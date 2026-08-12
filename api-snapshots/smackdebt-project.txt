@@ -1,0 +1,24 @@
+pub const fn stats(&self) -> WorkStats
+pub enum ExecutionWidth
+pub enum ProjectError
+pub fn analyze_codebase(request: &CodebaseRequest) -> Result<ProjectReport, ProjectError>
+pub fn analyze_diff(request: &DiffRequest) -> Result<ProjectReport, ProjectError>
+pub fn automatic(path: impl Into<PathBuf>) -> Self
+pub fn fixed(width: usize) -> Option<Self>
+pub fn into_report(self) -> Report
+pub fn new(path: impl Into<PathBuf>) -> Self
+pub fn report(&self) -> &Report
+pub fn with_excludes(mut self, excludes: Vec<String>) -> Self
+pub fn with_history_days(mut self, days: u32) -> Self
+pub fn with_policy(mut self, policy: HealthPolicy) -> Self
+pub fn with_reference(mut self, reference: impl Into<String>) -> Self
+pub fn with_thresholds( mut self, cognitive: (u32, u32), cyclomatic: (u32, u32), logical_lines: (u32, u32), ) -> Self
+pub fn with_width(mut self, width: ExecutionWidth) -> Self
+pub git_processes: usize
+pub inventory_visits: usize
+pub inventory_walks: usize
+pub source_reads: usize
+pub struct CodebaseRequest
+pub struct DiffRequest
+pub struct ProjectReport
+pub struct WorkStats

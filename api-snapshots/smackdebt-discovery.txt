@@ -1,0 +1,40 @@
+pub const fn as_str(self) -> &'static str
+pub const fn byte_len(&self) -> u64
+pub const fn id(&self) -> PackageId
+pub const fn index(self) -> usize
+pub const fn is_readonly(&self) -> bool
+pub const fn is_source(&self) -> bool
+pub const fn kind(&self) -> FileKind
+pub const fn package(&self) -> PackageId
+pub const fn stats(&self) -> InventoryStats
+pub directories_visited: usize
+pub enum FileKind
+pub enum InventoryDiagnostic
+pub enum ManifestKind
+pub excludes: Vec<String>
+pub files_visited: usize
+pub fn absolute_path(&self, path: &RelativePath) -> Option<PathBuf>
+pub fn as_path(&self) -> &Path
+pub fn diagnostics(&self) -> &[InventoryDiagnostic]
+pub fn discover(root: impl AsRef<Path>) -> io::Result<Self>
+pub fn discover_with(root: impl AsRef<Path>, options: InventoryOptions) -> io::Result<Self>
+pub fn files(&self) -> &[DiscoveredFile]
+pub fn into_path(self) -> PathBuf
+pub fn manifests(&self) -> &[ManifestKind]
+pub fn new(path: impl Into<PathBuf>) -> Option<Self>
+pub fn packages(&self) -> &[Package]
+pub fn path(&self) -> &RelativePath
+pub fn root(&self) -> &Path
+pub fn root(&self) -> &RelativePath
+pub fn source_files(&self) -> impl Iterator<Item = &DiscoveredFile>
+pub ignored_entries: usize
+pub include_other_files: bool
+pub source_candidates: usize
+pub struct DiscoveredFile
+pub struct Inventory
+pub struct InventoryOptions
+pub struct InventoryStats
+pub struct Package
+pub struct PackageId(u32)
+pub struct RelativePath(PathBuf)
+pub symlinks_skipped: usize

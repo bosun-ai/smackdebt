@@ -1,0 +1,30 @@
+pub const fn days(days: u32) -> Self
+pub days: u32
+pub entries: Vec<ChangedPath>
+pub enum ChangeStatus
+pub enum GitError
+pub fn batch_reader(&self, max_pending: usize) -> Result<BatchObjectReader, GitError>
+pub fn changed_paths(&self, base: &str) -> Result<Vec<ChangedPath>, GitError>
+pub fn default_ref(&self) -> Result<Option<String>, GitError>
+pub fn discover(path: impl AsRef<Path>) -> Result<Self, GitError>
+pub fn history(&self, window: HistoryWindow) -> Result<Vec<FileActivity>, GitError>
+pub fn merge_base(&self, left: &str, right: &str) -> Result<String, GitError>
+pub fn open(path: impl AsRef<Path>) -> Result<Self, GitError>
+pub fn process_stats(&self) -> ProcessStats
+pub fn read_object(&mut self, object: &str) -> Result<Vec<u8>, GitError>
+pub fn read_path(&mut self, reference: &str, path: &Path) -> Result<Vec<u8>, GitError>
+pub fn ref_exists(&self, reference: &str) -> Result<bool, GitError>
+pub fn root(&self) -> &Path
+pub fn status(&self) -> Result<WorktreeStatus, GitError>
+pub git_processes: usize
+pub path: PathBuf
+pub previous_path: Option<PathBuf>
+pub status: ChangeStatus
+pub struct BatchObjectReader
+pub struct ChangedPath
+pub struct FileActivity
+pub struct GitRepository
+pub struct HistoryWindow
+pub struct ProcessStats
+pub struct WorktreeStatus
+pub touches: u32

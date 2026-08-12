@@ -1,0 +1,21 @@
+[package]
+name = "smackdebt-project"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+publish.workspace = true
+
+[dependencies]
+rayon.workspace = true
+thiserror.workspace = true
+smackdebt-analysis = { path = "../analysis" }
+smackdebt-discovery = { path = "../discovery" }
+smackdebt-git = { path = "../git" }
+smackdebt-languages = { path = "../languages" }
+
+[dev-dependencies]
+tempfile.workspace = true
+
+[lints]
+workspace = true

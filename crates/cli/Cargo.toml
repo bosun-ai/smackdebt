@@ -1,0 +1,31 @@
+[package]
+name = "smackdebt"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+publish.workspace = true
+
+[features]
+allocation-stats = ["dep:stats_alloc"]
+
+[[bin]]
+name = "smackdebt"
+path = "src/main.rs"
+
+[dependencies]
+clap.workspace = true
+serde.workspace = true
+stats_alloc = { workspace = true, optional = true }
+smackdebt-output = { path = "../output" }
+smackdebt-project = { path = "../project" }
+toml.workspace = true
+
+[dev-dependencies]
+assert_cmd.workspace = true
+predicates = "3.1"
+serde_json.workspace = true
+tempfile.workspace = true
+
+[lints]
+workspace = true

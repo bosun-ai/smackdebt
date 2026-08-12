@@ -1,345 +1,193 @@
 # Smackdebt architecture
 
-## Purpose
-
 Smackdebt answers two questions:
 
-1. Where does a codebase carry the most costly debt?
-2. Did the current change improve or worsen that debt compared with a Git ref?
+1. Where is the codebase debt, and which findings matter most now?
+2. Did this worktree improve or worsen that debt compared with a Git ref?
 
-The architecture keeps source parsing, Git access, health policy, aggregation,
-and presentation separate. A language engine reports facts. Smackdebt decides
-how to rate, group, compare, and show those facts.
+The implementation favors small crates, inward dependencies, stable output,
+and predictable memory use. Command behavior and JSON schema version 1 are the
+product interfaces. Rust crate APIs remain private implementation seams.
 
-## Design goals
-
-- Useful output from `smackdebt` and `smackdebt diff` without configuration.
-- Progressive views from repository to package, directory, file, container,
-  and function.
-- Explainable ratings made from visible measurements.
-- One report domain shared by terminal and JSON output.
-- Parallel file analysis with one streamed Git history pass.
-- A small language interface that does not expose parser-library types.
-- Partial results with honest coverage when a file cannot be analyzed.
-
-The first release does not include a terminal UI, HTML report, server, machine
-learning, call graph, duplication scan, coverage analysis, security scan,
-persistent cache, or CI policy gate.
-
-## System flow
+## Crates and dependency direction
 
 ```mermaid
-flowchart LR
-    CLI[CLI request] --> Discovery[Repository discovery]
-    Discovery --> Inventory[Source inventory and package tree]
-    Inventory --> Source[Language analyzers]
-    Discovery --> Git[Git adapter]
-    Source --> Facts[File and code-unit facts]
-    Git --> Activity[History or ref-side data]
-    Facts --> Policy[Health policy]
-    Activity --> Policy
-    Policy --> Aggregate[Scope aggregation]
-    Aggregate --> Report[Report domain]
-    Report --> Terminal[Terminal renderer]
-    Report --> JSON[JSON renderer]
+flowchart TD
+    CLI[smackdebt CLI] --> Project[smackdebt-project]
+    CLI --> Output[smackdebt-output]
+    Project --> Analysis[smackdebt-analysis]
+    Project --> Languages[smackdebt-languages]
+    Project --> Discovery[smackdebt-discovery]
+    Project --> Git[smackdebt-git]
+    Output --> Analysis
+    Languages --> Analysis
 ```
 
-Dependencies point toward the report and policy domain. Filesystem, Git,
-`rust-code-analysis`, terminal styling, and JSON serialization remain adapters.
-
-## Domain model
-
-### Scope tree
-
-`Scope` represents a node a user can inspect:
-
-```text
-repository
-└── package
-    └── directory
-        └── file
-            └── code container
-                └── code unit
-```
-
-A package comes from a project manifest. A code container is a class, trait,
-implementation, interface, namespace, or similar language construct. A code
-unit is a named function, method, closure, or a synthetic top-level unit.
-
-Each scope has an identity, parent, source coverage, child summaries, health
-counts, findings, and optional activity. Paths stay relative to the repository
-root in reports.
-
-### Source facts
-
-A language analyzer returns one `FileAnalysis` value:
-
-```text
-FileAnalysis
-  path
-  language
-  source_lines
-  maintainability_index
-  parse_status
-  units[]
-
-CodeUnit
-  identity { container_path, kind, name }
-  span { start_line, end_line }
-  cognitive_complexity
-  cyclomatic_complexity
-  logical_lines
-  children[]
-```
-
-These values contain measurements, not ratings. They have no Git, terminal, or
-configuration concerns.
-
-### Health
-
-`HealthPolicy` maps a `CodeUnit` to `Healthy`, `Watch`, or `High` and records
-every signal that produced the result. The default limits live in one policy
-value and can be replaced from `.smackdebt.toml`.
-
-The highest signal sets the unit rating:
-
-| Signal | Watch | High |
-| --- | ---: | ---: |
-| Cognitive complexity | 15 | 25 |
-| Cyclomatic complexity | 11 | 21 |
-| Logical lines | 50 | 100 |
-
-Parent scopes aggregate counts. They do not average child ratings or expose a
-single project score.
-
-### Activity and hotspots
-
-`FileActivity` stores distinct non-merge touches within the configured history
-window. The default window is 90 days. A file has high activity when it has at
-least two touches and falls in the top activity quartile among touched,
-supported files in the selected scope.
-
-A hotspot is a `Watch` or `High` unit in a high-activity file. Ordering uses:
-
-1. health rating;
-2. touch count;
-3. cognitive complexity;
-4. cyclomatic complexity;
-5. logical lines;
-6. path and span for a stable tie break.
-
-The report prints these inputs. It does not expose a hidden hotspot score.
-
-### Reports
-
-`Report` is the public output model. Both renderers consume it without running
-analysis:
-
-```text
-Report
-  schema_version
-  mode
-  scope
-  coverage
-  health
-  activity
-  children[]
-  findings[]
-  diagnostics[]
-  comparison?
-```
-
-JSON uses `schema_version: 1`. Additive fields can extend version 1. Removing a
-field, changing its meaning, or changing a field type requires a new schema
-version.
-
-## Components
-
-### CLI
-
-The CLI parses these public forms:
-
-```text
-smackdebt [PATH]
-smackdebt diff [REF] [PATH]
-smackdebt --history DURATION [PATH]
-smackdebt [diff ...] --json
-```
-
-It resolves configuration, creates an `AnalysisRequest`, invokes one use case,
-and renders the returned report. It does not inspect source files or calculate
-ratings.
-
-### Repository discovery
-
-Discovery resolves an explicit path first. Without one, it uses the current Git
-worktree root or the current directory outside Git.
-
-The inventory walks the selected scope once and applies Git ignore rules plus
-Smackdebt exclusions. It skips binary files and known dependency or generated
-directories. Unsupported, unreadable, oversized, and parse-error files become
-coverage diagnostics rather than healthy files.
-
-Package discovery recognizes `Cargo.toml`, `package.json`, `pyproject.toml`,
-`pom.xml`, Gradle files, and `CMakeLists.txt`. Each source file belongs to its
-nearest package ancestor. When no manifest exists, discovery creates a root
-package.
-
-### Source analysis
-
-Core code depends on this small interface:
-
-```rust
-trait LanguageAnalyzer: Send + Sync {
-    fn language(&self) -> Language;
-    fn supports(&self, path: &Path, head: &[u8]) -> bool;
-    fn analyze(&self, source: SourceFile<'_>) -> Result<FileAnalysis, AnalysisError>;
-}
-```
-
-An analyzer receives borrowed source bytes when possible and returns owned
-domain values. The registry selects one analyzer per file. Core code does not
-depend on parser enums, syntax nodes, or metric structs.
-
-The first adapter pins `rust-code-analysis` at reviewed revision
-`37e5d83c056c8cbf827223d5814a93c5218df1a9`. It supports C/C++, Java,
-JavaScript/JSX, Python, Rust, and TypeScript/TSX. Kotlin remains disabled until
-its metrics contain real language behavior.
-
-For C and C++, the adapter collects preprocessor data once per scan and shares
-it with file analysis. The CLI does not expose the upstream preprocessing
-workflow.
-
-### Git adapter
-
-Core code depends on a `GitRepository` interface for:
-
-- repository and worktree discovery;
-- default-ref and merge-base resolution;
-- ignored and untracked paths;
-- streamed history with rename detection;
-- changed paths, statuses, and renames;
-- base-side file bytes.
-
-The first adapter runs `git` with structured arguments. It never builds a shell
-command from paths or refs. History uses one process for the selected window,
-and base objects use `git cat-file --batch`. The implementation must not run a
-Git process per file.
-
-Static analysis works without Git. In that case the report omits activity and
-explains why. Diff analysis requires Git.
-
-### Aggregation
-
-Aggregation builds the scope tree after file analysis. It performs one
-post-order pass and stores health counts, coverage, top findings, and activity
-for every scope.
-
-The adapter must not merge repository metrics through upstream
-`CodeMetrics::merge`. Upstream does not combine Halstead or maintainability
-values through that method, and parent syntax spaces already include their
-children.
-
-The adapter extracts file line counts and maintainability once from the root
-space. For nested code units, it derives exclusive additive values by
-subtracting direct child totals from the parent. It rates each function,
-closure, and synthetic top-level unit once. Containers group descendants but
-do not duplicate their measurements.
-
-### Presentation
-
-The terminal renderer receives a display width, color choice, and `Report`.
-It shows the current scope, coverage, health counts, a short ranked list, and
-one useful drill command. It truncates detail before paths or measurements
-become unreadable. `NO_COLOR` and non-terminal output disable ANSI styling.
-
-The JSON renderer serializes the same report. It does not maintain a second
-view model.
-
-## Codebase analysis
-
-1. Resolve the scope, configuration, and optional Git repository.
-2. Discover packages and source files in one walk.
-3. Read supported files and analyze them through a shared worker pool.
-4. Stream recent Git history once when available.
-5. Classify code units and select hotspots.
-6. Aggregate the tree and render the requested scope.
-
-The current version of each file is analyzed once. Results move through a
-channel into the aggregator so discovery does not retain every source buffer.
-
-## Diff analysis
-
-With no explicit ref, the Git adapter tries `origin/HEAD`, local `main`, then
-local `master`. It finds the merge base of that ref and `HEAD`, then compares
-the merge-base tree with the current worktree. This includes committed,
-staged, unstaged, and non-ignored untracked changes.
-
-The adapter reads rename-aware path status first. It analyzes each changed
-base-side file and each changed worktree file at most once. Named symbols match
-on renamed path, container path, kind, and name. A unique identity yields a
-metric comparison.
-
-Renamed symbols appear as one removal and one addition. Anonymous symbols,
-duplicate identities, or parse failures fall back to file-level changes with a
-diagnostic. Smackdebt does not guess a match from similar source text.
-
-`Comparison` records added, removed, improved, regressed, and unchanged units.
-A change is improved or regressed when its rating changes. Metric changes
-inside the same rating remain available in file drill views and JSON.
-
-The history window can add hotspot context to changed files. It never changes
-which source versions the diff compares.
-
-## Failure behavior
-
-One bad file does not stop a repository report. The report includes the path,
-reason, and excluded line count in `diagnostics` and `coverage`.
-
-Smackdebt returns:
-
-- `0` when it produced a report, regardless of health findings;
-- `1` when analysis could not produce a report;
-- `2` for invalid arguments or configuration.
-
-The CLI writes the report to standard output and diagnostics about invocation
-failure to standard error. JSON mode keeps standard output valid JSON.
-
-## Performance rules
-
-- Walk the selected filesystem scope once.
-- Read and analyze a current file once.
-- Analyze only changed files on each side of a diff.
-- Stream Git history once for the selected window.
-- Batch base-object reads.
-- Use one worker pool sized from available parallelism.
-- Keep stable ordering after parallel work completes.
-- Borrow source bytes inside adapters and move compact facts across threads.
-
-Large-repository tests must assert process counts as well as elapsed behavior,
-so a later refactor cannot introduce one Git call per file.
+| Crate | Responsibility |
+| --- | --- |
+| `smackdebt-analysis` | Measurements, health policy, aggregation, comparisons, and report values |
+| `smackdebt-languages` | File detection and compiled parser dispatch |
+| `smackdebt-discovery` | One ignore-aware inventory and package assignment |
+| `smackdebt-git` | Repository facts, history, status, refs, and object reads |
+| `smackdebt-project` | Codebase and diff use cases plus the Rayon pool |
+| `smackdebt-output` | Terminal and JSON writers over a borrowed report |
+| `smackdebt` | Arguments, dependency construction, streams, and exit codes |
+
+Infrastructure crates do not depend on each other. Project orchestration is the
+only place that composes filesystem, language, and Git behavior. Every crate is
+private until a separate release OpenSpec change approves publication.
+
+Workspace checks read Cargo metadata and reject dependency edges outside this
+diagram. Public API snapshots make cross-crate surface changes visible during
+review. All workspace crates forbid unsafe Rust.
+
+## Analysis model
+
+Inventory owns repository-relative paths and assigns small typed indexes.
+Language analysis produces a flat list of units per file. Each unit records:
+
+- its name, container, kind, and source span;
+- cognitive and cyclomatic complexity;
+- exclusive logical lines;
+- its parent unit index when nesting matters.
+
+The health policy stores the three signals in fixed-size values. The highest
+signal sets the result: `healthy`, `watch`, or `high`. Rating a unit does not
+allocate.
+
+The report uses flat arrays for scopes, findings, diagnostics, activity, and
+comparisons. Indexes connect related values. A finding is owned once even when
+several parent summaries include its rating. Full scans retain every `watch`
+and `high` finding and reduce healthy units to counts.
+
+The scope order is repository, package, directory, file, container, and unit.
+Aggregation reserves its storage and walks child scopes once in post-order.
+Parent scopes add counts; they never average debt into a project score.
+
+## Package discovery
+
+Discovery performs one filesystem walk without reading source contents. It
+applies ignore files, explicit exclusions, and generated-directory rules while
+recording stable relative paths and file metadata.
+
+A directory containing one or more recognized manifests is one package root.
+Cargo, npm, Python, Maven, Gradle, CMake, Bundler, and gemspec manifests in the
+same directory are ecosystem evidence for that single package. Each source file
+belongs to its nearest package ancestor. A repository with no recognized
+manifest gets `.` as its package.
+
+Unreadable paths, links, unsupported source, oversized files, and parse errors
+remain visible as coverage diagnostics. They are never counted as healthy.
+
+## Language analysis
+
+Language selection is a private enum and `match`, compiled into the binary.
+There are no runtime plugins, analyzer trait objects, callbacks, or parser types
+in public APIs.
+
+The temporary upstream adapter pins `rust-code-analysis` revision
+`37e5d83c056c8cbf827223d5814a93c5218df1a9`. It calls per-file analysis and
+bypasses the upstream walker, worker setup, channels, and output. It immediately
+reduces upstream data to the three measurements Smackdebt needs.
+
+Verified upstream-backed languages are C, C++, Java, JavaScript, JSX, Python,
+Rust, TypeScript, and TSX. Kotlin stays unsupported because the pinned engine
+does not supply the required measurements.
+
+Ruby and Vue are owned analyzers. Ruby reports methods, singleton methods, and
+lambdas while treating classes and modules as containers. Vue delegates script
+regions to JavaScript or TypeScript analysis, reports template control flow as
+a template unit, and counts style regions as covered source without rating
+them.
+
+Nested syntax needs metric-specific handling. Cognitive and cyclomatic values
+come from the unit itself. Exclusive logical lines subtract direct nested-unit
+line totals. Repository aggregation never uses the upstream metric merge
+operation.
+
+Replacing an upstream-backed language requires compatibility fixtures, an
+owned implementation, performance evidence, and one registry switch. No other
+crate should change.
+
+## Execution and memory ownership
+
+Project orchestration creates one private Rayon pool. `--jobs N` fixes its
+width; otherwise it uses available parallelism. One-file work stays serial.
+Indexed parallel collection preserves the same order as serial execution.
+
+Discovery owns paths. The project crate opens each selected current file once
+and moves its source buffer into analysis. A worker owns parser and scratch
+state and reuses them across files. In a diff, one worker holds at most the base
+and worktree buffers for its current file. Source memory therefore follows
+active worker count instead of repository size.
+
+Health policy runs on analysis workers. Healthy details are reduced before
+results return to aggregation. Terminal and JSON output write directly to an
+`io::Write` destination from borrowed report data; the output crate does not
+build a second owned report.
+
+## Git process shape
+
+Git commands use structured arguments and never invoke a shell. Refs and paths
+are passed separately. Static codebase analysis works outside Git; diff mode
+requires a repository.
+
+Codebase activity uses one streamed, non-merge, rename-aware history process.
+Activity orders existing debt using visible inputs: health, touch count, the
+three measurements, path, and span. It never changes a health rating and does
+not hide a numeric score.
+
+Diff mode resolves an explicit ref or tries `origin/HEAD`, `main`, then
+`master`. It compares from the merge base through committed, staged, unstaged,
+renamed, deleted, and non-ignored untracked worktree changes. One
+`git cat-file --batch` process supplies base objects through a small queue. The
+number of Git processes does not grow with the changed-file count.
+
+Named units match by path after rename handling, container, kind, and name.
+Results are added, removed, improved, regressed, metric-changed, ambiguous, or
+unchanged. Unclear identity, unsupported source, and parse failure produce a
+file-level comparison diagnostic instead of a guessed match.
+
+## Output and failure behavior
+
+Terminal output shows a short summary, stable hotspot ranking, and one useful
+drill command. It adapts to display width. `NO_COLOR` and redirected output
+disable ANSI styling.
+
+JSON starts with `schema_version: 1` and retains all `watch` and `high`
+findings, aggregate healthy counts, coverage, activity, diagnostics, and diff
+facts when present. Additive fields may extend version 1. Removing a field,
+changing its meaning, or changing its type requires a new schema version.
+
+Exit codes describe report production, not code health:
+
+- `0`: report produced;
+- `1`: analysis could not produce a report;
+- `2`: invalid arguments or configuration.
+
+One bad file does not stop a codebase report. Invocation failures go to standard
+error. JSON standard output stays valid when the report contains non-fatal
+diagnostics.
+
+## Performance evidence
+
+Correctness tests run outside measured intervals for generated one-file,
+one-hundred-file, small-diff, and large mixed-language workloads. Serial and
+parallel terminal and JSON output must match byte for byte.
+
+Instrumentation records inventory visits, source reads, allocations, Git
+processes, wall time, p95, peak memory, supported files, and source bytes.
+Cachegrind and DHAT commands cover complete CLI flows where the host supports
+them. A private Fluyt command also records revision, dirty state, host, and
+toolchain.
+
+The first trustworthy run sets checked latency and memory limits with ten
+percent regression room. Changing a workload creates an explicit new baseline.
+A regression is investigated before a limit changes.
 
 ## Security and privacy
 
-Smackdebt runs locally. It does not send source, paths, metrics, or Git history
-over the network. The Git adapter passes refs and paths as process arguments,
-does not invoke a shell, and rejects values that cannot be represented safely.
-
-Configuration can change exclusions and thresholds, but it cannot execute
-commands or load analyzer code.
-
-## Delivery sequence
-
-OpenSpec tracks implementation as separate changes:
-
-1. `add-codebase-report`: discovery, package hierarchy, source metrics, health,
-   terminal output, and JSON.
-2. `add-git-hotspots`: configurable history, rename-aware touches, and hotspot
-   priority.
-3. `add-ref-diff-report`: ref discovery, worktree comparison, symbol matching,
-   regressions, and improvements.
-4. `add-go-analysis`: first language engine outside `rust-code-analysis`, used
-   to prove the extension interface.
-
-Each change must include focused tests, strict OpenSpec validation, formatting,
-warning-free linting, and stable acceptance output before archive.
+Smackdebt runs locally and does not upload source, paths, metrics, or Git
+history. Configuration changes exclusions, thresholds, history, and worker
+count only. It cannot execute commands or load analyzer code. No async runtime
+or persistent cache is part of the first release.

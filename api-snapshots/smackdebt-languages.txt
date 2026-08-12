@@ -1,0 +1,9 @@
+pub enum AnalysisError
+pub file: FileId
+pub fn analyze(&mut self, source: SourceFile<'_>) -> Result<CoreFileAnalysis, AnalysisError>
+pub fn analyze(source: SourceFile<'_>) -> Result<CoreFileAnalysis, AnalysisError>
+pub fn detect(path: &Path) -> Language
+pub path: &'a Path
+pub source: Vec<u8>
+pub struct Analyzer
+pub struct SourceFile<'a>

@@ -1,6 +1,37 @@
-[package]
-name = "smackdebt"
+[workspace]
+resolver = "3"
+members = [
+    "crates/analysis",
+    "crates/languages",
+    "crates/discovery",
+    "crates/git",
+    "crates/project",
+    "crates/output",
+    "crates/cli",
+]
+
+[workspace.package]
 version = "0.1.0"
 edition = "2024"
+rust-version = "1.97"
+license = "MIT"
+publish = false
 
-[dependencies]
+[workspace.lints.rust]
+unsafe_code = "forbid"
+
+[workspace.dependencies]
+assert_cmd = "2.0"
+clap = { version = "4.5", features = ["derive"] }
+ignore = "0.4"
+rayon = "1.10"
+rust-code-analysis = { git = "https://github.com/mozilla/rust-code-analysis", rev = "37e5d83c056c8cbf827223d5814a93c5218df1a9" }
+serde = { version = "1.0", features = ["derive"] }
+serde_json = "1.0"
+tempfile = "3.14"
+thiserror = "2.0"
+toml = "0.8"
+stats_alloc = "0.1"
+tree-sitter = "0.24"
+tree-sitter-ruby = "0.23.1"
+tree-sitter-vue-updated = "0.1.0"

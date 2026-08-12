@@ -13,7 +13,7 @@ the reported paths to inspect a package, directory, file, or function.
 ## Install
 
 ```console
-cargo install smackdebt
+cargo install --path crates/cli
 ```
 
 Smackdebt runs locally and does not upload source code or analysis data.
@@ -29,9 +29,9 @@ smackdebt  .
 2 packages · 184 files · 29,418 lines · 96% analyzed
 
 Health
-  high    7 functions
-  watch  23 functions
-  healthy 1,146 functions
+  high    7 units
+  watch  23 units
+  healthy 1,146 units
 
 Hotspots                                           health  touches/90d
   crates/api/src/checkout.rs                       high             14
@@ -56,18 +56,23 @@ Pass a reported path to see its next level:
 $ smackdebt crates/api/src/checkout.rs
 
 smackdebt  crates/api/src/checkout.rs
-Rust · 612 lines · 18 functions · 14 touches/90d
+1 packages · 1 files · 612 lines · 100% analyzed
 
-Functions                                           health  reason
-  process_checkout                88–213             high    cognitive 31
-  apply_discounts                241–319            watch    58 lines
-  reserve_stock                  401–438          healthy    cognitive 4
+Health
+  high    1 units
+  watch   1 units
+  healthy 16 units
+
+Hotspots
+  crates/api/src/checkout.rs
+    process_checkout  high · cognitive 31 · cyclomatic 18 · 126 lines · 14 touches
 ```
 
 The default history window is 90 days. It affects hotspot priority only:
 
 ```console
 smackdebt --history 180d
+smackdebt --jobs 4
 ```
 
 ## Check a change
@@ -77,24 +82,15 @@ Compare the current worktree with the branch it came from:
 ```console
 $ smackdebt diff
 
-smackdebt diff  origin/main...worktree
-12 files changed · 8 analyzed · 4 unchanged by code metrics
+smackdebt diff  .
+8 source files changed · 8 analyzed · 0 not compared
 
 Health change
-  +1 high · -2 watch · 3 improved · 1 regressed
-
-Regressions
-  crates/api/src/checkout.rs
-    process_checkout              watch → high
+  4 changed units
+  process_checkout  regressed
     cognitive 14 → 19 · cyclomatic 9 → 12 · 42 → 57 lines
-
-Improvements
-  packages/web/src/orders.ts
-    groupOrders                   high → healthy
+  groupOrders  improved
     cognitive 28 → 7 · cyclomatic 17 → 5 · 91 → 38 lines
-
-Explore
-  smackdebt diff origin/main crates/api/src/checkout.rs
 ```
 
 With no ref, Smackdebt tries `origin/HEAD`, `main`, then `master`. It compares
@@ -141,10 +137,12 @@ project packages. It recognizes packages from common manifests, including:
 - `pom.xml`
 - Gradle settings and build files
 - `CMakeLists.txt`
+- `Gemfile` and `*.gemspec`
 
-Files belong to their nearest package. Repositories without a known manifest
-get one root package. Git ignore rules apply by default, along with common
-generated and dependency directories.
+Several recognized manifests in one directory describe one package with
+several ecosystem markers. Files belong to their nearest package. Repositories
+without a known manifest get one root package. Git ignore rules apply by
+default, along with common generated and dependency directories.
 
 Files that cannot be parsed stay visible in the coverage summary. Smackdebt
 does not quietly count them as healthy.
@@ -161,9 +159,13 @@ supports:
 - Python
 - Rust
 - TypeScript and TSX
+- Ruby
+- Vue single-file components, including script and template regions
 
-Language support sits behind a small analysis interface. New engines can add a
-language without changing Git analysis, health policy, aggregation, or output.
+Kotlin files remain visible as unsupported coverage; they are not counted as
+healthy. Language dispatch is compiled into the binary. An owned engine can
+replace one upstream-backed language without changing Git analysis, health
+policy, aggregation, or output.
 
 ## JSON
 
@@ -175,8 +177,11 @@ smackdebt diff main --json
 ```
 
 JSON contains the same report as the terminal view. The top-level object starts
-with `schema_version: 1` and includes the mode, scope, coverage, health,
-activity, children, findings, diagnostics, and diff data when present.
+with `schema_version: 1` and includes mode, root, flat scopes, files, findings,
+diagnostics, comparisons, and the health summary. Scope and file entries carry
+coverage, child indexes, health, language, and activity where available.
+It retains every `watch` and `high` finding while healthy units are represented
+by aggregate counts.
 
 Finding debt does not fail the command. Exit codes describe whether Smackdebt
 could produce a report:
