@@ -74,13 +74,12 @@
 - [x] 7.2 Run formatting, Clippy, workspace tests, strict OpenSpec validation,
   dependency checks, API snapshots, license checks, acceptance snapshots,
   allocation checks, performance workloads, and diff checks.
-- [ ] 7.3 Run the complete evidence from a clean revision and record workload,
+- [x] 7.3 Run the complete evidence from a clean revision and record workload,
   revision, dirty state, toolchain, host, source bytes, supported files, timing,
   memory, allocations, reads, and Git process counts.
-- [ ] 7.4 Keep all crates private until the separate publication decision and
+- [x] 7.4 Keep all crates private until the separate publication decision and
   recorded clean-revision evidence both pass.
 
-The complete implementation evidence is recorded from this working revision;
-tasks 7.3 and 7.4 remain open until the orchestrator reviews and commits the
-change, then reruns the clean-revision release command. All workspace crates
-still set `publish = false`.
+The complete implementation evidence is recorded from the reviewed clean
+revision. All workspace crates still set `publish = false`; publishing requires
+a separate explicit release action.
