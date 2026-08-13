@@ -163,14 +163,29 @@ file-level comparison diagnostic instead of a guessed match.
 
 ## Output and failure behavior
 
-Terminal output shows a short summary, a progressive debt or change
-distribution, concise detail, and one useful drill command. It passes through
-single-child structural scopes with visible breadcrumbs, limits area rows to
-ten debt-bearing areas and detail to three by default, and summarizes
-healthy-only areas as quiet. Codebase rows show both debt share within the
-selection and local attention rate. Finding detail names only signals that
-reached Watch or High. Terminal-only `--all` restores every area and retained
-detail. `NO_COLOR` and redirected output disable ANSI styling.
+Terminal output first builds private borrowed presentation rows for the
+selected summary, ranked areas, leading details, coverage notes, and drill
+command. Ranking, omission, and navigation happen once. Full, compact, and
+stacked writers then consume those rows without scanning the report or running
+analysis. This seam can support a later interactive renderer without putting
+terminal state in the report domain or promising a public Rust interface.
+
+The CLI resolves width and color before calling output. `COLUMNS` takes
+priority, followed by terminal width or a 100-column redirected default.
+Automatic color requires a terminal and no `NO_COLOR`; explicit always and
+never modes override that choice. The output crate reads no environment or
+terminal state. Styling uses semantic 16-color roles with no backgrounds, and
+removing its ANSI sequences yields the plain output byte for byte.
+
+Every layout shows a summary, progressive debt or change distribution, concise
+detail, and one useful drill command. It passes through single-child structural
+scopes with visible breadcrumbs, limits area rows to ten debt-bearing areas and
+detail to three by default, and summarizes healthy-only areas as quiet.
+Codebase rows show debt share, local attention rate, and a fractional rate bar;
+diff rows show exact directions and a share bar. Locations and commands remain
+whole. Finding detail names only signals that reached Watch or High, while diff
+detail names only changed measurements. Terminal-only `--all` restores every
+area and retained detail.
 
 JSON starts with `schema_version: 1` and retains all `watch` and `high`
 findings, aggregate healthy counts, coverage, activity, diagnostics, and diff

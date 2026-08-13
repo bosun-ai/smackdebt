@@ -11,7 +11,7 @@ fn serial_and_parallel_codebase_output_match() {
     let parallel = run(["--jobs", "4", project.path().to_str().unwrap()]);
     assert_eq!(serial, parallel);
     let text = String::from_utf8(serial).unwrap();
-    assert!(text.contains("Quality"));
+    assert!(text.contains("QUALITY"));
     assert!(text.contains("No child areas need attention"));
 }
 
@@ -71,6 +71,47 @@ fn invalid_project_config_uses_argument_exit_code() {
         .assert()
         .code(2)
         .stderr(predicates::str::contains("high greater than watch"));
+}
+
+#[test]
+fn terminal_color_can_be_forced_or_disabled_through_a_pipe() {
+    let project = fixture();
+    let path = project.path().to_str().unwrap();
+    let colored = run(["--color", "always", path]);
+    assert!(colored.windows(2).any(|bytes| bytes == b"\x1b["));
+
+    let plain = run(["--color", "never", path]);
+    assert!(!plain.windows(2).any(|bytes| bytes == b"\x1b["));
+    assert_eq!(strip_ansi(&colored), plain);
+}
+
+#[test]
+fn explicit_color_is_rejected_for_json() {
+    let project = fixture();
+    cargo_bin_cmd!("smackdebt")
+        .args(["--json", "--color", "always"])
+        .arg(project.path())
+        .assert()
+        .code(2)
+        .stderr(predicates::str::contains("cannot be used with '--color"));
+}
+
+fn strip_ansi(value: &[u8]) -> Vec<u8> {
+    let mut result = Vec::with_capacity(value.len());
+    let mut index = 0;
+    while index < value.len() {
+        if value[index..].starts_with(b"\x1b[") {
+            index += 2;
+            while index < value.len() && !(b'@'..=b'~').contains(&value[index]) {
+                index += 1;
+            }
+            index += usize::from(index < value.len());
+        } else {
+            result.push(value[index]);
+            index += 1;
+        }
+    }
+    result
 }
 
 fn run<const N: usize>(arguments: [&str; N]) -> Vec<u8> {

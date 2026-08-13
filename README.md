@@ -25,26 +25,28 @@ Run `smackdebt` from anywhere inside a repository:
 ```console
 $ smackdebt
 
-smackdebt  .
-2 packages · 184 files · 29,418 lines · 96% analyzed
+smackdebt · codebase
+.
+2 packages · 184 files · 29,418 lines
 
-Quality
-  30 of 1,176 rated units need attention (3%)
-  7 high · 23 watch · 1,146 healthy · 7 files excluded
+QUALITY  3% need attention
+▍░░░░░░░░░░░  30 / 1,176 code units
+▲ 7 high · ● 23 watch · 1,146 healthy
+! 7 of 184 source files excluded from analysis
 
-Debt by area
-  area  high  watch  share  rate
-  crates/api  4  8  40%  9%
-  packages/web  2  9  37%  11%
-  crates/core  1  6  23%  9%
+DEBT BY AREA
+  area          high  watch   share  rate
+  crates/api        4      8     40%  █▏░░░░░░░░░░  9%
+  packages/web      2      9     37%  █▍░░░░░░░░░░  11%
+  crates/core       1      6     23%  █▏░░░░░░░░░░  9%
   … 4 quiet areas hidden (use --all)
 
-Debt findings
-  crates/api/src/checkout.rs:42  process_checkout
-    high because cognitive 31 · lines 126 · 14 touches
+TOP FINDINGS
+▲ HIGH  process_checkout
+        crates/api/src/checkout.rs:42
+        cognitive 31 · lines 126 · 14 touches
 
-Explore
-  smackdebt crates/api
+→ Explore: smackdebt crates/api
 ```
 
 Smackdebt combines fixed code-health limits with recent activity. A complex
@@ -63,16 +65,19 @@ package, directory, and file scopes retain the same repository-relative paths:
 ```console
 $ smackdebt crates/api/src/checkout.rs
 
-smackdebt  crates/api/src/checkout.rs
-1 packages · 1 files · 612 lines · 100% analyzed
+smackdebt · codebase
+crates/api/src/checkout.rs
+1 package · 1 file · 612 lines
 
-Quality
-  2 of 18 rated units need attention (11%)
-  1 high · 1 watch · 16 healthy · 0 files excluded
+QUALITY  11% need attention
+█▍░░░░░░░░░░  2 / 18 code units
+▲ 1 high · ● 1 watch · 16 healthy
+✓ all 1 source file analyzed
 
-Debt findings
-  crates/api/src/checkout.rs:42  process_checkout
-    high because cognitive 31 · lines 126 · 14 touches
+TOP FINDINGS
+▲ HIGH  process_checkout
+        crates/api/src/checkout.rs:42
+        cognitive 31 · lines 126 · 14 touches
 ```
 
 The default terminal view shows up to ten areas and three details. Use
@@ -93,19 +98,25 @@ Compare the current worktree with the branch it came from:
 ```console
 $ smackdebt diff
 
-smackdebt diff  .
-8 source files changed · 8 analyzed · 0 not compared
+smackdebt · diff
+.
+8 source files changed · 8 analyzed
 
-Change by area
-  area  worse  better  changed  share
-  crates/api  2  1  1  50%
-  packages/web  1  0  1  25%
+CHANGE  8 retained units
+▲ WORSE 3 · ▼ BETTER 1 · ● CHANGED 4
 
-Health change
-  process_checkout  worse
-    cognitive 14 → 19 · cyclomatic 9 → 12 · lines 42 → 57
-  groupOrders  better
-    cognitive 28 → 7 · cyclomatic 17 → 5 · lines 91 → 38
+CHANGE BY AREA
+  area          worse  better  changed  share
+  crates/api        2       1        1  ██████░░░░░░  50%
+  packages/web      1       –        1  ███░░░░░░░░░  25%
+
+TOP CHANGES
+▲ WORSE  process_checkout
+        crates/api/src/checkout.rs
+        cognitive 14 → 19 · cyclomatic 9 → 12 · lines 42 → 57
+▼ BETTER  groupOrders
+        packages/web/src/orders.ts
+        cognitive 28 → 7 · cyclomatic 17 → 5 · lines 91 → 38
 ```
 
 With no ref, Smackdebt tries `origin/HEAD`, `main`, then `master`. It compares
@@ -233,8 +244,12 @@ watch = 50
 high = 100
 ```
 
-Command-line values override the project file. `NO_COLOR` disables terminal
-color, and redirected output stays readable without ANSI escape codes.
+Command-line values override the project file. Color defaults to automatic:
+`NO_COLOR` or `--color never` disables ANSI styling, while `--color always`
+keeps it when output is piped. `COLUMNS` overrides detected width. Reports use
+full, compact, or stacked layouts as space changes; redirected output defaults
+to 100 columns and keeps readable Unicode symbols and bars. JSON is always
+unstyled, and an explicit `--color` cannot be combined with `--json`.
 
 ## Design
 

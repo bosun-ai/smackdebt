@@ -75,21 +75,21 @@ that each source file belongs to its nearest package-root directory once.
 - **THEN** the README explains why the report shows one package rather than duplicate ecosystem packages
 
 ### Requirement: README demonstrates debt distribution
-The README SHALL show a codebase report with child High, Watch, and debt-share
-values, leading findings, a passed breadcrumb when relevant, and the next drill
-command.
+The README SHALL show the responsive codebase dashboard with exact child High,
+Watch, debt-share, and local-rate values, rate bars, leading findings, and the
+next drill command.
 
 #### Scenario: New user follows progressive exploration
 - **WHEN** the user reads the codebase example
-- **THEN** the example moves from repository to child area to file using exact, internally consistent counts
+- **THEN** the example explains the quality summary and moves from repository to child area to file using exact, internally consistent counts
 
 ### Requirement: README demonstrates progressive diff exploration
-The README SHALL show a diff report with child Worse, Better, Changed, and share
-values before detailed unit comparisons.
+The README SHALL show a responsive diff dashboard with child Worse, Better,
+Changed, and share values, share bars, and meaningful unit changes.
 
 #### Scenario: User locates a worktree regression
 - **WHEN** the user reads the diff example
-- **THEN** the example shows how to identify the affected area and drill to its detailed comparison
+- **THEN** the example shows how to identify the affected area and drill to its concise detailed comparison
 
 ### Requirement: README explains share and completeness
 The README SHALL define codebase and diff share denominators, integer rounding,
@@ -110,4 +110,13 @@ area's share of selected debt from its local attention rate.
 #### Scenario: User reads the root example
 - **WHEN** the README introduces the codebase report
 - **THEN** it explains how contribution and concentration support the next drill decision
+
+### Requirement: README documents terminal presentation controls
+Product documentation SHALL explain `--color`, `NO_COLOR`, width behavior,
+Unicode redirected output, `--all`, and JSON as the complete machine-readable
+view.
+
+#### Scenario: User runs Smackdebt in automation
+- **WHEN** the user reads output guidance
+- **THEN** the README explains how to force or disable ANSI styling and that JSON remains unstyled
 

@@ -6,7 +6,7 @@ use std::io::{self, IsTerminal, Write};
 use std::path::PathBuf;
 use std::process::ExitCode;
 
-use clap::{Args, Parser, Subcommand};
+use clap::{Args, Parser, Subcommand, ValueEnum};
 use serde::Deserialize;
 use smackdebt_output::{TerminalOptions, write_json, write_terminal};
 use smackdebt_project::{
@@ -74,6 +74,17 @@ struct Common {
     /// Show every terminal row and retained detail.
     #[arg(long, conflicts_with = "json")]
     all: bool,
+
+    /// Terminal color: auto, always, or never. Defaults to auto.
+    #[arg(long, value_enum, conflicts_with = "json")]
+    color: Option<ColorChoice>,
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq, ValueEnum)]
+enum ColorChoice {
+    Auto,
+    Always,
+    Never,
 }
 
 #[derive(Debug, Default, Deserialize)]
@@ -154,17 +165,16 @@ fn run(arguments: impl IntoIterator<Item = OsString>) -> ExitCode {
         }
     };
 
-    let (result, json, all) = match cli.command {
+    let (result, common) = match cli.command {
         None => {
             let request = match cli.path {
                 Some(path) => CodebaseRequest::new(path),
                 None => CodebaseRequest::automatic("."),
             };
             let request = apply_codebase_common(request, &cli.common, &config);
-            (analyze_codebase(&request), cli.common.json, cli.common.all)
+            (analyze_codebase(&request), cli.common)
         }
         Some(Command::Diff(args)) => {
-            let json = args.common.json;
             let mut request = match args.path {
                 Some(path) => DiffRequest::new(path),
                 None => DiffRequest::automatic("."),
@@ -176,18 +186,33 @@ fn run(arguments: impl IntoIterator<Item = OsString>) -> ExitCode {
                 request = request.with_width(width);
             }
             request = apply_diff_config(request, &config);
-            (analyze_diff(&request), json, args.common.all)
+            (analyze_diff(&request), args.common)
         }
     };
 
     match result {
         Ok(result) => {
+            let stdout_is_terminal = io::stdout().is_terminal();
             let mut stdout = io::BufWriter::new(io::stdout().lock());
-            let rendered = if json {
+            let rendered = if common.json {
                 write_json(&mut stdout, result.report()).and_then(|()| writeln!(stdout))
             } else {
-                let width = terminal_width();
-                write_terminal(&mut stdout, result.report(), TerminalOptions { width, all })
+                let width =
+                    terminal_width(stdout_is_terminal, std::env::var("COLUMNS").ok().as_deref());
+                let color = terminal_color(
+                    common.color.unwrap_or(ColorChoice::Auto),
+                    stdout_is_terminal,
+                    std::env::var_os("NO_COLOR").is_some(),
+                );
+                write_terminal(
+                    &mut stdout,
+                    result.report(),
+                    TerminalOptions {
+                        width,
+                        all: common.all,
+                        color,
+                    },
+                )
             };
             match rendered {
                 Ok(()) => ExitCode::SUCCESS,
@@ -297,15 +322,28 @@ fn execution_width(jobs: Option<usize>) -> Option<ExecutionWidth> {
     jobs.and_then(ExecutionWidth::fixed)
 }
 
-fn terminal_width() -> usize {
-    if !io::stdout().is_terminal() {
-        return 100;
-    }
-    std::env::var("COLUMNS")
-        .ok()
+fn terminal_width(is_terminal: bool, columns: Option<&str>) -> usize {
+    if let Some(width) = columns
         .and_then(|value| value.parse().ok())
         .filter(|width| *width >= 40)
+    {
+        return width;
+    }
+    if !is_terminal {
+        return 100;
+    }
+    terminal_size::terminal_size()
+        .map(|(terminal_size::Width(width), _)| usize::from(width))
+        .filter(|width| *width >= 40)
         .unwrap_or(100)
+}
+
+const fn terminal_color(choice: ColorChoice, is_terminal: bool, no_color: bool) -> bool {
+    match choice {
+        ColorChoice::Auto => is_terminal && !no_color,
+        ColorChoice::Always => true,
+        ColorChoice::Never => false,
+    }
 }
 
 fn fail(error: &ProjectError) -> ExitCode {
@@ -327,6 +365,28 @@ mod tests {
     #[test]
     fn rejects_zero_jobs() {
         let result = Cli::try_parse_from(["smackdebt", "--jobs", "0"]);
+        assert!(result.is_err());
+    }
+
+    #[test]
+    fn terminal_width_prefers_columns_and_has_a_redirect_default() {
+        assert_eq!(terminal_width(false, Some("80")), 80);
+        assert_eq!(terminal_width(false, None), 100);
+        assert_eq!(terminal_width(false, Some("20")), 100);
+    }
+
+    #[test]
+    fn terminal_color_honors_mode_terminal_and_no_color() {
+        assert!(terminal_color(ColorChoice::Always, false, true));
+        assert!(!terminal_color(ColorChoice::Never, true, false));
+        assert!(terminal_color(ColorChoice::Auto, true, false));
+        assert!(!terminal_color(ColorChoice::Auto, true, true));
+        assert!(!terminal_color(ColorChoice::Auto, false, false));
+    }
+
+    #[test]
+    fn explicit_color_conflicts_with_json() {
+        let result = Cli::try_parse_from(["smackdebt", "--json", "--color", "always"]);
         assert!(result.is_err());
     }
 }

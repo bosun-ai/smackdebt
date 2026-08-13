@@ -2,25 +2,26 @@
 
 //! Stable terminal and JSON views over the shared report.
 
-use std::borrow::Cow;
 use std::cmp::Reverse;
+use std::fmt;
 use std::io::{self, Write};
 use std::path::{Path, PathBuf};
 
+use anstyle::{AnsiColor, Effects, Style};
 use serde::ser::{Serialize, SerializeMap, SerializeSeq, Serializer};
 use smackdebt_analysis::{
     Comparison, ComparisonDirection, ComparisonKind, Diagnostic, DiagnosticKind, FileRecord,
     Finding, HealthCounts, Language, Measurements, Rating, Report, ReportMode, Scope, ScopeKind,
     Signal,
 };
+use unicode_width::{UnicodeWidthChar, UnicodeWidthStr};
 
-/// Terminal display choices. Color is intentionally absent until styling adds
-/// useful meaning; output is therefore safe for redirected streams and
-/// `NO_COLOR` by default.
+/// Resolved terminal display choices.
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub struct TerminalOptions {
     pub width: usize,
     pub all: bool,
+    pub color: bool,
 }
 
 impl Default for TerminalOptions {
@@ -28,265 +29,834 @@ impl Default for TerminalOptions {
         Self {
             width: 100,
             all: false,
+            color: false,
         }
     }
 }
 
-/// Writes a concise, stable terminal report.
+/// Writes a responsive terminal report from retained report facts.
 pub fn write_terminal(
     writer: &mut impl Write,
     report: &Report,
     options: TerminalOptions,
 ) -> io::Result<()> {
-    let mode = match report.mode() {
-        ReportMode::Codebase => "smackdebt",
-        ReportMode::Diff => "smackdebt diff",
-    };
-    let selected = report
-        .selected_scope()
-        .or_else(|| report.root())
-        .and_then(|id| report.scopes().get(id.index()));
-    writeln!(writer, "{mode}  {}", selected.map_or(".", Scope::name))?;
+    let presentation = Presentation::new(report, options.all);
+    Renderer::new(writer, options).write(&presentation)
+}
 
-    if let Some(scope) = selected {
-        let coverage = scope.coverage();
+#[derive(Clone, Copy)]
+enum Layout {
+    Full,
+    Compact,
+    Stacked,
+}
+
+impl Layout {
+    const fn for_width(width: usize) -> Self {
+        if width >= 100 {
+            Self::Full
+        } else if width >= 70 {
+            Self::Compact
+        } else {
+            Self::Stacked
+        }
+    }
+
+    const fn bar_width(self) -> usize {
+        match self {
+            Self::Full => 12,
+            Self::Compact => 8,
+            Self::Stacked => 10,
+        }
+    }
+}
+
+struct Presentation<'a> {
+    report: &'a Report,
+    selected: Option<&'a Scope>,
+    displayed: Option<&'a Scope>,
+    breadcrumbs: Vec<&'a str>,
+    areas: Vec<&'a Scope>,
+    quiet_areas: usize,
+    omitted_areas: usize,
+    findings: Vec<&'a Finding>,
+    omitted_findings: usize,
+    comparisons: Vec<&'a Comparison>,
+    omitted_comparisons: usize,
+    drill: Option<PathBuf>,
+}
+
+impl<'a> Presentation<'a> {
+    fn new(report: &'a Report, all: bool) -> Self {
+        let selected = report
+            .selected_scope()
+            .or_else(|| report.root())
+            .and_then(|id| report.scopes().get(id.index()));
+        let mut displayed = selected;
+        let mut breadcrumbs = Vec::new();
+        while let Some(scope) = displayed
+            && scope.kind() != ScopeKind::File
+            && scope.children().len() == 1
+        {
+            let child = &report.scopes()[scope.children()[0].index()];
+            if child.name() != "." {
+                breadcrumbs.push(child.name());
+            }
+            displayed = Some(child);
+        }
+
+        let mut areas = displayed.map_or_else(Vec::new, |scope| display_children(report, scope));
+        let mut quiet_areas = 0;
         match report.mode() {
             ReportMode::Codebase => {
-                let packages = selected.map_or(0, |scope| package_count(report, scope));
-                let analyzed_percent = if coverage.selected_files() == 0 {
-                    100
+                areas.sort_by(|left, right| codebase_child_order(left, right));
+                quiet_areas = areas
+                    .iter()
+                    .filter(|area| area.health().debt() == 0)
+                    .count();
+                if !all {
+                    areas.retain(|area| area.health().debt() > 0);
+                }
+            }
+            ReportMode::Diff => areas.sort_by(|left, right| diff_child_order(left, right)),
+        }
+        let omitted_areas = if all {
+            0
+        } else {
+            areas.len().saturating_sub(10)
+        };
+        if omitted_areas > 0 {
+            areas.truncate(10);
+        }
+
+        let mut findings = Vec::new();
+        let mut comparisons = Vec::new();
+        let mut omitted_findings = 0;
+        let mut omitted_comparisons = 0;
+        if let Some(scope) = displayed {
+            findings = scope
+                .findings()
+                .iter()
+                .map(|id| &report.findings()[id.index()])
+                .collect();
+            findings.sort_by(|left, right| finding_order(report, left, right));
+            let finding_limit = if all || scope.kind() == ScopeKind::File {
+                findings.len()
+            } else {
+                findings.len().min(3)
+            };
+            omitted_findings = findings.len() - finding_limit;
+            findings.truncate(finding_limit);
+
+            comparisons = scope
+                .comparisons()
+                .iter()
+                .map(|id| &report.comparisons()[id.index()])
+                .collect();
+            comparisons.sort_by(|left, right| {
+                direction_rank(left.direction())
+                    .cmp(&direction_rank(right.direction()))
+                    .then_with(|| left.identity().name().cmp(right.identity().name()))
+            });
+            let comparison_limit = if all || scope.kind() == ScopeKind::File {
+                comparisons.len()
+            } else {
+                comparisons.len().min(3)
+            };
+            omitted_comparisons = comparisons.len() - comparison_limit;
+            comparisons.truncate(comparison_limit);
+        }
+        let drill = if report.mode() == ReportMode::Codebase {
+            selected
+                .and_then(|scope| drill_path_from_visible(report, scope, areas.first().copied()))
+        } else {
+            None
+        };
+        Self {
+            report,
+            selected,
+            displayed,
+            breadcrumbs,
+            areas,
+            quiet_areas,
+            omitted_areas,
+            findings,
+            omitted_findings,
+            comparisons,
+            omitted_comparisons,
+            drill,
+        }
+    }
+}
+
+struct Renderer<'a, W> {
+    writer: &'a mut W,
+    options: TerminalOptions,
+    layout: Layout,
+    theme: Theme,
+}
+
+impl<'a, W: Write> Renderer<'a, W> {
+    fn new(writer: &'a mut W, options: TerminalOptions) -> Self {
+        Self {
+            writer,
+            layout: Layout::for_width(options.width),
+            theme: Theme::new(options.color),
+            options,
+        }
+    }
+
+    fn write(mut self, view: &Presentation<'_>) -> io::Result<()> {
+        self.write_header(view)?;
+        if let Some(scope) = view.selected {
+            match view.report.mode() {
+                ReportMode::Codebase => self.write_quality(view.report, scope)?,
+                ReportMode::Diff => self.write_change(scope)?,
+            }
+        }
+        for breadcrumb in &view.breadcrumbs {
+            writeln!(
+                self.writer,
+                "{}  ↓ {breadcrumb}{}",
+                self.theme.dim.0, self.theme.dim.1
+            )?;
+        }
+        match view.report.mode() {
+            ReportMode::Codebase => self.write_codebase_areas(view)?,
+            ReportMode::Diff => self.write_diff_areas(view)?,
+        }
+        self.write_details(view)?;
+        self.write_diagnostics(view.report.diagnostics())?;
+        if let Some(path) = &view.drill {
+            writeln!(self.writer)?;
+            self.theme
+                .write(self.writer, Role::Navigation, "→ Explore")?;
+            writeln!(self.writer, ": smackdebt {}", path.display())?;
+        }
+        Ok(())
+    }
+
+    fn write_header(&mut self, view: &Presentation<'_>) -> io::Result<()> {
+        self.theme.write(self.writer, Role::Brand, "smackdebt")?;
+        write!(self.writer, " · {}", mode_name(view.report.mode()))?;
+        writeln!(self.writer)?;
+        writeln!(self.writer, "{}", view.selected.map_or(".", Scope::name))?;
+        if let Some(scope) = view.selected {
+            let coverage = scope.coverage();
+            match view.report.mode() {
+                ReportMode::Codebase => writeln!(
+                    self.writer,
+                    "{} · {} · {}",
+                    Counted::new(package_count(view.report, scope), "package", "packages"),
+                    Counted::new(coverage.selected_files() as usize, "file", "files"),
+                    Counted::new(coverage.source_lines() as usize, "line", "lines")
+                ),
+                ReportMode::Diff => writeln!(
+                    self.writer,
+                    "{} · {} analyzed",
+                    Counted::new(
+                        coverage.selected_files() as usize,
+                        "source file changed",
+                        "source files changed"
+                    ),
+                    Grouped(coverage.analyzed_files() as usize)
+                ),
+            }?;
+        }
+        Ok(())
+    }
+
+    fn write_quality(&mut self, _report: &Report, scope: &Scope) -> io::Result<()> {
+        let health = scope.health();
+        let coverage = scope.coverage();
+        writeln!(self.writer)?;
+        self.heading("QUALITY")?;
+        writeln!(
+            self.writer,
+            "  {} need attention",
+            DisplayPercent::new(health.debt(), health.total())
+        )?;
+        self.theme.write(
+            self.writer,
+            Role::Navigation,
+            &Bar::new(health.debt(), health.total(), self.layout.bar_width()),
+        )?;
+        writeln!(
+            self.writer,
+            "  {} / {} code units",
+            Grouped(health.debt() as usize),
+            Grouped(health.total() as usize)
+        )?;
+        self.theme.write(self.writer, Role::Bad, "▲")?;
+        write!(self.writer, " {} high · ", Grouped(health.high() as usize))?;
+        self.theme.write(self.writer, Role::Watch, "●")?;
+        writeln!(
+            self.writer,
+            " {} watch · {} healthy",
+            Grouped(health.watch() as usize),
+            Grouped(health.healthy() as usize)
+        )?;
+        let excluded = coverage.unsupported_files() + coverage.failed_files();
+        if excluded == 0 {
+            self.theme.write(self.writer, Role::Good, "✓")?;
+            writeln!(
+                self.writer,
+                " all {} analyzed",
+                Counted::new(
+                    coverage.selected_files() as usize,
+                    "source file",
+                    "source files"
+                )
+            )?;
+        } else {
+            self.theme.write(self.writer, Role::Warning, "!")?;
+            writeln!(
+                self.writer,
+                " {} of {} excluded from analysis",
+                Counted::new(excluded as usize, "source file", "source files"),
+                Grouped(coverage.selected_files() as usize)
+            )?;
+        }
+        Ok(())
+    }
+
+    fn write_change(&mut self, scope: &Scope) -> io::Result<()> {
+        let diff = scope.diff();
+        writeln!(self.writer)?;
+        self.heading("CHANGE")?;
+        writeln!(
+            self.writer,
+            "  {} retained units",
+            Grouped(diff.total() as usize)
+        )?;
+        self.theme.write(self.writer, Role::Bad, "▲ WORSE")?;
+        write!(self.writer, " {} · ", Grouped(diff.worse() as usize))?;
+        self.theme.write(self.writer, Role::Good, "▼ BETTER")?;
+        write!(self.writer, " {} · ", Grouped(diff.better() as usize))?;
+        self.theme.write(self.writer, Role::Watch, "● CHANGED")?;
+        writeln!(self.writer, " {}", Grouped(diff.changed() as usize))
+    }
+
+    fn write_codebase_areas(&mut self, view: &Presentation<'_>) -> io::Result<()> {
+        let Some(scope) = view.displayed else {
+            return Ok(());
+        };
+        if scope.children().is_empty() {
+            return Ok(());
+        }
+        if view.areas.is_empty() {
+            writeln!(self.writer, "\nNo child areas need attention.")?;
+            return self.write_area_omissions(view, true);
+        }
+        writeln!(self.writer)?;
+        self.heading_line("DEBT BY AREA")?;
+        match self.layout {
+            Layout::Stacked => self.write_codebase_cards(&view.areas, scope.health().debt())?,
+            Layout::Full | Layout::Compact => {
+                self.write_codebase_table(&view.areas, scope.health().debt())?
+            }
+        }
+        self.write_area_omissions(view, true)
+    }
+
+    fn write_codebase_table(&mut self, areas: &[&Scope], denominator: u32) -> io::Result<()> {
+        let bar_width = self.layout.bar_width();
+        let fixed = match self.layout {
+            Layout::Full => 49,
+            Layout::Compact => 41,
+            Layout::Stacked => unreachable!(),
+        };
+        let available = self.options.width.saturating_sub(fixed).max(12);
+        let label_width = areas
+            .iter()
+            .map(|area| UnicodeWidthStr::width(area.name()))
+            .max()
+            .unwrap_or(12)
+            .min(available)
+            .max(12);
+        writeln!(
+            self.writer,
+            "  {:label_width$}  {:>5}  {:>5}  {:>6}  {:bar_width$}  {:>5}",
+            "area",
+            "high",
+            "watch",
+            "share",
+            "rate",
+            "",
+            label_width = label_width,
+            bar_width = bar_width
+        )?;
+        for area in areas {
+            let health = area.health();
+            let label = middle_truncate(area.name(), label_width);
+            write!(self.writer, "  {}  ", Padded::new(&label, label_width))?;
+            self.table_count(health.high(), Role::Bad, 5)?;
+            write!(self.writer, "  ")?;
+            self.table_count(health.watch(), Role::Watch, 5)?;
+            write!(
+                self.writer,
+                "  {:>6}  ",
+                DisplayPercent::new(health.debt(), denominator)
+            )?;
+            self.theme.write(
+                self.writer,
+                Role::Navigation,
+                &Bar::new(health.debt(), health.total(), bar_width),
+            )?;
+            writeln!(
+                self.writer,
+                "  {:>5}",
+                DisplayPercent::new(health.debt(), health.total())
+            )?;
+        }
+        Ok(())
+    }
+
+    fn write_codebase_cards(&mut self, areas: &[&Scope], denominator: u32) -> io::Result<()> {
+        for area in areas {
+            let health = area.health();
+            let role = if health.high() > 0 {
+                Role::Bad
+            } else {
+                Role::Watch
+            };
+            let marker = if health.high() > 0 { "▲" } else { "●" };
+            self.theme.write(self.writer, role, marker)?;
+            writeln!(self.writer, " {}", area.name())?;
+            writeln!(
+                self.writer,
+                "  {} high · {} watch · {} share",
+                Grouped(health.high() as usize),
+                Grouped(health.watch() as usize),
+                DisplayPercent::new(health.debt(), denominator)
+            )?;
+            write!(self.writer, "  rate ")?;
+            self.theme.write(
+                self.writer,
+                Role::Navigation,
+                &Bar::new(health.debt(), health.total(), self.layout.bar_width()),
+            )?;
+            writeln!(
+                self.writer,
+                " {}",
+                DisplayPercent::new(health.debt(), health.total())
+            )?;
+        }
+        Ok(())
+    }
+
+    fn write_diff_areas(&mut self, view: &Presentation<'_>) -> io::Result<()> {
+        let Some(scope) = view.displayed else {
+            return Ok(());
+        };
+        if scope.children().is_empty() {
+            return Ok(());
+        }
+        writeln!(self.writer)?;
+        self.heading_line("CHANGE BY AREA")?;
+        match self.layout {
+            Layout::Stacked => self.write_diff_cards(&view.areas, scope.diff().total())?,
+            Layout::Full | Layout::Compact => {
+                self.write_diff_table(&view.areas, scope.diff().total())?
+            }
+        }
+        self.write_area_omissions(view, false)
+    }
+
+    fn write_diff_table(&mut self, areas: &[&Scope], denominator: u32) -> io::Result<()> {
+        let bar_width = self.layout.bar_width();
+        let fixed = match self.layout {
+            Layout::Full => 55,
+            Layout::Compact => 47,
+            Layout::Stacked => unreachable!(),
+        };
+        let available = self.options.width.saturating_sub(fixed).max(12);
+        let label_width = areas
+            .iter()
+            .map(|area| UnicodeWidthStr::width(area.name()))
+            .max()
+            .unwrap_or(12)
+            .min(available)
+            .max(12);
+        writeln!(
+            self.writer,
+            "  {:label_width$}  {:>5}  {:>6}  {:>7}  {:bar_width$}  {:>5}",
+            "area",
+            "worse",
+            "better",
+            "changed",
+            "share",
+            "",
+            label_width = label_width,
+            bar_width = bar_width
+        )?;
+        for area in areas {
+            let diff = area.diff();
+            let label = middle_truncate(area.name(), label_width);
+            write!(self.writer, "  {}  ", Padded::new(&label, label_width))?;
+            self.table_count(diff.worse(), Role::Bad, 5)?;
+            write!(self.writer, "  ")?;
+            self.table_count(diff.better(), Role::Good, 6)?;
+            write!(self.writer, "  ")?;
+            self.table_count(diff.changed(), Role::Watch, 7)?;
+            write!(self.writer, "  ")?;
+            self.theme.write(
+                self.writer,
+                Role::Navigation,
+                &Bar::new(diff.total(), denominator, bar_width),
+            )?;
+            writeln!(
+                self.writer,
+                "  {:>5}",
+                DisplayPercent::new(diff.total(), denominator)
+            )?;
+        }
+        Ok(())
+    }
+
+    fn write_diff_cards(&mut self, areas: &[&Scope], denominator: u32) -> io::Result<()> {
+        for area in areas {
+            let diff = area.diff();
+            let (marker, role) = if diff.worse() > 0 {
+                ("▲", Role::Bad)
+            } else if diff.better() > 0 {
+                ("▼", Role::Good)
+            } else {
+                ("●", Role::Watch)
+            };
+            self.theme.write(self.writer, role, marker)?;
+            writeln!(self.writer, " {}", area.name())?;
+            writeln!(
+                self.writer,
+                "  {} worse · {} better · {} changed",
+                Grouped(diff.worse() as usize),
+                Grouped(diff.better() as usize),
+                Grouped(diff.changed() as usize)
+            )?;
+            write!(self.writer, "  share ")?;
+            self.theme.write(
+                self.writer,
+                Role::Navigation,
+                &Bar::new(diff.total(), denominator, self.layout.bar_width()),
+            )?;
+            writeln!(
+                self.writer,
+                " {}",
+                DisplayPercent::new(diff.total(), denominator)
+            )?;
+        }
+        Ok(())
+    }
+
+    fn write_area_omissions(&mut self, view: &Presentation<'_>, codebase: bool) -> io::Result<()> {
+        if view.omitted_areas == 0 && (!codebase || view.quiet_areas == 0 || self.options.all) {
+            return Ok(());
+        }
+        self.theme.start(self.writer, Role::Secondary)?;
+        if view.omitted_areas > 0 && codebase && view.quiet_areas > 0 {
+            writeln!(
+                self.writer,
+                "  … {} more debt-bearing {} · {} hidden (use --all)",
+                Grouped(view.omitted_areas),
+                if view.omitted_areas == 1 {
+                    "area"
                 } else {
-                    coverage.analyzed_files() * 100 / coverage.selected_files()
-                };
-                writeln!(
-                    writer,
-                    "{packages} packages · {} files · {} lines · {analyzed_percent}% analyzed",
-                    coverage.selected_files(),
-                    coverage.source_lines(),
+                    "areas"
+                },
+                Counted::new(view.quiet_areas, "quiet area", "quiet areas")
+            )?;
+        } else if view.omitted_areas > 0 {
+            writeln!(
+                self.writer,
+                "  … {} more {} hidden (use --all)",
+                Grouped(view.omitted_areas),
+                if view.omitted_areas == 1 {
+                    "area"
+                } else {
+                    "areas"
+                }
+            )?;
+        } else {
+            writeln!(
+                self.writer,
+                "  … {} hidden (use --all)",
+                Counted::new(view.quiet_areas, "quiet area", "quiet areas")
+            )?;
+        }
+        self.theme.end(self.writer, Role::Secondary)
+    }
+
+    fn write_details(&mut self, view: &Presentation<'_>) -> io::Result<()> {
+        match view.report.mode() {
+            ReportMode::Codebase => self.write_findings(view),
+            ReportMode::Diff => self.write_comparisons(view),
+        }
+    }
+
+    fn write_findings(&mut self, view: &Presentation<'_>) -> io::Result<()> {
+        if view.findings.is_empty() {
+            writeln!(self.writer, "\nNo watch or high findings.")?;
+            return Ok(());
+        }
+        writeln!(self.writer)?;
+        self.heading_line("TOP FINDINGS")?;
+        for finding in &view.findings {
+            let role = if finding.assessment().rating() == Rating::High {
+                Role::Bad
+            } else {
+                Role::Watch
+            };
+            let label = if role == Role::Bad {
+                "▲ HIGH"
+            } else {
+                "● WATCH"
+            };
+            self.theme.write(self.writer, role, label)?;
+            write!(self.writer, "  ")?;
+            if let Some(container) = finding.identity().container() {
+                write!(self.writer, "{container}::")?;
+            }
+            writeln!(self.writer, "{}", finding.identity().name())?;
+            let file = &view.report.files()[finding.file().index()];
+            writeln!(
+                self.writer,
+                "        {}:{}",
+                file.path(),
+                finding.span().start_line()
+            )?;
+            write!(self.writer, "        ")?;
+            let mut first = true;
+            for signal in finding
+                .assessment()
+                .signals()
+                .iter()
+                .filter(|signal| signal.rating() != Rating::Healthy)
+            {
+                if !first {
+                    write!(self.writer, " · ")?;
+                }
+                write!(
+                    self.writer,
+                    "{} {}",
+                    signal_name(signal.signal()),
+                    signal.value()
                 )?;
-                write_health(
-                    writer,
-                    scope.health(),
-                    coverage.unsupported_files() + coverage.failed_files(),
+                first = false;
+            }
+            if let Some(activity) = file.activity().filter(|activity| activity.touches() > 0) {
+                if !first {
+                    write!(self.writer, " · ")?;
+                }
+                write!(
+                    self.writer,
+                    "{}",
+                    Counted::new(activity.touches() as usize, "touch", "touches")
                 )?;
             }
-            ReportMode::Diff => writeln!(
-                writer,
-                "{} source files changed · {} analyzed · {} not compared",
-                coverage.selected_files(),
-                coverage.analyzed_files(),
-                coverage.unsupported_files() + coverage.failed_files(),
-            )?,
+            writeln!(self.writer)?;
+        }
+        self.write_omitted(view.omitted_findings, "findings")
+    }
+
+    fn write_comparisons(&mut self, view: &Presentation<'_>) -> io::Result<()> {
+        if view.comparisons.is_empty() {
+            writeln!(self.writer, "\nNo changed units.")?;
+            return Ok(());
+        }
+        writeln!(self.writer)?;
+        self.heading_line("TOP CHANGES")?;
+        for comparison in &view.comparisons {
+            let (label, role) = match comparison.direction() {
+                ComparisonDirection::Worse => ("▲ WORSE", Role::Bad),
+                ComparisonDirection::Better => ("▼ BETTER", Role::Good),
+                ComparisonDirection::Changed => ("● CHANGED", Role::Watch),
+            };
+            self.theme.write(self.writer, role, label)?;
+            write!(self.writer, "  ")?;
+            if let Some(container) = comparison.identity().container() {
+                write!(self.writer, "{container}::")?;
+            }
+            writeln!(self.writer, "{}", comparison.identity().name())?;
+            if let Some(file) = comparison.file() {
+                writeln!(
+                    self.writer,
+                    "        {}",
+                    view.report.files()[file.index()].path()
+                )?;
+            }
+            write!(self.writer, "        ")?;
+            match comparison.kind() {
+                ComparisonKind::Added => write!(
+                    self.writer,
+                    "added as {}",
+                    comparison.after_rating().map_or("unrated", rating_name)
+                )?,
+                ComparisonKind::Removed => write!(
+                    self.writer,
+                    "removed from {}",
+                    comparison.before_rating().map_or("unrated", rating_name)
+                )?,
+                ComparisonKind::Ambiguous => {
+                    write!(self.writer, "identity could not be matched safely")?
+                }
+                _ => self.write_changed_measurements(comparison)?,
+            }
+            writeln!(self.writer)?;
+        }
+        self.write_omitted(view.omitted_comparisons, "comparisons")
+    }
+
+    fn write_changed_measurements(&mut self, comparison: &Comparison) -> io::Result<()> {
+        let (Some(before), Some(after)) = (comparison.before(), comparison.after()) else {
+            return write!(self.writer, "{}", comparison_name(comparison.kind()));
+        };
+        let values = [
+            (
+                "cognitive",
+                before.cognitive_complexity(),
+                after.cognitive_complexity(),
+            ),
+            (
+                "cyclomatic",
+                before.cyclomatic_complexity(),
+                after.cyclomatic_complexity(),
+            ),
+            ("lines", before.logical_lines(), after.logical_lines()),
+        ];
+        let mut first = true;
+        for (name, before, after) in values
+            .into_iter()
+            .filter(|(_, before, after)| before != after)
+        {
+            if !first {
+                write!(self.writer, " · ")?;
+            }
+            write!(self.writer, "{name} {before} → {after}")?;
+            first = false;
+        }
+        if first {
+            write!(self.writer, "{}", comparison_name(comparison.kind()))?;
+        }
+        Ok(())
+    }
+
+    fn write_diagnostics(&mut self, diagnostics: &[Diagnostic]) -> io::Result<()> {
+        if diagnostics.is_empty() {
+            return Ok(());
+        }
+        writeln!(self.writer)?;
+        self.heading_line("COVERAGE NOTES")?;
+        for diagnostic in diagnostics.iter().take(5) {
+            self.theme.write(self.writer, Role::Warning, "!")?;
+            writeln!(self.writer, " {}", diagnostic.message())?;
+        }
+        if diagnostics.len() > 5 {
+            self.write_omitted(diagnostics.len() - 5, "coverage notes")?;
+        }
+        Ok(())
+    }
+
+    fn write_omitted(&mut self, count: usize, noun: &str) -> io::Result<()> {
+        if count == 0 {
+            return Ok(());
+        }
+        self.theme.start(self.writer, Role::Secondary)?;
+        writeln!(
+            self.writer,
+            "  … {} {noun} omitted (use --all)",
+            Grouped(count)
+        )?;
+        self.theme.end(self.writer, Role::Secondary)
+    }
+
+    fn table_count(&mut self, value: u32, role: Role, width: usize) -> io::Result<()> {
+        let shown = if value == 0 {
+            "–".to_owned()
+        } else {
+            Grouped(value as usize).to_string()
+        };
+        let padding = width.saturating_sub(UnicodeWidthStr::width(shown.as_str()));
+        write!(self.writer, "{}", " ".repeat(padding))?;
+        self.theme.write(self.writer, role, &shown)
+    }
+
+    fn heading(&mut self, heading: &str) -> io::Result<()> {
+        self.theme.write(self.writer, Role::Heading, heading)
+    }
+
+    fn heading_line(&mut self, heading: &str) -> io::Result<()> {
+        self.heading(heading)?;
+        writeln!(self.writer)
+    }
+}
+
+#[derive(Clone, Copy, Eq, PartialEq)]
+enum Role {
+    Brand,
+    Heading,
+    Bad,
+    Watch,
+    Good,
+    Warning,
+    Navigation,
+    Secondary,
+}
+
+struct Theme {
+    enabled: bool,
+    dim: (&'static str, &'static str),
+}
+
+impl Theme {
+    fn new(enabled: bool) -> Self {
+        Self {
+            enabled,
+            dim: if enabled {
+                ("\x1b[2m", "\x1b[0m")
+            } else {
+                ("", "")
+            },
         }
     }
 
-    match report.mode() {
-        ReportMode::Codebase => write_codebase_view(writer, report, selected, options)?,
-        ReportMode::Diff => write_diff_view(writer, report, selected, options)?,
-    }
-
-    if !report.diagnostics().is_empty() {
-        writeln!(writer, "\nCoverage notes")?;
-        for diagnostic in report.diagnostics().iter().take(5) {
-            writeln!(writer, "  {}", diagnostic.message())?;
+    fn style(role: Role) -> Style {
+        match role {
+            Role::Brand => Style::new().bold().fg_color(Some(AnsiColor::Cyan.into())),
+            Role::Heading => Style::new().effects(Effects::BOLD),
+            Role::Bad => Style::new().fg_color(Some(AnsiColor::Red.into())),
+            Role::Watch | Role::Warning => Style::new().fg_color(Some(AnsiColor::Yellow.into())),
+            Role::Good => Style::new().fg_color(Some(AnsiColor::Green.into())),
+            Role::Navigation => Style::new().fg_color(Some(AnsiColor::Cyan.into())),
+            Role::Secondary => Style::new().effects(Effects::DIMMED),
         }
     }
 
-    if report.mode() == ReportMode::Codebase
-        && let Some(selected) = selected
-        && let Some(path) = drill_path(report, selected)
-    {
-        writeln!(writer, "\nExplore")?;
-        writeln!(writer, "  smackdebt {}", path.display())?;
+    fn write(
+        &self,
+        writer: &mut impl Write,
+        role: Role,
+        value: &(impl fmt::Display + ?Sized),
+    ) -> io::Result<()> {
+        self.start(writer, role)?;
+        write!(writer, "{value}")?;
+        self.end(writer, role)
     }
-    Ok(())
-}
 
-fn display_scope<'a>(
-    report: &'a Report,
-    mut scope: &'a Scope,
-    writer: &mut impl Write,
-) -> io::Result<&'a Scope> {
-    while scope.kind() != ScopeKind::File && scope.children().len() == 1 {
-        let child = &report.scopes()[scope.children()[0].index()];
-        if child.name() != "." {
-            writeln!(writer, "  ↓ {}", child.name())?;
+    fn start(&self, writer: &mut impl Write, role: Role) -> io::Result<()> {
+        if self.enabled {
+            write!(writer, "{}", Self::style(role).render())
+        } else {
+            Ok(())
         }
-        scope = child;
     }
-    Ok(scope)
-}
 
-fn write_codebase_view(
-    writer: &mut impl Write,
-    report: &Report,
-    selected: Option<&Scope>,
-    options: TerminalOptions,
-) -> io::Result<()> {
-    let Some(selected) = selected else {
-        return Ok(());
-    };
-    let scope = display_scope(report, selected, writer)?;
-    write_scope_distribution(writer, report, scope, options.all)?;
-    write_scope_findings(writer, report, scope, options.width, options.all)?;
-    Ok(())
-}
-
-fn write_diff_view(
-    writer: &mut impl Write,
-    report: &Report,
-    selected: Option<&Scope>,
-    options: TerminalOptions,
-) -> io::Result<()> {
-    let Some(selected) = selected else {
-        return Ok(());
-    };
-    let scope = display_scope(report, selected, writer)?;
-    write_diff_distribution(writer, report, scope, options.all)?;
-    write_scope_comparisons(writer, report, scope, options.width, options.all)?;
-    Ok(())
-}
-
-fn write_health(
-    writer: &mut impl Write,
-    health: HealthCounts,
-    excluded_files: u32,
-) -> io::Result<()> {
-    writeln!(writer, "\nQuality")?;
-    writeln!(
-        writer,
-        "  {} of {} rated units need attention ({})",
-        health.debt(),
-        health.total(),
-        DisplayPercent::new(health.debt(), health.total())
-    )?;
-    writeln!(
-        writer,
-        "  {} high · {} watch · {} healthy · {excluded_files} files excluded",
-        health.high(),
-        health.watch(),
-        health.healthy()
-    )
-}
-
-fn write_scope_distribution(
-    writer: &mut impl Write,
-    report: &Report,
-    scope: &Scope,
-    all: bool,
-) -> io::Result<()> {
-    if scope.children().is_empty() {
-        return Ok(());
-    }
-    let denominator = scope.health().debt();
-    let mut children = display_children(report, scope);
-    children.sort_by(|left, right| codebase_child_order(left, right));
-    let healthy_only = children
-        .iter()
-        .filter(|child| child.health().debt() == 0)
-        .count();
-    if !all {
-        children.retain(|child| child.health().debt() > 0);
-    }
-    if children.is_empty() {
-        writeln!(writer, "\nNo child areas need attention.")?;
-        if healthy_only > 0 {
-            writeln!(writer, "  {healthy_only} quiet areas hidden (use --all)")?;
+    fn end(&self, writer: &mut impl Write, role: Role) -> io::Result<()> {
+        if self.enabled {
+            write!(writer, "{}", Self::style(role).render_reset())
+        } else {
+            Ok(())
         }
-        return Ok(());
     }
-    let limit = if all {
-        children.len()
-    } else {
-        children.len().min(10)
-    };
-    writeln!(writer, "\nDebt by area")?;
-    writeln!(writer, "  area  high  watch  share  rate")?;
-    for child in children.iter().take(limit) {
-        writeln!(
-            writer,
-            "  {}  {}  {}  {}  {}",
-            child.name(),
-            child.health().high(),
-            child.health().watch(),
-            DisplayPercent::new(child.health().debt(), denominator),
-            DisplayPercent::new(child.health().debt(), child.health().total())
-        )?;
-    }
-    if !all && children.len() > limit && healthy_only > 0 {
-        writeln!(
-            writer,
-            "  … {} more debt-bearing · {healthy_only} quiet areas hidden (use --all)",
-            children.len() - limit
-        )?;
-    } else if !all && children.len() > limit {
-        writeln!(
-            writer,
-            "  … {} more debt-bearing areas hidden (use --all)",
-            children.len() - limit
-        )?;
-    } else if !all && healthy_only > 0 {
-        writeln!(writer, "  … {healthy_only} quiet areas hidden (use --all)")?;
-    }
-    Ok(())
-}
-
-fn codebase_child_order(left: &Scope, right: &Scope) -> std::cmp::Ordering {
-    right
-        .health()
-        .high()
-        .cmp(&left.health().high())
-        .then_with(|| right.health().watch().cmp(&left.health().watch()))
-        .then_with(|| left.name().cmp(right.name()))
-}
-
-fn write_diff_distribution(
-    writer: &mut impl Write,
-    report: &Report,
-    scope: &Scope,
-    all: bool,
-) -> io::Result<()> {
-    if scope.children().is_empty() {
-        return Ok(());
-    }
-    let denominator = scope.diff().total();
-    let mut children = display_children(report, scope);
-    children.sort_by(|left, right| {
-        right
-            .diff()
-            .worse()
-            .cmp(&left.diff().worse())
-            .then_with(|| right.diff().better().cmp(&left.diff().better()))
-            .then_with(|| right.diff().changed().cmp(&left.diff().changed()))
-            .then_with(|| left.name().cmp(right.name()))
-    });
-    let limit = if all {
-        children.len()
-    } else {
-        children.len().min(10)
-    };
-    writeln!(writer, "\nChange by area")?;
-    writeln!(writer, "  area  worse  better  changed  share")?;
-    for child in children.iter().take(limit) {
-        let diff = child.diff();
-        writeln!(
-            writer,
-            "  {}  {}  {}  {}  {}%",
-            child.name(),
-            diff.worse(),
-            diff.better(),
-            diff.changed(),
-            percent(diff.total(), denominator)
-        )?;
-    }
-    if !all && children.len() > limit {
-        writeln!(
-            writer,
-            "  … {} areas omitted (use --all)",
-            children.len() - limit
-        )?;
-    }
-    Ok(())
 }
 
 fn percent(value: u32, denominator: u32) -> u32 {
@@ -300,6 +870,116 @@ fn percent(value: u32, denominator: u32) -> u32 {
 struct DisplayPercent {
     value: u32,
     denominator: u32,
+}
+
+struct Grouped(usize);
+
+impl fmt::Display for Grouped {
+    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
+        let digits = self.0.to_string();
+        let first = digits.len() % 3;
+        if first > 0 {
+            formatter.write_str(&digits[..first])?;
+        }
+        for (index, chunk) in digits.as_bytes()[first..].chunks(3).enumerate() {
+            if first > 0 || index > 0 {
+                formatter.write_str(",")?;
+            }
+            formatter.write_str(std::str::from_utf8(chunk).map_err(|_| fmt::Error)?)?;
+        }
+        Ok(())
+    }
+}
+
+struct Counted {
+    count: usize,
+    singular: &'static str,
+    plural: &'static str,
+}
+
+impl Counted {
+    const fn new(count: usize, singular: &'static str, plural: &'static str) -> Self {
+        Self {
+            count,
+            singular,
+            plural,
+        }
+    }
+}
+
+impl fmt::Display for Counted {
+    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
+        write!(
+            formatter,
+            "{} {}",
+            Grouped(self.count),
+            if self.count == 1 {
+                self.singular
+            } else {
+                self.plural
+            }
+        )
+    }
+}
+
+struct Bar {
+    value: u32,
+    denominator: u32,
+    width: usize,
+}
+
+impl Bar {
+    const fn new(value: u32, denominator: u32, width: usize) -> Self {
+        Self {
+            value,
+            denominator,
+            width,
+        }
+    }
+}
+
+impl fmt::Display for Bar {
+    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
+        const FRACTIONS: [char; 8] = [' ', '▏', '▎', '▍', '▌', '▋', '▊', '▉'];
+        let eighths = if self.denominator == 0 {
+            0
+        } else {
+            (self.value as usize * self.width * 8 + self.denominator as usize / 2)
+                / self.denominator as usize
+        };
+        let eighths = if self.value > 0 { eighths.max(1) } else { 0 }.min(self.width * 8);
+        let full = eighths / 8;
+        let fraction = eighths % 8;
+        for _ in 0..full {
+            formatter.write_str("█")?;
+        }
+        if fraction > 0 {
+            write!(formatter, "{}", FRACTIONS[fraction])?;
+        }
+        for _ in (full + usize::from(fraction > 0))..self.width {
+            formatter.write_str("░")?;
+        }
+        Ok(())
+    }
+}
+
+struct Padded<'a> {
+    value: &'a str,
+    width: usize,
+}
+impl<'a> Padded<'a> {
+    const fn new(value: &'a str, width: usize) -> Self {
+        Self { value, width }
+    }
+}
+impl fmt::Display for Padded<'_> {
+    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
+        formatter.write_str(self.value)?;
+        for _ in UnicodeWidthStr::width(self.value)..self.width {
+            formatter.write_str(" ")?;
+        }
+        Ok(())
+    }
 }
 
 impl DisplayPercent {
@@ -341,105 +1021,26 @@ fn display_children<'a>(report: &'a Report, scope: &'a Scope) -> Vec<&'a Scope> 
 }
 
 fn package_count(report: &Report, scope: &Scope) -> usize {
-    let own = usize::from(scope.kind() == ScopeKind::Package);
-    let descendants = own
+    if scope.kind() == ScopeKind::Repository {
+        return count_package_descendants(report, scope);
+    }
+    let mut current = Some(scope);
+    while let Some(candidate) = current {
+        if candidate.kind() == ScopeKind::Package {
+            return 1;
+        }
+        current = candidate.parent().map(|id| &report.scopes()[id.index()]);
+    }
+    0
+}
+
+fn count_package_descendants(report: &Report, scope: &Scope) -> usize {
+    usize::from(scope.kind() == ScopeKind::Package)
         + scope
             .children()
             .iter()
-            .map(|id| package_count(report, &report.scopes()[id.index()]))
-            .sum::<usize>();
-    if descendants == 0 && scope.kind() != ScopeKind::Repository {
-        1
-    } else {
-        descendants
-    }
-}
-
-fn write_scope_findings(
-    writer: &mut impl Write,
-    report: &Report,
-    scope: &Scope,
-    _width: usize,
-    all: bool,
-) -> io::Result<()> {
-    if scope.findings().is_empty() {
-        writeln!(writer, "\nNo watch or high findings.")?;
-        return Ok(());
-    }
-    let mut findings: Vec<&Finding> = scope
-        .findings()
-        .iter()
-        .map(|id| &report.findings()[id.index()])
-        .collect();
-    findings.sort_by(|left, right| finding_order(report, left, right));
-    let limit = if all || scope.kind() == ScopeKind::File {
-        findings.len()
-    } else {
-        findings.len().min(3)
-    };
-    writeln!(writer, "\nDebt findings")?;
-    for finding in findings.into_iter().take(limit) {
-        let file = &report.files()[finding.file().index()];
-        if let Some(container) = finding.identity().container() {
-            writeln!(
-                writer,
-                "  {}:{}  {container}::{}",
-                file.path(),
-                finding.span().start_line(),
-                finding.identity().name()
-            )?;
-        } else {
-            writeln!(
-                writer,
-                "  {}:{}  {}",
-                file.path(),
-                finding.span().start_line(),
-                finding.identity().name()
-            )?;
-        }
-        write_attention_reasons(writer, finding, file)?;
-    }
-    if !all && limit < scope.findings().len() {
-        writeln!(
-            writer,
-            "  … {} findings omitted (use --all)",
-            scope.findings().len() - limit
-        )?;
-    }
-    Ok(())
-}
-
-fn write_attention_reasons(
-    writer: &mut impl Write,
-    finding: &Finding,
-    file: &FileRecord,
-) -> io::Result<()> {
-    write!(
-        writer,
-        "    {} because ",
-        rating_name(finding.assessment().rating())
-    )?;
-    let mut first = true;
-    for signal in finding.assessment().signals() {
-        if signal.rating() == Rating::Healthy {
-            continue;
-        }
-        if !first {
-            write!(writer, " · ")?;
-        }
-        write!(
-            writer,
-            "{} {}",
-            signal_name(signal.signal()),
-            signal.value()
-        )?;
-        first = false;
-    }
-    writeln!(
-        writer,
-        " · {} touches",
-        file.activity().map_or(0, |activity| activity.touches())
-    )
+            .map(|id| count_package_descendants(report, &report.scopes()[id.index()]))
+            .sum::<usize>()
 }
 
 fn signal_name(signal: Signal) -> &'static str {
@@ -448,66 +1049,6 @@ fn signal_name(signal: Signal) -> &'static str {
         Signal::CyclomaticComplexity => "cyclomatic",
         Signal::LogicalLines => "lines",
     }
-}
-
-fn write_scope_comparisons(
-    writer: &mut impl Write,
-    report: &Report,
-    scope: &Scope,
-    width: usize,
-    all: bool,
-) -> io::Result<()> {
-    if scope.comparisons().is_empty() {
-        writeln!(writer, "\nNo changed units.")?;
-        return Ok(());
-    }
-    let mut comparisons: Vec<&Comparison> = scope
-        .comparisons()
-        .iter()
-        .map(|id| &report.comparisons()[id.index()])
-        .collect();
-    comparisons.sort_by(|left, right| {
-        direction_rank(left.direction())
-            .cmp(&direction_rank(right.direction()))
-            .then_with(|| left.identity().name().cmp(right.identity().name()))
-    });
-    let limit = if all || scope.kind() == ScopeKind::File {
-        comparisons.len()
-    } else {
-        comparisons.len().min(3)
-    };
-    writeln!(writer, "\nHealth change")?;
-    for comparison in comparisons.into_iter().take(limit) {
-        let name = truncate(comparison.identity().name(), width.saturating_sub(24));
-        writeln!(
-            writer,
-            "  {name}  {}",
-            direction_name(comparison.direction())
-        )?;
-        if let Some(file_id) = comparison.file() {
-            writeln!(writer, "    {}", report.files()[file_id.index()].path())?;
-        }
-        if let (Some(before), Some(after)) = (comparison.before(), comparison.after()) {
-            writeln!(
-                writer,
-                "    cognitive {} → {} · cyclomatic {} → {} · lines {} → {}",
-                before.cognitive_complexity(),
-                after.cognitive_complexity(),
-                before.cyclomatic_complexity(),
-                after.cyclomatic_complexity(),
-                before.logical_lines(),
-                after.logical_lines()
-            )?;
-        }
-    }
-    if !all && limit < scope.comparisons().len() {
-        writeln!(
-            writer,
-            "  … {} comparisons omitted (use --all)",
-            scope.comparisons().len() - limit
-        )?;
-    }
-    Ok(())
 }
 
 fn direction_rank(direction: ComparisonDirection) -> u8 {
@@ -556,12 +1097,12 @@ fn finding_order(report: &Report, left: &Finding, right: &Finding) -> std::cmp::
         ))
 }
 
-fn drill_path(report: &Report, selected: &Scope) -> Option<PathBuf> {
-    let scope = skipped_scope(report, selected);
-    let mut children = display_children(report, scope);
-    children.retain(|child| child.health().debt() > 0);
-    children.sort_by(|left, right| codebase_child_order(left, right));
-    let child = children.first()?;
+fn drill_path_from_visible(
+    report: &Report,
+    selected: &Scope,
+    child: Option<&Scope>,
+) -> Option<PathBuf> {
+    let child = child?;
     let root = report.root().map(|id| &report.scopes()[id.index()])?;
     let invocation_path = Path::new(root.name());
     if invocation_path == Path::new(".") {
@@ -573,29 +1114,55 @@ fn drill_path(report: &Report, selected: &Scope) -> Option<PathBuf> {
     Some(invocation_path.join(suffix))
 }
 
-fn skipped_scope<'a>(report: &'a Report, mut scope: &'a Scope) -> &'a Scope {
-    while scope.kind() != ScopeKind::File && scope.children().len() == 1 {
-        scope = &report.scopes()[scope.children()[0].index()];
-    }
-    scope
+fn codebase_child_order(left: &Scope, right: &Scope) -> std::cmp::Ordering {
+    right
+        .health()
+        .high()
+        .cmp(&left.health().high())
+        .then_with(|| right.health().watch().cmp(&left.health().watch()))
+        .then_with(|| left.name().cmp(right.name()))
 }
 
-fn truncate(value: &str, width: usize) -> Cow<'_, str> {
-    if value.chars().count() <= width {
-        return Cow::Borrowed(value);
+fn diff_child_order(left: &Scope, right: &Scope) -> std::cmp::Ordering {
+    right
+        .diff()
+        .worse()
+        .cmp(&left.diff().worse())
+        .then_with(|| right.diff().better().cmp(&left.diff().better()))
+        .then_with(|| right.diff().changed().cmp(&left.diff().changed()))
+        .then_with(|| left.name().cmp(right.name()))
+}
+
+fn middle_truncate(value: &str, width: usize) -> String {
+    if UnicodeWidthStr::width(value) <= width {
+        return value.to_owned();
     }
     if width <= 1 {
-        return Cow::Owned("…".to_owned());
+        return "…".to_owned();
     }
-    let tail: String = value
-        .chars()
-        .rev()
-        .take(width - 1)
-        .collect::<String>()
-        .chars()
-        .rev()
-        .collect();
-    Cow::Owned(format!("…{tail}"))
+    let left_width = (width - 1) / 2;
+    let right_width = width - 1 - left_width;
+    let mut left = String::new();
+    let mut used = 0;
+    for character in value.chars() {
+        let character_width = character.width().unwrap_or(0);
+        if used + character_width > left_width {
+            break;
+        }
+        left.push(character);
+        used += character_width;
+    }
+    let mut right = String::new();
+    used = 0;
+    for character in value.chars().rev() {
+        let character_width = character.width().unwrap_or(0);
+        if used + character_width > right_width {
+            break;
+        }
+        right.insert(0, character);
+        used += character_width;
+    }
+    format!("{left}…{right}")
 }
 
 /// Streams JSON schema version 1 without cloning report strings or arrays.
@@ -1080,7 +1647,7 @@ mod tests {
         let mut terminal = Vec::new();
         write_terminal(&mut terminal, &report, TerminalOptions::default()).unwrap();
         let terminal = String::from_utf8(terminal).unwrap();
-        assert!(terminal.contains("Debt findings"));
+        assert!(terminal.contains("TOP FINDINGS"));
         assert!(terminal.contains("file-10.rs"));
         assert!(!terminal.contains("file-1.rs"));
     }
@@ -1091,13 +1658,17 @@ mod tests {
         let mut terminal = Vec::new();
         write_terminal(&mut terminal, &report, TerminalOptions::default()).unwrap();
         let terminal = String::from_utf8(terminal).unwrap();
-        assert!(terminal.contains("Debt findings"));
+        assert!(terminal.contains("TOP FINDINGS"));
     }
 
     #[test]
-    fn truncation_borrows_values_that_fit() {
-        assert!(matches!(truncate("short", 20), Cow::Borrowed("short")));
-        assert_eq!(truncate("directory/file.rs", 8), "…file.rs");
+    fn area_labels_are_shortened_in_the_middle_by_display_width() {
+        assert_eq!(middle_truncate("short", 20), "short");
+        assert_eq!(middle_truncate("directory/file.rs", 8), "dir…e.rs");
+        assert_eq!(
+            UnicodeWidthStr::width(middle_truncate("目录/directory/file.rs", 12).as_str()),
+            12
+        );
     }
 
     #[test]
@@ -1129,6 +1700,167 @@ mod tests {
         assert_eq!(DisplayPercent::new(1, 201).to_string(), "<1%");
         assert_eq!(DisplayPercent::new(0, 200).to_string(), "0%");
         assert_eq!(DisplayPercent::new(3, 100).to_string(), "3%");
+    }
+
+    #[test]
+    fn fractional_bars_keep_small_nonzero_values_visible() {
+        assert_eq!(Bar::new(0, 1_000, 8).to_string(), "░░░░░░░░");
+        assert_eq!(Bar::new(1, 1_000, 8).to_string(), "▏░░░░░░░");
+        assert_eq!(
+            UnicodeWidthStr::width(Bar::new(1, 1_000, 8).to_string().as_str()),
+            8
+        );
+    }
+
+    #[test]
+    fn grouped_counts_and_nouns_are_readable() {
+        assert_eq!(Grouped(19_761).to_string(), "19,761");
+        assert_eq!(Counted::new(1, "file", "files").to_string(), "1 file");
+        assert_eq!(Counted::new(2, "file", "files").to_string(), "2 files");
+    }
+
+    #[test]
+    fn package_count_uses_package_scopes_not_files_or_directories() {
+        let mut report = Report::new(ReportMode::Codebase);
+        let root = ScopeId::from_index(0);
+        let package = ScopeId::from_index(1);
+        let directory = ScopeId::from_index(2);
+        let file = ScopeId::from_index(3);
+        let mut root_scope = Scope::new(root, ScopeKind::Repository, ".", None);
+        root_scope.add_child(package);
+        report.add_scope(root_scope);
+        let mut package_scope = Scope::new(package, ScopeKind::Package, ".", Some(root));
+        package_scope.add_child(directory);
+        report.add_scope(package_scope);
+        let mut directory_scope = Scope::new(directory, ScopeKind::Directory, "src", Some(package));
+        directory_scope.add_child(file);
+        report.add_scope(directory_scope);
+        report.add_scope(Scope::new(
+            file,
+            ScopeKind::File,
+            "src/lib.rs",
+            Some(directory),
+        ));
+
+        assert_eq!(package_count(&report, &report.scopes()[root.index()]), 1);
+        assert_eq!(
+            package_count(&report, &report.scopes()[directory.index()]),
+            1
+        );
+        assert_eq!(package_count(&report, &report.scopes()[file.index()]), 1);
+    }
+
+    #[test]
+    fn full_compact_and_stacked_layouts_keep_the_same_area_facts() {
+        let mut report = Report::new(ReportMode::Codebase);
+        let root = ScopeId::from_index(0);
+        let package = ScopeId::from_index(1);
+        let debt = ScopeId::from_index(2);
+        let quiet = ScopeId::from_index(3);
+        let mut root_scope = Scope::new(root, ScopeKind::Repository, ".", None);
+        root_scope.add_child(package);
+        report.add_scope(root_scope);
+        let mut package_scope = Scope::new(package, ScopeKind::Package, ".", Some(root));
+        package_scope.add_child(debt);
+        package_scope.add_child(quiet);
+        report.add_scope(package_scope);
+        report.add_scope(Scope::new(
+            debt,
+            ScopeKind::Directory,
+            "src/very-long-feature-name",
+            Some(package),
+        ));
+        report.add_scope(Scope::new(
+            quiet,
+            ScopeKind::Directory,
+            "tests",
+            Some(package),
+        ));
+        report.set_root(root);
+        for (index, scope, health) in [
+            (0, debt, HealthCounts::new(8, 2, 1)),
+            (1, quiet, HealthCounts::new(4, 0, 0)),
+        ] {
+            let file = FileRecord::new(
+                FileId::from_index(index),
+                scope,
+                format!("file-{index}.rs"),
+                Coverage::new(1, 1, 0, 0, 1_234, 0),
+                health,
+            );
+            report.scopes_mut()[scope.index()].add_file(file.id());
+            report.add_file(file);
+        }
+        let files = report.files().to_vec();
+        aggregate_scopes(report.scopes_mut(), &files, root);
+
+        let render = |width| {
+            let mut bytes = Vec::new();
+            write_terminal(
+                &mut bytes,
+                &report,
+                TerminalOptions {
+                    width,
+                    all: false,
+                    color: false,
+                },
+            )
+            .unwrap();
+            String::from_utf8(bytes).unwrap()
+        };
+        let full = render(120);
+        let compact = render(80);
+        let stacked = render(50);
+        for output in [&full, &compact, &stacked] {
+            assert!(output.contains("src/very-long-feature-name"));
+            assert!(output.contains("1 high"));
+            assert!(output.contains("2 watch"));
+            assert!(output.contains("1 quiet area hidden"));
+        }
+        assert!(full.contains("area"));
+        assert!(compact.contains("rate"));
+        assert!(stacked.contains("▲ src/very-long-feature-name\n"));
+    }
+
+    #[test]
+    fn removing_ansi_from_styled_output_reproduces_plain_output() {
+        let report = report_with_findings(true);
+        let render = |color| {
+            let mut bytes = Vec::new();
+            write_terminal(
+                &mut bytes,
+                &report,
+                TerminalOptions {
+                    width: 80,
+                    all: false,
+                    color,
+                },
+            )
+            .unwrap();
+            bytes
+        };
+        let colored = render(true);
+        let plain = render(false);
+        assert!(colored.windows(2).any(|bytes| bytes == b"\x1b["));
+        assert_eq!(strip_ansi(&colored), plain);
+    }
+
+    fn strip_ansi(value: &[u8]) -> Vec<u8> {
+        let mut result = Vec::with_capacity(value.len());
+        let mut index = 0;
+        while index < value.len() {
+            if value[index..].starts_with(b"\x1b[") {
+                index += 2;
+                while index < value.len() && !(b'@'..=b'~').contains(&value[index]) {
+                    index += 1;
+                }
+                index += usize::from(index < value.len());
+            } else {
+                result.push(value[index]);
+                index += 1;
+            }
+        }
+        result
     }
 
     #[test]
@@ -1170,7 +1902,11 @@ mod tests {
         let files = report.files().to_vec();
         aggregate_scopes(report.scopes_mut(), &files, root);
 
-        let path = drill_path(&report, &report.scopes()[package.index()]);
+        let path = drill_path_from_visible(
+            &report,
+            &report.scopes()[package.index()],
+            Some(&report.scopes()[child.index()]),
+        );
 
         assert_eq!(path, Some(PathBuf::from("/work/project/bow/src")));
     }
