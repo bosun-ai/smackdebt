@@ -63,15 +63,21 @@ pub(super) fn analyze_codebase(request: &CodebaseRequest) -> Result<ProjectRepor
         .enumerate()
         .zip(&analyses)
         .map(|((index, file), result)| {
-            let eligible = matches!(
-                result,
-                FileResult::Analyzed(rated) if verdict_eligible(&rated.analysis, rated.role)
-            );
+            let (role, trust) = match result {
+                FileResult::Analyzed(rated) => (rated.role, rated.analysis.parse_status().trust()),
+                FileResult::Unsupported { role, .. } | FileResult::Failed { role, .. } => {
+                    (*role, SourceTrust::Failed)
+                }
+                FileResult::RoleConflict { .. } => {
+                    unreachable!("role conflicts stop composition")
+                }
+            };
             (
                 file.path().as_path().to_path_buf(),
                 FileId::from_index(index),
                 file.package(),
-                eligible,
+                role,
+                trust,
             )
         })
         .collect::<Vec<_>>();
@@ -466,7 +472,8 @@ pub(super) fn analyze_diff(request: &DiffRequest) -> Result<ProjectReport, Proje
                     PathBuf::from(file.path()),
                     file.id(),
                     package,
-                    file.role().affects_verdict() && file.trust() == SourceTrust::Trusted,
+                    file.role(),
+                    file.trust(),
                 )
             })
         })
@@ -1361,14 +1368,14 @@ struct LoadedEvolution {
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 enum HistoryAlias {
-    Resolved(FileId, PackageId, bool),
+    Resolved(FileId, PackageId, SourceRole, SourceTrust),
     Unusable,
 }
 
 fn load_evolution(
     inventory_root: &Path,
     history_days: u32,
-    files: &[(PathBuf, FileId, PackageId, bool)],
+    files: &[(PathBuf, FileId, PackageId, SourceRole, SourceTrust)],
 ) -> LoadedEvolution {
     let Ok(repository) = GitRepository::discover(inventory_root) else {
         return LoadedEvolution {
@@ -1386,23 +1393,29 @@ fn load_evolution(
         .unwrap_or(Path::new(""));
     let mut aliases: HashMap<PathBuf, HistoryAlias> = files
         .iter()
-        .map(|(path, file, package, eligible)| {
+        .map(|(path, file, package, role, trust)| {
             (
                 path.clone(),
-                HistoryAlias::Resolved(*file, *package, *eligible),
+                HistoryAlias::Resolved(*file, *package, *role, *trust),
             )
         })
         .collect();
     let file_paths: HashMap<FileId, PathBuf> = files
         .iter()
-        .map(|(path, file, _, _)| (*file, path.clone()))
+        .map(|(path, file, _, _, _)| (*file, path.clone()))
         .collect();
     let mut contributors = HashMap::<ContributorIdentity, ContributorId>::new();
     let mut accumulator = EvolutionAccumulator::default();
+    for (_, file, package, role, trust) in files {
+        accumulator.register_source(*file, *package, *role, *trust);
+    }
     let mut activity = HashMap::<PathBuf, u32>::new();
     let mut textual_changes = 0u32;
     let mut uncounted_changes = 0u32;
-    let mut excluded_paths = 0u32;
+    let mut eligible_commits = 0u32;
+    let mut mapped_eligible_changes = 0u32;
+    let mut context_changes = 0u32;
+    let mut excluded_changes = 0u32;
     let mut rename_gaps = 0u32;
     let mut streamed_commits = 0u32;
     let cutoff = std::time::SystemTime::now()
@@ -1417,14 +1430,15 @@ fn load_evolution(
             .entry(commit.contributor().clone())
             .or_insert(next_contributor);
         let mut changes = Vec::new();
+        let mut contains_eligible_source = false;
         for change in commit.changes() {
             let path = change
                 .path()
                 .strip_prefix(relative_root)
                 .unwrap_or(change.path());
             let identity = aliases.get(path).copied();
-            let Some(HistoryAlias::Resolved(file, package, eligible)) = identity else {
-                excluded_paths += 1;
+            let Some(HistoryAlias::Resolved(file, package, role, trust)) = identity else {
+                excluded_changes += 1;
                 continue;
             };
             if let Some(previous) = change.previous_path() {
@@ -1433,7 +1447,7 @@ fn load_evolution(
                     .unwrap_or(previous)
                     .to_path_buf();
                 match aliases.get(&previous) {
-                    Some(HistoryAlias::Resolved(existing_file, existing_package, _))
+                    Some(HistoryAlias::Resolved(existing_file, existing_package, _, _))
                         if (*existing_file, *existing_package) != (file, package) =>
                     {
                         rename_gaps += 1;
@@ -1441,7 +1455,8 @@ fn load_evolution(
                     }
                     Some(HistoryAlias::Unusable) => {}
                     _ => {
-                        aliases.insert(previous, HistoryAlias::Resolved(file, package, eligible));
+                        aliases
+                            .insert(previous, HistoryAlias::Resolved(file, package, role, trust));
                     }
                 }
             }
@@ -1453,18 +1468,21 @@ fn load_evolution(
             if contributes_activity && let Some(path) = file_paths.get(&file) {
                 *activity.entry(path.clone()).or_default() += 1;
             }
-            if eligible {
-                changes.push(HistoryChangeFact::new(
-                    file,
-                    package,
-                    change.added_lines(),
-                    change.deleted_lines(),
-                ));
+            if role.affects_verdict() && trust == SourceTrust::Trusted {
+                mapped_eligible_changes += 1;
+                contains_eligible_source = true;
+            } else {
+                context_changes += 1;
             }
+            changes.push(
+                HistoryChangeFact::new(file, package, change.added_lines(), change.deleted_lines())
+                    .with_source_evidence(role, trust),
+            );
         }
         if !changes.is_empty() {
             accumulator.accept(HistoryCommitFact::new(contributor, changes));
         }
+        eligible_commits += u32::from(contains_eligible_source);
         Ok(())
     });
     let process_count = repository.git_processes();
@@ -1480,11 +1498,14 @@ fn load_evolution(
                     },
                     summary.revision().map(str::to_owned),
                     summary.commits(),
+                    eligible_commits,
+                    mapped_eligible_changes,
+                    context_changes,
                     summary.newest_timestamp(),
                     summary.oldest_timestamp(),
                     textual_changes,
                     uncounted_changes,
-                    excluded_paths,
+                    excluded_changes,
                     rename_gaps,
                     summary
                         .is_shallow()
@@ -1511,11 +1532,14 @@ fn load_evolution(
                         availability,
                         None,
                         streamed_commits,
+                        eligible_commits,
+                        mapped_eligible_changes,
+                        context_changes,
                         None,
                         None,
                         textual_changes,
                         uncounted_changes,
-                        excluded_paths,
+                        excluded_changes,
                         rename_gaps,
                         Some(reason.clone()),
                     ),
@@ -3172,6 +3196,11 @@ mod tests {
             ["config", "user.email", "test@example.invalid"],
         );
         git(root.path(), ["config", "user.name", "Smackdebt Test"]);
+        fs::write(
+            root.path().join(".smackdebt.toml"),
+            "[source_roles]\ngenerated = ['old.js', 'new.js']\n",
+        )
+        .unwrap();
         fs::write(root.path().join("old.js"), "export const value = 1;\n").unwrap();
         git(root.path(), ["add", "-A"]);
         git(root.path(), ["commit", "-qm", "initial old path"]);
@@ -3182,8 +3211,15 @@ mod tests {
         git(root.path(), ["add", "-A"]);
         git(root.path(), ["commit", "-qm", "reuse old path"]);
 
-        let result =
-            analyze_codebase(&CodebaseRequest::new(root.path()).with_history_days(36_500)).unwrap();
+        let result = analyze_codebase(
+            &CodebaseRequest::new(root.path())
+                .with_history_days(36_500)
+                .with_role_rules(vec![
+                    SourceRoleRule::generated("old.js"),
+                    SourceRoleRule::generated("new.js"),
+                ]),
+        )
+        .unwrap();
         let report = result.report();
         let touches = report
             .file_history()
@@ -3197,8 +3233,14 @@ mod tests {
             .collect::<HashMap<_, _>>();
         assert_eq!(touches["new.js"], 1);
         assert_eq!(touches["old.js"], 1);
+        assert!(report.file_history().iter().all(|history| {
+            history.role() == SourceRole::Generated && history.trust() == SourceTrust::Trusted
+        }));
+        assert_eq!(report.history_coverage().eligible_commits(), 0);
+        assert_eq!(report.history_coverage().mapped_eligible_changes(), 0);
+        assert_eq!(report.history_coverage().context_changes(), 2);
         assert_eq!(report.history_coverage().rename_gaps(), 1);
-        assert_eq!(report.history_coverage().excluded_paths(), 1);
+        assert_eq!(report.history_coverage().excluded_changes(), 2);
     }
 
     #[test]

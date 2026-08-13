@@ -9,7 +9,7 @@ use anstyle::{AnsiColor, Effects, Style};
 use smackdebt_analysis::{
     ArchitectureFindingKind, Comparison, ComparisonDirection, ComparisonKind, Diagnostic,
     DiagnosticKind, FileId, FileRecord, Finding, Language, Rating, Report, ReportMode, Scope,
-    ScopeKind, Signal,
+    ScopeKind, Signal, SourceRole, SourceTrust,
 };
 use unicode_width::{UnicodeWidthChar, UnicodeWidthStr};
 
@@ -467,12 +467,12 @@ impl<'a, W: Write> Renderer<'a, W> {
         match coverage.availability() {
             smackdebt_analysis::HistoryAvailability::Complete => writeln!(
                 self.writer,
-                "{} commits · complete local history",
+                "complete local stream · {} commits",
                 Grouped(coverage.commits() as usize)
             )?,
             smackdebt_analysis::HistoryAvailability::Incomplete => writeln!(
                 self.writer,
-                "{} commits · incomplete history",
+                "incomplete local stream · {} commits",
                 Grouped(coverage.commits() as usize)
             )?,
             smackdebt_analysis::HistoryAvailability::Unavailable => {
@@ -486,18 +486,23 @@ impl<'a, W: Write> Renderer<'a, W> {
                 return Ok(());
             }
         }
-        if coverage.uncounted_changes() > 0
-            || coverage.excluded_paths() > 0
-            || coverage.rename_gaps() > 0
-        {
-            writeln!(
-                self.writer,
-                "{} uncounted · {} excluded · {} rename gaps",
-                Grouped(coverage.uncounted_changes() as usize),
-                Grouped(coverage.excluded_paths() as usize),
-                Grouped(coverage.rename_gaps() as usize)
-            )?;
-        }
+        let observed_changes = coverage.observed_changes();
+        writeln!(
+            self.writer,
+            "eligible mapping {}/{} changes · {}% · {} commits",
+            Grouped(coverage.mapped_eligible_changes() as usize),
+            Grouped(observed_changes as usize),
+            percent(coverage.mapped_eligible_changes(), observed_changes),
+            Grouped(coverage.eligible_commits() as usize),
+        )?;
+        writeln!(
+            self.writer,
+            "{} context · {} excluded · {} uncounted · {} rename gaps",
+            Grouped(coverage.context_changes() as usize),
+            Grouped(coverage.excluded_changes() as usize),
+            Grouped(coverage.uncounted_changes() as usize),
+            Grouped(coverage.rename_gaps() as usize)
+        )?;
         let relevant_packages = report
             .files()
             .iter()
@@ -510,17 +515,23 @@ impl<'a, W: Write> Renderer<'a, W> {
             .package_history()
             .iter()
             .filter(|value| relevant(value.package()))
+            .filter(|value| self.options.all || value.affects_findings())
             .collect::<Vec<_>>();
         histories.sort_by_key(|value| (Reverse(value.touches()), value.package()));
+        if !self.options.all {
+            let mut displayed_packages = std::collections::BTreeSet::new();
+            histories.retain(|value| displayed_packages.insert(value.package()));
+        }
         for value in histories
             .iter()
             .take(if self.options.all { histories.len() } else { 3 })
         {
             let name = package_name(report, value.package().index()).unwrap_or("?");
-            let concentration = report
-                .contributor_concentration()
-                .iter()
-                .find(|item| item.package() == value.package());
+            let concentration = report.contributor_concentration().iter().find(|item| {
+                item.package() == value.package()
+                    && item.role() == value.role()
+                    && item.trust() == value.trust()
+            });
             write!(
                 self.writer,
                 "  {name} · {} touches · +{} -{}",
@@ -536,13 +547,26 @@ impl<'a, W: Write> Renderer<'a, W> {
                     percent(concentration.numerator(), concentration.denominator())
                 )?;
             }
+            if self.options.all
+                || value.role() != smackdebt_analysis::SourceRole::Primary
+                || value.trust() != smackdebt_analysis::SourceTrust::Trusted
+            {
+                write!(
+                    self.writer,
+                    " · {}/{}",
+                    history_role_name(value.role()),
+                    history_trust_name(value.trust())
+                )?;
+            }
             writeln!(self.writer)?;
         }
         let mut files = report
             .file_history()
             .iter()
             .filter(|value| {
-                value.touches() > 0 && file_belongs_to_scope(report, value.file(), scope)
+                value.touches() > 0
+                    && file_belongs_to_scope(report, value.file(), scope)
+                    && (self.options.all || value.affects_findings())
             })
             .collect::<Vec<_>>();
         files.sort_by(|left, right| {
@@ -564,55 +588,91 @@ impl<'a, W: Write> Renderer<'a, W> {
                 Grouped(value.added_lines() as usize),
                 Grouped(value.deleted_lines() as usize)
             )?;
+            if self.options.all
+                || value.role() != smackdebt_analysis::SourceRole::Primary
+                || value.trust() != smackdebt_analysis::SourceTrust::Trusted
+            {
+                writeln!(
+                    self.writer,
+                    "      evidence {}/{}",
+                    history_role_name(value.role()),
+                    history_trust_name(value.trust())
+                )?;
+            }
         }
-        let couplings = report
-            .change_coupling()
+        let finding_couplings = scope
+            .evolutionary_findings()
             .iter()
-            .filter(|pair| relevant(pair.left()) || relevant(pair.right()))
+            .map(|id| report.evolutionary_findings()[id.index()].coupling())
             .collect::<Vec<_>>();
+        let mut couplings = if self.options.all {
+            report
+                .change_coupling()
+                .iter()
+                .copied()
+                .filter(|pair| relevant(pair.left()) || relevant(pair.right()))
+                .map(|pair| {
+                    let finding = finding_couplings
+                        .iter()
+                        .any(|candidate| same_coupling_operands(*candidate, pair));
+                    (pair, finding)
+                })
+                .collect::<Vec<_>>()
+        } else {
+            finding_couplings
+                .iter()
+                .copied()
+                .map(|pair| (pair, true))
+                .collect::<Vec<_>>()
+        };
+        if self.options.all {
+            let missing_findings = finding_couplings
+                .iter()
+                .copied()
+                .filter(|finding| {
+                    !couplings
+                        .iter()
+                        .any(|(pair, _)| same_coupling_operands(*pair, *finding))
+                })
+                .map(|pair| (pair, true))
+                .collect::<Vec<_>>();
+            couplings.extend(missing_findings);
+        }
         for pair in couplings
             .iter()
             .take(if self.options.all { couplings.len() } else { 3 })
         {
+            let (pair, finding) = pair;
             let explained = report.package_edges().iter().any(|edge| {
                 (edge.source() == pair.left() && edge.target() == pair.right())
                     || (edge.source() == pair.right() && edge.target() == pair.left())
             });
-            writeln!(
+            write!(
                 self.writer,
-                "  coupling {} ↔ {} · {}/{} shared commits · {}% similarity · {}",
+                "{}coupling {} ↔ {} · {}/{} shared commits · {}% similarity · {}",
+                if *finding { "● WATCH  " } else { "  " },
                 package_name(report, pair.left().index()).unwrap_or("?"),
                 package_name(report, pair.right().index()).unwrap_or("?"),
                 pair.shared_commits(),
                 pair.union_commits(),
                 percent(pair.shared_commits(), pair.union_commits()),
                 if explained {
-                    "static dependency"
+                    "static use"
                 } else {
-                    "no static dependency"
+                    "no eligible static use"
                 }
             )?;
-        }
-        let finding_ids = scope.evolutionary_findings();
-        for id in finding_ids.iter().take(if self.options.all {
-            finding_ids.len()
-        } else {
-            3
-        }) {
-            let pair = report.evolutionary_findings()[id.index()].coupling();
-            writeln!(
-                self.writer,
-                "● WATCH  recurrent change coupling without a static dependency"
-            )?;
-            writeln!(
-                self.writer,
-                "        {} ↔ {} · {}/{} shared commits · {}% similarity",
-                package_name(report, pair.left().index()).unwrap_or("?"),
-                package_name(report, pair.right().index()).unwrap_or("?"),
-                pair.shared_commits(),
-                pair.union_commits(),
-                percent(pair.shared_commits(), pair.union_commits())
-            )?;
+            if let Some(evidence) = pair.evidence() {
+                write!(
+                    self.writer,
+                    " · {}/{} ↔ {}/{}",
+                    history_role_name(evidence.left_role()),
+                    history_trust_name(evidence.left_trust()),
+                    history_role_name(evidence.right_role()),
+                    history_trust_name(evidence.right_trust())
+                )?;
+            }
+            writeln!(self.writer)?;
         }
         if report.mode() == ReportMode::Diff {
             for id in scope.evolutionary_comparisons() {
@@ -1286,6 +1346,35 @@ fn percent(value: u32, denominator: u32) -> u32 {
         .saturating_add(denominator / 2)
         .checked_div(denominator)
         .unwrap_or(0)
+}
+
+fn same_coupling_operands(
+    left: smackdebt_analysis::ChangeCoupling,
+    right: smackdebt_analysis::ChangeCoupling,
+) -> bool {
+    left.left() == right.left()
+        && left.right() == right.right()
+        && left.shared_commits() == right.shared_commits()
+        && left.union_commits() == right.union_commits()
+}
+
+fn history_role_name(role: SourceRole) -> &'static str {
+    match role {
+        SourceRole::Primary => "primary",
+        SourceRole::Test => "test",
+        SourceRole::Example => "example",
+        SourceRole::Benchmark => "benchmark",
+        SourceRole::Fixture => "fixture",
+        SourceRole::Generated => "generated",
+    }
+}
+
+fn history_trust_name(trust: SourceTrust) -> &'static str {
+    match trust {
+        SourceTrust::Trusted => "trusted",
+        SourceTrust::Advisory => "advisory",
+        SourceTrust::Failed => "failed",
+    }
 }
 
 struct DisplayPercent {

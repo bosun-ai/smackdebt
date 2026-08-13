@@ -95,16 +95,21 @@ ownership relations. JSON retains the complete relation tables.
 
 ### Preserve exact history evidence and filter only presentation
 
-File and package history rows expose `touches`, `added_lines`, `deleted_lines`,
-and `uncounted_changes`. History coverage exposes availability, revision,
-commit count, newest and oldest timestamps, textual changes, uncounted changes,
-excluded paths, rename gaps, and reason. Coupling rows expose left and right
-package IDs, `shared_commits`, `union_commits`, and Jaccard similarity.
-Contributor concentration exposes package ID, contributor count, numerator,
-denominator, and ratio without identity.
+File and package history rows expose SourceRole, trust, `touches`,
+`added_lines`, `deleted_lines`, and `uncounted_changes`. History coverage
+separates stream availability and total commits from eligible commits, eligible
+mapped changes, context changes, excluded changes, textual changes, uncounted
+changes, rename gaps, revision, timestamps, and reason. Coupling rows expose
+left and right package IDs and endpoint evidence, `shared_commits`,
+`union_commits`, and Jaccard similarity. Contributor concentration exposes
+package ID, SourceRole, trust, contributor count, numerator, denominator, and
+ratio without identity.
 
-Each source-derived history observation retains SourceRole. Fixture and
-generated observations remain descriptive but cannot create default findings.
+Aggregation keeps eligible parsed evidence separate from fixture, generated,
+recovered, and failed context. Context observations remain descriptive in JSON
+and `--all` but cannot change eligible churn, contributor top share, coupling
+operands, or default findings. Terminal output reports Git stream state and
+eligible mapping strength as separate evidence.
 An unexplained coupling finding requires at least three shared commits, Jaccard
 similarity of at least 0.20, sufficient history, and no trusted verdict `uses`
 relation in either direction. Weaker observations remain in JSON and `--all`.

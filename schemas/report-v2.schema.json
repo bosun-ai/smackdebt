@@ -225,24 +225,24 @@
       "properties":{"id":{"$ref":"#/$defs/index"},"kind":{"enum":["edge_added","edge_removed","cycle_introduced","cycle_removed"]},"direction":{"enum":["worse","better","changed"]},"packages":{"type":"array","items":{"$ref":"#/$defs/index"},"uniqueItems":true},"witness":{"type":"array","items":{"$ref":"#/$defs/index"}},"files":{"type":"array","items":{"$ref":"#/$defs/index"},"uniqueItems":true},"relation":{"type":["string","null"],"enum":["uses","module_ownership",null]},"role":{"type":["string","null"],"enum":["primary","test","example","benchmark","fixture","generated",null]},"trust":{"type":["string","null"],"enum":["trusted","advisory","failed",null]},"before_references":{"type":["integer","null"],"minimum":0},"after_references":{"type":["integer","null"],"minimum":0}}, "additionalProperties":false
     },
     "history_coverage": {
-      "type":"object", "required":["availability","revision","commits","newest_timestamp","oldest_timestamp","textual_changes","uncounted_changes","excluded_paths","rename_gaps","reason"],
-      "properties":{"availability":{"enum":["complete","incomplete","unavailable"]},"revision":{"type":["string","null"]},"commits":{"type":"integer","minimum":0},"newest_timestamp":{"type":["integer","null"]},"oldest_timestamp":{"type":["integer","null"]},"textual_changes":{"type":"integer","minimum":0},"uncounted_changes":{"type":"integer","minimum":0},"excluded_paths":{"type":"integer","minimum":0},"rename_gaps":{"type":"integer","minimum":0},"reason":{"type":["string","null"]}}, "additionalProperties":false
+      "type":"object", "required":["availability","revision","commits","eligible_commits","mapped_eligible_changes","context_changes","newest_timestamp","oldest_timestamp","textual_changes","uncounted_changes","excluded_changes","rename_gaps","reason"],
+      "properties":{"availability":{"enum":["complete","incomplete","unavailable"]},"revision":{"type":["string","null"]},"commits":{"type":"integer","minimum":0},"eligible_commits":{"type":"integer","minimum":0},"mapped_eligible_changes":{"type":"integer","minimum":0},"context_changes":{"type":"integer","minimum":0},"newest_timestamp":{"type":["integer","null"]},"oldest_timestamp":{"type":["integer","null"]},"textual_changes":{"type":"integer","minimum":0},"uncounted_changes":{"type":"integer","minimum":0},"excluded_changes":{"type":"integer","minimum":0},"rename_gaps":{"type":"integer","minimum":0},"reason":{"type":["string","null"]}}, "additionalProperties":false
     },
     "file_history": {
-      "type":"object", "required":["file","touches","added_lines","deleted_lines","uncounted_changes"],
-      "properties":{"file":{"$ref":"#/$defs/index"},"touches":{"type":"integer","minimum":0},"added_lines":{"type":"integer","minimum":0},"deleted_lines":{"type":"integer","minimum":0},"uncounted_changes":{"type":"integer","minimum":0}}, "additionalProperties":false
+      "type":"object", "required":["file","role","trust","touches","added_lines","deleted_lines","uncounted_changes"],
+      "properties":{"file":{"$ref":"#/$defs/index"},"role":{"enum":["primary","test","example","benchmark","fixture","generated"]},"trust":{"enum":["trusted","advisory","failed"]},"touches":{"type":"integer","minimum":0},"added_lines":{"type":"integer","minimum":0},"deleted_lines":{"type":"integer","minimum":0},"uncounted_changes":{"type":"integer","minimum":0}}, "additionalProperties":false
     },
     "package_history": {
-      "type":"object", "required":["package","touches","added_lines","deleted_lines","uncounted_changes"],
-      "properties":{"package":{"$ref":"#/$defs/index"},"touches":{"type":"integer","minimum":0},"added_lines":{"type":"integer","minimum":0},"deleted_lines":{"type":"integer","minimum":0},"uncounted_changes":{"type":"integer","minimum":0}}, "additionalProperties":false
+      "type":"object", "required":["package","role","trust","touches","added_lines","deleted_lines","uncounted_changes"],
+      "properties":{"package":{"$ref":"#/$defs/index"},"role":{"enum":["primary","test","example","benchmark","fixture","generated"]},"trust":{"enum":["trusted","advisory","failed"]},"touches":{"type":"integer","minimum":0},"added_lines":{"type":"integer","minimum":0},"deleted_lines":{"type":"integer","minimum":0},"uncounted_changes":{"type":"integer","minimum":0}}, "additionalProperties":false
     },
     "change_coupling": {
-      "type":"object", "required":["left","right","shared_commits","union_commits","similarity"],
-      "properties":{"left":{"$ref":"#/$defs/index"},"right":{"$ref":"#/$defs/index"},"shared_commits":{"type":"integer","minimum":2},"union_commits":{"type":"integer","minimum":2},"similarity":{"type":"number","minimum":0,"maximum":1}}, "additionalProperties":false
+      "type":"object", "required":["left","right","left_role","left_trust","right_role","right_trust","shared_commits","union_commits","similarity"],
+      "properties":{"left":{"$ref":"#/$defs/index"},"right":{"$ref":"#/$defs/index"},"left_role":{"enum":["primary","test","example","benchmark","fixture","generated"]},"left_trust":{"enum":["trusted","advisory","failed"]},"right_role":{"enum":["primary","test","example","benchmark","fixture","generated"]},"right_trust":{"enum":["trusted","advisory","failed"]},"shared_commits":{"type":"integer","minimum":2},"union_commits":{"type":"integer","minimum":2},"similarity":{"type":"number","minimum":0,"maximum":1}}, "additionalProperties":false
     },
     "contributor_concentration": {
-      "type":"object", "required":["package","contributor_count","numerator","denominator","ratio"],
-      "properties":{"package":{"$ref":"#/$defs/index"},"contributor_count":{"type":"integer","minimum":1},"numerator":{"type":"integer","minimum":1},"denominator":{"type":"integer","minimum":1},"ratio":{"type":"number","minimum":0,"maximum":1}}, "additionalProperties":false
+      "type":"object", "required":["package","role","trust","contributor_count","numerator","denominator","ratio"],
+      "properties":{"package":{"$ref":"#/$defs/index"},"role":{"enum":["primary","test","example","benchmark","fixture","generated"]},"trust":{"enum":["trusted","advisory","failed"]},"contributor_count":{"type":"integer","minimum":1},"numerator":{"type":"integer","minimum":1},"denominator":{"type":"integer","minimum":1},"ratio":{"type":"number","minimum":0,"maximum":1}}, "additionalProperties":false
     },
     "evolutionary_finding": {
       "type":"object", "required":["id","rating","left","right","shared_commits","union_commits","similarity"],

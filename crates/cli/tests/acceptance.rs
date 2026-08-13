@@ -411,7 +411,13 @@ fn evolutionary_analysis_is_exact_private_and_deterministic() {
     assert_eq!(report["change_coupling"][0]["shared_commits"], 3);
     assert_eq!(report["change_coupling"][0]["union_commits"], 6);
     assert_eq!(report["change_coupling"][0]["similarity"], 0.5);
+    assert_eq!(report["change_coupling"].as_array().unwrap().len(), 1);
     assert_eq!(report["evolutionary_findings"].as_array().unwrap().len(), 1);
+    let terminal_text = String::from_utf8(serial_terminal.clone()).unwrap();
+    assert_eq!(terminal_text.matches("3/6 shared commits").count(), 1);
+    assert_eq!(terminal_text.matches("  a · 5 touches").count(), 1);
+    assert_eq!(terminal_text.matches("80% top share").count(), 1);
+    assert!(!terminal_text.contains("coupling a ↔ c"));
     for private_value in [
         "Alice Example",
         "alice@example.invalid",
@@ -470,6 +476,313 @@ fn diff_uses_history_as_context_and_can_explain_coupling() {
             .iter()
             .any(|value| { value["kind"] == "finding_removed" && value["direction"] == "better" })
     );
+    let default_terminal = String::from_utf8(run_in(
+        project.path(),
+        ["diff", "main", "--color", "never", "--history", "36500d"],
+    ))
+    .unwrap();
+    assert!(!default_terminal.contains("coupling a ↔ b"));
+    let detailed_terminal = String::from_utf8(run_in(
+        project.path(),
+        [
+            "diff",
+            "main",
+            "--all",
+            "--color",
+            "never",
+            "--history",
+            "36500d",
+        ],
+    ))
+    .unwrap();
+    assert!(detailed_terminal.contains("coupling a ↔ b · 3/6 shared commits"));
+    assert!(detailed_terminal.contains("static use"));
+}
+
+#[test]
+fn ref_and_worktree_diffs_apply_the_same_coupling_policy() {
+    let project = evolutionary_fixture();
+    git(project.path(), ["branch", "base"]);
+    fs::write(
+        project.path().join("b/main.js"),
+        "import { a } from '../a/main';\nexport const b = a;\n",
+    )
+    .unwrap();
+    let worktree: serde_json::Value = serde_json::from_slice(&run_in(
+        project.path(),
+        ["diff", "base", "--json", "--history", "36500d"],
+    ))
+    .unwrap();
+    commit_as(
+        project.path(),
+        "History Test",
+        "history@example.invalid",
+        "explain coupling",
+    );
+    let committed: serde_json::Value = serde_json::from_slice(&run_in(
+        project.path(),
+        ["diff", "base", "--json", "--history", "36500d"],
+    ))
+    .unwrap();
+
+    for report in [&worktree, &committed] {
+        assert!(
+            report["evolutionary_findings"]
+                .as_array()
+                .unwrap()
+                .is_empty()
+        );
+        assert_eq!(
+            report["evolutionary_comparisons"][0]["kind"],
+            "finding_removed"
+        );
+        assert_eq!(report["evolutionary_comparisons"][0]["direction"], "better");
+    }
+}
+
+#[test]
+fn fixture_and_generated_history_stays_descriptive_without_findings() {
+    let project = contextual_history_fixture();
+    let json = run_in(project.path(), ["--json", "--history", "36500d"]);
+    let report: serde_json::Value = serde_json::from_slice(&json).unwrap();
+    validate_schema(&report);
+    assert_eq!(report["change_coupling"].as_array().unwrap().len(), 3);
+    assert!(
+        report["evolutionary_findings"]
+            .as_array()
+            .unwrap()
+            .is_empty()
+    );
+    assert_eq!(report["files"][0]["role"], "primary");
+    assert_eq!(report["files"][1]["role"], "fixture");
+    assert_eq!(report["files"][2]["role"], "generated");
+    assert_eq!(report["file_history"][0]["touches"], 3);
+    assert_eq!(report["file_history"][0]["role"], "primary");
+    assert_eq!(report["file_history"][0]["trust"], "trusted");
+    assert_eq!(report["file_history"][1]["touches"], 3);
+    assert_eq!(report["file_history"][1]["role"], "fixture");
+    assert_eq!(report["file_history"][2]["touches"], 3);
+    assert_eq!(report["file_history"][2]["role"], "generated");
+    assert_eq!(report["history_coverage"]["eligible_commits"], 3);
+    assert_eq!(report["history_coverage"]["mapped_eligible_changes"], 3);
+    assert_eq!(report["history_coverage"]["context_changes"], 6);
+    assert_eq!(report["change_coupling"][0]["left_role"], "primary");
+    assert_eq!(report["change_coupling"][0]["right_role"], "fixture");
+
+    let default = String::from_utf8(run_in(
+        project.path(),
+        ["--color", "never", "--history", "36500d"],
+    ))
+    .unwrap();
+    assert!(!default.contains("coupling a ↔ b"));
+    assert!(!default.contains("coupling a ↔ c"));
+    let detailed = String::from_utf8(run_in(
+        project.path(),
+        ["--all", "--color", "never", "--history", "36500d"],
+    ))
+    .unwrap();
+    assert!(detailed.contains("coupling a ↔ b · 3/3 shared commits"));
+    assert!(detailed.contains("coupling a ↔ c · 3/3 shared commits"));
+    assert!(detailed.contains("primary/trusted ↔ generated/trusted"));
+}
+
+#[test]
+fn generated_history_cannot_change_eligible_history_or_concentration() {
+    let project = generated_heavy_history_fixture();
+    let report: serde_json::Value =
+        serde_json::from_slice(&run_in(project.path(), ["--json", "--history", "36500d"])).unwrap();
+    validate_schema(&report);
+    assert_index_integrity(&report);
+    let diff_report: serde_json::Value = serde_json::from_slice(&run_in(
+        project.path(),
+        ["diff", "HEAD", "--json", "--history", "36500d"],
+    ))
+    .unwrap();
+    for field in [
+        "history_coverage",
+        "file_history",
+        "change_coupling",
+        "contributor_concentration",
+        "evolutionary_findings",
+    ] {
+        assert_eq!(
+            report[field], diff_report[field],
+            "{field} differs in diff mode"
+        );
+    }
+    let nonempty_package_history = |value: &serde_json::Value| {
+        value["package_history"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .filter(|row| row["touches"] != 0)
+            .cloned()
+            .collect::<Vec<_>>()
+    };
+    assert_eq!(
+        nonempty_package_history(&report),
+        nonempty_package_history(&diff_report)
+    );
+
+    let coverage = &report["history_coverage"];
+    assert_eq!(coverage["commits"], 10);
+    assert_eq!(coverage["eligible_commits"], 3);
+    assert_eq!(coverage["mapped_eligible_changes"], 6);
+    assert_eq!(coverage["context_changes"], 16);
+    assert_eq!(coverage["excluded_changes"], 3);
+    assert_eq!(coverage["textual_changes"], 22);
+    assert_eq!(coverage["uncounted_changes"], 0);
+
+    let package_history = report["package_history"].as_array().unwrap();
+    for package in 0..=1 {
+        let eligible = package_history
+            .iter()
+            .find(|row| row["package"] == package && row["role"] == "primary")
+            .unwrap();
+        let context = package_history
+            .iter()
+            .find(|row| row["package"] == package && row["role"] == "generated")
+            .unwrap();
+        assert_eq!(eligible["touches"], 3);
+        assert_eq!(context["touches"], 8);
+    }
+    let concentration = report["contributor_concentration"].as_array().unwrap();
+    for package in 0..=1 {
+        let eligible = concentration
+            .iter()
+            .find(|row| row["package"] == package && row["role"] == "primary")
+            .unwrap();
+        let context = concentration
+            .iter()
+            .find(|row| row["package"] == package && row["role"] == "generated")
+            .unwrap();
+        assert_eq!(eligible["contributor_count"], 1);
+        assert_eq!(eligible["numerator"], 3);
+        assert_eq!(eligible["denominator"], 3);
+        assert_eq!(context["contributor_count"], 8);
+        assert_eq!(context["numerator"], 1);
+        assert_eq!(context["denominator"], 8);
+    }
+    assert!(
+        report["change_coupling"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .any(|row| row["left_role"] == "primary"
+                && row["right_role"] == "primary"
+                && row["shared_commits"] == 3
+                && row["union_commits"] == 3)
+    );
+    assert!(
+        report["change_coupling"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .any(|row| row["left_role"] == "generated"
+                && row["right_role"] == "generated"
+                && row["shared_commits"] == 8
+                && row["union_commits"] == 8)
+    );
+    assert_eq!(report["evolutionary_findings"][0]["shared_commits"], 3);
+    assert_eq!(report["evolutionary_findings"][0]["union_commits"], 3);
+
+    let default = String::from_utf8(run_in(
+        project.path(),
+        ["--color", "never", "--history", "36500d"],
+    ))
+    .unwrap();
+    assert!(default.contains("eligible mapping 6/25 changes · 24% · 3 commits"));
+    assert!(default.contains("a · 3 touches"));
+    assert!(default.contains("1 contributors · 100% top share"));
+    assert!(!default.contains("generated/trusted"));
+    assert!(!default.contains("a · 8 touches"));
+
+    let detailed = String::from_utf8(run_in(
+        project.path(),
+        ["--all", "--color", "never", "--history", "36500d"],
+    ))
+    .unwrap();
+    assert!(detailed.contains("a · 8 touches"));
+    assert!(detailed.contains("8 contributors · 13% top share · generated/trusted"));
+    assert!(detailed.contains("generated/trusted ↔ generated/trusted"));
+    assert_eq!(detailed.matches("3/3 shared commits").count(), 1);
+    assert!(detailed.contains("● WATCH  coupling a ↔ b · 3/3 shared commits"));
+}
+
+#[test]
+fn complete_stream_without_eligible_mapping_cannot_create_findings() {
+    let project = generated_only_history_fixture();
+    let report: serde_json::Value =
+        serde_json::from_slice(&run_in(project.path(), ["--json", "--history", "36500d"])).unwrap();
+    assert_eq!(report["history_coverage"]["availability"], "complete");
+    assert_eq!(report["history_coverage"]["eligible_commits"], 0);
+    assert_eq!(report["history_coverage"]["mapped_eligible_changes"], 0);
+    assert_eq!(report["history_coverage"]["context_changes"], 6);
+    assert!(
+        report["evolutionary_findings"]
+            .as_array()
+            .unwrap()
+            .is_empty()
+    );
+    assert_eq!(report["change_coupling"][0]["shared_commits"], 3);
+
+    let terminal = String::from_utf8(run_in(
+        project.path(),
+        ["--all", "--color", "never", "--history", "36500d"],
+    ))
+    .unwrap();
+    assert!(terminal.contains("complete local stream · 3 commits"));
+    assert!(terminal.contains("eligible mapping 0/9 changes · 0% · 0 commits"));
+    assert!(!terminal.contains("● WATCH"));
+}
+
+#[test]
+fn default_history_shows_each_package_once_across_eligible_roles() {
+    let project = eligible_role_history_fixture();
+    let default = String::from_utf8(run_in(
+        project.path(),
+        ["--color", "never", "--history", "36500d"],
+    ))
+    .unwrap();
+    assert_eq!(default.matches("  a · 2 touches").count(), 1);
+
+    let detailed = String::from_utf8(run_in(
+        project.path(),
+        ["--all", "--color", "never", "--history", "36500d"],
+    ))
+    .unwrap();
+    assert_eq!(detailed.matches("  a · 2 touches").count(), 2);
+    assert!(detailed.contains("primary/trusted"));
+    assert!(detailed.contains("test/trusted"));
+}
+
+#[test]
+fn weak_coupling_stays_in_json_and_detailed_terminal_only() {
+    let project = weak_history_fixture();
+    let report: serde_json::Value =
+        serde_json::from_slice(&run_in(project.path(), ["--json", "--history", "36500d"])).unwrap();
+    assert_eq!(report["change_coupling"].as_array().unwrap().len(), 1);
+    assert_eq!(report["change_coupling"][0]["shared_commits"], 2);
+    assert_eq!(report["change_coupling"][0]["union_commits"], 4);
+    assert!(
+        report["evolutionary_findings"]
+            .as_array()
+            .unwrap()
+            .is_empty()
+    );
+
+    let default = String::from_utf8(run_in(
+        project.path(),
+        ["--color", "never", "--history", "36500d"],
+    ))
+    .unwrap();
+    assert!(!default.contains("coupling a ↔ b"));
+    let detailed = String::from_utf8(run_in(
+        project.path(),
+        ["--all", "--color", "never", "--history", "36500d"],
+    ))
+    .unwrap();
+    assert!(detailed.contains("coupling a ↔ b · 2/4 shared commits"));
 }
 
 #[test]
@@ -491,9 +804,7 @@ fn selected_package_shows_file_churn_all_coupling_and_omits_unrelated_history() 
     );
     let text = String::from_utf8(terminal).unwrap();
     assert!(text.contains("file a/main.js · 5 touches"));
-    assert!(
-        text.contains("coupling a ↔ b · 3/6 shared commits · 50% similarity · static dependency")
-    );
+    assert!(text.contains("coupling a ↔ b · 3/6 shared commits · 50% similarity · static use"));
     assert!(!text.contains("c/main.js"));
     assert!(!text.contains("  c ·"));
 }
@@ -591,6 +902,30 @@ fn shallow_history_is_reported_as_incomplete() {
         "repository history is shallow"
     );
     assert_eq!(report["history_coverage"]["commits"], 1);
+    assert!(report["history_coverage"].get("revision").is_some());
+    assert!(report["history_coverage"].get("newest_timestamp").is_some());
+    assert!(report["history_coverage"].get("oldest_timestamp").is_some());
+    assert!(report["history_coverage"].get("textual_changes").is_some());
+    assert!(
+        report["history_coverage"]
+            .get("uncounted_changes")
+            .is_some()
+    );
+    assert!(report["history_coverage"].get("eligible_commits").is_some());
+    assert!(
+        report["history_coverage"]
+            .get("mapped_eligible_changes")
+            .is_some()
+    );
+    assert!(report["history_coverage"].get("context_changes").is_some());
+    assert!(report["history_coverage"].get("excluded_changes").is_some());
+    assert!(report["history_coverage"].get("rename_gaps").is_some());
+    assert!(
+        report["evolutionary_findings"]
+            .as_array()
+            .unwrap()
+            .is_empty()
+    );
     assert!(!report["files"].as_array().unwrap().is_empty());
 }
 
@@ -780,15 +1115,18 @@ fn assert_index_integrity(report: &serde_json::Value) {
     }
     assert_eq!(files_with_history.len(), files.len());
 
-    assert_eq!(package_history.len(), package_graph.len());
     let mut packages_with_history = HashSet::new();
+    let mut package_history_keys = HashSet::new();
     for history in package_history {
         let package = history["package"].as_u64().unwrap() as usize;
         assert!(package < package_graph.len());
+        let role = history["role"].as_str().unwrap();
+        let trust = history["trust"].as_str().unwrap();
         assert!(
-            packages_with_history.insert(package),
-            "duplicate package history row"
+            package_history_keys.insert((package, role, trust)),
+            "duplicate package history evidence row"
         );
+        packages_with_history.insert(package);
     }
     assert_eq!(packages_with_history.len(), package_graph.len());
 
@@ -799,9 +1137,13 @@ fn assert_index_integrity(report: &serde_json::Value) {
         assert!(left < package_graph.len());
         assert!(right < package_graph.len());
         assert!(left < right, "coupling pair identity is not stable");
+        let left_role = coupling["left_role"].as_str().unwrap();
+        let left_trust = coupling["left_trust"].as_str().unwrap();
+        let right_role = coupling["right_role"].as_str().unwrap();
+        let right_trust = coupling["right_trust"].as_str().unwrap();
         assert!(
-            coupling_pairs.insert((left, right)),
-            "duplicate coupling pair"
+            coupling_pairs.insert((left, right, left_role, left_trust, right_role, right_trust,)),
+            "duplicate coupling evidence pair"
         );
     }
 
@@ -809,9 +1151,11 @@ fn assert_index_integrity(report: &serde_json::Value) {
     for concentration in contributor_concentration {
         let package = concentration["package"].as_u64().unwrap() as usize;
         assert!(package < package_graph.len());
+        let role = concentration["role"].as_str().unwrap();
+        let trust = concentration["trust"].as_str().unwrap();
         assert!(
-            concentration_packages.insert(package),
-            "duplicate concentration row"
+            concentration_packages.insert((package, role, trust)),
+            "duplicate concentration evidence row"
         );
     }
 
@@ -1083,6 +1427,226 @@ fn evolutionary_fixture() -> tempfile::TempDir {
         project.path(),
         "Bob Example",
         "bob@example.invalid",
+        "b only",
+    );
+    project
+}
+
+fn contextual_history_fixture() -> tempfile::TempDir {
+    let project = tempfile::tempdir().unwrap();
+    git(project.path(), ["init", "-b", "main"]);
+    for package in ["a", "b", "c"] {
+        fs::create_dir_all(project.path().join(package)).unwrap();
+        fs::write(project.path().join(package).join("package.json"), "{}\n").unwrap();
+        fs::write(
+            project.path().join(package).join("main.js"),
+            format!("export const {package} = 1;\n"),
+        )
+        .unwrap();
+    }
+    fs::write(
+        project.path().join(".smackdebt.toml"),
+        "[source_roles]\nfixture = ['b/main.js']\ngenerated = ['c/main.js']\n",
+    )
+    .unwrap();
+    commit_as(
+        project.path(),
+        "History Test",
+        "history@example.invalid",
+        "initial",
+    );
+    for version in 2..=3 {
+        for package in ["a", "b", "c"] {
+            fs::write(
+                project.path().join(package).join("main.js"),
+                format!("export const {package} = {version};\n"),
+            )
+            .unwrap();
+        }
+        commit_as(
+            project.path(),
+            "History Test",
+            "history@example.invalid",
+            &format!("version {version}"),
+        );
+    }
+    project
+}
+
+fn generated_heavy_history_fixture() -> tempfile::TempDir {
+    let project = tempfile::tempdir().unwrap();
+    git(project.path(), ["init", "-b", "main"]);
+    for package in ["a", "b"] {
+        fs::create_dir_all(project.path().join(package)).unwrap();
+        fs::write(project.path().join(package).join("package.json"), "{}\n").unwrap();
+        fs::write(
+            project.path().join(package).join("main.js"),
+            format!("export const {package} = 1;\n"),
+        )
+        .unwrap();
+        fs::write(
+            project.path().join(package).join("generated.js"),
+            format!("export const generated_{package} = 1;\n"),
+        )
+        .unwrap();
+    }
+    fs::write(
+        project.path().join(".smackdebt.toml"),
+        "[source_roles]\ngenerated = ['a/generated.js', 'b/generated.js']\n",
+    )
+    .unwrap();
+    commit_as(
+        project.path(),
+        "Eligible History",
+        "eligible@example.invalid",
+        "initial eligible and context",
+    );
+    for version in 2..=3 {
+        for package in ["a", "b"] {
+            fs::write(
+                project.path().join(package).join("main.js"),
+                format!("export const {package} = {version};\n"),
+            )
+            .unwrap();
+        }
+        commit_as(
+            project.path(),
+            "Eligible History",
+            "eligible@example.invalid",
+            &format!("eligible {version}"),
+        );
+    }
+    for version in 2..=8 {
+        for package in ["a", "b"] {
+            fs::write(
+                project.path().join(package).join("generated.js"),
+                format!("export const generated_{package} = {version};\n"),
+            )
+            .unwrap();
+        }
+        commit_as(
+            project.path(),
+            &format!("Generated {version}"),
+            &format!("generated-{version}@example.invalid"),
+            &format!("generated {version}"),
+        );
+    }
+    project
+}
+
+fn generated_only_history_fixture() -> tempfile::TempDir {
+    let project = tempfile::tempdir().unwrap();
+    git(project.path(), ["init", "-b", "main"]);
+    for package in ["a", "b"] {
+        fs::create_dir_all(project.path().join(package)).unwrap();
+        fs::write(project.path().join(package).join("package.json"), "{}\n").unwrap();
+        fs::write(
+            project.path().join(package).join("generated.js"),
+            format!("export const generated_{package} = 1;\n"),
+        )
+        .unwrap();
+    }
+    fs::write(
+        project.path().join(".smackdebt.toml"),
+        "[source_roles]\ngenerated = ['a/generated.js', 'b/generated.js']\n",
+    )
+    .unwrap();
+    commit_as(
+        project.path(),
+        "Generated History",
+        "generated@example.invalid",
+        "generated one",
+    );
+    for version in 2..=3 {
+        for package in ["a", "b"] {
+            fs::write(
+                project.path().join(package).join("generated.js"),
+                format!("export const generated_{package} = {version};\n"),
+            )
+            .unwrap();
+        }
+        commit_as(
+            project.path(),
+            "Generated History",
+            "generated@example.invalid",
+            &format!("generated {version}"),
+        );
+    }
+    project
+}
+
+fn eligible_role_history_fixture() -> tempfile::TempDir {
+    let project = tempfile::tempdir().unwrap();
+    git(project.path(), ["init", "-b", "main"]);
+    fs::create_dir_all(project.path().join("a")).unwrap();
+    fs::write(project.path().join("a/package.json"), "{}\n").unwrap();
+    fs::write(project.path().join("a/main.js"), "export const main = 1;\n").unwrap();
+    fs::write(project.path().join("a/test.js"), "export const test = 1;\n").unwrap();
+    fs::write(
+        project.path().join(".smackdebt.toml"),
+        "[source_roles]\ntest = ['a/test.js']\n",
+    )
+    .unwrap();
+    commit_as(
+        project.path(),
+        "Role History",
+        "roles@example.invalid",
+        "roles one",
+    );
+    fs::write(project.path().join("a/main.js"), "export const main = 2;\n").unwrap();
+    fs::write(project.path().join("a/test.js"), "export const test = 2;\n").unwrap();
+    commit_as(
+        project.path(),
+        "Role History",
+        "roles@example.invalid",
+        "roles two",
+    );
+    project
+}
+
+fn weak_history_fixture() -> tempfile::TempDir {
+    let project = tempfile::tempdir().unwrap();
+    git(project.path(), ["init", "-b", "main"]);
+    for package in ["a", "b"] {
+        fs::create_dir_all(project.path().join(package)).unwrap();
+        fs::write(project.path().join(package).join("package.json"), "{}\n").unwrap();
+        fs::write(
+            project.path().join(package).join("main.js"),
+            format!("export const {package} = 1;\n"),
+        )
+        .unwrap();
+    }
+    commit_as(
+        project.path(),
+        "History Test",
+        "history@example.invalid",
+        "together one",
+    );
+    for package in ["a", "b"] {
+        fs::write(
+            project.path().join(package).join("main.js"),
+            format!("export const {package} = 2;\n"),
+        )
+        .unwrap();
+    }
+    commit_as(
+        project.path(),
+        "History Test",
+        "history@example.invalid",
+        "together two",
+    );
+    fs::write(project.path().join("a/main.js"), "export const a = 3;\n").unwrap();
+    commit_as(
+        project.path(),
+        "History Test",
+        "history@example.invalid",
+        "a only",
+    );
+    fs::write(project.path().join("b/main.js"), "export const b = 3;\n").unwrap();
+    commit_as(
+        project.path(),
+        "History Test",
+        "history@example.invalid",
         "b only",
     );
     project

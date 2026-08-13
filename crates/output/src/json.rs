@@ -274,7 +274,7 @@ impl Serialize for FileView<'_> {
         S: Serializer,
     {
         let file = self.0;
-        let mut map = serializer.serialize_map(Some(10))?;
+        let mut map = serializer.serialize_map(Some(13))?;
         map.serialize_entry("id", &file.id().get())?;
         map.serialize_entry("scope", &file.scope().get())?;
         map.serialize_entry("path", &file.path_id().map(|id| id.get()))?;
@@ -487,11 +487,14 @@ impl Serialize for HistoryCoverageView<'_> {
         map.serialize_entry("availability", availability)?;
         map.serialize_entry("revision", &value.revision())?;
         map.serialize_entry("commits", &value.commits())?;
+        map.serialize_entry("eligible_commits", &value.eligible_commits())?;
+        map.serialize_entry("mapped_eligible_changes", &value.mapped_eligible_changes())?;
+        map.serialize_entry("context_changes", &value.context_changes())?;
         map.serialize_entry("newest_timestamp", &value.newest_timestamp())?;
         map.serialize_entry("oldest_timestamp", &value.oldest_timestamp())?;
         map.serialize_entry("textual_changes", &value.textual_changes())?;
         map.serialize_entry("uncounted_changes", &value.uncounted_changes())?;
-        map.serialize_entry("excluded_paths", &value.excluded_paths())?;
+        map.serialize_entry("excluded_changes", &value.excluded_changes())?;
         map.serialize_entry("rename_gaps", &value.rename_gaps())?;
         map.serialize_entry("reason", &value.reason())?;
         map.end()
@@ -511,8 +514,10 @@ impl Serialize for FileHistoryRecords<'_> {
 struct FileHistoryView(FileHistory);
 impl Serialize for FileHistoryView {
     fn serialize<S: Serializer>(&self, serializer: S) -> Result<S::Ok, S::Error> {
-        let mut map = serializer.serialize_map(Some(5))?;
+        let mut map = serializer.serialize_map(Some(7))?;
         map.serialize_entry("file", &self.0.file().get())?;
+        map.serialize_entry("role", source_role_name(self.0.role()))?;
+        map.serialize_entry("trust", source_trust_name(self.0.trust()))?;
         map.serialize_entry("touches", &self.0.touches())?;
         map.serialize_entry("added_lines", &self.0.added_lines())?;
         map.serialize_entry("deleted_lines", &self.0.deleted_lines())?;
@@ -533,8 +538,10 @@ impl Serialize for PackageHistoryRecords<'_> {
 struct PackageHistoryView(PackageHistory);
 impl Serialize for PackageHistoryView {
     fn serialize<S: Serializer>(&self, serializer: S) -> Result<S::Ok, S::Error> {
-        let mut map = serializer.serialize_map(Some(5))?;
+        let mut map = serializer.serialize_map(Some(7))?;
         map.serialize_entry("package", &self.0.package().get())?;
+        map.serialize_entry("role", source_role_name(self.0.role()))?;
+        map.serialize_entry("trust", source_trust_name(self.0.trust()))?;
         map.serialize_entry("touches", &self.0.touches())?;
         map.serialize_entry("added_lines", &self.0.added_lines())?;
         map.serialize_entry("deleted_lines", &self.0.deleted_lines())?;
@@ -555,9 +562,17 @@ impl Serialize for ChangeCouplingRecords<'_> {
 struct ChangeCouplingView(smackdebt_analysis::ChangeCoupling);
 impl Serialize for ChangeCouplingView {
     fn serialize<S: Serializer>(&self, serializer: S) -> Result<S::Ok, S::Error> {
-        let mut map = serializer.serialize_map(Some(5))?;
+        let evidence = self
+            .0
+            .evidence()
+            .expect("retained coupling observations carry source evidence");
+        let mut map = serializer.serialize_map(Some(9))?;
         map.serialize_entry("left", &self.0.left().get())?;
         map.serialize_entry("right", &self.0.right().get())?;
+        map.serialize_entry("left_role", source_role_name(evidence.left_role()))?;
+        map.serialize_entry("left_trust", source_trust_name(evidence.left_trust()))?;
+        map.serialize_entry("right_role", source_role_name(evidence.right_role()))?;
+        map.serialize_entry("right_trust", source_trust_name(evidence.right_trust()))?;
         map.serialize_entry("shared_commits", &self.0.shared_commits())?;
         map.serialize_entry("union_commits", &self.0.union_commits())?;
         map.serialize_entry("similarity", &self.0.similarity())?;
@@ -577,8 +592,10 @@ impl Serialize for ConcentrationRecords<'_> {
 struct ConcentrationView(smackdebt_analysis::ContributorConcentration);
 impl Serialize for ConcentrationView {
     fn serialize<S: Serializer>(&self, serializer: S) -> Result<S::Ok, S::Error> {
-        let mut map = serializer.serialize_map(Some(5))?;
+        let mut map = serializer.serialize_map(Some(7))?;
         map.serialize_entry("package", &self.0.package().get())?;
+        map.serialize_entry("role", source_role_name(self.0.role()))?;
+        map.serialize_entry("trust", source_trust_name(self.0.trust()))?;
         map.serialize_entry("contributor_count", &self.0.contributor_count())?;
         map.serialize_entry("numerator", &self.0.numerator())?;
         map.serialize_entry("denominator", &self.0.denominator())?;

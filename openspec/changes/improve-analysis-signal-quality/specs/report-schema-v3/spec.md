@@ -41,15 +41,22 @@ Advisory and verdict graph links SHALL be distinguishable.
 
 ### Requirement: Version 3 exposes exact history fields
 File and package history SHALL expose `touches`, `added_lines`, `deleted_lines`,
-and `uncounted_changes`. Coverage SHALL expose availability, revision, commits,
-newest and oldest timestamps, textual changes, uncounted changes, excluded
-paths, rename gaps, and reason. Coupling SHALL expose package IDs,
+`uncounted_changes`, SourceRole, and trust. Coverage SHALL expose availability,
+revision, streamed commits, commits containing eligible current source, mapped
+eligible changes, mapped context changes, newest and oldest timestamps, textual
+changes, uncounted changes, excluded changes, rename gaps, and reason. Coupling
+SHALL expose package IDs, endpoint SourceRole and trust for descriptive rows,
 `shared_commits`, `union_commits`, and similarity. Concentration SHALL expose
-package ID, contributor count, numerator, denominator, and ratio.
+package ID, SourceRole, trust, contributor count, numerator, denominator, and
+ratio. Eligible and context history SHALL remain separate after aggregation.
 
 #### Scenario: A weak coupling row is not a default finding
 - **WHEN** it misses the finding threshold
 - **THEN** JSON retains its exact operands without a finding link
+
+#### Scenario: A current generated change is mapped
+- **WHEN** history maps a change to a current generated file
+- **THEN** it increments context changes and its generated trusted history row rather than excluded changes or an eligible row
 
 ### Requirement: Version 3 has an executable schema and exact examples
 The repository SHALL contain a checked JSON Schema for version 3. Codebase,

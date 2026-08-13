@@ -29,89 +29,60 @@ ARCHITECTURE CHANGE
 ● CHANGED  edge added  h  i  references 0 → 1
 
 EVOLUTION CONTEXT
-5 commits · complete local history
-0 uncounted · 10 excluded · 0 rename gaps
-  h · 5 touches · +6 -4 · 3 contributors · 40% top share
-  i · 4 touches · +4 -3 · 2 contributors · 50% top share
-  a · 2 touches · +9 -7 · 2 contributors · 50% top share
-  b · 2 touches · +10 -2 · 2 contributors · 50% top share
-  c · 2 touches · +3 -1 · 2 contributors · 50% top share
-  d · 2 touches · +3 -1 · 2 contributors · 50% top share
-  e · 2 touches · +2 -1 · 2 contributors · 50% top share
-  f · 2 touches · +1 -1 · 2 contributors · 50% top share
-  new · 1 touches · +1 -0 · 1 contributors · 100% top share
+complete local stream · 5 commits
+eligible mapping 23/33 changes · 70% · 5 commits
+0 context · 10 excluded · 0 uncounted · 0 rename gaps
+  h · 5 touches · +6 -4 · 3 contributors · 40% top share · primary/trusted
+  i · 4 touches · +4 -3 · 2 contributors · 50% top share · primary/trusted
+  a · 2 touches · +9 -7 · 2 contributors · 50% top share · primary/trusted
+  b · 2 touches · +10 -2 · 2 contributors · 50% top share · primary/trusted
+  c · 2 touches · +3 -1 · 2 contributors · 50% top share · primary/trusted
+  d · 2 touches · +3 -1 · 2 contributors · 50% top share · primary/trusted
+  e · 2 touches · +2 -1 · 2 contributors · 50% top share · primary/trusted
+  f · 2 touches · +1 -1 · 2 contributors · 50% top share · primary/trusted
+  new · 1 touches · +1 -0 · 1 contributors · 100% top share · primary/trusted
     file h/main.js · 5 touches · +6 -4
+      evidence primary/trusted
     file i/main.js · 4 touches · +4 -3
+      evidence primary/trusted
     file a/main.js · 2 touches · +9 -7
+      evidence primary/trusted
     file b/main.js · 2 touches · +10 -2
+      evidence primary/trusted
     file c/main.js · 2 touches · +3 -1
+      evidence primary/trusted
     file d/main.js · 2 touches · +3 -1
+      evidence primary/trusted
     file e/old.js · 2 touches · +1 -1
+      evidence primary/trusted
     file f/deleted.js · 2 touches · +1 -1
+      evidence primary/trusted
     file e/new.js · 1 touches · +1 -0
+      evidence primary/trusted
     file new/untracked.js · 1 touches · +1 -0
-  coupling a ↔ b · 2/2 shared commits · 100% similarity · no static dependency
-  coupling a ↔ c · 2/2 shared commits · 100% similarity · static dependency
-  coupling a ↔ d · 2/2 shared commits · 100% similarity · no static dependency
-  coupling a ↔ e · 2/2 shared commits · 100% similarity · no static dependency
-  coupling a ↔ f · 2/2 shared commits · 100% similarity · no static dependency
-  coupling a ↔ h · 2/5 shared commits · 40% similarity · no static dependency
-  coupling b ↔ c · 2/2 shared commits · 100% similarity · no static dependency
-  coupling b ↔ d · 2/2 shared commits · 100% similarity · no static dependency
-  coupling b ↔ e · 2/2 shared commits · 100% similarity · no static dependency
-  coupling b ↔ f · 2/2 shared commits · 100% similarity · no static dependency
-  coupling b ↔ h · 2/5 shared commits · 40% similarity · no static dependency
-  coupling c ↔ d · 2/2 shared commits · 100% similarity · static dependency
-  coupling c ↔ e · 2/2 shared commits · 100% similarity · no static dependency
-  coupling c ↔ f · 2/2 shared commits · 100% similarity · no static dependency
-  coupling c ↔ h · 2/5 shared commits · 40% similarity · no static dependency
-  coupling d ↔ e · 2/2 shared commits · 100% similarity · no static dependency
-  coupling d ↔ f · 2/2 shared commits · 100% similarity · no static dependency
-  coupling d ↔ h · 2/5 shared commits · 40% similarity · no static dependency
-  coupling e ↔ f · 2/2 shared commits · 100% similarity · no static dependency
-  coupling e ↔ h · 2/5 shared commits · 40% similarity · no static dependency
-  coupling f ↔ h · 2/5 shared commits · 40% similarity · no static dependency
-  coupling h ↔ i · 4/5 shared commits · 80% similarity · static dependency
-● WATCH  recurrent change coupling without a static dependency
-        a ↔ b · 2/2 shared commits · 100% similarity
-● WATCH  recurrent change coupling without a static dependency
-        a ↔ d · 2/2 shared commits · 100% similarity
-● WATCH  recurrent change coupling without a static dependency
-        a ↔ e · 2/2 shared commits · 100% similarity
-● WATCH  recurrent change coupling without a static dependency
-        a ↔ f · 2/2 shared commits · 100% similarity
-● WATCH  recurrent change coupling without a static dependency
-        a ↔ h · 2/5 shared commits · 40% similarity
-● WATCH  recurrent change coupling without a static dependency
-        b ↔ c · 2/2 shared commits · 100% similarity
-● WATCH  recurrent change coupling without a static dependency
-        b ↔ d · 2/2 shared commits · 100% similarity
-● WATCH  recurrent change coupling without a static dependency
-        b ↔ e · 2/2 shared commits · 100% similarity
-● WATCH  recurrent change coupling without a static dependency
-        b ↔ f · 2/2 shared commits · 100% similarity
-● WATCH  recurrent change coupling without a static dependency
-        b ↔ h · 2/5 shared commits · 40% similarity
-● WATCH  recurrent change coupling without a static dependency
-        c ↔ e · 2/2 shared commits · 100% similarity
-● WATCH  recurrent change coupling without a static dependency
-        c ↔ f · 2/2 shared commits · 100% similarity
-● WATCH  recurrent change coupling without a static dependency
-        c ↔ h · 2/5 shared commits · 40% similarity
-● WATCH  recurrent change coupling without a static dependency
-        d ↔ e · 2/2 shared commits · 100% similarity
-● WATCH  recurrent change coupling without a static dependency
-        d ↔ f · 2/2 shared commits · 100% similarity
-● WATCH  recurrent change coupling without a static dependency
-        d ↔ h · 2/5 shared commits · 40% similarity
-● WATCH  recurrent change coupling without a static dependency
-        e ↔ f · 2/2 shared commits · 100% similarity
-● WATCH  recurrent change coupling without a static dependency
-        e ↔ h · 2/5 shared commits · 40% similarity
-● WATCH  recurrent change coupling without a static dependency
-        f ↔ h · 2/5 shared commits · 40% similarity
-▲ WORSE  coupling finding introduced
-▼ BETTER  coupling finding removed
+      evidence primary/trusted
+  coupling a ↔ b · 2/2 shared commits · 100% similarity · no eligible static use · primary/trusted ↔ primary/trusted
+  coupling a ↔ c · 2/2 shared commits · 100% similarity · static use · primary/trusted ↔ primary/trusted
+  coupling a ↔ d · 2/2 shared commits · 100% similarity · no eligible static use · primary/trusted ↔ primary/trusted
+  coupling a ↔ e · 2/2 shared commits · 100% similarity · no eligible static use · primary/trusted ↔ primary/trusted
+  coupling a ↔ f · 2/2 shared commits · 100% similarity · no eligible static use · primary/trusted ↔ primary/trusted
+  coupling a ↔ h · 2/5 shared commits · 40% similarity · no eligible static use · primary/trusted ↔ primary/trusted
+  coupling b ↔ c · 2/2 shared commits · 100% similarity · no eligible static use · primary/trusted ↔ primary/trusted
+  coupling b ↔ d · 2/2 shared commits · 100% similarity · no eligible static use · primary/trusted ↔ primary/trusted
+  coupling b ↔ e · 2/2 shared commits · 100% similarity · no eligible static use · primary/trusted ↔ primary/trusted
+  coupling b ↔ f · 2/2 shared commits · 100% similarity · no eligible static use · primary/trusted ↔ primary/trusted
+  coupling b ↔ h · 2/5 shared commits · 40% similarity · no eligible static use · primary/trusted ↔ primary/trusted
+  coupling c ↔ d · 2/2 shared commits · 100% similarity · static use · primary/trusted ↔ primary/trusted
+  coupling c ↔ e · 2/2 shared commits · 100% similarity · no eligible static use · primary/trusted ↔ primary/trusted
+  coupling c ↔ f · 2/2 shared commits · 100% similarity · no eligible static use · primary/trusted ↔ primary/trusted
+  coupling c ↔ h · 2/5 shared commits · 40% similarity · no eligible static use · primary/trusted ↔ primary/trusted
+  coupling d ↔ e · 2/2 shared commits · 100% similarity · no eligible static use · primary/trusted ↔ primary/trusted
+  coupling d ↔ f · 2/2 shared commits · 100% similarity · no eligible static use · primary/trusted ↔ primary/trusted
+  coupling d ↔ h · 2/5 shared commits · 40% similarity · no eligible static use · primary/trusted ↔ primary/trusted
+  coupling e ↔ f · 2/2 shared commits · 100% similarity · no eligible static use · primary/trusted ↔ primary/trusted
+  coupling e ↔ h · 2/5 shared commits · 40% similarity · no eligible static use · primary/trusted ↔ primary/trusted
+  coupling f ↔ h · 2/5 shared commits · 40% similarity · no eligible static use · primary/trusted ↔ primary/trusted
+  coupling h ↔ i · 4/5 shared commits · 80% similarity · static use · primary/trusted ↔ primary/trusted
 ▼ BETTER  coupling finding removed
 
 TOP CHANGES

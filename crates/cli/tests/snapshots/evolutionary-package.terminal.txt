@@ -14,10 +14,12 @@ ARCHITECTURE
   b/main.js → a/main.js · 1 references
 
 EVOLUTION
-6 commits · complete local history
-0 uncounted · 4 excluded · 0 rename gaps
-  a · 5 touches · +4 -3 · 2 contributors · 80% top share
+complete local stream · 6 commits
+eligible mapping 10/14 changes · 71% · 6 commits
+0 context · 4 excluded · 0 uncounted · 0 rename gaps
+  a · 5 touches · +4 -3 · 2 contributors · 80% top share · primary/trusted
     file a/main.js · 5 touches · +4 -3
-  coupling a ↔ b · 3/6 shared commits · 50% similarity · static dependency
+      evidence primary/trusted
+  coupling a ↔ b · 3/6 shared commits · 50% similarity · static use · primary/trusted ↔ primary/trusted
 
 No watch or high findings.

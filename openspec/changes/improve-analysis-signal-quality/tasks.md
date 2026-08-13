@@ -21,10 +21,10 @@
 
 ## 4. History fields, coupling, and de-duplication
 
-- [ ] 4.1 Preserve exact file, package, coverage, coupling, and contributor-concentration fields named by the specification, including SourceRole for source-derived observations.
-- [ ] 4.2 Require three shared commits, at least 20% Jaccard, sufficient history, and no eligible trusted use for an unexplained coupling finding.
-- [ ] 4.3 Retain weaker coupling in JSON and `--all` and prove threshold edges, static explanations, shallow history, and fixture/generated exclusion.
-- [ ] 4.4 Remove repeated package history, coupling, concentration, and operand rows from default terminal sections.
+- [x] 4.1 Preserve exact file, package, coverage, coupling, and contributor-concentration fields named by the specification, including SourceRole for source-derived observations.
+- [x] 4.2 Require three shared commits, at least 20% Jaccard, sufficient history, and no eligible trusted use for an unexplained coupling finding.
+- [x] 4.3 Retain weaker coupling in JSON and `--all` and prove threshold edges, static explanations, shallow history, and fixture/generated exclusion.
+- [x] 4.4 Remove repeated package history, coupling, concentration, and operand rows from default terminal sections.
 
 ## 5. JSON version 3
 

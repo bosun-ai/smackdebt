@@ -1,3 +1,4 @@
+use crate::change_coupling::qualifies_for_finding;
 use crate::evolution::has_static_edge;
 use crate::{
     ChangeCoupling, ComparisonDirection, EvolutionaryComparison, EvolutionaryComparisonId,
@@ -10,7 +11,7 @@ pub fn compare_evolution(
     after: &[PackageEdge],
 ) -> Vec<EvolutionaryComparison> {
     let mut result = Vec::new();
-    for pair in coupling {
+    for pair in coupling.iter().filter(|pair| qualifies_for_finding(**pair)) {
         let before_explained = has_static_edge(before, pair.left(), pair.right());
         let after_explained = has_static_edge(after, pair.left(), pair.right());
         let value = match (before_explained, after_explained) {

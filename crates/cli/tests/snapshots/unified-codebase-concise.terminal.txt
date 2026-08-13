@@ -24,15 +24,15 @@ ARCHITECTURE
   d/main.js → c/main.js · 1 references
 
 EVOLUTION
-4 commits · complete local history
-0 uncounted · 11 excluded · 0 rename gaps
+complete local stream · 4 commits
+eligible mapping 12/23 changes · 52% · 4 commits
+0 context · 11 excluded · 0 uncounted · 0 rename gaps
   h · 4 touches · +4 -3 · 2 contributors · 50% top share
   i · 4 touches · +4 -3 · 2 contributors · 50% top share
   a · 1 touches · +7 -0 · 1 contributors · 100% top share
     file h/main.js · 4 touches · +4 -3
     file i/main.js · 4 touches · +4 -3
     file a/main.js · 1 touches · +7 -0
-  coupling h ↔ i · 4/4 shared commits · 100% similarity · static dependency
 
 TOP FINDINGS
 ▲ HIGH  b

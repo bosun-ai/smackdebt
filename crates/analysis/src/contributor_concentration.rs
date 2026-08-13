@@ -1,6 +1,10 @@
 use std::collections::{BTreeMap, BTreeSet};
 
-use crate::{ContributorConcentration, ContributorId, HistoryCommitFact, PackageId};
+use crate::{
+    ContributorConcentration, ContributorId, HistoryCommitFact, PackageId, SourceRole, SourceTrust,
+};
+
+type PackageEvidence = (PackageId, SourceRole, SourceTrust);
 
 pub fn contributor_concentration(commits: &[HistoryCommitFact]) -> Vec<ContributorConcentration> {
     let mut accumulator = ContributorConcentrationAccumulator::default();
@@ -12,7 +16,7 @@ pub fn contributor_concentration(commits: &[HistoryCommitFact]) -> Vec<Contribut
 
 #[derive(Default)]
 pub(crate) struct ContributorConcentrationAccumulator {
-    counts: BTreeMap<PackageId, BTreeMap<ContributorId, u32>>,
+    counts: BTreeMap<PackageEvidence, BTreeMap<ContributorId, u32>>,
 }
 
 impl ContributorConcentrationAccumulator {
@@ -20,12 +24,12 @@ impl ContributorConcentrationAccumulator {
         let packages = commit
             .changes()
             .iter()
-            .map(|change| change.package())
+            .map(|change| (change.package(), change.role(), change.trust()))
             .collect::<BTreeSet<_>>();
-        for package in packages {
+        for evidence in packages {
             *self
                 .counts
-                .entry(package)
+                .entry(evidence)
                 .or_default()
                 .entry(commit.contributor())
                 .or_default() += 1;
@@ -34,7 +38,7 @@ impl ContributorConcentrationAccumulator {
     pub(crate) fn finish(self) -> Vec<ContributorConcentration> {
         self.counts
             .into_iter()
-            .map(|(package, contributors)| {
+            .map(|((package, role, trust), contributors)| {
                 let numerator = contributors.values().copied().max().unwrap_or(0);
                 let denominator = contributors.values().sum();
                 ContributorConcentration::new(
@@ -43,6 +47,7 @@ impl ContributorConcentrationAccumulator {
                     numerator,
                     denominator,
                 )
+                .with_evidence(role, trust)
             })
             .collect()
     }

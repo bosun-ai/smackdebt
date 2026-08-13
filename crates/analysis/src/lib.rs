@@ -30,10 +30,11 @@ pub use contributor_concentration::contributor_concentration;
 pub use cycle_witness::cycle_witness;
 pub use dependency_degree::dependency_degree;
 pub use evolution::{
-    ChangeCoupling, ContributorConcentration, ContributorId, EvolutionAccumulator,
-    EvolutionaryComparison, EvolutionaryComparisonId, EvolutionaryComparisonKind,
-    EvolutionaryFinding, EvolutionaryFindingId, EvolutionaryReportFacts, FileHistory,
-    HistoryAvailability, HistoryChangeFact, HistoryCommitFact, HistoryCoverage, PackageHistory,
+    ChangeCoupling, ContributorConcentration, ContributorId, CouplingEvidence,
+    EvolutionAccumulator, EvolutionaryComparison, EvolutionaryComparisonId,
+    EvolutionaryComparisonKind, EvolutionaryFinding, EvolutionaryFindingId,
+    EvolutionaryReportFacts, FileHistory, HistoryAvailability, HistoryChangeFact,
+    HistoryCommitFact, HistoryCoverage, PackageHistory,
 };
 pub use evolutionary_comparison::compare_evolution;
 pub use instability::instability;

@@ -12,11 +12,13 @@ ARCHITECTURE CHANGE
 ● CHANGED  edge added  b  a  references 0 → 1
 
 EVOLUTION CONTEXT
-6 commits · complete local history
-0 uncounted · 4 excluded · 0 rename gaps
-  b · 4 touches · +4 -3 · 2 contributors · 50% top share
+complete local stream · 6 commits
+eligible mapping 10/14 changes · 71% · 6 commits
+0 context · 4 excluded · 0 uncounted · 0 rename gaps
+  b · 4 touches · +4 -3 · 2 contributors · 50% top share · primary/trusted
     file b/main.js · 4 touches · +4 -3
-  coupling a ↔ b · 3/6 shared commits · 50% similarity · static dependency
+      evidence primary/trusted
+  coupling a ↔ b · 3/6 shared commits · 50% similarity · static use · primary/trusted ↔ primary/trusted
 ▼ BETTER  coupling finding removed
 
 No changed units.

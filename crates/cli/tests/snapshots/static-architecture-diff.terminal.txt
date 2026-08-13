@@ -18,8 +18,9 @@ ARCHITECTURE CHANGE
 ● CHANGED  edge added  core  app  references 0 → 1
 
 EVOLUTION CONTEXT
-1 commits · complete local history
-0 uncounted · 3 excluded · 0 rename gaps
+complete local stream · 1 commits
+eligible mapping 7/10 changes · 70% · 1 commits
+0 context · 3 excluded · 0 uncounted · 0 rename gaps
   app · 1 touches · +22 -0 · 1 contributors · 100% top share
   core · 1 touches · +3 -0 · 1 contributors · 100% top share
   native · 1 touches · +8 -0 · 1 contributors · 100% top share
