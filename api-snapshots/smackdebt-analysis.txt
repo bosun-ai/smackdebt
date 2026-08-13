@@ -107,6 +107,9 @@ pub enum smackdebt_analysis::SourceTrust
 pub smackdebt_analysis::SourceTrust::Advisory
 pub smackdebt_analysis::SourceTrust::Failed
 pub smackdebt_analysis::SourceTrust::Trusted
+pub enum smackdebt_analysis::StaticRelationKind
+pub smackdebt_analysis::StaticRelationKind::ModuleOwnership
+pub smackdebt_analysis::StaticRelationKind::Uses
 pub enum smackdebt_analysis::UnitKind
 pub smackdebt_analysis::UnitKind::Closure
 pub smackdebt_analysis::UnitKind::Function
@@ -116,13 +119,20 @@ pub smackdebt_analysis::UnitKind::SyntheticTopLevel
 pub smackdebt_analysis::UnitKind::Template
 pub struct smackdebt_analysis::ArchitectureComparison
 impl smackdebt_analysis::ArchitectureComparison
+pub const fn smackdebt_analysis::ArchitectureComparison::after_references(&self) -> core::option::Option<u32>
+pub const fn smackdebt_analysis::ArchitectureComparison::before_references(&self) -> core::option::Option<u32>
 pub const fn smackdebt_analysis::ArchitectureComparison::direction(&self) -> smackdebt_analysis::ComparisonDirection
 pub fn smackdebt_analysis::ArchitectureComparison::files(&self) -> &[smackdebt_analysis::FileId]
 pub const fn smackdebt_analysis::ArchitectureComparison::id(&self) -> smackdebt_analysis::ArchitectureComparisonId
 pub const fn smackdebt_analysis::ArchitectureComparison::kind(&self) -> smackdebt_analysis::ArchitectureComparisonKind
 pub fn smackdebt_analysis::ArchitectureComparison::new(smackdebt_analysis::ArchitectureComparisonId, smackdebt_analysis::ArchitectureComparisonKind, alloc::vec::Vec<smackdebt_analysis::PackageId>) -> Self
 pub fn smackdebt_analysis::ArchitectureComparison::packages(&self) -> &[smackdebt_analysis::PackageId]
+pub const fn smackdebt_analysis::ArchitectureComparison::relation(&self) -> core::option::Option<smackdebt_analysis::StaticRelationKind>
+pub const fn smackdebt_analysis::ArchitectureComparison::role(&self) -> core::option::Option<smackdebt_analysis::SourceRole>
+pub const fn smackdebt_analysis::ArchitectureComparison::trust(&self) -> core::option::Option<smackdebt_analysis::SourceTrust>
 pub fn smackdebt_analysis::ArchitectureComparison::with_files(self, alloc::vec::Vec<smackdebt_analysis::FileId>) -> Self
+pub fn smackdebt_analysis::ArchitectureComparison::with_reference_counts(self, u32, u32) -> Self
+pub fn smackdebt_analysis::ArchitectureComparison::with_relation_evidence(self, smackdebt_analysis::StaticRelationKind, smackdebt_analysis::SourceRole, smackdebt_analysis::SourceTrust) -> Self
 pub fn smackdebt_analysis::ArchitectureComparison::with_witness(self, alloc::vec::Vec<smackdebt_analysis::PackageId>) -> Self
 pub fn smackdebt_analysis::ArchitectureComparison::witness(&self) -> &[smackdebt_analysis::PackageId]
 pub struct smackdebt_analysis::ArchitectureComparisonId(_)
@@ -206,11 +216,18 @@ pub const fn smackdebt_analysis::Coverage::unsupported_files(self) -> u32
 pub struct smackdebt_analysis::DependencyCoverage
 impl smackdebt_analysis::DependencyCoverage
 pub const fn smackdebt_analysis::DependencyCoverage::ambiguous(self) -> u32
+pub const fn smackdebt_analysis::DependencyCoverage::ambiguous_internal_uses(self) -> u32
+pub const fn smackdebt_analysis::DependencyCoverage::context_relations(self) -> u32
 pub const fn smackdebt_analysis::DependencyCoverage::external(self) -> u32
+pub const fn smackdebt_analysis::DependencyCoverage::external_uses(self) -> u32
 pub const fn smackdebt_analysis::DependencyCoverage::internal(self) -> u32
-pub const fn smackdebt_analysis::DependencyCoverage::new(u32, u32, u32, u32) -> Self
+pub const fn smackdebt_analysis::DependencyCoverage::module_ownership_relations(self) -> u32
+pub const fn smackdebt_analysis::DependencyCoverage::new(u32, u32, u32, u32, u32, u32, u32) -> Self
+pub const fn smackdebt_analysis::DependencyCoverage::resolved_internal_uses(self) -> u32
 pub const fn smackdebt_analysis::DependencyCoverage::total(self) -> u32
 pub const fn smackdebt_analysis::DependencyCoverage::unresolved(self) -> u32
+pub const fn smackdebt_analysis::DependencyCoverage::unresolved_internal_uses(self) -> u32
+pub const fn smackdebt_analysis::DependencyCoverage::unresolved_package_uses(self) -> u32
 pub struct smackdebt_analysis::DependencyEdge
 impl smackdebt_analysis::DependencyEdge
 pub const fn smackdebt_analysis::DependencyEdge::affects_verdict(&self) -> bool
@@ -218,11 +235,13 @@ pub const fn smackdebt_analysis::DependencyEdge::id(&self) -> smackdebt_analysis
 pub fn smackdebt_analysis::DependencyEdge::locations(&self) -> &[smackdebt_analysis::SourceSpan]
 pub fn smackdebt_analysis::DependencyEdge::new(smackdebt_analysis::DependencyEdgeId, smackdebt_analysis::FileId, smackdebt_analysis::FileId, u32, alloc::vec::Vec<smackdebt_analysis::SourceSpan>) -> Self
 pub const fn smackdebt_analysis::DependencyEdge::references(&self) -> u32
+pub const fn smackdebt_analysis::DependencyEdge::relation(&self) -> smackdebt_analysis::StaticRelationKind
 pub const fn smackdebt_analysis::DependencyEdge::role(&self) -> smackdebt_analysis::SourceRole
 pub const fn smackdebt_analysis::DependencyEdge::source(&self) -> smackdebt_analysis::FileId
 pub const fn smackdebt_analysis::DependencyEdge::target(&self) -> smackdebt_analysis::FileId
 pub const fn smackdebt_analysis::DependencyEdge::trust(&self) -> smackdebt_analysis::SourceTrust
 pub fn smackdebt_analysis::DependencyEdge::with_evidence(self, smackdebt_analysis::SourceRole, smackdebt_analysis::SourceTrust) -> Self
+pub fn smackdebt_analysis::DependencyEdge::with_relation(self, smackdebt_analysis::StaticRelationKind) -> Self
 pub struct smackdebt_analysis::DependencyEdgeId(_)
 impl smackdebt_analysis::DependencyEdgeId
 pub const fn smackdebt_analysis::DependencyEdgeId::from_index(usize) -> Self
@@ -233,10 +252,12 @@ impl smackdebt_analysis::DependencySyntax
 pub const fn smackdebt_analysis::DependencySyntax::intent(&self) -> smackdebt_analysis::DependencyIntent
 pub const fn smackdebt_analysis::DependencySyntax::kind(&self) -> smackdebt_analysis::DependencyKind
 pub fn smackdebt_analysis::DependencySyntax::new(smackdebt_analysis::DependencyKind, impl core::convert::Into<alloc::string::String>, smackdebt_analysis::SourceSpan, smackdebt_analysis::DependencySyntaxState) -> Self
+pub const fn smackdebt_analysis::DependencySyntax::relation(&self) -> smackdebt_analysis::StaticRelationKind
 pub const fn smackdebt_analysis::DependencySyntax::span(&self) -> smackdebt_analysis::SourceSpan
 pub const fn smackdebt_analysis::DependencySyntax::state(&self) -> &smackdebt_analysis::DependencySyntaxState
 pub fn smackdebt_analysis::DependencySyntax::target(&self) -> &str
 pub fn smackdebt_analysis::DependencySyntax::with_internal_intent(self) -> Self
+pub fn smackdebt_analysis::DependencySyntax::with_relation(self, smackdebt_analysis::StaticRelationKind) -> Self
 pub struct smackdebt_analysis::Diagnostic
 impl smackdebt_analysis::Diagnostic
 pub const fn smackdebt_analysis::Diagnostic::excluded_lines(&self) -> u32
@@ -293,9 +314,14 @@ pub fn smackdebt_analysis::EvolutionaryReportFacts::new(smackdebt_analysis::Hist
 pub struct smackdebt_analysis::ExternalDependency
 impl smackdebt_analysis::ExternalDependency
 pub const fn smackdebt_analysis::ExternalDependency::file(&self) -> smackdebt_analysis::FileId
+pub fn smackdebt_analysis::ExternalDependency::locations(&self) -> &[smackdebt_analysis::SourceSpan]
 pub fn smackdebt_analysis::ExternalDependency::new(smackdebt_analysis::FileId, impl core::convert::Into<alloc::string::String>, u32) -> Self
 pub const fn smackdebt_analysis::ExternalDependency::references(&self) -> u32
+pub const fn smackdebt_analysis::ExternalDependency::relation(&self) -> smackdebt_analysis::StaticRelationKind
+pub const fn smackdebt_analysis::ExternalDependency::role(&self) -> smackdebt_analysis::SourceRole
 pub fn smackdebt_analysis::ExternalDependency::target(&self) -> &str
+pub const fn smackdebt_analysis::ExternalDependency::trust(&self) -> smackdebt_analysis::SourceTrust
+pub fn smackdebt_analysis::ExternalDependency::with_evidence(self, alloc::vec::Vec<smackdebt_analysis::SourceSpan>, smackdebt_analysis::StaticRelationKind, smackdebt_analysis::SourceRole, smackdebt_analysis::SourceTrust) -> Self
 pub struct smackdebt_analysis::FileActivity
 impl smackdebt_analysis::FileActivity
 pub const fn smackdebt_analysis::FileActivity::new(u32) -> Self
@@ -528,10 +554,17 @@ pub struct smackdebt_analysis::ResolutionDiagnostic
 impl smackdebt_analysis::ResolutionDiagnostic
 pub const fn smackdebt_analysis::ResolutionDiagnostic::file(&self) -> smackdebt_analysis::FileId
 pub const fn smackdebt_analysis::ResolutionDiagnostic::kind(&self) -> smackdebt_analysis::ResolutionIssueKind
+pub fn smackdebt_analysis::ResolutionDiagnostic::locations(&self) -> &[smackdebt_analysis::SourceSpan]
 pub fn smackdebt_analysis::ResolutionDiagnostic::new(smackdebt_analysis::FileId, smackdebt_analysis::SourceSpan, impl core::convert::Into<alloc::string::String>, smackdebt_analysis::ResolutionIssueKind, impl core::convert::Into<alloc::string::String>) -> Self
 pub fn smackdebt_analysis::ResolutionDiagnostic::reason(&self) -> &str
+pub const fn smackdebt_analysis::ResolutionDiagnostic::references(&self) -> u32
+pub const fn smackdebt_analysis::ResolutionDiagnostic::relation(&self) -> smackdebt_analysis::StaticRelationKind
+pub const fn smackdebt_analysis::ResolutionDiagnostic::role(&self) -> smackdebt_analysis::SourceRole
 pub const fn smackdebt_analysis::ResolutionDiagnostic::span(&self) -> smackdebt_analysis::SourceSpan
 pub fn smackdebt_analysis::ResolutionDiagnostic::target(&self) -> &str
+pub const fn smackdebt_analysis::ResolutionDiagnostic::trust(&self) -> smackdebt_analysis::SourceTrust
+pub fn smackdebt_analysis::ResolutionDiagnostic::with_evidence(self, smackdebt_analysis::StaticRelationKind, smackdebt_analysis::SourceRole, smackdebt_analysis::SourceTrust) -> Self
+pub fn smackdebt_analysis::ResolutionDiagnostic::with_occurrences(self, u32, alloc::vec::Vec<smackdebt_analysis::SourceSpan>) -> Self
 pub struct smackdebt_analysis::Scope
 impl smackdebt_analysis::Scope
 pub fn smackdebt_analysis::Scope::add_architecture_comparison(&mut self, smackdebt_analysis::ArchitectureComparisonId)

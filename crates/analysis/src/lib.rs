@@ -52,6 +52,6 @@ pub use report::{
 };
 pub use source::{
     DependencyIntent, DependencyKind, DependencySyntax, DependencySyntaxState, FileAnalysis,
-    Language, LocalUnitId, ParseStatus, SourceRole, SourceSpan, SourceTrust, UnitFact,
-    UnitIdentity, UnitKind,
+    Language, LocalUnitId, ParseStatus, SourceRole, SourceSpan, SourceTrust, StaticRelationKind,
+    UnitFact, UnitIdentity, UnitKind,
 };

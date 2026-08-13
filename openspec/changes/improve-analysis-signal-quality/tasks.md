@@ -14,10 +14,10 @@
 
 ## 3. Static relation meaning
 
-- [ ] 3.1 Model relation kind as `uses` or `module_ownership` with SourceRole, trust, resolution, span, and count as separate evidence.
-- [ ] 3.2 Implement Rust external-module ownership, inline-module, import, qualified-path, and safely resolved macro-path behavior in the Rust language implementation.
-- [ ] 3.3 Drive verdict graphs only from eligible parsed uses and prove ownership, advisory, fixture, and generated relations cannot create health or coupling explanations.
-- [ ] 3.4 Preserve relation kind and evidence independently in ref and worktree diffs.
+- [x] 3.1 Model relation kind as `uses` or `module_ownership` with SourceRole, trust, resolution, span, and count as separate evidence.
+- [x] 3.2 Implement Rust external-module ownership, inline-module, import, qualified-path, and safely resolved macro-path behavior in the Rust language implementation.
+- [x] 3.3 Drive verdict graphs only from eligible parsed uses and prove ownership, advisory, fixture, and generated relations cannot create health or coupling explanations.
+- [x] 3.4 Preserve relation kind and evidence independently in ref and worktree diffs.
 
 ## 4. History fields, coupling, and de-duplication
 

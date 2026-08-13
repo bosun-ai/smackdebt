@@ -229,7 +229,7 @@ impl Serialize for DiffView {
     where
         S: Serializer,
     {
-        let mut map = serializer.serialize_map(Some(6))?;
+        let mut map = serializer.serialize_map(Some(11))?;
         map.serialize_entry("worse", &self.0.worse())?;
         map.serialize_entry("better", &self.0.better())?;
         map.serialize_entry("changed", &self.0.changed())?;
@@ -292,11 +292,24 @@ impl Serialize for FileView<'_> {
 struct DependencyCoverageView(smackdebt_analysis::DependencyCoverage);
 impl Serialize for DependencyCoverageView {
     fn serialize<S: Serializer>(&self, serializer: S) -> Result<S::Ok, S::Error> {
-        let mut map = serializer.serialize_map(Some(7))?;
+        let mut map = serializer.serialize_map(Some(12))?;
         map.serialize_entry("internal", &self.0.internal())?;
         map.serialize_entry("external", &self.0.external())?;
         map.serialize_entry("unresolved", &self.0.unresolved())?;
         map.serialize_entry("ambiguous", &self.0.ambiguous())?;
+        map.serialize_entry("resolved_internal_uses", &self.0.resolved_internal_uses())?;
+        map.serialize_entry(
+            "unresolved_internal_uses",
+            &self.0.unresolved_internal_uses(),
+        )?;
+        map.serialize_entry("ambiguous_internal_uses", &self.0.ambiguous_internal_uses())?;
+        map.serialize_entry("external_uses", &self.0.external_uses())?;
+        map.serialize_entry("unresolved_package_uses", &self.0.unresolved_package_uses())?;
+        map.serialize_entry(
+            "module_ownership_relations",
+            &self.0.module_ownership_relations(),
+        )?;
+        map.serialize_entry("context_relations", &self.0.context_relations())?;
         map.serialize_entry("total", &self.0.total())?;
         map.end()
     }
@@ -315,12 +328,19 @@ impl Serialize for DependencyEdges<'_> {
 struct DependencyEdgeView<'a>(&'a DependencyEdge);
 impl Serialize for DependencyEdgeView<'_> {
     fn serialize<S: Serializer>(&self, serializer: S) -> Result<S::Ok, S::Error> {
-        let mut map = serializer.serialize_map(Some(5))?;
+        let mut map = serializer.serialize_map(Some(8))?;
         map.serialize_entry("id", &self.0.id().get())?;
         map.serialize_entry("source", &self.0.source().get())?;
         map.serialize_entry("target", &self.0.target().get())?;
         map.serialize_entry("references", &self.0.references())?;
         map.serialize_entry("locations", &Locations(self.0.locations()))?;
+        map.serialize_entry(
+            "relation",
+            match self.0.relation() {
+                smackdebt_analysis::StaticRelationKind::Uses => "uses",
+                smackdebt_analysis::StaticRelationKind::ModuleOwnership => "module_ownership",
+            },
+        )?;
         map.serialize_entry("role", source_role_name(self.0.role()))?;
         map.serialize_entry("trust", source_trust_name(self.0.trust()))?;
         map.end()
@@ -384,10 +404,14 @@ impl Serialize for ExternalDependencies<'_> {
 struct ExternalDependencyView<'a>(&'a ExternalDependency);
 impl Serialize for ExternalDependencyView<'_> {
     fn serialize<S: Serializer>(&self, serializer: S) -> Result<S::Ok, S::Error> {
-        let mut map = serializer.serialize_map(Some(3))?;
+        let mut map = serializer.serialize_map(Some(7))?;
         map.serialize_entry("file", &self.0.file().get())?;
         map.serialize_entry("target", self.0.target())?;
         map.serialize_entry("references", &self.0.references())?;
+        map.serialize_entry("locations", &Locations(self.0.locations()))?;
+        map.serialize_entry("relation", relation_name(self.0.relation()))?;
+        map.serialize_entry("role", source_role_name(self.0.role()))?;
+        map.serialize_entry("trust", source_trust_name(self.0.trust()))?;
         map.end()
     }
 }
@@ -408,13 +432,18 @@ impl Serialize for ResolutionDiagnosticView<'_> {
             smackdebt_analysis::ResolutionIssueKind::Unresolved => "unresolved",
             smackdebt_analysis::ResolutionIssueKind::Ambiguous => "ambiguous",
         };
-        let mut map = serializer.serialize_map(Some(6))?;
+        let mut map = serializer.serialize_map(Some(11))?;
         map.serialize_entry("file", &self.0.file().get())?;
         map.serialize_entry("start_line", &self.0.span().start_line())?;
         map.serialize_entry("end_line", &self.0.span().end_line())?;
         map.serialize_entry("target", self.0.target())?;
         map.serialize_entry("kind", kind)?;
         map.serialize_entry("reason", self.0.reason())?;
+        map.serialize_entry("references", &self.0.references())?;
+        map.serialize_entry("locations", &Locations(self.0.locations()))?;
+        map.serialize_entry("relation", relation_name(self.0.relation()))?;
+        map.serialize_entry("role", source_role_name(self.0.role()))?;
+        map.serialize_entry("trust", source_trust_name(self.0.trust()))?;
         map.end()
     }
 }
@@ -654,7 +683,7 @@ impl Serialize for ArchitectureComparisons<'_> {
 struct ArchitectureComparisonView<'a>(&'a ArchitectureComparison);
 impl Serialize for ArchitectureComparisonView<'_> {
     fn serialize<S: Serializer>(&self, serializer: S) -> Result<S::Ok, S::Error> {
-        let mut map = serializer.serialize_map(Some(6))?;
+        let mut map = serializer.serialize_map(Some(9))?;
         map.serialize_entry("id", &self.0.id().get())?;
         let kind = match self.0.kind() {
             smackdebt_analysis::ArchitectureComparisonKind::EdgeAdded => "edge_added",
@@ -667,6 +696,11 @@ impl Serialize for ArchitectureComparisonView<'_> {
         map.serialize_entry("packages", &PackageIds(self.0.packages()))?;
         map.serialize_entry("witness", &PackageIds(self.0.witness()))?;
         map.serialize_entry("files", &FileIds(self.0.files()))?;
+        map.serialize_entry("relation", &self.0.relation().map(relation_name))?;
+        map.serialize_entry("role", &self.0.role().map(source_role_name))?;
+        map.serialize_entry("trust", &self.0.trust().map(source_trust_name))?;
+        map.serialize_entry("before_references", &self.0.before_references())?;
+        map.serialize_entry("after_references", &self.0.after_references())?;
         map.end()
     }
 }
@@ -807,6 +841,13 @@ fn source_role_name(role: SourceRole) -> &'static str {
         SourceRole::Benchmark => "benchmark",
         SourceRole::Fixture => "fixture",
         SourceRole::Generated => "generated",
+    }
+}
+
+fn relation_name(relation: smackdebt_analysis::StaticRelationKind) -> &'static str {
+    match relation {
+        smackdebt_analysis::StaticRelationKind::Uses => "uses",
+        smackdebt_analysis::StaticRelationKind::ModuleOwnership => "module_ownership",
     }
 }
 

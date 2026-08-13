@@ -9,16 +9,17 @@ use std::sync::{Arc, Mutex, mpsc};
 
 use rayon::prelude::*;
 use smackdebt_analysis::{
-    ArchitectureFinding, ArchitectureFindingId, ArchitectureFindingKind, ArchitectureGraph,
-    ArchitectureReportFacts, Comparison, ComparisonId, ContributorId, Coverage, DependencyCoverage,
-    DependencyEdge, DependencyEdgeId, DependencySyntax, DependencySyntaxState, Diagnostic,
-    DiagnosticId, DiagnosticKind, EvolutionAccumulator, ExternalDependency, FileActivity,
-    FileAnalysis, FileId, FileRecord, Finding, FindingId, HealthAssessment, HealthCounts,
-    HealthPolicy, HistoryAvailability, HistoryChangeFact, HistoryCommitFact, HistoryCoverage,
-    Language, PackageEdge, PackageEdgeId, PackageGraphMeasurement, PackageId, PackageRecord,
-    ParseStatus, Rating, Report, ReportBuilder as AnalysisReportBuilder, ReportMode,
-    ResolutionDiagnostic, ResolutionIssueKind, Scope, ScopeId, ScopeKind, SourceCoverageOutcome,
-    SourceRole, SourceTrust, compare_architecture, compare_units, cycle_witness, dependency_degree,
+    ArchitectureComparison, ArchitectureComparisonId, ArchitectureFinding, ArchitectureFindingId,
+    ArchitectureFindingKind, ArchitectureGraph, ArchitectureReportFacts, Comparison, ComparisonId,
+    ContributorId, Coverage, DependencyCoverage, DependencyEdge, DependencyEdgeId,
+    DependencySyntax, DependencySyntaxState, Diagnostic, DiagnosticId, DiagnosticKind,
+    EvolutionAccumulator, ExternalDependency, FileActivity, FileAnalysis, FileId, FileRecord,
+    Finding, FindingId, HealthAssessment, HealthCounts, HealthPolicy, HistoryAvailability,
+    HistoryChangeFact, HistoryCommitFact, HistoryCoverage, Language, PackageEdge, PackageEdgeId,
+    PackageGraphMeasurement, PackageId, PackageRecord, ParseStatus, Rating, Report,
+    ReportBuilder as AnalysisReportBuilder, ReportMode, ResolutionDiagnostic, ResolutionIssueKind,
+    Scope, ScopeId, ScopeKind, SourceCoverageOutcome, SourceRole, SourceTrust,
+    compare_architecture, compare_units, cycle_witness, dependency_degree,
     strongly_connected_components,
 };
 use smackdebt_discovery::{DiscoveredFile, Inventory, generic_source_roles, glob_matches};
@@ -31,6 +32,7 @@ use crate::requests::{
 };
 
 const PARALLEL_FILE_CUTOVER: usize = 100;
+const RETAINED_RELATION_LOCATIONS: usize = 3;
 
 /// Analyzes the selected codebase.
 pub(super) fn analyze_codebase(request: &CodebaseRequest) -> Result<ProjectReport, ProjectError> {
@@ -391,7 +393,23 @@ pub(super) fn analyze_diff(request: &DiffRequest) -> Result<ProjectReport, Proje
         &before_architecture.cycles,
         &current_architecture.cycles,
     );
+    architecture_comparisons.retain(|comparison| {
+        matches!(
+            comparison.kind(),
+            smackdebt_analysis::ArchitectureComparisonKind::CycleIntroduced
+                | smackdebt_analysis::ArchitectureComparisonKind::CycleRemoved
+        )
+    });
+    append_relation_comparisons(
+        &mut architecture_comparisons,
+        &before_architecture.file_edges,
+        &current_architecture.file_edges,
+        builder.files(),
+    );
     for comparison in &mut architecture_comparisons {
+        if comparison.relation().is_some() {
+            continue;
+        }
         let source = if comparison.kind()
             == smackdebt_analysis::ArchitectureComparisonKind::CycleRemoved
             || comparison.kind() == smackdebt_analysis::ArchitectureComparisonKind::EdgeRemoved
@@ -553,6 +571,83 @@ pub(super) fn analyze_diff(request: &DiffRequest) -> Result<ProjectReport, Proje
             git_processes: repository.git_processes(),
         },
     })
+}
+
+fn append_relation_comparisons(
+    comparisons: &mut Vec<ArchitectureComparison>,
+    before_edges: &[DependencyEdge],
+    current_edges: &[DependencyEdge],
+    files: &[FileRecord],
+) {
+    type RelationKey = (
+        PackageId,
+        PackageId,
+        smackdebt_analysis::StaticRelationKind,
+        SourceRole,
+        SourceTrust,
+    );
+    fn relations_by_evidence(
+        edges: &[DependencyEdge],
+        files: &[FileRecord],
+    ) -> BTreeMap<RelationKey, (u32, (FileId, FileId))> {
+        let mut values: BTreeMap<RelationKey, (u32, (FileId, FileId))> = BTreeMap::new();
+        for edge in edges {
+            let Some(source_package) = files[edge.source().index()].package() else {
+                continue;
+            };
+            let Some(target_package) = files[edge.target().index()].package() else {
+                continue;
+            };
+            values
+                .entry((
+                    source_package,
+                    target_package,
+                    edge.relation(),
+                    edge.role(),
+                    edge.trust(),
+                ))
+                .and_modify(|value| {
+                    value.0 += edge.references();
+                    value.1 = (edge.source(), edge.target());
+                })
+                .or_insert((edge.references(), (edge.source(), edge.target())));
+        }
+        values
+    }
+    let before = relations_by_evidence(before_edges, files);
+    let current = relations_by_evidence(current_edges, files);
+    let keys: std::collections::BTreeSet<_> =
+        before.keys().chain(current.keys()).copied().collect();
+    for (source_package, target_package, relation, role, trust) in keys {
+        let key = (source_package, target_package, relation, role, trust);
+        let before_references = before.get(&key).map_or(0, |value| value.0);
+        let after_references = current.get(&key).map_or(0, |value| value.0);
+        if before_references == after_references {
+            continue;
+        }
+        let kind = if after_references > before_references {
+            smackdebt_analysis::ArchitectureComparisonKind::EdgeAdded
+        } else {
+            smackdebt_analysis::ArchitectureComparisonKind::EdgeRemoved
+        };
+        let files = current
+            .get(&key)
+            .or_else(|| before.get(&key))
+            .expect("changed relation has file evidence")
+            .1;
+        let id = ArchitectureComparisonId::from_index(comparisons.len());
+        let packages = if source_package == target_package {
+            vec![source_package]
+        } else {
+            vec![source_package, target_package]
+        };
+        comparisons.push(
+            ArchitectureComparison::new(id, kind, packages)
+                .with_files(vec![files.0, files.1])
+                .with_relation_evidence(relation, role, trust)
+                .with_reference_counts(before_references, after_references),
+        );
+    }
 }
 
 struct InputSide {
@@ -1869,8 +1964,105 @@ struct SourceDependencies {
     trust: SourceTrust,
 }
 
-type DependencyEdgeKey = (FileId, FileId, SourceRole, SourceTrust);
+type DependencyEdgeKey = (
+    FileId,
+    FileId,
+    smackdebt_analysis::StaticRelationKind,
+    SourceRole,
+    SourceTrust,
+);
 type DependencyEdgeValue = (u32, Vec<smackdebt_analysis::SourceSpan>);
+type ResolutionDiagnosticKey = (
+    FileId,
+    String,
+    ResolutionIssueKind,
+    String,
+    smackdebt_analysis::StaticRelationKind,
+    SourceRole,
+    SourceTrust,
+);
+
+#[derive(Clone, Copy)]
+enum RelationResolution {
+    ResolvedInternal,
+    UnresolvedInternal,
+    AmbiguousInternal,
+    External,
+    UnresolvedPackage,
+}
+
+#[derive(Default)]
+struct DependencyPartitionCounts {
+    resolved_internal_uses: u32,
+    unresolved_internal_uses: u32,
+    ambiguous_internal_uses: u32,
+    external_uses: u32,
+    unresolved_package_uses: u32,
+    module_ownership_relations: u32,
+    context_relations: u32,
+}
+
+impl DependencyPartitionCounts {
+    fn record(
+        &mut self,
+        relation: smackdebt_analysis::StaticRelationKind,
+        role: SourceRole,
+        trust: SourceTrust,
+        resolution: RelationResolution,
+    ) {
+        if trust != SourceTrust::Trusted || !role.affects_verdict() {
+            self.context_relations += 1;
+        } else if relation == smackdebt_analysis::StaticRelationKind::ModuleOwnership {
+            self.module_ownership_relations += 1;
+        } else {
+            match resolution {
+                RelationResolution::ResolvedInternal => self.resolved_internal_uses += 1,
+                RelationResolution::UnresolvedInternal => self.unresolved_internal_uses += 1,
+                RelationResolution::AmbiguousInternal => self.ambiguous_internal_uses += 1,
+                RelationResolution::External => self.external_uses += 1,
+                RelationResolution::UnresolvedPackage => self.unresolved_package_uses += 1,
+            }
+        }
+    }
+
+    fn finish(self) -> DependencyCoverage {
+        DependencyCoverage::new(
+            self.resolved_internal_uses,
+            self.unresolved_internal_uses,
+            self.ambiguous_internal_uses,
+            self.external_uses,
+            self.unresolved_package_uses,
+            self.module_ownership_relations,
+            self.context_relations,
+        )
+    }
+}
+
+fn record_resolution_diagnostic(
+    values: &mut BTreeMap<ResolutionDiagnosticKey, DependencyEdgeValue>,
+    source: FileId,
+    reference: &DependencySyntax,
+    role: SourceRole,
+    trust: SourceTrust,
+    kind: ResolutionIssueKind,
+    reason: &str,
+) {
+    let value = values
+        .entry((
+            source,
+            reference.target().to_owned(),
+            kind,
+            reason.to_owned(),
+            reference.relation(),
+            role,
+            trust,
+        ))
+        .or_default();
+    value.0 += 1;
+    if value.1.len() < RETAINED_RELATION_LOCATIONS {
+        value.1.push(reference.span());
+    }
+}
 
 #[derive(Clone)]
 struct ResolutionAlias {
@@ -1969,33 +2161,66 @@ fn build_architecture(
     for source in dependencies {
         index.insert(source.path.clone(), source.file);
     }
-    let mut internal = 0u32;
-    let mut external_count = 0u32;
-    let mut unresolved = 0u32;
-    let mut ambiguous = 0u32;
+    let mut coverage = DependencyPartitionCounts::default();
     let mut edge_values: BTreeMap<DependencyEdgeKey, DependencyEdgeValue> = BTreeMap::new();
-    let mut external_values: BTreeMap<(FileId, String), u32> = BTreeMap::new();
-    let mut diagnostics = Vec::new();
+    let mut external_values: BTreeMap<
+        (
+            FileId,
+            String,
+            smackdebt_analysis::StaticRelationKind,
+            SourceRole,
+            SourceTrust,
+        ),
+        DependencyEdgeValue,
+    > = BTreeMap::new();
+    let mut diagnostic_values: BTreeMap<ResolutionDiagnosticKey, DependencyEdgeValue> =
+        BTreeMap::new();
 
     for dependencies in dependencies {
         let source = dependencies.file;
         for reference in &dependencies.references {
             match reference.state() {
                 DependencySyntaxState::External => {
-                    external_count += 1;
-                    *external_values
-                        .entry((source, reference.target().to_owned()))
-                        .or_default() += 1;
+                    coverage.record(
+                        reference.relation(),
+                        dependencies.role,
+                        dependencies.trust,
+                        RelationResolution::External,
+                    );
+                    let value = external_values
+                        .entry((
+                            source,
+                            reference.target().to_owned(),
+                            reference.relation(),
+                            dependencies.role,
+                            dependencies.trust,
+                        ))
+                        .or_default();
+                    value.0 += 1;
+                    if value.1.len() < RETAINED_RELATION_LOCATIONS {
+                        value.1.push(reference.span());
+                    }
                 }
                 DependencySyntaxState::Unresolved(reason) => {
-                    unresolved += 1;
-                    diagnostics.push(ResolutionDiagnostic::new(
+                    coverage.record(
+                        reference.relation(),
+                        dependencies.role,
+                        dependencies.trust,
+                        if reference.intent() == smackdebt_analysis::DependencyIntent::Internal {
+                            RelationResolution::UnresolvedInternal
+                        } else {
+                            RelationResolution::UnresolvedPackage
+                        },
+                    );
+                    record_resolution_diagnostic(
+                        &mut diagnostic_values,
                         source,
-                        reference.span(),
-                        reference.target(),
+                        reference,
+                        dependencies.role,
+                        dependencies.trust,
                         ResolutionIssueKind::Unresolved,
                         reason,
-                    ));
+                    );
                 }
                 DependencySyntaxState::Candidates(candidates) => {
                     let matches =
@@ -2004,42 +2229,82 @@ fn build_architecture(
                         [] if reference.intent()
                             == smackdebt_analysis::DependencyIntent::Internal =>
                         {
-                            unresolved += 1;
-                            diagnostics.push(ResolutionDiagnostic::new(
+                            coverage.record(
+                                reference.relation(),
+                                dependencies.role,
+                                dependencies.trust,
+                                RelationResolution::UnresolvedInternal,
+                            );
+                            record_resolution_diagnostic(
+                                &mut diagnostic_values,
                                 source,
-                                reference.span(),
-                                reference.target(),
+                                reference,
+                                dependencies.role,
+                                dependencies.trust,
                                 ResolutionIssueKind::Unresolved,
                                 "no repository file matches",
-                            ));
+                            );
                         }
                         [] => {
-                            external_count += 1;
-                            *external_values
-                                .entry((source, reference.target().to_owned()))
-                                .or_default() += 1;
+                            coverage.record(
+                                reference.relation(),
+                                dependencies.role,
+                                dependencies.trust,
+                                RelationResolution::External,
+                            );
+                            let value = external_values
+                                .entry((
+                                    source,
+                                    reference.target().to_owned(),
+                                    reference.relation(),
+                                    dependencies.role,
+                                    dependencies.trust,
+                                ))
+                                .or_default();
+                            value.0 += 1;
+                            if value.1.len() < RETAINED_RELATION_LOCATIONS {
+                                value.1.push(reference.span());
+                            }
                         }
                         [target] => {
-                            internal += 1;
+                            coverage.record(
+                                reference.relation(),
+                                dependencies.role,
+                                dependencies.trust,
+                                RelationResolution::ResolvedInternal,
+                            );
                             if source != *target {
                                 let entry = edge_values
-                                    .entry((source, *target, dependencies.role, dependencies.trust))
+                                    .entry((
+                                        source,
+                                        *target,
+                                        reference.relation(),
+                                        dependencies.role,
+                                        dependencies.trust,
+                                    ))
                                     .or_default();
                                 entry.0 += 1;
-                                if entry.1.len() < 3 {
+                                if entry.1.len() < RETAINED_RELATION_LOCATIONS {
                                     entry.1.push(reference.span());
                                 }
                             }
                         }
                         _ => {
-                            ambiguous += 1;
-                            diagnostics.push(ResolutionDiagnostic::new(
+                            coverage.record(
+                                reference.relation(),
+                                dependencies.role,
+                                dependencies.trust,
+                                RelationResolution::AmbiguousInternal,
+                            );
+                            record_resolution_diagnostic(
+                                &mut diagnostic_values,
                                 source,
-                                reference.span(),
-                                reference.target(),
+                                reference,
+                                dependencies.role,
+                                dependencies.trust,
                                 ResolutionIssueKind::Ambiguous,
                                 "several repository files match",
-                            ));
+                            );
                         }
                     }
                 }
@@ -2047,11 +2312,22 @@ fn build_architecture(
         }
     }
 
+    let diagnostics = diagnostic_values
+        .into_iter()
+        .map(
+            |((source, target, kind, reason, relation, role, trust), (references, locations))| {
+                ResolutionDiagnostic::new(source, locations[0], target, kind, reason)
+                    .with_evidence(relation, role, trust)
+                    .with_occurrences(references, locations)
+            },
+        )
+        .collect();
+
     let file_edges: Vec<_> = edge_values
         .into_iter()
         .enumerate()
         .map(
-            |(edge_index, ((source, target, role, trust), (references, locations)))| {
+            |(edge_index, ((source, target, relation, role, trust), (references, locations)))| {
                 DependencyEdge::new(
                     DependencyEdgeId::from_index(edge_index),
                     source,
@@ -2059,13 +2335,19 @@ fn build_architecture(
                     references,
                     locations,
                 )
+                .with_relation(relation)
                 .with_evidence(role, trust)
             },
         )
         .collect();
     let external: Vec<_> = external_values
         .into_iter()
-        .map(|((file, target), references)| ExternalDependency::new(file, target, references))
+        .map(
+            |((file, target, relation, role, trust), (references, locations))| {
+                ExternalDependency::new(file, target, references)
+                    .with_evidence(locations, relation, role, trust)
+            },
+        )
         .collect();
 
     let mut package_values: BTreeMap<(PackageId, PackageId), (u32, u32, Vec<DependencyEdgeId>)> =
@@ -2230,7 +2512,7 @@ fn build_architecture(
     }
 
     ArchitectureBuild {
-        coverage: DependencyCoverage::new(internal, external_count, unresolved, ambiguous),
+        coverage: coverage.finish(),
         file_edges,
         package_edges,
         external,
@@ -2255,19 +2537,44 @@ fn resolve_candidates(
         expanded.extend(aliases.iter().filter_map(|alias| alias.expand(candidate)));
         for candidate in expanded {
             let path = Path::new(&candidate);
-            let joined = if candidate.starts_with("./") || candidate.starts_with("../") {
-                parent.join(path)
+            let mut joined = if candidate.starts_with("./") || candidate.starts_with("../") {
+                vec![parent.join(path)]
             } else {
-                path.to_path_buf()
+                vec![path.to_path_buf()]
             };
-            if let Some(clean) = clean_relative(&joined)
-                && let Some(file) = index.get(&clean)
+            if source
+                .extension()
+                .is_some_and(|extension| extension == "rs")
+                && !candidate.starts_with("./")
+                && !candidate.starts_with("../")
+                && let Some(source_root) = rust_source_root(source)
             {
-                matches.insert(*file);
+                joined.push(source_root.join(path));
+            }
+            for joined in joined {
+                if let Some(clean) = clean_relative(&joined)
+                    && let Some(file) = index.get(&clean)
+                {
+                    matches.insert(*file);
+                }
             }
         }
     }
     matches.into_iter().collect()
+}
+
+fn rust_source_root(source: &Path) -> Option<PathBuf> {
+    let mut root = PathBuf::new();
+    for component in source.parent()?.components() {
+        let std::path::Component::Normal(value) = component else {
+            return None;
+        };
+        root.push(value);
+        if value == "src" {
+            return Some(root);
+        }
+    }
+    None
 }
 
 fn clean_relative(path: &Path) -> Option<PathBuf> {
@@ -2703,6 +3010,8 @@ mod tests {
         assert_eq!(report.dependency_edges()[0].trust(), SourceTrust::Advisory);
         assert!(report.package_edges().is_empty());
         assert!(report.architecture_findings().is_empty());
+        assert_eq!(report.dependency_coverage().context_relations(), 1);
+        assert_eq!(report.dependency_coverage().total(), 1);
     }
 
     #[test]
@@ -2740,10 +3049,50 @@ mod tests {
         );
         assert!(report.package_edges().is_empty());
         assert!(report.architecture_findings().is_empty());
+        assert_eq!(report.dependency_coverage().context_relations(), 3);
+        assert_eq!(report.dependency_coverage().total(), 3);
         let root_coverage = report.scopes()[report.root().unwrap().index()].coverage();
         assert_eq!(root_coverage.clean_files(), 1);
         assert_eq!(root_coverage.context_files(), 2);
         assert_eq!(root_coverage.recovered_files(), 0);
+    }
+
+    #[test]
+    fn generated_dependency_is_visible_without_affecting_architecture_health() {
+        let root = tempfile::tempdir().unwrap();
+        for package in ["app", "core"] {
+            fs::create_dir_all(root.path().join(package)).unwrap();
+            fs::write(root.path().join(package).join("package.json"), "{}").unwrap();
+        }
+        fs::create_dir_all(root.path().join("app/generated")).unwrap();
+        fs::write(
+            root.path().join("app/generated/main.js"),
+            "// @generated\nimport core from '../../core/main';\nimport { helper } from './helper';\nexport function generated() { helper(); core(); }\n",
+        )
+        .unwrap();
+        fs::write(
+            root.path().join("app/generated/helper.js"),
+            "// @generated\nimport { generated } from './main';\nexport function helper() { generated(); }\n",
+        )
+        .unwrap();
+        fs::write(
+            root.path().join("core/main.js"),
+            "export default function core() {}\n",
+        )
+        .unwrap();
+
+        let result = analyze_codebase(&CodebaseRequest::new(root.path())).unwrap();
+        let report = result.report();
+        assert_eq!(report.dependency_edges().len(), 3);
+        assert!(report.dependency_edges().iter().all(|edge| {
+            edge.role() == SourceRole::Generated
+                && edge.relation() == smackdebt_analysis::StaticRelationKind::Uses
+                && !edge.affects_verdict()
+        }));
+        assert!(report.package_edges().is_empty());
+        assert!(report.architecture_findings().is_empty());
+        assert_eq!(report.dependency_coverage().context_relations(), 3);
+        assert_eq!(report.dependency_coverage().total(), 3);
     }
 
     #[test]
@@ -3063,7 +3412,7 @@ mod tests {
         }
         fs::write(
             root.path().join("app/a.js"),
-            "import core from '../core/b';\nimport ext from 'external';\nconst late = require(name);\nfunction app() {}\n",
+            "import core from '../core/b';\nimport ext from 'external';\nconst late = require(name);\nconst later = require(name);\nfunction app() {}\n",
         ).unwrap();
         fs::write(
             root.path().join("core/b.js"),
@@ -3077,14 +3426,47 @@ mod tests {
         assert_eq!(report.package_edges().len(), 2);
         assert_eq!(
             report.dependency_coverage(),
-            DependencyCoverage::new(2, 1, 1, 0)
+            DependencyCoverage::new(2, 0, 0, 1, 2, 0, 0)
         );
+        assert_eq!(report.dependency_coverage().total(), 5);
         assert_eq!(report.architecture_findings().len(), 1);
         assert_eq!(
             report.architecture_findings()[0].kind(),
             ArchitectureFindingKind::PackageCycle
         );
         assert_eq!(report.architecture_findings()[0].rating(), Rating::High);
+        let external = &report.external_dependencies()[0];
+        assert_eq!(
+            external.relation(),
+            smackdebt_analysis::StaticRelationKind::Uses
+        );
+        assert_eq!(external.role(), SourceRole::Primary);
+        assert_eq!(external.trust(), SourceTrust::Trusted);
+        assert_eq!(external.references(), 1);
+        assert_eq!(
+            external.locations(),
+            &[smackdebt_analysis::SourceSpan::new(2, 2)]
+        );
+        let unresolved = report
+            .resolution_diagnostics()
+            .iter()
+            .find(|value| value.kind() == ResolutionIssueKind::Unresolved)
+            .expect("dynamic reference stays unresolved");
+        assert_eq!(
+            unresolved.relation(),
+            smackdebt_analysis::StaticRelationKind::Uses
+        );
+        assert_eq!(unresolved.role(), SourceRole::Primary);
+        assert_eq!(unresolved.trust(), SourceTrust::Trusted);
+        assert_eq!(unresolved.references(), 2);
+        assert_eq!(unresolved.span(), smackdebt_analysis::SourceSpan::new(3, 3));
+        assert_eq!(
+            unresolved.locations(),
+            &[
+                smackdebt_analysis::SourceSpan::new(3, 3),
+                smackdebt_analysis::SourceSpan::new(4, 4),
+            ]
+        );
     }
 
     #[test]
@@ -3209,6 +3591,271 @@ mod tests {
                 "{name}"
             );
         }
+    }
+
+    #[test]
+    fn rust_crate_qualified_use_resolves_from_the_crate_source_root() {
+        let root = tempfile::tempdir().unwrap();
+        fs::create_dir_all(root.path().join("crates/app/src/core")).unwrap();
+        fs::write(
+            root.path().join("crates/app/Cargo.toml"),
+            "[package]\nname='app'\nversion='0.1.0'\n",
+        )
+        .unwrap();
+        fs::write(
+            root.path().join("crates/app/src/lib.rs"),
+            "use crate::core::work;\npub fn run() { work(); }\n",
+        )
+        .unwrap();
+        fs::write(
+            root.path().join("crates/app/src/core.rs"),
+            "pub fn work() {}\n",
+        )
+        .unwrap();
+
+        let result = analyze_codebase(&CodebaseRequest::new(root.path())).unwrap();
+        assert_eq!(result.report().dependency_edges().len(), 1);
+        assert_eq!(
+            result
+                .report()
+                .dependency_coverage()
+                .resolved_internal_uses(),
+            1
+        );
+        assert_eq!(result.report().dependency_coverage().total(), 1);
+    }
+
+    #[test]
+    fn rust_module_ownership_cycle_is_context_while_mutual_uses_are_a_verdict() {
+        let ownership = tempfile::tempdir().unwrap();
+        fs::write(
+            ownership.path().join("Cargo.toml"),
+            "[package]\nname='ownership'\nversion='0.1.0'\n",
+        )
+        .unwrap();
+        fs::write(ownership.path().join("a.rs"), "mod b;\npub fn a() {}\n").unwrap();
+        fs::write(ownership.path().join("b.rs"), "mod a;\npub fn b() {}\n").unwrap();
+        let result = analyze_codebase(&CodebaseRequest::new(ownership.path())).unwrap();
+        let report = result.report();
+        assert_eq!(report.dependency_edges().len(), 2);
+        assert!(report.dependency_edges().iter().all(|edge| {
+            edge.relation() == smackdebt_analysis::StaticRelationKind::ModuleOwnership
+                && !edge.affects_verdict()
+        }));
+        assert!(report.package_edges().is_empty());
+        assert!(report.architecture_findings().is_empty());
+        assert_eq!(report.dependency_coverage().module_ownership_relations(), 2);
+        assert_eq!(report.dependency_coverage().total(), 2);
+
+        let uses = tempfile::tempdir().unwrap();
+        fs::write(
+            uses.path().join("Cargo.toml"),
+            "[package]\nname='uses'\nversion='0.1.0'\n",
+        )
+        .unwrap();
+        fs::write(
+            uses.path().join("a.rs"),
+            "use crate::b::b;\npub fn a() { b(); }\n",
+        )
+        .unwrap();
+        fs::write(
+            uses.path().join("b.rs"),
+            "use crate::a::a;\npub fn b() { a(); }\n",
+        )
+        .unwrap();
+        let result = analyze_codebase(&CodebaseRequest::new(uses.path())).unwrap();
+        let report = result.report();
+        assert_eq!(report.dependency_edges().len(), 2);
+        assert!(report.dependency_edges().iter().all(|edge| {
+            edge.relation() == smackdebt_analysis::StaticRelationKind::Uses
+                && edge.affects_verdict()
+        }));
+        assert!(
+            report
+                .architecture_findings()
+                .iter()
+                .any(|finding| { finding.kind() == ArchitectureFindingKind::FileCycle })
+        );
+        assert_eq!(report.dependency_coverage().resolved_internal_uses(), 2);
+        assert_eq!(report.dependency_coverage().total(), 2);
+    }
+
+    #[test]
+    fn rust_relation_diffs_keep_kind_role_and_trust_as_independent_evidence() {
+        let root = tempfile::tempdir().unwrap();
+        let repository_path = root.path();
+        git(repository_path, ["init", "-q"]);
+        git(
+            repository_path,
+            ["config", "user.email", "test@example.invalid"],
+        );
+        git(repository_path, ["config", "user.name", "Smackdebt Test"]);
+        fs::write(
+            repository_path.join("Cargo.toml"),
+            "[package]\nname='relations'\nversion='0.1.0'\n",
+        )
+        .unwrap();
+        fs::write(repository_path.join("child.rs"), "pub fn work() {}\n").unwrap();
+        fs::write(
+            repository_path.join("main.rs"),
+            "use crate::child::work;\nfn main() { work(); }\n",
+        )
+        .unwrap();
+        git(repository_path, ["add", "."]);
+        git(repository_path, ["commit", "-qm", "base use"]);
+        fs::write(
+            repository_path.join("main.rs"),
+            "mod child;\nuse crate::child::work;\nfn main() { work(); }\n",
+        )
+        .unwrap();
+        git(repository_path, ["add", "."]);
+        git(repository_path, ["commit", "-qm", "add ownership"]);
+
+        let clean =
+            analyze_diff(&DiffRequest::new(repository_path).with_reference("HEAD~1")).unwrap();
+        let ownership = clean
+            .report()
+            .architecture_comparisons()
+            .iter()
+            .find(|comparison| {
+                comparison.kind() == smackdebt_analysis::ArchitectureComparisonKind::EdgeAdded
+                    && comparison.relation()
+                        == Some(smackdebt_analysis::StaticRelationKind::ModuleOwnership)
+            })
+            .expect("clean ref diff retains ownership evidence");
+        assert_eq!(ownership.role(), Some(SourceRole::Primary));
+        assert_eq!(ownership.trust(), Some(SourceTrust::Trusted));
+        assert_eq!(
+            ownership.direction(),
+            smackdebt_analysis::ComparisonDirection::Changed
+        );
+        assert!(
+            clean
+                .report()
+                .architecture_comparisons()
+                .iter()
+                .all(|comparison| {
+                    comparison.direction() != smackdebt_analysis::ComparisonDirection::Worse
+                })
+        );
+
+        fs::write(
+            repository_path.join("main.rs"),
+            "mod child;\nuse crate::child::work;\nfn main() { work(); }\nfn broken(\n",
+        )
+        .unwrap();
+        let worktree =
+            analyze_diff(&DiffRequest::new(repository_path).with_reference("HEAD")).unwrap();
+        assert!(
+            worktree
+                .report()
+                .architecture_comparisons()
+                .iter()
+                .any(|comparison| {
+                    comparison.relation() == Some(smackdebt_analysis::StaticRelationKind::Uses)
+                        && comparison.kind()
+                            == smackdebt_analysis::ArchitectureComparisonKind::EdgeAdded
+                        && comparison.role() == Some(SourceRole::Primary)
+                        && comparison.trust() == Some(SourceTrust::Advisory)
+                })
+        );
+        assert!(
+            worktree
+                .report()
+                .architecture_comparisons()
+                .iter()
+                .any(|comparison| {
+                    comparison.relation() == Some(smackdebt_analysis::StaticRelationKind::Uses)
+                        && comparison.kind()
+                            == smackdebt_analysis::ArchitectureComparisonKind::EdgeRemoved
+                        && comparison.role() == Some(SourceRole::Primary)
+                        && comparison.trust() == Some(SourceTrust::Trusted)
+                })
+        );
+
+        fs::create_dir_all(repository_path.join("tests")).unwrap();
+        fs::write(
+            repository_path.join("tests/main.rs"),
+            "use crate::child::work;\nfn main() { work(); }\n",
+        )
+        .unwrap();
+        fs::remove_file(repository_path.join("main.rs")).unwrap();
+        let role_change =
+            analyze_diff(&DiffRequest::new(repository_path).with_reference("HEAD")).unwrap();
+        assert!(
+            role_change
+                .report()
+                .architecture_comparisons()
+                .iter()
+                .any(|comparison| {
+                    comparison.relation() == Some(smackdebt_analysis::StaticRelationKind::Uses)
+                        && comparison.kind()
+                            == smackdebt_analysis::ArchitectureComparisonKind::EdgeAdded
+                        && comparison.role() == Some(SourceRole::Test)
+                        && comparison.trust() == Some(SourceTrust::Trusted)
+                })
+        );
+        assert!(
+            role_change
+                .report()
+                .architecture_comparisons()
+                .iter()
+                .any(|comparison| {
+                    comparison.relation() == Some(smackdebt_analysis::StaticRelationKind::Uses)
+                        && comparison.kind()
+                            == smackdebt_analysis::ArchitectureComparisonKind::EdgeRemoved
+                        && comparison.role() == Some(SourceRole::Primary)
+                        && comparison.trust() == Some(SourceTrust::Trusted)
+                })
+        );
+    }
+
+    #[test]
+    fn relation_diff_retains_reference_count_changes_for_the_same_file_pair() {
+        let root = tempfile::tempdir().unwrap();
+        let repository_path = root.path();
+        git(repository_path, ["init", "-q"]);
+        git(
+            repository_path,
+            ["config", "user.email", "test@example.invalid"],
+        );
+        git(repository_path, ["config", "user.name", "Smackdebt Test"]);
+        fs::write(repository_path.join("package.json"), "{}").unwrap();
+        fs::write(
+            repository_path.join("main.js"),
+            "import value from './value';\nfunction main() { return value(); }\n",
+        )
+        .unwrap();
+        fs::write(
+            repository_path.join("value.js"),
+            "export default function value() {}\n",
+        )
+        .unwrap();
+        git(repository_path, ["add", "."]);
+        git(repository_path, ["commit", "-qm", "one reference"]);
+        fs::write(
+            repository_path.join("main.js"),
+            "import value from './value';\nimport second from './value';\nfunction main() { value(); second(); }\n",
+        )
+        .unwrap();
+
+        let result =
+            analyze_diff(&DiffRequest::new(repository_path).with_reference("HEAD")).unwrap();
+        let comparison = result
+            .report()
+            .architecture_comparisons()
+            .iter()
+            .find(|comparison| {
+                comparison.relation() == Some(smackdebt_analysis::StaticRelationKind::Uses)
+                    && comparison.before_references() == Some(1)
+                    && comparison.after_references() == Some(2)
+            })
+            .expect("reference count change is retained");
+        assert_eq!(
+            comparison.direction(),
+            smackdebt_analysis::ComparisonDirection::Changed
+        );
+        assert_eq!(result.report().dependency_edges()[0].references(), 2);
     }
 
     #[test]
@@ -3567,7 +4214,11 @@ mod tests {
 
         let result =
             analyze_diff(&DiffRequest::new(repository_path).with_reference("HEAD")).unwrap();
-        assert!(result.report().architecture_comparisons().is_empty());
+        assert!(
+            result.report().architecture_comparisons().is_empty(),
+            "{:?}",
+            result.report().architecture_comparisons()
+        );
         assert_eq!(result.report().dependency_edges().len(), 1);
     }
 

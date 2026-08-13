@@ -2,7 +2,7 @@ use std::path::Path;
 
 use smackdebt_analysis::{
     DependencyIntent, DependencyKind, DependencySyntax, DependencySyntaxState, Language,
-    ParseStatus, SourceSpan, UnitKind,
+    ParseStatus, SourceSpan, StaticRelationKind, UnitKind,
 };
 use smackdebt_languages::Analyzer;
 
@@ -363,6 +363,7 @@ fn every_supported_language_translates_dependency_syntax_with_original_spans() {
             DependencyKind::Include,
             "local.h",
             DependencyIntent::Internal,
+            StaticRelationKind::Uses,
             vec!["./local.h"],
             1,
         ),
@@ -372,6 +373,7 @@ fn every_supported_language_translates_dependency_syntax_with_original_spans() {
             DependencyKind::Include,
             "local.hpp",
             DependencyIntent::Internal,
+            StaticRelationKind::Uses,
             vec!["./local.hpp"],
             1,
         ),
@@ -381,6 +383,7 @@ fn every_supported_language_translates_dependency_syntax_with_original_spans() {
             DependencyKind::Import,
             "app.Local",
             DependencyIntent::Package,
+            StaticRelationKind::Uses,
             vec![
                 "app/Local.java",
                 "src/main/java/app/Local.java",
@@ -394,6 +397,7 @@ fn every_supported_language_translates_dependency_syntax_with_original_spans() {
             DependencyKind::Import,
             "./local",
             DependencyIntent::Internal,
+            StaticRelationKind::Uses,
             vec![
                 "./local",
                 "./local.js",
@@ -413,6 +417,7 @@ fn every_supported_language_translates_dependency_syntax_with_original_spans() {
             DependencyKind::Import,
             "./local",
             DependencyIntent::Internal,
+            StaticRelationKind::Uses,
             vec![
                 "./local",
                 "./local.js",
@@ -432,6 +437,7 @@ fn every_supported_language_translates_dependency_syntax_with_original_spans() {
             DependencyKind::Import,
             ".local",
             DependencyIntent::Internal,
+            StaticRelationKind::Uses,
             vec!["./local.py", "./local/__init__.py"],
             1,
         ),
@@ -441,6 +447,7 @@ fn every_supported_language_translates_dependency_syntax_with_original_spans() {
             DependencyKind::Module,
             "local",
             DependencyIntent::Internal,
+            StaticRelationKind::ModuleOwnership,
             vec!["./local.rs", "./local/mod.rs"],
             1,
         ),
@@ -450,6 +457,7 @@ fn every_supported_language_translates_dependency_syntax_with_original_spans() {
             DependencyKind::Import,
             "./local",
             DependencyIntent::Internal,
+            StaticRelationKind::Uses,
             vec![
                 "./local",
                 "./local.js",
@@ -469,6 +477,7 @@ fn every_supported_language_translates_dependency_syntax_with_original_spans() {
             DependencyKind::Import,
             "./local",
             DependencyIntent::Internal,
+            StaticRelationKind::Uses,
             vec![
                 "./local",
                 "./local.js",
@@ -488,6 +497,7 @@ fn every_supported_language_translates_dependency_syntax_with_original_spans() {
             DependencyKind::Require,
             "local",
             DependencyIntent::Internal,
+            StaticRelationKind::Uses,
             vec![
                 "./local",
                 "./local.rb",
@@ -503,6 +513,7 @@ fn every_supported_language_translates_dependency_syntax_with_original_spans() {
             DependencyKind::Import,
             "./local",
             DependencyIntent::Internal,
+            StaticRelationKind::Uses,
             vec![
                 "./local",
                 "./local.js",
@@ -518,7 +529,7 @@ fn every_supported_language_translates_dependency_syntax_with_original_spans() {
         ),
     ];
     let mut analyzer = Analyzer::default();
-    for (path, source, kind, target, intent, candidates, line) in cases {
+    for (path, source, kind, target, intent, relation, candidates, line) in cases {
         let analysis = analyzer
             .analyze(Path::new(path), source.as_bytes().to_vec())
             .unwrap();
@@ -527,6 +538,7 @@ fn every_supported_language_translates_dependency_syntax_with_original_spans() {
         assert_eq!(dependency.kind(), kind, "{path}");
         assert_eq!(dependency.target(), target, "{path}");
         assert_eq!(dependency.intent(), intent, "{path}");
+        assert_eq!(dependency.relation(), relation, "{path}");
         assert_eq!(
             (dependency.span().start_line(), dependency.span().end_line()),
             (line, line),
@@ -653,6 +665,69 @@ fn root_package_malformed_and_unsupported_forms_do_not_guess() {
         )
         .with_internal_intent()]
     );
+}
+
+#[test]
+fn rust_relations_partition_ownership_inline_modules_uses_and_macros() {
+    let analysis = Analyzer::default()
+        .analyze(
+            Path::new("src/lib.rs"),
+            b"mod child;\nmod inline { pub fn local() {} }\nuse crate::shared::work;\nfn run() { crate::qualified::call(); }\ninclude!(\"generated.rs\");\n"
+                .to_vec(),
+        )
+        .unwrap();
+    let dependencies = analysis.dependencies();
+    assert_eq!(dependencies.len(), 4);
+    assert_eq!(dependencies[0].target(), "child");
+    assert_eq!(
+        dependencies[0].relation(),
+        StaticRelationKind::ModuleOwnership
+    );
+    assert_eq!(dependencies[0].span(), SourceSpan::new(1, 1));
+    assert_eq!(dependencies[1].target(), "crate::shared::work");
+    assert_eq!(dependencies[1].relation(), StaticRelationKind::Uses);
+    assert_eq!(dependencies[1].span(), SourceSpan::new(3, 3));
+    assert_eq!(dependencies[2].target(), "crate::qualified::call");
+    assert_eq!(dependencies[2].relation(), StaticRelationKind::Uses);
+    assert_eq!(dependencies[2].span(), SourceSpan::new(4, 4));
+    assert_eq!(dependencies[3].target(), "generated.rs");
+    assert_eq!(dependencies[3].relation(), StaticRelationKind::Uses);
+    assert_eq!(dependencies[3].span(), SourceSpan::new(5, 5));
+    assert!(
+        dependencies
+            .iter()
+            .all(|dependency| dependency.target() != "inline")
+    );
+}
+
+#[test]
+fn rust_qualified_paths_require_explicit_repository_intent() {
+    let analysis = Analyzer::default()
+        .analyze(
+            Path::new("src/lib.rs"),
+            b"fn run() { crate::local::work(); self::sibling::work(); super::parent::work(); std::fmt::format(); serde::value(); Type::associated(); }\n"
+                .to_vec(),
+        )
+        .unwrap();
+
+    let targets: Vec<_> = analysis
+        .dependencies()
+        .iter()
+        .map(DependencySyntax::target)
+        .collect();
+    assert_eq!(
+        targets,
+        [
+            "crate::local::work",
+            "self::sibling::work",
+            "super::parent::work",
+        ]
+    );
+    assert!(analysis.dependencies().iter().all(|dependency| {
+        dependency.intent() == DependencyIntent::Internal
+            && dependency.relation() == StaticRelationKind::Uses
+            && dependency.span() == SourceSpan::new(1, 1)
+    }));
 }
 
 #[test]

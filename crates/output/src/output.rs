@@ -398,15 +398,25 @@ impl<'a, W: Write> Renderer<'a, W> {
                 };
                 for id in ids.iter().take(limit) {
                     let comparison = &report.architecture_comparisons()[id.index()];
-                    let label = match comparison.kind() {
-                        smackdebt_analysis::ArchitectureComparisonKind::EdgeAdded => "edge added",
-                        smackdebt_analysis::ArchitectureComparisonKind::EdgeRemoved => {
+                    let label = match (comparison.kind(), comparison.relation()) {
+                        (
+                            smackdebt_analysis::ArchitectureComparisonKind::EdgeAdded,
+                            Some(smackdebt_analysis::StaticRelationKind::ModuleOwnership),
+                        ) => "module ownership added",
+                        (
+                            smackdebt_analysis::ArchitectureComparisonKind::EdgeRemoved,
+                            Some(smackdebt_analysis::StaticRelationKind::ModuleOwnership),
+                        ) => "module ownership removed",
+                        (smackdebt_analysis::ArchitectureComparisonKind::EdgeAdded, _) => {
+                            "edge added"
+                        }
+                        (smackdebt_analysis::ArchitectureComparisonKind::EdgeRemoved, _) => {
                             "edge removed"
                         }
-                        smackdebt_analysis::ArchitectureComparisonKind::CycleIntroduced => {
+                        (smackdebt_analysis::ArchitectureComparisonKind::CycleIntroduced, _) => {
                             "package cycle introduced"
                         }
-                        smackdebt_analysis::ArchitectureComparisonKind::CycleRemoved => {
+                        (smackdebt_analysis::ArchitectureComparisonKind::CycleRemoved, _) => {
                             "package cycle removed"
                         }
                     };
@@ -428,6 +438,12 @@ impl<'a, W: Write> Renderer<'a, W> {
                                 write!(self.writer, "  {name}")?;
                             }
                         }
+                    }
+                    if let (Some(before), Some(after)) = (
+                        comparison.before_references(),
+                        comparison.after_references(),
+                    ) {
+                        write!(self.writer, "  references {before} → {after}")?;
                     }
                     writeln!(self.writer)?;
                 }

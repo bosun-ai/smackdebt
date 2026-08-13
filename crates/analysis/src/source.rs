@@ -34,6 +34,13 @@ pub enum DependencyKind {
     Require,
 }
 
+/// The architectural meaning of one extracted static relation.
+#[derive(Clone, Copy, Debug, Eq, Hash, Ord, PartialEq, PartialOrd)]
+pub enum StaticRelationKind {
+    Uses,
+    ModuleOwnership,
+}
+
 #[derive(Clone, Copy, Debug, Eq, Hash, Ord, PartialEq, PartialOrd)]
 pub enum DependencyIntent {
     Internal,
@@ -56,6 +63,7 @@ pub struct DependencySyntax {
     span: SourceSpan,
     state: DependencySyntaxState,
     intent: DependencyIntent,
+    relation: StaticRelationKind,
 }
 
 impl DependencySyntax {
@@ -71,6 +79,7 @@ impl DependencySyntax {
             span,
             state,
             intent: DependencyIntent::Package,
+            relation: StaticRelationKind::Uses,
         }
     }
 
@@ -93,9 +102,16 @@ impl DependencySyntax {
     pub const fn intent(&self) -> DependencyIntent {
         self.intent
     }
+    pub const fn relation(&self) -> StaticRelationKind {
+        self.relation
+    }
 
     pub fn with_internal_intent(mut self) -> Self {
         self.intent = DependencyIntent::Internal;
+        self
+    }
+    pub fn with_relation(mut self, relation: StaticRelationKind) -> Self {
+        self.relation = relation;
         self
     }
 }

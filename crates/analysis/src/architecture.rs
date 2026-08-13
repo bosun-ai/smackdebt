@@ -1,4 +1,7 @@
-use crate::{ComparisonDirection, FileId, PackageId, Rating, SourceRole, SourceSpan, SourceTrust};
+use crate::{
+    ComparisonDirection, FileId, PackageId, Rating, SourceRole, SourceSpan, SourceTrust,
+    StaticRelationKind,
+};
 
 #[derive(Clone, Debug, Default, Eq, PartialEq)]
 pub struct ArchitectureGraph {
@@ -86,6 +89,7 @@ pub struct DependencyEdge {
     locations: Vec<SourceSpan>,
     role: SourceRole,
     trust: SourceTrust,
+    relation: StaticRelationKind,
 }
 
 impl DependencyEdge {
@@ -104,11 +108,16 @@ impl DependencyEdge {
             locations,
             role: SourceRole::Primary,
             trust: SourceTrust::Trusted,
+            relation: StaticRelationKind::Uses,
         }
     }
     pub fn with_evidence(mut self, role: SourceRole, trust: SourceTrust) -> Self {
         self.role = role;
         self.trust = trust;
+        self
+    }
+    pub fn with_relation(mut self, relation: StaticRelationKind) -> Self {
+        self.relation = relation;
         self
     }
     pub const fn id(&self) -> DependencyEdgeId {
@@ -132,8 +141,13 @@ impl DependencyEdge {
     pub const fn trust(&self) -> SourceTrust {
         self.trust
     }
+    pub const fn relation(&self) -> StaticRelationKind {
+        self.relation
+    }
     pub const fn affects_verdict(&self) -> bool {
-        self.role.affects_verdict() && matches!(self.trust, SourceTrust::Trusted)
+        matches!(self.relation, StaticRelationKind::Uses)
+            && self.role.affects_verdict()
+            && matches!(self.trust, SourceTrust::Trusted)
     }
 }
 
@@ -314,6 +328,11 @@ pub struct ArchitectureComparison {
     packages: Vec<PackageId>,
     witness: Vec<PackageId>,
     files: Vec<FileId>,
+    relation: Option<StaticRelationKind>,
+    role: Option<SourceRole>,
+    trust: Option<SourceTrust>,
+    before_references: Option<u32>,
+    after_references: Option<u32>,
 }
 
 impl ArchitectureComparison {
@@ -336,6 +355,11 @@ impl ArchitectureComparison {
             packages,
             witness: Vec::new(),
             files: Vec::new(),
+            relation: None,
+            role: None,
+            trust: None,
+            before_references: None,
+            after_references: None,
         }
     }
     pub fn with_witness(mut self, witness: Vec<PackageId>) -> Self {
@@ -344,6 +368,22 @@ impl ArchitectureComparison {
     }
     pub fn with_files(mut self, files: Vec<FileId>) -> Self {
         self.files = files;
+        self
+    }
+    pub fn with_relation_evidence(
+        mut self,
+        relation: StaticRelationKind,
+        role: SourceRole,
+        trust: SourceTrust,
+    ) -> Self {
+        self.relation = Some(relation);
+        self.role = Some(role);
+        self.trust = Some(trust);
+        self
+    }
+    pub fn with_reference_counts(mut self, before: u32, after: u32) -> Self {
+        self.before_references = Some(before);
+        self.after_references = Some(after);
         self
     }
     pub const fn id(&self) -> ArchitectureComparisonId {
@@ -364,43 +404,99 @@ impl ArchitectureComparison {
     pub fn files(&self) -> &[FileId] {
         &self.files
     }
+    pub const fn relation(&self) -> Option<StaticRelationKind> {
+        self.relation
+    }
+    pub const fn role(&self) -> Option<SourceRole> {
+        self.role
+    }
+    pub const fn trust(&self) -> Option<SourceTrust> {
+        self.trust
+    }
+    pub const fn before_references(&self) -> Option<u32> {
+        self.before_references
+    }
+    pub const fn after_references(&self) -> Option<u32> {
+        self.after_references
+    }
 }
 
 #[derive(Clone, Copy, Debug, Default, Eq, PartialEq)]
 pub struct DependencyCoverage {
-    internal: u32,
-    external: u32,
-    unresolved: u32,
-    ambiguous: u32,
+    resolved_internal_uses: u32,
+    unresolved_internal_uses: u32,
+    ambiguous_internal_uses: u32,
+    external_uses: u32,
+    unresolved_package_uses: u32,
+    module_ownership_relations: u32,
+    context_relations: u32,
 }
 
 impl DependencyCoverage {
-    pub const fn new(internal: u32, external: u32, unresolved: u32, ambiguous: u32) -> Self {
+    pub const fn new(
+        resolved_internal_uses: u32,
+        unresolved_internal_uses: u32,
+        ambiguous_internal_uses: u32,
+        external_uses: u32,
+        unresolved_package_uses: u32,
+        module_ownership_relations: u32,
+        context_relations: u32,
+    ) -> Self {
         Self {
-            internal,
-            external,
-            unresolved,
-            ambiguous,
+            resolved_internal_uses,
+            unresolved_internal_uses,
+            ambiguous_internal_uses,
+            external_uses,
+            unresolved_package_uses,
+            module_ownership_relations,
+            context_relations,
         }
     }
+    pub const fn resolved_internal_uses(self) -> u32 {
+        self.resolved_internal_uses
+    }
+    pub const fn unresolved_internal_uses(self) -> u32 {
+        self.unresolved_internal_uses
+    }
+    pub const fn ambiguous_internal_uses(self) -> u32 {
+        self.ambiguous_internal_uses
+    }
+    pub const fn external_uses(self) -> u32 {
+        self.external_uses
+    }
+    pub const fn unresolved_package_uses(self) -> u32 {
+        self.unresolved_package_uses
+    }
+    pub const fn module_ownership_relations(self) -> u32 {
+        self.module_ownership_relations
+    }
+    pub const fn context_relations(self) -> u32 {
+        self.context_relations
+    }
     pub const fn internal(self) -> u32 {
-        self.internal
+        self.resolved_internal_uses + self.module_ownership_relations
     }
     pub const fn external(self) -> u32 {
-        self.external
+        self.external_uses
     }
     pub const fn unresolved(self) -> u32 {
-        self.unresolved
+        self.unresolved_internal_uses + self.unresolved_package_uses
     }
     pub const fn ambiguous(self) -> u32 {
-        self.ambiguous
+        self.ambiguous_internal_uses
     }
     pub const fn total(self) -> u32 {
-        self.internal + self.external + self.unresolved + self.ambiguous
+        self.resolved_internal_uses
+            + self.unresolved_internal_uses
+            + self.ambiguous_internal_uses
+            + self.external_uses
+            + self.unresolved_package_uses
+            + self.module_ownership_relations
+            + self.context_relations
     }
 }
 
-#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+#[derive(Clone, Copy, Debug, Eq, Hash, Ord, PartialEq, PartialOrd)]
 pub enum ResolutionIssueKind {
     Unresolved,
     Ambiguous,
@@ -413,6 +509,11 @@ pub struct ResolutionDiagnostic {
     target: String,
     kind: ResolutionIssueKind,
     reason: String,
+    relation: StaticRelationKind,
+    role: SourceRole,
+    trust: SourceTrust,
+    references: u32,
+    locations: Vec<SourceSpan>,
 }
 
 impl ResolutionDiagnostic {
@@ -429,7 +530,23 @@ impl ResolutionDiagnostic {
             target: target.into(),
             kind,
             reason: reason.into(),
+            relation: StaticRelationKind::Uses,
+            role: SourceRole::Primary,
+            trust: SourceTrust::Trusted,
+            references: 1,
+            locations: vec![span],
         }
+    }
+    pub fn with_evidence(
+        mut self,
+        relation: StaticRelationKind,
+        role: SourceRole,
+        trust: SourceTrust,
+    ) -> Self {
+        self.relation = relation;
+        self.role = role;
+        self.trust = trust;
+        self
     }
     pub const fn file(&self) -> FileId {
         self.file
@@ -446,6 +563,26 @@ impl ResolutionDiagnostic {
     pub fn reason(&self) -> &str {
         &self.reason
     }
+    pub const fn relation(&self) -> StaticRelationKind {
+        self.relation
+    }
+    pub const fn role(&self) -> SourceRole {
+        self.role
+    }
+    pub const fn trust(&self) -> SourceTrust {
+        self.trust
+    }
+    pub const fn references(&self) -> u32 {
+        self.references
+    }
+    pub fn locations(&self) -> &[SourceSpan] {
+        &self.locations
+    }
+    pub fn with_occurrences(mut self, references: u32, locations: Vec<SourceSpan>) -> Self {
+        self.references = references;
+        self.locations = locations;
+        self
+    }
 }
 
 #[derive(Clone, Debug, Eq, PartialEq)]
@@ -453,6 +590,10 @@ pub struct ExternalDependency {
     file: FileId,
     target: String,
     references: u32,
+    locations: Vec<SourceSpan>,
+    relation: StaticRelationKind,
+    role: SourceRole,
+    trust: SourceTrust,
 }
 
 impl ExternalDependency {
@@ -461,7 +602,24 @@ impl ExternalDependency {
             file,
             target: target.into(),
             references,
+            locations: Vec::new(),
+            relation: StaticRelationKind::Uses,
+            role: SourceRole::Primary,
+            trust: SourceTrust::Trusted,
         }
+    }
+    pub fn with_evidence(
+        mut self,
+        locations: Vec<SourceSpan>,
+        relation: StaticRelationKind,
+        role: SourceRole,
+        trust: SourceTrust,
+    ) -> Self {
+        self.locations = locations;
+        self.relation = relation;
+        self.role = role;
+        self.trust = trust;
+        self
     }
     pub const fn file(&self) -> FileId {
         self.file
@@ -471,5 +629,36 @@ impl ExternalDependency {
     }
     pub const fn references(&self) -> u32 {
         self.references
+    }
+    pub fn locations(&self) -> &[SourceSpan] {
+        &self.locations
+    }
+    pub const fn relation(&self) -> StaticRelationKind {
+        self.relation
+    }
+    pub const fn role(&self) -> SourceRole {
+        self.role
+    }
+    pub const fn trust(&self) -> SourceTrust {
+        self.trust
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::DependencyCoverage;
+
+    #[test]
+    fn dependency_evidence_partitions_have_one_exact_total() {
+        let coverage = DependencyCoverage::new(1, 2, 3, 4, 5, 6, 7);
+
+        assert_eq!(coverage.resolved_internal_uses(), 1);
+        assert_eq!(coverage.unresolved_internal_uses(), 2);
+        assert_eq!(coverage.ambiguous_internal_uses(), 3);
+        assert_eq!(coverage.external_uses(), 4);
+        assert_eq!(coverage.unresolved_package_uses(), 5);
+        assert_eq!(coverage.module_ownership_relations(), 6);
+        assert_eq!(coverage.context_relations(), 7);
+        assert_eq!(coverage.total(), 28);
     }
 }

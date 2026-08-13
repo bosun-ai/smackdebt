@@ -9,7 +9,7 @@ CHANGE  0 retained units
 ARCHITECTURE CHANGE
 1 internal · 0 external · 0 unresolved · 0 ambiguous
 ▲ WORSE 0 · ▼ BETTER 0 · ● CHANGED 1
-● CHANGED  edge added  b  a
+● CHANGED  edge added  b  a  references 0 → 1
 
 EVOLUTION CONTEXT
 6 commits · complete local history

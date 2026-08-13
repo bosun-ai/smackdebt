@@ -15,7 +15,7 @@ ARCHITECTURE CHANGE
 5 internal · 1 external · 1 unresolved · 1 ambiguous
 ▲ WORSE 1 · ▼ BETTER 0 · ● CHANGED 1
 ▲ WORSE  package cycle introduced  app  core  witness  app  core  app
-● CHANGED  edge added  core  app
+● CHANGED  edge added  core  app  references 0 → 1
 
 EVOLUTION CONTEXT
 1 commits · complete local history

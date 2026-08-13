@@ -1,4 +1,6 @@
-use smackdebt_analysis::{DependencyKind, DependencySyntax, DependencySyntaxState, SourceSpan};
+use smackdebt_analysis::{
+    DependencyKind, DependencySyntax, DependencySyntaxState, SourceSpan, StaticRelationKind,
+};
 use tree_sitter::Node;
 
 pub(super) fn quoted(
@@ -26,12 +28,29 @@ pub(super) fn quoted(
 
 pub(super) fn rust(node: Node<'_>, source: &[u8]) -> Option<DependencySyntax> {
     let kind = match node.kind() {
-        "use_declaration" | "extern_crate_declaration" => DependencyKind::Import,
+        "use_declaration" | "extern_crate_declaration" | "scoped_identifier" => {
+            DependencyKind::Import
+        }
         "mod_item" => DependencyKind::Module,
         "macro_invocation" => DependencyKind::Include,
         _ => return None,
     };
     let text = node.utf8_text(source).ok()?.trim();
+    if node.kind() == "scoped_identifier"
+        && (node
+            .parent()
+            .is_some_and(|parent| parent.kind() == "scoped_identifier")
+            || has_ancestor(node, "use_declaration"))
+    {
+        return None;
+    }
+    if node.kind() == "scoped_identifier"
+        && !["crate::", "self::", "super::"]
+            .iter()
+            .any(|prefix| text.starts_with(prefix))
+    {
+        return None;
+    }
     if node.kind() == "macro_invocation" {
         if !text.starts_with("include!") {
             return None;
@@ -75,6 +94,9 @@ pub(super) fn rust(node: Node<'_>, source: &[u8]) -> Option<DependencySyntax> {
     if node.kind() == "extern_crate_declaration" {
         return Some(external(node, kind, text));
     }
+    if node.kind() == "mod_item" && !text.ends_with(';') {
+        return None;
+    }
     let target = text
         .strip_prefix("use ")
         .and_then(|value| value.strip_suffix(';'))
@@ -112,7 +134,7 @@ pub(super) fn rust(node: Node<'_>, source: &[u8]) -> Option<DependencySyntax> {
     };
     let normalized = format!("{prefix}{}", value.replace("::", "/"));
     let mut values = vec![format!("{normalized}.rs"), format!("{normalized}/mod.rs")];
-    if node.kind() == "use_declaration" {
+    if matches!(node.kind(), "use_declaration" | "scoped_identifier") {
         let mut parent = normalized.as_str();
         while let Some((prefix, _)) = parent.rsplit_once('/') {
             values.push(format!("{prefix}.rs"));
@@ -120,7 +142,22 @@ pub(super) fn rust(node: Node<'_>, source: &[u8]) -> Option<DependencySyntax> {
             parent = prefix;
         }
     }
-    Some(candidates(node, kind, target, values).with_internal_intent())
+    let dependency = candidates(node, kind, target, values).with_internal_intent();
+    Some(if node.kind() == "mod_item" {
+        dependency.with_relation(StaticRelationKind::ModuleOwnership)
+    } else {
+        dependency
+    })
+}
+
+fn has_ancestor(mut node: Node<'_>, kind: &str) -> bool {
+    while let Some(parent) = node.parent() {
+        if parent.kind() == kind {
+            return true;
+        }
+        node = parent;
+    }
+    false
 }
 
 pub(super) fn python(node: Node<'_>, source: &[u8]) -> Option<DependencySyntax> {

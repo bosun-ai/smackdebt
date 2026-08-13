@@ -22,11 +22,11 @@ ARCHITECTURE CHANGE
 ▲ WORSE 1 · ▼ BETTER 1 · ● CHANGED 5
 ▲ WORSE  package cycle introduced  c  d  witness  c  d  c
 ▼ BETTER  package cycle removed  a  b  witness  a  b  a
-● CHANGED  edge added  a  c
-● CHANGED  edge added  d  c
-● CHANGED  edge added  h  i
-● CHANGED  edge removed  a  b
-● CHANGED  edge removed  b  a
+● CHANGED  edge removed  a  b  references 1 → 0
+● CHANGED  edge added  a  c  references 0 → 1
+● CHANGED  edge removed  b  a  references 1 → 0
+● CHANGED  edge added  d  c  references 0 → 1
+● CHANGED  edge added  h  i  references 0 → 1
 
 EVOLUTION CONTEXT
 4 commits · complete local history

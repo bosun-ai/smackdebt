@@ -218,6 +218,26 @@ fn static_architecture_codebase_snapshots_are_reviewed() {
     assert_eq!(report["dependency_coverage"]["external"], 1);
     assert_eq!(report["dependency_coverage"]["unresolved"], 1);
     assert_eq!(report["dependency_coverage"]["ambiguous"], 1);
+    assert_eq!(
+        report["dependency_coverage"]["module_ownership_relations"],
+        1
+    );
+    let partition_total: u64 = [
+        "resolved_internal_uses",
+        "unresolved_internal_uses",
+        "ambiguous_internal_uses",
+        "external_uses",
+        "unresolved_package_uses",
+        "module_ownership_relations",
+        "context_relations",
+    ]
+    .iter()
+    .map(|field| report["dependency_coverage"][field].as_u64().unwrap())
+    .sum();
+    assert_eq!(
+        partition_total,
+        report["dependency_coverage"]["total"].as_u64().unwrap()
+    );
     assert!(
         report["package_graph"]
             .as_array()

@@ -255,6 +255,7 @@ fn offset_dependency(dependency: DependencySyntax, line_offset: u32) -> Dependen
     }
     let span = dependency.span();
     let internal = dependency.intent() == smackdebt_analysis::DependencyIntent::Internal;
+    let relation = dependency.relation();
     let dependency = DependencySyntax::new(
         dependency.kind(),
         dependency.target(),
@@ -264,6 +265,7 @@ fn offset_dependency(dependency: DependencySyntax, line_offset: u32) -> Dependen
         ),
         dependency.state().clone(),
     );
+    let dependency = dependency.with_relation(relation);
     if internal {
         dependency.with_internal_intent()
     } else {
