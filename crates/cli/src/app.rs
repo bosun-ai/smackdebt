@@ -79,7 +79,7 @@ fn run(arguments: impl IntoIterator<Item = OsString>) -> ExitCode {
             if let Some(width) = execution_width(args.common.jobs) {
                 request = request.with_width(width);
             }
-            request = apply_diff_config(request, &config);
+            request = apply_diff_common(request, &args.common, &config);
             (request.analyze(), args.common)
         }
     };
@@ -150,9 +150,15 @@ fn apply_codebase_thresholds(request: CodebaseRequest, config: &ProjectConfig) -
     request.with_thresholds(cognitive, cyclomatic, lines)
 }
 
-fn apply_diff_config(request: DiffRequest, config: &ProjectConfig) -> DiffRequest {
+fn apply_diff_common(request: DiffRequest, common: &Common, config: &ProjectConfig) -> DiffRequest {
+    let configured_history = config
+        .history
+        .as_deref()
+        .and_then(|value| parse_days(value).ok());
     let (cognitive, cyclomatic, lines) = config.thresholds();
-    request.with_thresholds(cognitive, cyclomatic, lines)
+    request
+        .with_history_days(common.history.or(configured_history).unwrap_or(90))
+        .with_thresholds(cognitive, cyclomatic, lines)
 }
 
 fn execution_width(jobs: Option<usize>) -> Option<ExecutionWidth> {

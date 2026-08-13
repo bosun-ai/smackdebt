@@ -66,6 +66,15 @@ class WorkloadHarnessTests(unittest.TestCase):
             status = subprocess.run(["git", "status", "--porcelain"], cwd=root, check=True, capture_output=True, text=True)
             self.assertEqual(len(status.stdout.splitlines()), 200)
 
+    def test_evolution_profile_has_dense_two_commit_package_history(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory) / "workload"
+            self.run_tool("generate", "--output", str(root), "--profile", "evolution-dense", "--files", "20")
+            commits = subprocess.run(["git", "rev-list", "--count", "HEAD"], cwd=root, check=True, capture_output=True, text=True)
+            self.assertEqual(commits.stdout.strip(), "2")
+            self.assertEqual(len(list(root.glob("package-*/package.json"))), 20)
+            self.assertFalse(subprocess.run(["git", "status", "--porcelain"], cwd=root, check=True, capture_output=True, text=True).stdout)
+
     def test_runner_checks_before_each_measured_command(self):
         with tempfile.TemporaryDirectory() as directory:
             root = Path(directory) / "workload"

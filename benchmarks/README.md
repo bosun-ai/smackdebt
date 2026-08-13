@@ -16,13 +16,17 @@ python3 scripts/performance/workload.py metadata \
 ```
 
 Profiles are `one-file`, `hundred-file`, `small-diff`, `large-mixed`,
-`graph-sparse`, `graph-dense`, `many-package`, and `large-dependency-diff`.
+`graph-sparse`, `graph-dense`, `many-package`, `evolution-dense`, and
+`large-dependency-diff`.
 The large profile defaults to 100,000 source files and can be overridden with
 `--files` for local iteration. The small-diff profile creates a committed base
 and four modified files so diff workflows exercise a real worktree.
 The graph profiles cover sparse imports, dense package relationships, many
 package identities, and a 200-file dependency diff. Each graph source has a
 checked target shape before timing begins.
+`evolution-dense` creates 100 packages changed together in two commits. Its
+codebase command uses the full generated history so the measured report proves
+pair deduplication, one streamed history process, allocations, and peak memory.
 
 Once the CLI exists, run it with the wrapper. The wrapper generates and checks
 the workload first, then appends one wall-time record per invocation:

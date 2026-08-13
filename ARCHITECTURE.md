@@ -245,10 +245,35 @@ Git commands use structured arguments and never invoke a shell. Refs and paths
 are passed separately. Static codebase analysis works outside Git; diff mode
 requires a repository.
 
-Codebase activity uses one streamed, non-merge, rename-aware history process.
+Codebase evolution uses one streamed, non-merge, rename-aware history process.
+The Git crate emits one compact commit at a time with normalized opaque
+contributor identity, timestamp, rename records, and optional textual line
+counts. It retains no commit message or source text. Project composition joins
+those paths to the current inventory, follows unbroken rename chains from a
+current file to its earlier names, and converts contributor identity to a
+temporary integer before calling analysis.
+
+Analysis owns separate churn, change-coupling, contributor-concentration, and
+evolutionary-comparison modules. Package touches and contributor touches count
+once per commit. Change coupling counts each unordered package pair once per
+commit and retains pairs after two shared commits. A recurrent pair without a
+static package edge in either direction creates a Watch finding. All ratios
+retain their numerator and denominator. Output only reads the completed
+aggregate tables; contributor names, addresses, raw fields, and temporary
+identifiers cannot enter a report value.
+
+History is anchored to files and package assignments in the current inventory.
+Deleted files and old package layouts are not reconstructed. Binary changes add
+a touch without line churn. Excluded paths and rename gaps are counted. Shallow
+or interrupted streams are marked incomplete, and unavailable history leaves
+source and static architecture analysis intact.
+
 Activity orders existing debt using visible inputs: health, touch count, the
 three measurements, path, and span. It never changes a health rating and does
-not hide a numeric score.
+not hide a numeric score. Diff analysis attaches the same retained history to
+changed files and packages as context. Only a worktree static edge can add or
+remove an unexplained-coupling finding; history itself has no before and after
+direction.
 
 Diff mode resolves an explicit ref or tries `origin/HEAD`, `main`, then
 `master`. It compares from the merge base through committed, staged, unstaged,

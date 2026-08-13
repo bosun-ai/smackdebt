@@ -21,4 +21,10 @@ ARCHITECTURE
   app/helper.js → app/choice.js · 1 references
   app/main.js → core/main.js · 1 references
 
+EVOLUTION
+history unavailable: not a Git repository
+
 No watch or high findings.
+
+COVERAGE NOTES
+! Git history unavailable: not a Git repository

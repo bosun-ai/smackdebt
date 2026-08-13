@@ -13,4 +13,10 @@ ARCHITECTURE
 0 internal · 0 external · 0 unresolved · 0 ambiguous
 ▲ 0 high · ● 0 watch · 0 internal edges
 
+EVOLUTION
+history unavailable: not a Git repository
+
 No watch or high findings.
+
+COVERAGE NOTES
+! Git history unavailable: not a Git repository

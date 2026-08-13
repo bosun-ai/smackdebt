@@ -1,0 +1,41 @@
+{
+  "schema_version": 1,
+  "profile": "evolution-dense",
+  "source_engine": "owned-tree-sitter-static-and-evolutionary-analysis",
+  "workspace_revision": "d2c822eab62107d698845cb7e2097c56644bce2d",
+  "workspace_dirty": true,
+  "host": "macOS-26.3.1-arm64-arm-64bit",
+  "rustc": "rustc 1.97.0 (2d8144b78 2026-07-07)",
+  "command": "scripts/performance/baseline.sh evolution-dense",
+  "seed": 1,
+  "content_digest": "2b9d02446a17fe00c99afe4aff870ba1ce6f9ed1846e78ad97136690a732e96c",
+  "supported_files": 100,
+  "source_bytes": 18320,
+  "source_reads": 100,
+  "git_processes": 2,
+  "inventory_walks": 1,
+  "samples_parser_time_ns": [
+    1797215,
+    2165541,
+    1941039,
+    1905992,
+    1740039
+  ],
+  "p95_parser_time_ns": 2165541,
+  "samples_wall_time_ns": [
+    298624250,
+    294703083,
+    296912708,
+    293652875,
+    296186916
+  ],
+  "p95_wall_time_ns": 298624250,
+  "peak_resident_bytes": 27803648,
+  "wall_time_budget_ns": 328486675,
+  "peak_resident_budget_bytes": 30584013,
+  "budget_room_percent": 10,
+  "allocation_count": 19345,
+  "reallocation_count": 7233,
+  "allocated_bytes": 2873346,
+  "allocation_note": "Measured with the allocation-stats release feature."
+}

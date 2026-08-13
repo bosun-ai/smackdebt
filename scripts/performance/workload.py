@@ -24,9 +24,10 @@ PROFILES = {
     "graph-sparse": 1_000,
     "graph-dense": 500,
     "many-package": 1_000,
+    "evolution-dense": 100,
     "large-dependency-diff": 1_000,
 }
-GRAPH_PROFILES = {"graph-sparse", "graph-dense", "many-package", "large-dependency-diff"}
+GRAPH_PROFILES = {"graph-sparse", "graph-dense", "many-package", "evolution-dense", "large-dependency-diff"}
 DIFF_PROFILES = {"small-diff", "large-dependency-diff"}
 LANGUAGES = ("rust", "python", "javascript", "typescript", "tsx", "java", "c", "cpp", "ruby", "vue")
 EXTENSIONS = {
@@ -73,7 +74,7 @@ def _profile_count(profile: str, files: int | None) -> int:
 
 
 def _graph_bytes(profile: str, index: int, count: int, changed: bool = False) -> bytes:
-    package_size = 1 if profile == "many-package" else 10
+    package_size = 1 if profile in {"many-package", "evolution-dense"} else 10
     package = index // package_size
     package_count = (count + package_size - 1) // package_size
     targets = [(package + 1) % package_count]
@@ -138,6 +139,16 @@ def _git_commit(root: Path) -> None:
     subprocess.run(["git", "commit", "-qm", "generated baseline"], cwd=root, check=True, env=env)
 
 
+def _git_commit_evolution(root: Path) -> None:
+    _git_commit(root)
+    for path in sorted(root.glob("package-*/unit-*.js")):
+        path.write_bytes(path.read_bytes() + b"// second history touch\n")
+    env = os.environ.copy()
+    env.update({"GIT_AUTHOR_DATE": "2000-01-02T00:00:00Z", "GIT_COMMITTER_DATE": "2000-01-02T00:00:00Z"})
+    subprocess.run(["git", "add", "-A"], cwd=root, check=True, env=env)
+    subprocess.run(["git", "commit", "-qm", "generated evolution"], cwd=root, check=True, env=env)
+
+
 def generate(root: Path, profile: str, seed: int, files: int | None, lines: int) -> dict:
     count = _profile_count(profile, files)
     if lines < 8 or lines > 1000:
@@ -153,7 +164,7 @@ def generate(root: Path, profile: str, seed: int, files: int | None, lines: int)
         elif path.is_dir() and path != root and ".git" not in path.parts:
             shutil.rmtree(path)
     if profile in GRAPH_PROFILES:
-        package_size = 1 if profile == "many-package" else 10
+        package_size = 1 if profile in {"many-package", "evolution-dense"} else 10
         for index in range(count):
             package = index // package_size
             folder = root / f"package-{package:04}"
@@ -170,7 +181,10 @@ def generate(root: Path, profile: str, seed: int, files: int | None, lines: int)
             folder = root / "src" / f"group-{index // 1000:03d}"
             folder.mkdir(parents=True, exist_ok=True)
             (folder / f"generated-{index:06d}{EXTENSIONS[language]}").write_bytes(_stable_bytes(profile, seed, language, index, lines))
-    if profile in DIFF_PROFILES:
+    if profile == "evolution-dense":
+        _git_commit_evolution(root)
+        (root / ".git" / "info" / "exclude").write_text("manifest.json\nmetadata.json\ncheck.json\nruns.jsonl\n")
+    elif profile in DIFF_PROFILES:
         _git_commit(root)
         (root / ".git" / "info" / "exclude").write_text("manifest.json\nmetadata.json\ncheck.json\nruns.jsonl\n")
         if profile == "small-diff":

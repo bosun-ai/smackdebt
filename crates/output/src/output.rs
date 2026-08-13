@@ -254,6 +254,7 @@ impl<'a, W: Write> Renderer<'a, W> {
             ReportMode::Diff => self.write_diff_areas(view)?,
         }
         self.write_architecture(view)?;
+        self.write_evolution(view)?;
         self.write_details(view)?;
         self.write_diagnostics(view.report.diagnostics())?;
         if let Some(path) = &view.drill {
@@ -423,6 +424,190 @@ impl<'a, W: Write> Renderer<'a, W> {
                     }
                     writeln!(self.writer)?;
                 }
+            }
+        }
+        Ok(())
+    }
+
+    fn write_evolution(&mut self, view: &Presentation<'_>) -> io::Result<()> {
+        let Some(scope) = view.selected else {
+            return Ok(());
+        };
+        let report = view.report;
+        writeln!(self.writer)?;
+        self.heading_line(if report.mode() == ReportMode::Codebase {
+            "EVOLUTION"
+        } else {
+            "EVOLUTION CONTEXT"
+        })?;
+        let coverage = report.history_coverage();
+        match coverage.availability() {
+            smackdebt_analysis::HistoryAvailability::Complete => writeln!(
+                self.writer,
+                "{} commits · complete local history",
+                Grouped(coverage.commits() as usize)
+            )?,
+            smackdebt_analysis::HistoryAvailability::Incomplete => writeln!(
+                self.writer,
+                "{} commits · incomplete history",
+                Grouped(coverage.commits() as usize)
+            )?,
+            smackdebt_analysis::HistoryAvailability::Unavailable => {
+                writeln!(
+                    self.writer,
+                    "history unavailable{}",
+                    coverage
+                        .reason()
+                        .map_or(String::new(), |reason| format!(": {reason}"))
+                )?;
+                return Ok(());
+            }
+        }
+        if coverage.uncounted_changes() > 0
+            || coverage.excluded_paths() > 0
+            || coverage.rename_gaps() > 0
+        {
+            writeln!(
+                self.writer,
+                "{} uncounted · {} excluded · {} rename gaps",
+                Grouped(coverage.uncounted_changes() as usize),
+                Grouped(coverage.excluded_paths() as usize),
+                Grouped(coverage.rename_gaps() as usize)
+            )?;
+        }
+        let relevant_packages = report
+            .files()
+            .iter()
+            .filter(|file| file_belongs_to_scope(report, file.id(), scope))
+            .filter_map(FileRecord::package)
+            .collect::<std::collections::BTreeSet<_>>();
+        let relevant =
+            |package: smackdebt_analysis::PackageId| relevant_packages.contains(&package);
+        let mut histories = report
+            .package_history()
+            .iter()
+            .filter(|value| relevant(value.package()))
+            .collect::<Vec<_>>();
+        histories.sort_by_key(|value| (Reverse(value.touches()), value.package()));
+        for value in histories
+            .iter()
+            .take(if self.options.all { histories.len() } else { 3 })
+        {
+            let name = package_name(report, value.package().index()).unwrap_or("?");
+            let concentration = report
+                .contributor_concentration()
+                .iter()
+                .find(|item| item.package() == value.package());
+            write!(
+                self.writer,
+                "  {name} · {} touches · +{} -{}",
+                value.touches(),
+                Grouped(value.added_lines() as usize),
+                Grouped(value.deleted_lines() as usize)
+            )?;
+            if let Some(concentration) = concentration {
+                write!(
+                    self.writer,
+                    " · {} contributors · {}% top share",
+                    concentration.contributor_count(),
+                    percent(concentration.numerator(), concentration.denominator())
+                )?;
+            }
+            writeln!(self.writer)?;
+        }
+        let mut files = report
+            .file_history()
+            .iter()
+            .filter(|value| {
+                value.touches() > 0 && file_belongs_to_scope(report, value.file(), scope)
+            })
+            .collect::<Vec<_>>();
+        files.sort_by(|left, right| {
+            Reverse(left.touches())
+                .cmp(&Reverse(right.touches()))
+                .then_with(|| {
+                    report.files()[left.file().index()]
+                        .path()
+                        .cmp(report.files()[right.file().index()].path())
+                })
+        });
+        let file_limit = if self.options.all { files.len() } else { 3 };
+        for value in files.into_iter().take(file_limit) {
+            writeln!(
+                self.writer,
+                "    file {} · {} touches · +{} -{}",
+                report.files()[value.file().index()].path(),
+                value.touches(),
+                Grouped(value.added_lines() as usize),
+                Grouped(value.deleted_lines() as usize)
+            )?;
+        }
+        let couplings = report
+            .change_coupling()
+            .iter()
+            .filter(|pair| relevant(pair.left()) || relevant(pair.right()))
+            .collect::<Vec<_>>();
+        for pair in couplings
+            .iter()
+            .take(if self.options.all { couplings.len() } else { 3 })
+        {
+            let explained = report.package_edges().iter().any(|edge| {
+                (edge.source() == pair.left() && edge.target() == pair.right())
+                    || (edge.source() == pair.right() && edge.target() == pair.left())
+            });
+            writeln!(
+                self.writer,
+                "  coupling {} ↔ {} · {}/{} shared commits · {}% similarity · {}",
+                package_name(report, pair.left().index()).unwrap_or("?"),
+                package_name(report, pair.right().index()).unwrap_or("?"),
+                pair.shared_commits(),
+                pair.union_commits(),
+                percent(pair.shared_commits(), pair.union_commits()),
+                if explained {
+                    "static dependency"
+                } else {
+                    "no static dependency"
+                }
+            )?;
+        }
+        let finding_ids = scope.evolutionary_findings();
+        for id in finding_ids.iter().take(if self.options.all {
+            finding_ids.len()
+        } else {
+            3
+        }) {
+            let pair = report.evolutionary_findings()[id.index()].coupling();
+            writeln!(
+                self.writer,
+                "● WATCH  recurrent change coupling without a static dependency"
+            )?;
+            writeln!(
+                self.writer,
+                "        {} ↔ {} · {}/{} shared commits · {}% similarity",
+                package_name(report, pair.left().index()).unwrap_or("?"),
+                package_name(report, pair.right().index()).unwrap_or("?"),
+                pair.shared_commits(),
+                pair.union_commits(),
+                percent(pair.shared_commits(), pair.union_commits())
+            )?;
+        }
+        if report.mode() == ReportMode::Diff {
+            for id in scope.evolutionary_comparisons() {
+                let comparison = report.evolutionary_comparisons()[id.index()];
+                let label = match comparison.direction() {
+                    ComparisonDirection::Better => "▼ BETTER",
+                    ComparisonDirection::Worse => "▲ WORSE",
+                    ComparisonDirection::Changed => "● CHANGED",
+                };
+                writeln!(
+                    self.writer,
+                    "{label}  coupling finding {}",
+                    match comparison.kind() {
+                        smackdebt_analysis::EvolutionaryComparisonKind::FindingIntroduced =>
+                            "introduced",
+                        smackdebt_analysis::EvolutionaryComparisonKind::FindingRemoved => "removed",
+                    }
+                )?;
             }
         }
         Ok(())

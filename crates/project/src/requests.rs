@@ -99,6 +99,7 @@ pub struct DiffRequest {
     pub(super) automatic_scope: bool,
     pub(super) reference: Option<String>,
     pub(super) width: ExecutionWidth,
+    pub(super) history_days: u32,
     pub(super) policy: HealthPolicy,
 }
 
@@ -109,6 +110,7 @@ impl DiffRequest {
             automatic_scope: false,
             reference: None,
             width: ExecutionWidth::Automatic,
+            history_days: DEFAULT_HISTORY_DAYS,
             policy: HealthPolicy::default(),
         }
     }
@@ -126,6 +128,11 @@ impl DiffRequest {
 
     pub fn with_width(mut self, width: ExecutionWidth) -> Self {
         self.width = width;
+        self
+    }
+
+    pub fn with_history_days(mut self, days: u32) -> Self {
+        self.history_days = days;
         self
     }
 

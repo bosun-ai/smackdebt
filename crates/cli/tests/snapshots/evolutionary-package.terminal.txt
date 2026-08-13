@@ -1,0 +1,23 @@
+smackdebt · codebase
+a
+1 package · 1 file · 1 line
+
+QUALITY  0% need attention
+░░░░░░░░░░░░  0 / 0 code units
+▲ 0 high · ● 0 watch · 0 healthy
+✓ all 1 source file analyzed
+  ↓ a/main.js
+
+ARCHITECTURE
+1 internal · 0 external · 0 unresolved · 0 ambiguous
+▲ 0 high · ● 0 watch · 1 internal edges
+  b/main.js → a/main.js · 1 references
+
+EVOLUTION
+6 commits · complete local history
+0 uncounted · 4 excluded · 0 rename gaps
+  a · 5 touches · +4 -3 · 2 contributors · 80% top share
+    file a/main.js · 5 touches · +4 -3
+  coupling a ↔ b · 3/6 shared commits · 50% similarity · static dependency
+
+No watch or high findings.

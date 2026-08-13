@@ -229,6 +229,44 @@ Static analysis does not provide compiler type resolution, runtime tracing, or
 executed build configuration. Macros, generated paths, runtime imports, and
 unsupported aliases can therefore remain unresolved.
 
+## Read the evolution evidence
+
+The `EVOLUTION` section uses all locally available non-merge Git history. The
+`--history` option still limits only the recent activity used to order source
+findings. Evolution keeps its evidence separate from current code health and
+the static dependency graph:
+
+- touches count distinct commits that changed a current file or package;
+- churn reports textual lines added and deleted;
+- change coupling reports packages that changed in the same commits;
+- contributor count reports how many normalized contributors touched a
+  package;
+- top-contributor share reports the largest contributor's package touches over
+  all contributor touches for that package.
+
+Coupling uses Jaccard similarity: shared commits divided by commits touching
+either package. A pair is retained after two shared commits. Recurrent coupling
+without a static dependency in either direction is Watch because it can reveal
+a missing or unclear package relationship. Coupling that matches a static edge
+remains descriptive. Churn, contributor count, and contributor concentration
+do not receive health labels.
+
+Smackdebt follows detected renames back from files that still exist and assigns
+their history to the files' current packages. It does not reconstruct removed
+files or old package layouts. Binary changes count as touches without invented
+line totals. Shallow, partial, empty, or unavailable history is stated in the
+report while source and static architecture results remain usable.
+
+Contributor names, addresses, and internal identities stop before the report.
+Terminal and JSON output contain only aggregate contributor counts and
+concentration operands. History and all other analysis stay on the local
+machine.
+
+Diff reports show evolution as existing context for changed files and packages.
+Historical values are not labelled Better or Worse. A worktree dependency can
+remove an unexplained-coupling finding, but it does not change the retained
+history values.
+
 ## Discovery
 
 Smackdebt finds the repository root, supported source files, ignored paths, and

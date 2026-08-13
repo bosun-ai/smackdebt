@@ -14,6 +14,8 @@ The source measurements are in `one-file.json`, `hundred-file.json`, and
 `small-diff.json`. Static graph measurements add `graph-sparse.json`,
 `graph-dense.json`, `many-package.json`, and `large-dependency-diff.json`.
 They were recorded from an optimized build after output correctness checks.
+Evolutionary analysis adds `evolution-dense.json`, with two commits touching
+100 packages and every observed unordered package pair retained once.
 The 100-file comparison measured five serial runs at
 40–50 ms and five four-worker runs at 30–40 ms, so the first parallel cutover
 is 100 files.

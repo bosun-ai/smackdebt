@@ -37,7 +37,7 @@ def main() -> int:
     record = {
         "schema_version": 1,
         "profile": args.profile,
-        "source_engine": "owned-tree-sitter-static-graph",
+        "source_engine": "owned-tree-sitter-static-and-evolutionary-analysis",
         "workspace_revision": revision,
         "workspace_dirty": dirty,
         "host": metadata["host"],

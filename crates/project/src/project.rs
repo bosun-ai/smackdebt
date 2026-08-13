@@ -10,17 +10,18 @@ use std::sync::{Arc, Mutex, mpsc};
 use rayon::prelude::*;
 use smackdebt_analysis::{
     ArchitectureFinding, ArchitectureFindingId, ArchitectureFindingKind, ArchitectureGraph,
-    ArchitectureReportFacts, Comparison, ComparisonId, Coverage, DependencyCoverage,
+    ArchitectureReportFacts, Comparison, ComparisonId, ContributorId, Coverage, DependencyCoverage,
     DependencyEdge, DependencyEdgeId, DependencySyntax, DependencySyntaxState, Diagnostic,
-    DiagnosticId, DiagnosticKind, ExternalDependency, FileActivity, FileAnalysis, FileId,
-    FileRecord, Finding, FindingId, HealthAssessment, HealthCounts, HealthPolicy, Language,
-    PackageEdge, PackageEdgeId, PackageGraphMeasurement, PackageId, ParseStatus, Rating, Report,
-    ReportBuilder as AnalysisReportBuilder, ReportMode, ResolutionDiagnostic, ResolutionIssueKind,
-    Scope, ScopeId, ScopeKind, compare_architecture, compare_units, cycle_witness,
-    dependency_degree, strongly_connected_components,
+    DiagnosticId, DiagnosticKind, EvolutionAccumulator, ExternalDependency, FileActivity,
+    FileAnalysis, FileId, FileRecord, Finding, FindingId, HealthAssessment, HealthCounts,
+    HealthPolicy, HistoryAvailability, HistoryChangeFact, HistoryCommitFact, HistoryCoverage,
+    Language, PackageEdge, PackageEdgeId, PackageGraphMeasurement, PackageId, ParseStatus, Rating,
+    Report, ReportBuilder as AnalysisReportBuilder, ReportMode, ResolutionDiagnostic,
+    ResolutionIssueKind, Scope, ScopeId, ScopeKind, compare_architecture, compare_units,
+    cycle_witness, dependency_degree, strongly_connected_components,
 };
 use smackdebt_discovery::{DiscoveredFile, Inventory};
-use smackdebt_git::{Change, GitRepository};
+use smackdebt_git::{Change, ContributorIdentity, GitRepository};
 use smackdebt_languages::{AnalysisError as LanguageError, Analyzer};
 
 use crate::requests::WorkStats;
@@ -49,21 +50,33 @@ pub(super) fn analyze_codebase(request: &CodebaseRequest) -> Result<ProjectRepor
         &source_reads,
     )?;
 
-    let (activity, _git_processes, history_error) =
-        load_activity(&selection.inventory_root, request.history_days);
+    let history_files = candidates
+        .iter()
+        .enumerate()
+        .map(|(index, file)| {
+            (
+                file.path().as_path().to_path_buf(),
+                FileId::from_index(index),
+                file.package(),
+            )
+        })
+        .collect::<Vec<_>>();
+    let history = load_evolution(
+        &selection.inventory_root,
+        request.history_days,
+        &history_files,
+    );
     let mut builder = CodebaseReportBuilder::new(
         ReportMode::Codebase,
         selection.label,
         &inventory,
         &candidates,
-        &activity,
+        &history.activity,
         aliases,
+        history.evolution,
     );
-    if let Some(message) = history_error {
-        builder.add_general_diagnostic(
-            DiagnosticKind::Other,
-            format!("Git history unavailable: {message}"),
-        );
+    if let Some(message) = history.diagnostic {
+        builder.add_general_diagnostic(DiagnosticKind::Other, message);
     }
     for (file_index, analysis) in analyses.into_iter().enumerate() {
         builder.add_analysis(file_index, analysis);
@@ -94,7 +107,7 @@ pub(super) fn analyze_codebase(request: &CodebaseRequest) -> Result<ProjectRepor
             inventory_walks: 1,
             inventory_visits: _inventory_visits,
             source_reads: source_reads.load(Ordering::Relaxed),
-            git_processes: _git_processes,
+            git_processes: history.processes,
         },
     })
 }
@@ -375,6 +388,27 @@ pub(super) fn analyze_diff(request: &DiffRequest) -> Result<ProjectReport, Proje
         .map(|finding| finding.id())
         .collect();
     let architecture_findings_for_links = current_architecture.findings.clone();
+    let history_files = builder
+        .files()
+        .iter()
+        .filter_map(|file| {
+            file.package()
+                .map(|package| (PathBuf::from(file.path()), file.id(), package))
+        })
+        .collect::<Vec<_>>();
+    let history = load_evolution(repository.root(), request.history_days, &history_files);
+    let history_diagnostic = history.diagnostic.clone();
+    let current_package_edges = current_architecture.package_edges.clone();
+    let before_package_edges = before_architecture.package_edges.clone();
+    let evolution = history.evolution.accumulator.finish(
+        history.evolution.coverage,
+        builder.files().len(),
+        package_roots.len(),
+        &current_package_edges,
+        Some(&before_package_edges),
+    );
+    let evolutionary_findings = evolution.findings().to_vec();
+    let evolutionary_comparisons = evolution.comparisons().to_vec();
     builder.set_architecture(ArchitectureReportFacts::new(
         ArchitectureGraph::new(
             current_architecture.coverage,
@@ -387,6 +421,31 @@ pub(super) fn analyze_diff(request: &DiffRequest) -> Result<ProjectReport, Proje
         current_architecture.findings,
         architecture_comparisons,
     ));
+    builder.set_evolution(evolution);
+    if let Some(message) = history_diagnostic {
+        let id = DiagnosticId::from_index(builder.diagnostic_count());
+        builder.add_diagnostic(Diagnostic::new(id, None, DiagnosticKind::Other, message, 0));
+    }
+    for finding in evolutionary_findings {
+        builder.link_evolutionary_finding(root, finding.id());
+        let pair = finding.coupling();
+        builder
+            .link_evolutionary_finding(ScopeId::from_index(1 + pair.left().index()), finding.id());
+        builder
+            .link_evolutionary_finding(ScopeId::from_index(1 + pair.right().index()), finding.id());
+    }
+    for comparison in evolutionary_comparisons {
+        builder.link_evolutionary_comparison(root, comparison.id());
+        let pair = comparison.coupling();
+        builder.link_evolutionary_comparison(
+            ScopeId::from_index(1 + pair.left().index()),
+            comparison.id(),
+        );
+        builder.link_evolutionary_comparison(
+            ScopeId::from_index(1 + pair.right().index()),
+            comparison.id(),
+        );
+    }
     for id in architecture_comparison_ids {
         builder.link_architecture_comparison(root, id);
         let comparison = &architecture_comparisons_for_links[id.index()];
@@ -862,33 +921,184 @@ fn analyze_bytes(
     analyzer.analyze(path, source)
 }
 
-fn load_activity(
+struct EvolutionInput {
+    accumulator: EvolutionAccumulator,
+    coverage: HistoryCoverage,
+}
+
+struct LoadedEvolution {
+    evolution: EvolutionInput,
+    activity: HashMap<PathBuf, u32>,
+    processes: usize,
+    diagnostic: Option<String>,
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+enum HistoryAlias {
+    Resolved(FileId, PackageId),
+    Unusable,
+}
+
+fn load_evolution(
     inventory_root: &Path,
     history_days: u32,
-) -> (HashMap<PathBuf, u32>, usize, Option<String>) {
+    files: &[(PathBuf, FileId, PackageId)],
+) -> LoadedEvolution {
     let Ok(repository) = GitRepository::discover(inventory_root) else {
-        return (HashMap::new(), 0, None);
+        return LoadedEvolution {
+            evolution: EvolutionInput {
+                accumulator: EvolutionAccumulator::default(),
+                coverage: HistoryCoverage::unavailable("not a Git repository"),
+            },
+            activity: HashMap::new(),
+            processes: 0,
+            diagnostic: Some("Git history unavailable: not a Git repository".to_owned()),
+        };
     };
     let relative_root = inventory_root
         .strip_prefix(repository.root())
         .unwrap_or(Path::new(""));
-    let history = repository.history(history_days);
+    let mut aliases: HashMap<PathBuf, HistoryAlias> = files
+        .iter()
+        .map(|(path, file, package)| (path.clone(), HistoryAlias::Resolved(*file, *package)))
+        .collect();
+    let mut contributors = HashMap::<ContributorIdentity, ContributorId>::new();
+    let mut accumulator = EvolutionAccumulator::default();
+    let mut activity = HashMap::<PathBuf, u32>::new();
+    let mut textual_changes = 0u32;
+    let mut uncounted_changes = 0u32;
+    let mut excluded_paths = 0u32;
+    let mut rename_gaps = 0u32;
+    let mut streamed_commits = 0u32;
+    let cutoff = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map_or(i64::MIN, |duration| duration.as_secs() as i64)
+        .saturating_sub(i64::from(history_days) * 86_400);
+    let history = repository.stream_history(|commit| {
+        streamed_commits += 1;
+        let contributes_activity = commit.timestamp() >= cutoff;
+        let next_contributor = ContributorId::from_index(contributors.len());
+        let contributor = *contributors
+            .entry(commit.contributor().clone())
+            .or_insert(next_contributor);
+        let mut changes = Vec::new();
+        for change in commit.changes() {
+            let path = change
+                .path()
+                .strip_prefix(relative_root)
+                .unwrap_or(change.path());
+            let identity = aliases.get(path).copied();
+            let Some(HistoryAlias::Resolved(file, package)) = identity else {
+                excluded_paths += 1;
+                continue;
+            };
+            if let Some(previous) = change.previous_path() {
+                let previous = previous
+                    .strip_prefix(relative_root)
+                    .unwrap_or(previous)
+                    .to_path_buf();
+                match aliases.get(&previous) {
+                    Some(HistoryAlias::Resolved(existing_file, existing_package))
+                        if (*existing_file, *existing_package) != (file, package) =>
+                    {
+                        rename_gaps += 1;
+                        aliases.insert(previous, HistoryAlias::Unusable);
+                    }
+                    Some(HistoryAlias::Unusable) => {}
+                    _ => {
+                        aliases.insert(previous, HistoryAlias::Resolved(file, package));
+                    }
+                }
+            }
+            if change.added_lines().is_some() && change.deleted_lines().is_some() {
+                textual_changes += 1;
+            } else {
+                uncounted_changes += 1;
+            }
+            if contributes_activity {
+                *activity.entry(files[file.index()].0.clone()).or_default() += 1;
+            }
+            changes.push(HistoryChangeFact::new(
+                file,
+                package,
+                change.added_lines(),
+                change.deleted_lines(),
+            ));
+        }
+        if !changes.is_empty() {
+            accumulator.accept(HistoryCommitFact::new(contributor, changes));
+        }
+        Ok(())
+    });
     let process_count = repository.git_processes();
     match history {
-        Ok(values) => {
-            let activity = values
-                .into_iter()
-                .filter_map(|value| {
-                    value
-                        .path()
-                        .strip_prefix(relative_root)
-                        .ok()
-                        .map(|path| (path.to_path_buf(), value.touches()))
-                })
-                .collect();
-            (activity, process_count, None)
+        Ok(summary) => LoadedEvolution {
+            evolution: EvolutionInput {
+                accumulator,
+                coverage: HistoryCoverage::new(
+                    if summary.is_shallow() {
+                        HistoryAvailability::Incomplete
+                    } else {
+                        HistoryAvailability::Complete
+                    },
+                    summary.revision().map(str::to_owned),
+                    summary.commits(),
+                    summary.newest_timestamp(),
+                    summary.oldest_timestamp(),
+                    textual_changes,
+                    uncounted_changes,
+                    excluded_paths,
+                    rename_gaps,
+                    summary
+                        .is_shallow()
+                        .then(|| "repository history is shallow".to_owned()),
+                ),
+            },
+            activity,
+            processes: process_count,
+            diagnostic: None,
+        },
+        Err(error) => {
+            let reason = error.to_string();
+            let availability = failed_history_availability(&error, streamed_commits);
+            let incomplete = availability == HistoryAvailability::Incomplete;
+            let label = if incomplete {
+                "incomplete"
+            } else {
+                "unavailable"
+            };
+            LoadedEvolution {
+                evolution: EvolutionInput {
+                    accumulator,
+                    coverage: HistoryCoverage::new(
+                        availability,
+                        None,
+                        streamed_commits,
+                        None,
+                        None,
+                        textual_changes,
+                        uncounted_changes,
+                        excluded_paths,
+                        rename_gaps,
+                        Some(reason.clone()),
+                    ),
+                },
+                activity,
+                processes: process_count,
+                diagnostic: Some(format!("Git history {label}: {reason}")),
+            }
         }
-        Err(error) => (HashMap::new(), process_count, Some(error.to_string())),
+    }
+}
+
+fn failed_history_availability(
+    error: &smackdebt_git::GitError,
+    streamed_commits: u32,
+) -> HistoryAvailability {
+    if matches!(error, smackdebt_git::GitError::InvalidOutput(_)) || streamed_commits > 0 {
+        HistoryAvailability::Incomplete
+    } else {
+        HistoryAvailability::Unavailable
     }
 }
 
@@ -998,6 +1208,7 @@ struct CodebaseReportBuilder<'a> {
     dependencies: Vec<(FileId, PathBuf, Vec<DependencySyntax>)>,
     aliases: Vec<ResolutionAlias>,
     package_roots: Vec<PathBuf>,
+    evolution: EvolutionInput,
 }
 
 impl<'a> CodebaseReportBuilder<'a> {
@@ -1008,6 +1219,7 @@ impl<'a> CodebaseReportBuilder<'a> {
         candidates: &[&DiscoveredFile],
         activity: &'a HashMap<PathBuf, u32>,
         aliases: Vec<ResolutionAlias>,
+        evolution: EvolutionInput,
     ) -> Self {
         let package_roots: Vec<PathBuf> = inventory
             .packages()
@@ -1051,6 +1263,7 @@ impl<'a> CodebaseReportBuilder<'a> {
             dependencies: Vec::with_capacity(candidates.len()),
             aliases,
             package_roots: included_roots,
+            evolution,
         }
     }
 
@@ -1166,6 +1379,15 @@ impl<'a> CodebaseReportBuilder<'a> {
             &self.package_roots,
         );
         let architecture_findings_for_links = architecture.findings.clone();
+        let package_edges = architecture.package_edges.clone();
+        let evolution = self.evolution.accumulator.finish(
+            self.evolution.coverage,
+            self.files.len(),
+            self.package_roots.len(),
+            &package_edges,
+            None,
+        );
+        let evolutionary_findings = evolution.findings().to_vec();
         let root = ScopeId::from_index(0);
         let mut builder = AnalysisReportBuilder::with_capacity(
             self.mode,
@@ -1200,6 +1422,19 @@ impl<'a> CodebaseReportBuilder<'a> {
             architecture.findings,
             Vec::new(),
         ));
+        builder.set_evolution(evolution);
+        for finding in evolutionary_findings {
+            builder.link_evolutionary_finding(root, finding.id());
+            let pair = finding.coupling();
+            builder.link_evolutionary_finding(
+                ScopeId::from_index(1 + pair.left().index()),
+                finding.id(),
+            );
+            builder.link_evolutionary_finding(
+                ScopeId::from_index(1 + pair.right().index()),
+                finding.id(),
+            );
+        }
         for (index, finding) in architecture.finding_links {
             builder.link_architecture_finding(index, finding);
         }
@@ -1846,6 +2081,63 @@ mod tests {
             ExecutionWidth::fixed(1),
             Some(ExecutionWidth::Fixed(_))
         ));
+    }
+
+    #[test]
+    fn malformed_or_interrupted_history_is_incomplete_but_empty_history_is_unavailable() {
+        assert_eq!(
+            failed_history_availability(
+                &smackdebt_git::GitError::InvalidOutput("malformed record".to_owned()),
+                0,
+            ),
+            HistoryAvailability::Incomplete
+        );
+        assert_eq!(
+            failed_history_availability(&smackdebt_git::GitError::EmptyHistory, 0),
+            HistoryAvailability::Unavailable
+        );
+        assert_eq!(
+            failed_history_availability(&smackdebt_git::GitError::EmptyHistory, 1),
+            HistoryAvailability::Incomplete
+        );
+    }
+
+    #[test]
+    fn reused_rename_path_excludes_older_history_from_both_current_files() {
+        let root = tempfile::tempdir().unwrap();
+        git(root.path(), ["init", "-q"]);
+        git(
+            root.path(),
+            ["config", "user.email", "test@example.invalid"],
+        );
+        git(root.path(), ["config", "user.name", "Smackdebt Test"]);
+        fs::write(root.path().join("old.js"), "export const value = 1;\n").unwrap();
+        git(root.path(), ["add", "-A"]);
+        git(root.path(), ["commit", "-qm", "initial old path"]);
+        fs::rename(root.path().join("old.js"), root.path().join("new.js")).unwrap();
+        git(root.path(), ["add", "-A"]);
+        git(root.path(), ["commit", "-qm", "rename old to new"]);
+        fs::write(root.path().join("old.js"), "export const reused = 2;\n").unwrap();
+        git(root.path(), ["add", "-A"]);
+        git(root.path(), ["commit", "-qm", "reuse old path"]);
+
+        let result =
+            analyze_codebase(&CodebaseRequest::new(root.path()).with_history_days(36_500)).unwrap();
+        let report = result.report();
+        let touches = report
+            .file_history()
+            .iter()
+            .map(|history| {
+                (
+                    report.files()[history.file().index()].path(),
+                    history.touches(),
+                )
+            })
+            .collect::<HashMap<_, _>>();
+        assert_eq!(touches["new.js"], 1);
+        assert_eq!(touches["old.js"], 1);
+        assert_eq!(report.history_coverage().rename_gaps(), 1);
+        assert_eq!(report.history_coverage().excluded_paths(), 1);
     }
 
     #[test]

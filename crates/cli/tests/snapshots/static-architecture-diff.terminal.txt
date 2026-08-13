@@ -17,4 +17,14 @@ ARCHITECTURE CHANGE
 ▲ WORSE  package cycle introduced  app  core  witness  app  core  app
 ● CHANGED  edge added  core  app
 
+EVOLUTION CONTEXT
+1 commits · complete local history
+0 uncounted · 3 excluded · 0 rename gaps
+  app · 1 touches · +22 -0 · 1 contributors · 100% top share
+  core · 1 touches · +3 -0 · 1 contributors · 100% top share
+  native · 1 touches · +8 -0 · 1 contributors · 100% top share
+    file app/choice.js · 1 touches · +5 -0
+    file app/choice.ts · 1 touches · +3 -0
+    file app/helper.js · 1 touches · +5 -0
+
 No changed units.

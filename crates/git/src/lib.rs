@@ -2,4 +2,7 @@
 
 mod repository;
 
-pub use repository::{Change, FileActivity, GitError, GitRepository, ObjectReader};
+pub use repository::{
+    Change, ContributorIdentity, GitError, GitRepository, HistoryChange, HistoryCommit,
+    HistoryStreamSummary, ObjectReader,
+};

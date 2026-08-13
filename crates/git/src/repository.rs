@@ -5,7 +5,6 @@
 //! All commands are passed as argument vectors to `git`; refs and paths are
 //! never interpolated into a shell command.
 
-use std::collections::HashMap;
 use std::ffi::OsString;
 use std::fmt;
 use std::io::{self, BufRead, BufReader, Read, Write};
@@ -21,6 +20,8 @@ use std::sync::{
 pub enum GitError {
     /// The path is not inside a Git worktree.
     NotRepository(PathBuf),
+    /// The repository has no commit history.
+    EmptyHistory,
     /// A ref or object name contained an unsafe argument.
     UnsafeArgument(String),
     /// Git returned a non-zero status.
@@ -46,6 +47,7 @@ impl fmt::Display for GitError {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
             Self::NotRepository(path) => write!(f, "not a Git repository: {}", path.display()),
+            Self::EmptyHistory => write!(f, "repository has no commits"),
             Self::UnsafeArgument(value) => write!(f, "unsafe Git argument: {value:?}"),
             Self::Command {
                 args,
@@ -172,20 +174,81 @@ struct WorktreeStatus {
     pub entries: Vec<ChangedPath>,
 }
 
-/// Aggregated activity for a path. `touches` counts distinct commits.
+/// A normalized contributor key that is intentionally opaque outside Git
+/// history aggregation.
+#[derive(Debug, Clone, Hash, PartialEq, Eq)]
+pub struct ContributorIdentity(String);
+
+/// One file change in a non-merge commit.
 #[derive(Debug, Clone, PartialEq, Eq)]
-pub struct FileActivity {
+pub struct HistoryChange {
     path: PathBuf,
-    touches: u32,
+    previous_path: Option<PathBuf>,
+    added_lines: Option<u32>,
+    deleted_lines: Option<u32>,
 }
 
-impl FileActivity {
+impl HistoryChange {
     pub fn path(&self) -> &Path {
         &self.path
     }
+    pub fn previous_path(&self) -> Option<&Path> {
+        self.previous_path.as_deref()
+    }
+    pub const fn added_lines(&self) -> Option<u32> {
+        self.added_lines
+    }
+    pub const fn deleted_lines(&self) -> Option<u32> {
+        self.deleted_lines
+    }
+}
 
-    pub const fn touches(&self) -> u32 {
-        self.touches
+/// Compact facts for one commit. The callback receiving this value finishes
+/// before the next commit is parsed.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct HistoryCommit {
+    contributor: ContributorIdentity,
+    timestamp: i64,
+    changes: Vec<HistoryChange>,
+}
+
+impl HistoryCommit {
+    pub fn contributor(&self) -> &ContributorIdentity {
+        &self.contributor
+    }
+    pub const fn timestamp(&self) -> i64 {
+        self.timestamp
+    }
+    pub fn changes(&self) -> &[HistoryChange] {
+        &self.changes
+    }
+}
+
+/// Coverage facts collected while streaming history.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct HistoryStreamSummary {
+    revision: Option<String>,
+    commits: u32,
+    newest_timestamp: Option<i64>,
+    oldest_timestamp: Option<i64>,
+    shallow: bool,
+}
+
+impl HistoryStreamSummary {
+    pub fn revision(&self) -> Option<&str> {
+        self.revision.as_deref()
+    }
+    pub const fn commits(&self) -> u32 {
+        self.commits
+    }
+    pub const fn newest_timestamp(&self) -> Option<i64> {
+        self.newest_timestamp
+    }
+    pub const fn oldest_timestamp(&self) -> Option<i64> {
+        self.oldest_timestamp
+    }
+    pub const fn is_shallow(&self) -> bool {
+        self.shallow
     }
 }
 
@@ -351,18 +414,20 @@ impl GitRepository {
             .collect())
     }
 
-    /// Stream non-merge history through one Git process and aggregate touches.
-    /// The output is consumed incrementally, so history size does not require
-    /// one giant Git output allocation.
-    pub fn history(&self, days: u32) -> Result<Vec<FileActivity>, GitError> {
+    /// Stream non-merge history through one Git process. Only one commit is
+    /// retained by this adapter at a time.
+    pub fn stream_history(
+        &self,
+        mut accept: impl FnMut(HistoryCommit) -> Result<(), GitError>,
+    ) -> Result<HistoryStreamSummary, GitError> {
         let args = vec![
             OsString::from("log"),
             OsString::from("--no-merges"),
-            OsString::from("--name-status"),
-            OsString::from("--format=%H%x00"),
+            OsString::from("--numstat"),
+            OsString::from("--format=%x1e%H%x00%aN%x00%aE%x00%at%x00"),
             OsString::from("-z"),
             OsString::from("--find-renames"),
-            OsString::from(format!("--since={days} days ago")),
+            OsString::from("--use-mailmap"),
             OsString::from("--"),
         ];
         let mut command = self.command(args.clone());
@@ -381,8 +446,9 @@ impl GitRepository {
             .ok_or_else(|| GitError::InvalidOutput("history stderr was not piped".into()))?;
         let mut reader = ZeroReader::new(stdout);
         let mut stderr_reader = BufReader::new(stderr);
+        let shallow = self.root.join(".git/shallow").is_file();
         let mut history = HistoryParser::default();
-        let read_result = reader.read_tokens(|token| history.accept(token));
+        let read_result = reader.read_tokens(|token| history.accept(token, &mut accept));
         let status = if read_result.is_err() {
             let _ = child.kill();
             child.wait()?
@@ -394,13 +460,18 @@ impl GitRepository {
         if !status.success() {
             let mut message = String::new();
             stderr_reader.read_to_string(&mut message)?;
+            if message.contains("does not have any commits")
+                || message.contains("does not have any commits yet")
+            {
+                return Err(GitError::EmptyHistory);
+            }
             return Err(GitError::Command {
                 args,
                 status: status.code(),
                 stderr: message,
             });
         }
-        history.finish()
+        history.finish(&mut accept, shallow)
     }
 
     /// Start one `git cat-file --batch` process. Keep this reader alive across
@@ -428,7 +499,10 @@ impl GitRepository {
 
     fn command(&self, args: Vec<OsString>) -> Command {
         let mut command = Command::new("git");
-        command.args(args).current_dir(&self.root);
+        command
+            .args(args)
+            .current_dir(&self.root)
+            .env("LC_ALL", "C");
         command
     }
 }
@@ -553,84 +627,164 @@ fn parse_name_status_z(bytes: &[u8]) -> Result<Vec<ChangedPath>, GitError> {
 
 #[derive(Default)]
 struct HistoryParser {
-    commit_seen: bool,
-    pending: Option<PendingHistory>,
-    counts: HashMap<PathBuf, u32>,
+    header: Vec<Vec<u8>>,
+    current: Option<PendingCommit>,
+    pending_rename: Option<PendingRename>,
+    revision: Option<String>,
+    commits: u32,
+    newest_timestamp: Option<i64>,
+    oldest_timestamp: Option<i64>,
 }
 
-struct PendingHistory {
-    status: ChangeStatus,
+struct PendingCommit {
+    contributor: ContributorIdentity,
+    timestamp: i64,
+    changes: Vec<HistoryChange>,
+}
+
+struct PendingRename {
+    added_lines: Option<u32>,
+    deleted_lines: Option<u32>,
     old_path: Option<PathBuf>,
 }
 
 impl HistoryParser {
-    fn accept(&mut self, raw: &[u8]) -> Result<(), GitError> {
-        // Git emits an extra empty record and a newline around the explicit
-        // NUL format marker. Those delimiters are not paths or statuses.
+    fn accept(
+        &mut self,
+        raw: &[u8],
+        accept: &mut impl FnMut(HistoryCommit) -> Result<(), GitError>,
+    ) -> Result<(), GitError> {
+        if raw.starts_with(&[0x1e]) {
+            self.flush(accept)?;
+            if self.pending_rename.is_some() {
+                return Err(GitError::InvalidOutput("rename record lacks a path".into()));
+            }
+            self.header.clear();
+            self.header.push(raw[1..].to_vec());
+            return Ok(());
+        }
+        if !self.header.is_empty() && self.header.len() < 4 {
+            self.header.push(raw.to_vec());
+            if self.header.len() == 4 {
+                let revision = String::from_utf8(self.header[0].clone())?;
+                if revision.len() != 40 || !revision.bytes().all(|byte| byte.is_ascii_hexdigit()) {
+                    return Err(GitError::InvalidOutput(
+                        "history commit id is malformed".into(),
+                    ));
+                }
+                let timestamp = String::from_utf8(self.header[3].clone())?
+                    .parse::<i64>()
+                    .map_err(|_| {
+                        GitError::InvalidOutput("history timestamp is malformed".into())
+                    })?;
+                let mut identity = self.header[1].clone();
+                identity.push(0);
+                identity.extend_from_slice(&self.header[2]);
+                if self.revision.is_none() {
+                    self.revision = Some(revision);
+                    self.newest_timestamp = Some(timestamp);
+                }
+                self.oldest_timestamp = Some(timestamp);
+                self.current = Some(PendingCommit {
+                    contributor: ContributorIdentity(String::from_utf8(identity)?),
+                    timestamp,
+                    changes: Vec::new(),
+                });
+            }
+            return Ok(());
+        }
         let token = raw.strip_prefix(b"\n").unwrap_or(raw);
         if token.is_empty() {
             return Ok(());
         }
-        if token.len() == 40 && token.iter().all(u8::is_ascii_hexdigit) {
-            if self.pending.is_some() {
-                return Err(GitError::InvalidOutput(
-                    "history record lacks a path".into(),
-                ));
-            }
-            self.commit_seen = true;
-            return Ok(());
-        }
-
-        if let Some(pending) = &mut self.pending {
+        let current = self.current.as_mut().ok_or_else(|| {
+            GitError::InvalidOutput("history change appeared before commit header".into())
+        })?;
+        if let Some(mut rename) = self.pending_rename.take() {
             let path = PathBuf::from(String::from_utf8(token.to_vec())?);
-            if matches!(pending.status, ChangeStatus::Renamed | ChangeStatus::Copied)
-                && pending.old_path.is_none()
-            {
-                pending.old_path = Some(path);
-                return Ok(());
+            if rename.old_path.is_none() {
+                rename.old_path = Some(path);
+                self.pending_rename = Some(rename);
+            } else {
+                current.changes.push(HistoryChange {
+                    path,
+                    previous_path: rename.old_path,
+                    added_lines: rename.added_lines,
+                    deleted_lines: rename.deleted_lines,
+                });
             }
-            if self.commit_seen {
-                *self.counts.entry(path).or_default() += 1;
-            }
-            self.pending = None;
             return Ok(());
         }
-
-        let tab = token.iter().position(|byte| *byte == b'\t');
-        let status_token = tab.map_or(token, |index| &token[..index]);
-        let code = status_token
-            .first()
-            .copied()
-            .ok_or_else(|| GitError::InvalidOutput("empty history status".into()))?;
-        let status = ChangeStatus::from_code(code, false)?;
-        self.pending = Some(PendingHistory {
-            status,
-            old_path: None,
-        });
-        if let Some(index) = tab {
-            let path = PathBuf::from(String::from_utf8(token[index + 1..].to_vec())?);
-            if self.commit_seen {
-                *self.counts.entry(path).or_default() += 1;
-            }
-            self.pending = None;
+        let mut fields = token.splitn(3, |byte| *byte == b'\t');
+        let added = parse_numstat_count(fields.next())?;
+        let deleted = parse_numstat_count(fields.next())?;
+        let path = fields
+            .next()
+            .ok_or_else(|| GitError::InvalidOutput("history numstat lacks a path".into()))?;
+        if path.is_empty() {
+            self.pending_rename = Some(PendingRename {
+                added_lines: added,
+                deleted_lines: deleted,
+                old_path: None,
+            });
+        } else {
+            current.changes.push(HistoryChange {
+                path: PathBuf::from(String::from_utf8(path.to_vec())?),
+                previous_path: None,
+                added_lines: added,
+                deleted_lines: deleted,
+            });
         }
         Ok(())
     }
 
-    fn finish(self) -> Result<Vec<FileActivity>, GitError> {
-        if self.pending.is_some() {
-            return Err(GitError::InvalidOutput(
-                "history record lacks a path".into(),
-            ));
+    fn flush(
+        &mut self,
+        accept: &mut impl FnMut(HistoryCommit) -> Result<(), GitError>,
+    ) -> Result<(), GitError> {
+        if let Some(rename) = self.pending_rename.take() {
+            return Err(GitError::InvalidOutput(if rename.old_path.is_some() {
+                "rename record lacks new path".into()
+            } else {
+                "rename record lacks old path".into()
+            }));
         }
-        let mut values: Vec<_> = self
-            .counts
-            .into_iter()
-            .map(|(path, touches)| FileActivity { path, touches })
-            .collect();
-        values.sort_by(|left, right| left.path.cmp(&right.path));
-        Ok(values)
+        if let Some(commit) = self.current.take() {
+            self.commits += 1;
+            accept(HistoryCommit {
+                contributor: commit.contributor,
+                timestamp: commit.timestamp,
+                changes: commit.changes,
+            })?;
+        }
+        Ok(())
     }
+
+    fn finish(
+        mut self,
+        accept: &mut impl FnMut(HistoryCommit) -> Result<(), GitError>,
+        shallow: bool,
+    ) -> Result<HistoryStreamSummary, GitError> {
+        self.flush(accept)?;
+        Ok(HistoryStreamSummary {
+            revision: self.revision,
+            commits: self.commits,
+            newest_timestamp: self.newest_timestamp,
+            oldest_timestamp: self.oldest_timestamp,
+            shallow,
+        })
+    }
+}
+
+fn parse_numstat_count(raw: Option<&[u8]>) -> Result<Option<u32>, GitError> {
+    let raw = raw.ok_or_else(|| GitError::InvalidOutput("history numstat is incomplete".into()))?;
+    if raw == b"-" {
+        return Ok(None);
+    }
+    String::from_utf8(raw.to_vec())?
+        .parse()
+        .map(Some)
+        .map_err(|_| GitError::InvalidOutput("history line count is malformed".into()))
 }
 
 /// A single long-lived `git cat-file --batch` reader.
@@ -891,6 +1045,18 @@ mod tests {
     }
 
     #[test]
+    fn empty_repository_has_unavailable_history_from_the_history_process() {
+        let repo = Repo::new();
+        let adapter = GitRepository::discover(&repo.path).unwrap();
+        let before = adapter.git_processes();
+        assert!(matches!(
+            adapter.stream_history(|_| Ok(())),
+            Err(GitError::EmptyHistory)
+        ));
+        assert_eq!(adapter.git_processes() - before, 1);
+    }
+
+    #[test]
     fn status_includes_untracked_and_rename() {
         let repo = Repo::new();
         repo.commit("old.rs", "one", "initial");
@@ -935,21 +1101,117 @@ mod tests {
     }
 
     #[test]
-    fn history_uses_one_process_and_counts_touches() {
+    fn history_uses_one_process_and_streams_churn() {
         let repo = Repo::new();
         repo.commit("a.rs", "one", "one");
-        repo.commit("a.rs", "two", "two");
+        repo.commit("a.rs", "two\nthree", "two");
         let adapter = GitRepository::discover(&repo.path).unwrap();
         let before = adapter.git_processes();
-        let activity = adapter.history(3650).unwrap();
+        let mut commits = Vec::new();
+        let summary = adapter
+            .stream_history(|commit| {
+                commits.push(commit);
+                Ok(())
+            })
+            .unwrap();
         assert_eq!(adapter.git_processes() - before, 1);
-        assert_eq!(
-            activity
-                .iter()
-                .find(|item| item.path == Path::new("a.rs"))
-                .map(|item| item.touches),
-            Some(2)
-        );
+        assert_eq!(summary.commits(), 2);
+        assert_eq!(commits.len(), 2);
+        assert_eq!(commits[0].changes()[0].path(), Path::new("a.rs"));
+        assert_eq!(commits[0].changes()[0].added_lines(), Some(2));
+        assert_eq!(commits[0].changes()[0].deleted_lines(), Some(1));
+    }
+
+    #[test]
+    fn history_follows_renames_and_keeps_binary_churn_unknown() {
+        let repo = Repo::new();
+        repo.commit("old.rs", "one\n", "initial");
+        fs::rename(repo.path.join("old.rs"), repo.path.join("new.rs")).unwrap();
+        git(&repo.path, ["add", "-A"]);
+        git(&repo.path, ["commit", "-qm", "rename"]);
+        repo.commit("image.bin", "\0\u{1}\u{2}", "binary");
+        let adapter = GitRepository::discover(&repo.path).unwrap();
+        let mut commits = Vec::new();
+        adapter
+            .stream_history(|commit| {
+                commits.push(commit);
+                Ok(())
+            })
+            .unwrap();
+        let rename = commits
+            .iter()
+            .flat_map(|commit| commit.changes())
+            .find(|change| change.path() == Path::new("new.rs"))
+            .unwrap();
+        assert_eq!(rename.previous_path(), Some(Path::new("old.rs")));
+        let binary = commits
+            .iter()
+            .flat_map(|commit| commit.changes())
+            .find(|change| change.path() == Path::new("image.bin"))
+            .unwrap();
+        assert_eq!(binary.added_lines(), None);
+        assert_eq!(binary.deleted_lines(), None);
+    }
+
+    #[test]
+    fn malformed_history_record_is_rejected() {
+        let mut parser = HistoryParser::default();
+        let mut accepted = |_| Ok(());
+        parser
+            .accept(
+                b"\x1e0123456789012345678901234567890123456789",
+                &mut accepted,
+            )
+            .unwrap();
+        parser.accept(b"Name", &mut accepted).unwrap();
+        parser
+            .accept(b"address@example.test", &mut accepted)
+            .unwrap();
+        parser.accept(b"123", &mut accepted).unwrap();
+        assert!(matches!(
+            parser.accept(b"not-a-numstat-record", &mut accepted),
+            Err(GitError::InvalidOutput(_))
+        ));
+    }
+
+    #[test]
+    fn malformed_history_after_valid_commit_preserves_accepted_prefix() {
+        let mut parser = HistoryParser::default();
+        let mut commits = Vec::new();
+        let mut accepted = |commit| {
+            commits.push(commit);
+            Ok(())
+        };
+        parser
+            .accept(
+                b"\x1e0123456789012345678901234567890123456789",
+                &mut accepted,
+            )
+            .unwrap();
+        parser.accept(b"Name", &mut accepted).unwrap();
+        parser
+            .accept(b"address@example.test", &mut accepted)
+            .unwrap();
+        parser.accept(b"123", &mut accepted).unwrap();
+        parser.accept(b"2\t1\tfirst.rs", &mut accepted).unwrap();
+        parser
+            .accept(
+                b"\x1e1123456789012345678901234567890123456789",
+                &mut accepted,
+            )
+            .unwrap();
+        parser.accept(b"Name", &mut accepted).unwrap();
+        parser
+            .accept(b"address@example.test", &mut accepted)
+            .unwrap();
+        parser.accept(b"122", &mut accepted).unwrap();
+
+        assert!(matches!(
+            parser.accept(b"not-a-numstat-record", &mut accepted),
+            Err(GitError::InvalidOutput(_))
+        ));
+        assert_eq!(commits.len(), 1);
+        assert_eq!(commits[0].changes()[0].path(), Path::new("first.rs"));
     }
 
     #[test]

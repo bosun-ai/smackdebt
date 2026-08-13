@@ -6,6 +6,11 @@ use crate::{
     ArchitectureReportFacts, DependencyCoverage, DependencyEdge, ExternalDependency, PackageEdge,
     PackageGraphMeasurement, ResolutionDiagnostic,
 };
+use crate::{
+    ChangeCoupling, ContributorConcentration, EvolutionaryComparison, EvolutionaryComparisonId,
+    EvolutionaryFinding, EvolutionaryFindingId, EvolutionaryReportFacts, FileHistory,
+    HistoryCoverage, PackageHistory,
+};
 #[cfg(test)]
 use crate::{HealthPolicy, LocalUnitId, Rating, Signal, Thresholds, compare_units};
 
@@ -220,6 +225,8 @@ pub struct Scope {
     comparisons: Vec<ComparisonId>,
     architecture_findings: Vec<ArchitectureFindingId>,
     architecture_comparisons: Vec<ArchitectureComparisonId>,
+    evolutionary_findings: Vec<EvolutionaryFindingId>,
+    evolutionary_comparisons: Vec<EvolutionaryComparisonId>,
     coverage: Coverage,
     health: HealthCounts,
     diff: DiffCounts,
@@ -244,6 +251,8 @@ impl Scope {
             comparisons: Vec::new(),
             architecture_findings: Vec::new(),
             architecture_comparisons: Vec::new(),
+            evolutionary_findings: Vec::new(),
+            evolutionary_comparisons: Vec::new(),
             coverage: Coverage::default(),
             health: HealthCounts::default(),
             diff: DiffCounts::default(),
@@ -280,6 +289,12 @@ impl Scope {
     }
     pub fn architecture_comparisons(&self) -> &[ArchitectureComparisonId] {
         &self.architecture_comparisons
+    }
+    pub fn evolutionary_findings(&self) -> &[EvolutionaryFindingId] {
+        &self.evolutionary_findings
+    }
+    pub fn evolutionary_comparisons(&self) -> &[EvolutionaryComparisonId] {
+        &self.evolutionary_comparisons
     }
     pub const fn diff(&self) -> DiffCounts {
         self.diff
@@ -322,6 +337,16 @@ impl Scope {
     pub fn add_architecture_comparison(&mut self, comparison: ArchitectureComparisonId) {
         if !self.architecture_comparisons.contains(&comparison) {
             self.architecture_comparisons.push(comparison);
+        }
+    }
+    pub fn add_evolutionary_finding(&mut self, finding: EvolutionaryFindingId) {
+        if !self.evolutionary_findings.contains(&finding) {
+            self.evolutionary_findings.push(finding);
+        }
+    }
+    pub fn add_evolutionary_comparison(&mut self, comparison: EvolutionaryComparisonId) {
+        if !self.evolutionary_comparisons.contains(&comparison) {
+            self.evolutionary_comparisons.push(comparison);
         }
     }
     pub fn set_path(&mut self, path: PathId) {
@@ -501,6 +526,13 @@ pub struct Report {
     package_graph: Vec<PackageGraphMeasurement>,
     architecture_findings: Vec<ArchitectureFinding>,
     architecture_comparisons: Vec<ArchitectureComparison>,
+    history_coverage: HistoryCoverage,
+    file_history: Vec<FileHistory>,
+    package_history: Vec<PackageHistory>,
+    change_coupling: Vec<ChangeCoupling>,
+    contributor_concentration: Vec<ContributorConcentration>,
+    evolutionary_findings: Vec<EvolutionaryFinding>,
+    evolutionary_comparisons: Vec<EvolutionaryComparison>,
 }
 
 /// The source operation represented by a report.
@@ -570,6 +602,16 @@ impl ReportBuilder {
         self.report.architecture_comparisons = facts.comparisons;
     }
 
+    pub fn set_evolution(&mut self, facts: EvolutionaryReportFacts) {
+        self.report.history_coverage = facts.coverage;
+        self.report.file_history = facts.file_history;
+        self.report.package_history = facts.package_history;
+        self.report.change_coupling = facts.coupling;
+        self.report.contributor_concentration = facts.concentration;
+        self.report.evolutionary_findings = facts.findings;
+        self.report.evolutionary_comparisons = facts.comparisons;
+    }
+
     pub fn link_architecture_finding(&mut self, scope: ScopeId, finding: ArchitectureFindingId) {
         self.report.scopes[scope.index()].add_architecture_finding(finding);
     }
@@ -580,6 +622,18 @@ impl ReportBuilder {
         comparison: ArchitectureComparisonId,
     ) {
         self.report.scopes[scope.index()].add_architecture_comparison(comparison);
+    }
+
+    pub fn link_evolutionary_finding(&mut self, scope: ScopeId, finding: EvolutionaryFindingId) {
+        self.report.scopes[scope.index()].add_evolutionary_finding(finding);
+    }
+
+    pub fn link_evolutionary_comparison(
+        &mut self,
+        scope: ScopeId,
+        comparison: EvolutionaryComparisonId,
+    ) {
+        self.report.scopes[scope.index()].add_evolutionary_comparison(comparison);
     }
 
     pub fn link_file(&mut self, scope: ScopeId, file: FileId) {
@@ -635,6 +689,13 @@ impl Report {
             package_graph: Vec::new(),
             architecture_findings: Vec::new(),
             architecture_comparisons: Vec::new(),
+            history_coverage: HistoryCoverage::default(),
+            file_history: Vec::new(),
+            package_history: Vec::new(),
+            change_coupling: Vec::new(),
+            contributor_concentration: Vec::new(),
+            evolutionary_findings: Vec::new(),
+            evolutionary_comparisons: Vec::new(),
         }
     }
 
@@ -691,6 +752,27 @@ impl Report {
     }
     pub fn architecture_comparisons(&self) -> &[ArchitectureComparison] {
         &self.architecture_comparisons
+    }
+    pub const fn history_coverage(&self) -> &HistoryCoverage {
+        &self.history_coverage
+    }
+    pub fn file_history(&self) -> &[FileHistory] {
+        &self.file_history
+    }
+    pub fn package_history(&self) -> &[PackageHistory] {
+        &self.package_history
+    }
+    pub fn change_coupling(&self) -> &[ChangeCoupling] {
+        &self.change_coupling
+    }
+    pub fn contributor_concentration(&self) -> &[ContributorConcentration] {
+        &self.contributor_concentration
+    }
+    pub fn evolutionary_findings(&self) -> &[EvolutionaryFinding] {
+        &self.evolutionary_findings
+    }
+    pub fn evolutionary_comparisons(&self) -> &[EvolutionaryComparison] {
+        &self.evolutionary_comparisons
     }
     fn add_scope(&mut self, scope: Scope) -> ScopeId {
         let id = scope.id();
@@ -830,6 +912,14 @@ fn aggregate_scope(scopes: &mut [Scope], files: &[FileRecord], scope_id: ScopeId
         let comparison_ids = scopes[child_id.index()].architecture_comparisons.clone();
         for comparison_id in comparison_ids {
             scopes[index].add_architecture_comparison(comparison_id);
+        }
+        let finding_ids = scopes[child_id.index()].evolutionary_findings.clone();
+        for finding_id in finding_ids {
+            scopes[index].add_evolutionary_finding(finding_id);
+        }
+        let comparison_ids = scopes[child_id.index()].evolutionary_comparisons.clone();
+        for comparison_id in comparison_ids {
+            scopes[index].add_evolutionary_comparison(comparison_id);
         }
     }
     scopes[index].coverage = coverage;

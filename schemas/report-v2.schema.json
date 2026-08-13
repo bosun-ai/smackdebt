@@ -3,7 +3,7 @@
   "$id": "https://smackdebt.dev/schema/report-v2.json",
   "title": "Smackdebt report version 2",
   "type": "object",
-  "required": ["schema_version", "mode", "root", "selected_scope", "paths", "scopes", "files", "findings", "diagnostics", "comparisons", "health", "activity", "dependency_coverage", "dependency_edges", "package_edges", "external_dependencies", "resolution_diagnostics", "package_graph", "architecture_findings", "architecture_comparisons"],
+  "required": ["schema_version", "mode", "root", "selected_scope", "paths", "scopes", "files", "findings", "diagnostics", "comparisons", "health", "activity", "dependency_coverage", "dependency_edges", "package_edges", "external_dependencies", "resolution_diagnostics", "package_graph", "architecture_findings", "architecture_comparisons", "history_coverage", "file_history", "package_history", "change_coupling", "contributor_concentration", "evolutionary_findings", "evolutionary_comparisons"],
   "properties": {
     "schema_version": { "const": 2 },
     "mode": { "enum": ["codebase", "diff"] },
@@ -24,7 +24,14 @@
     "resolution_diagnostics": { "type": "array", "items": { "$ref": "#/$defs/resolution_diagnostic" } },
     "package_graph": { "type": "array", "items": { "$ref": "#/$defs/package_graph" } },
     "architecture_findings": { "type": "array", "items": { "$ref": "#/$defs/architecture_finding" } },
-    "architecture_comparisons": { "type": "array", "items": { "$ref": "#/$defs/architecture_comparison" } }
+    "architecture_comparisons": { "type": "array", "items": { "$ref": "#/$defs/architecture_comparison" } },
+    "history_coverage": { "$ref": "#/$defs/history_coverage" },
+    "file_history": { "type": "array", "items": { "$ref": "#/$defs/file_history" } },
+    "package_history": { "type": "array", "items": { "$ref": "#/$defs/package_history" } },
+    "change_coupling": { "type": "array", "items": { "$ref": "#/$defs/change_coupling" } },
+    "contributor_concentration": { "type": "array", "items": { "$ref": "#/$defs/contributor_concentration" } },
+    "evolutionary_findings": { "type": "array", "items": { "$ref": "#/$defs/evolutionary_finding" } },
+    "evolutionary_comparisons": { "type": "array", "items": { "$ref": "#/$defs/evolutionary_comparison" } }
   },
   "additionalProperties": false,
   "$defs": {
@@ -69,7 +76,7 @@
     },
     "scope": {
       "type": "object",
-      "required": ["id", "kind", "parent", "children", "path", "findings", "comparisons", "architecture_findings", "architecture_comparisons", "coverage", "health", "diff"],
+      "required": ["id", "kind", "parent", "children", "path", "findings", "comparisons", "architecture_findings", "architecture_comparisons", "evolutionary_findings", "evolutionary_comparisons", "coverage", "health", "diff"],
       "properties": {
         "id": { "$ref": "#/$defs/index" },
         "kind": { "enum": ["repository", "package", "directory", "file"] },
@@ -80,6 +87,8 @@
         "comparisons": { "type": "array", "items": { "$ref": "#/$defs/index" }, "uniqueItems": true },
         "architecture_findings": { "type": "array", "items": { "$ref": "#/$defs/index" }, "uniqueItems": true },
         "architecture_comparisons": { "type": "array", "items": { "$ref": "#/$defs/index" }, "uniqueItems": true },
+        "evolutionary_findings": { "type": "array", "items": { "$ref": "#/$defs/index" }, "uniqueItems": true },
+        "evolutionary_comparisons": { "type": "array", "items": { "$ref": "#/$defs/index" }, "uniqueItems": true },
         "coverage": { "$ref": "#/$defs/coverage" },
         "health": { "$ref": "#/$defs/index" },
         "diff": { "$ref": "#/$defs/diff" }
@@ -207,6 +216,34 @@
     "architecture_comparison": {
       "type":"object", "required":["id","kind","direction","packages","witness","files"],
       "properties":{"id":{"$ref":"#/$defs/index"},"kind":{"enum":["edge_added","edge_removed","cycle_introduced","cycle_removed"]},"direction":{"enum":["worse","better","changed"]},"packages":{"type":"array","items":{"$ref":"#/$defs/index"},"uniqueItems":true},"witness":{"type":"array","items":{"$ref":"#/$defs/index"}},"files":{"type":"array","items":{"$ref":"#/$defs/index"},"uniqueItems":true}}, "additionalProperties":false
+    },
+    "history_coverage": {
+      "type":"object", "required":["availability","revision","commits","newest_timestamp","oldest_timestamp","textual_changes","uncounted_changes","excluded_paths","rename_gaps","reason"],
+      "properties":{"availability":{"enum":["complete","incomplete","unavailable"]},"revision":{"type":["string","null"]},"commits":{"type":"integer","minimum":0},"newest_timestamp":{"type":["integer","null"]},"oldest_timestamp":{"type":["integer","null"]},"textual_changes":{"type":"integer","minimum":0},"uncounted_changes":{"type":"integer","minimum":0},"excluded_paths":{"type":"integer","minimum":0},"rename_gaps":{"type":"integer","minimum":0},"reason":{"type":["string","null"]}}, "additionalProperties":false
+    },
+    "file_history": {
+      "type":"object", "required":["file","touches","added_lines","deleted_lines","uncounted_changes"],
+      "properties":{"file":{"$ref":"#/$defs/index"},"touches":{"type":"integer","minimum":0},"added_lines":{"type":"integer","minimum":0},"deleted_lines":{"type":"integer","minimum":0},"uncounted_changes":{"type":"integer","minimum":0}}, "additionalProperties":false
+    },
+    "package_history": {
+      "type":"object", "required":["package","touches","added_lines","deleted_lines","uncounted_changes"],
+      "properties":{"package":{"$ref":"#/$defs/index"},"touches":{"type":"integer","minimum":0},"added_lines":{"type":"integer","minimum":0},"deleted_lines":{"type":"integer","minimum":0},"uncounted_changes":{"type":"integer","minimum":0}}, "additionalProperties":false
+    },
+    "change_coupling": {
+      "type":"object", "required":["left","right","shared_commits","union_commits","similarity"],
+      "properties":{"left":{"$ref":"#/$defs/index"},"right":{"$ref":"#/$defs/index"},"shared_commits":{"type":"integer","minimum":2},"union_commits":{"type":"integer","minimum":2},"similarity":{"type":"number","minimum":0,"maximum":1}}, "additionalProperties":false
+    },
+    "contributor_concentration": {
+      "type":"object", "required":["package","contributor_count","numerator","denominator","ratio"],
+      "properties":{"package":{"$ref":"#/$defs/index"},"contributor_count":{"type":"integer","minimum":1},"numerator":{"type":"integer","minimum":1},"denominator":{"type":"integer","minimum":1},"ratio":{"type":"number","minimum":0,"maximum":1}}, "additionalProperties":false
+    },
+    "evolutionary_finding": {
+      "type":"object", "required":["id","rating","left","right","shared_commits","union_commits","similarity"],
+      "properties":{"id":{"$ref":"#/$defs/index"},"rating":{"const":"watch"},"left":{"$ref":"#/$defs/index"},"right":{"$ref":"#/$defs/index"},"shared_commits":{"type":"integer","minimum":2},"union_commits":{"type":"integer","minimum":2},"similarity":{"type":"number","minimum":0,"maximum":1}}, "additionalProperties":false
+    },
+    "evolutionary_comparison": {
+      "type":"object", "required":["id","kind","direction","left","right","shared_commits","union_commits","similarity"],
+      "properties":{"id":{"$ref":"#/$defs/index"},"kind":{"enum":["finding_introduced","finding_removed"]},"direction":{"enum":["worse","better"]},"left":{"$ref":"#/$defs/index"},"right":{"$ref":"#/$defs/index"},"shared_commits":{"type":"integer","minimum":2},"union_commits":{"type":"integer","minimum":2},"similarity":{"type":"number","minimum":0,"maximum":1}}, "additionalProperties":false
     }
   }
 }

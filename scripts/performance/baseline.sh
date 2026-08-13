@@ -2,13 +2,14 @@
 set -eu
 
 if [ "$#" -ne 1 ]; then
-    echo "usage: $0 one-file|hundred-file|small-diff|graph-sparse|graph-dense|many-package|large-dependency-diff" >&2
+    echo "usage: $0 one-file|hundred-file|small-diff|graph-sparse|graph-dense|many-package|evolution-dense|large-dependency-diff" >&2
     exit 2
 fi
 
 profile=$1
 case "$profile" in
     one-file|hundred-file|graph-sparse|graph-dense|many-package) command="scripts/performance/smackdebt-codebase.sh" ;;
+    evolution-dense) command="scripts/performance/smackdebt-evolution.sh" ;;
     small-diff|large-dependency-diff) command="scripts/performance/smackdebt-diff.sh" ;;
     *) echo "unknown profile: $profile" >&2; exit 2 ;;
 esac

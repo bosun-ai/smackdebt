@@ -39,6 +39,13 @@ pub smackdebt_analysis::DiagnosticKind::ParseFailure
 pub smackdebt_analysis::DiagnosticKind::UnreadableFile
 pub smackdebt_analysis::DiagnosticKind::UnsafeReference
 pub smackdebt_analysis::DiagnosticKind::UnsupportedLanguage
+pub enum smackdebt_analysis::EvolutionaryComparisonKind
+pub smackdebt_analysis::EvolutionaryComparisonKind::FindingIntroduced
+pub smackdebt_analysis::EvolutionaryComparisonKind::FindingRemoved
+pub enum smackdebt_analysis::HistoryAvailability
+pub smackdebt_analysis::HistoryAvailability::Complete
+pub smackdebt_analysis::HistoryAvailability::Incomplete
+pub smackdebt_analysis::HistoryAvailability::Unavailable
 pub enum smackdebt_analysis::Language
 pub smackdebt_analysis::Language::C
 pub smackdebt_analysis::Language::Cpp
@@ -119,6 +126,14 @@ pub fn smackdebt_analysis::ArchitectureGraph::new(smackdebt_analysis::Dependency
 pub struct smackdebt_analysis::ArchitectureReportFacts
 impl smackdebt_analysis::ArchitectureReportFacts
 pub fn smackdebt_analysis::ArchitectureReportFacts::new(smackdebt_analysis::ArchitectureGraph, alloc::vec::Vec<smackdebt_analysis::ArchitectureFinding>, alloc::vec::Vec<smackdebt_analysis::ArchitectureComparison>) -> Self
+pub struct smackdebt_analysis::ChangeCoupling
+impl smackdebt_analysis::ChangeCoupling
+pub const fn smackdebt_analysis::ChangeCoupling::left(self) -> smackdebt_analysis::PackageId
+pub const fn smackdebt_analysis::ChangeCoupling::new(smackdebt_analysis::PackageId, smackdebt_analysis::PackageId, u32, u32) -> Self
+pub const fn smackdebt_analysis::ChangeCoupling::right(self) -> smackdebt_analysis::PackageId
+pub const fn smackdebt_analysis::ChangeCoupling::shared_commits(self) -> u32
+pub fn smackdebt_analysis::ChangeCoupling::similarity(self) -> f64
+pub const fn smackdebt_analysis::ChangeCoupling::union_commits(self) -> u32
 pub struct smackdebt_analysis::Comparison
 impl smackdebt_analysis::Comparison
 pub const fn smackdebt_analysis::Comparison::after(&self) -> core::option::Option<smackdebt_analysis::Measurements>
@@ -137,6 +152,19 @@ impl smackdebt_analysis::ComparisonId
 pub const fn smackdebt_analysis::ComparisonId::from_index(usize) -> Self
 pub const fn smackdebt_analysis::ComparisonId::get(self) -> u32
 pub const fn smackdebt_analysis::ComparisonId::index(self) -> usize
+pub struct smackdebt_analysis::ContributorConcentration
+impl smackdebt_analysis::ContributorConcentration
+pub const fn smackdebt_analysis::ContributorConcentration::contributor_count(self) -> u32
+pub const fn smackdebt_analysis::ContributorConcentration::denominator(self) -> u32
+pub const fn smackdebt_analysis::ContributorConcentration::new(smackdebt_analysis::PackageId, u32, u32, u32) -> Self
+pub const fn smackdebt_analysis::ContributorConcentration::numerator(self) -> u32
+pub const fn smackdebt_analysis::ContributorConcentration::package(self) -> smackdebt_analysis::PackageId
+pub fn smackdebt_analysis::ContributorConcentration::ratio(self) -> f64
+pub struct smackdebt_analysis::ContributorId(_)
+impl smackdebt_analysis::ContributorId
+pub const fn smackdebt_analysis::ContributorId::from_index(usize) -> Self
+pub const fn smackdebt_analysis::ContributorId::get(self) -> u32
+pub const fn smackdebt_analysis::ContributorId::index(self) -> usize
 pub struct smackdebt_analysis::Coverage
 impl smackdebt_analysis::Coverage
 pub const fn smackdebt_analysis::Coverage::analyzed_files(self) -> u32
@@ -199,6 +227,37 @@ pub const fn smackdebt_analysis::DiffCounts::changed(self) -> u32
 pub const fn smackdebt_analysis::DiffCounts::new(u32, u32, u32) -> Self
 pub const fn smackdebt_analysis::DiffCounts::total(self) -> u32
 pub const fn smackdebt_analysis::DiffCounts::worse(self) -> u32
+pub struct smackdebt_analysis::EvolutionAccumulator
+impl smackdebt_analysis::EvolutionAccumulator
+pub fn smackdebt_analysis::EvolutionAccumulator::accept(&mut self, smackdebt_analysis::HistoryCommitFact)
+pub fn smackdebt_analysis::EvolutionAccumulator::finish(self, smackdebt_analysis::HistoryCoverage, usize, usize, &[smackdebt_analysis::PackageEdge], core::option::Option<&[smackdebt_analysis::PackageEdge]>) -> smackdebt_analysis::EvolutionaryReportFacts
+pub struct smackdebt_analysis::EvolutionaryComparison
+impl smackdebt_analysis::EvolutionaryComparison
+pub const fn smackdebt_analysis::EvolutionaryComparison::coupling(self) -> smackdebt_analysis::ChangeCoupling
+pub const fn smackdebt_analysis::EvolutionaryComparison::direction(self) -> smackdebt_analysis::ComparisonDirection
+pub const fn smackdebt_analysis::EvolutionaryComparison::id(self) -> smackdebt_analysis::EvolutionaryComparisonId
+pub const fn smackdebt_analysis::EvolutionaryComparison::kind(self) -> smackdebt_analysis::EvolutionaryComparisonKind
+pub const fn smackdebt_analysis::EvolutionaryComparison::new(smackdebt_analysis::EvolutionaryComparisonId, smackdebt_analysis::EvolutionaryComparisonKind, smackdebt_analysis::ComparisonDirection, smackdebt_analysis::ChangeCoupling) -> Self
+pub struct smackdebt_analysis::EvolutionaryComparisonId(_)
+impl smackdebt_analysis::EvolutionaryComparisonId
+pub const fn smackdebt_analysis::EvolutionaryComparisonId::from_index(usize) -> Self
+pub const fn smackdebt_analysis::EvolutionaryComparisonId::get(self) -> u32
+pub const fn smackdebt_analysis::EvolutionaryComparisonId::index(self) -> usize
+pub struct smackdebt_analysis::EvolutionaryFinding
+impl smackdebt_analysis::EvolutionaryFinding
+pub const fn smackdebt_analysis::EvolutionaryFinding::coupling(self) -> smackdebt_analysis::ChangeCoupling
+pub const fn smackdebt_analysis::EvolutionaryFinding::id(self) -> smackdebt_analysis::EvolutionaryFindingId
+pub const fn smackdebt_analysis::EvolutionaryFinding::new(smackdebt_analysis::EvolutionaryFindingId, smackdebt_analysis::ChangeCoupling) -> Self
+pub struct smackdebt_analysis::EvolutionaryFindingId(_)
+impl smackdebt_analysis::EvolutionaryFindingId
+pub const fn smackdebt_analysis::EvolutionaryFindingId::from_index(usize) -> Self
+pub const fn smackdebt_analysis::EvolutionaryFindingId::get(self) -> u32
+pub const fn smackdebt_analysis::EvolutionaryFindingId::index(self) -> usize
+pub struct smackdebt_analysis::EvolutionaryReportFacts
+impl smackdebt_analysis::EvolutionaryReportFacts
+pub fn smackdebt_analysis::EvolutionaryReportFacts::comparisons(&self) -> &[smackdebt_analysis::EvolutionaryComparison]
+pub fn smackdebt_analysis::EvolutionaryReportFacts::findings(&self) -> &[smackdebt_analysis::EvolutionaryFinding]
+pub fn smackdebt_analysis::EvolutionaryReportFacts::new(smackdebt_analysis::HistoryCoverage, alloc::vec::Vec<smackdebt_analysis::FileHistory>, alloc::vec::Vec<smackdebt_analysis::PackageHistory>, alloc::vec::Vec<smackdebt_analysis::ChangeCoupling>, alloc::vec::Vec<smackdebt_analysis::ContributorConcentration>, alloc::vec::Vec<smackdebt_analysis::EvolutionaryFinding>, alloc::vec::Vec<smackdebt_analysis::EvolutionaryComparison>) -> Self
 pub struct smackdebt_analysis::ExternalDependency
 impl smackdebt_analysis::ExternalDependency
 pub const fn smackdebt_analysis::ExternalDependency::file(&self) -> smackdebt_analysis::FileId
@@ -218,6 +277,14 @@ pub const fn smackdebt_analysis::FileAnalysis::parse_status(&self) -> &smackdebt
 pub const fn smackdebt_analysis::FileAnalysis::source_lines(&self) -> u32
 pub fn smackdebt_analysis::FileAnalysis::units(&self) -> &[smackdebt_analysis::UnitFact]
 pub fn smackdebt_analysis::FileAnalysis::with_dependencies(smackdebt_analysis::Language, u32, smackdebt_analysis::ParseStatus, alloc::vec::Vec<smackdebt_analysis::UnitFact>, alloc::vec::Vec<smackdebt_analysis::DependencySyntax>) -> Self
+pub struct smackdebt_analysis::FileHistory
+impl smackdebt_analysis::FileHistory
+pub const fn smackdebt_analysis::FileHistory::added_lines(self) -> u64
+pub const fn smackdebt_analysis::FileHistory::deleted_lines(self) -> u64
+pub const fn smackdebt_analysis::FileHistory::file(self) -> smackdebt_analysis::FileId
+pub const fn smackdebt_analysis::FileHistory::new(smackdebt_analysis::FileId, u32, u64, u64, u32) -> Self
+pub const fn smackdebt_analysis::FileHistory::touches(self) -> u32
+pub const fn smackdebt_analysis::FileHistory::uncounted_changes(self) -> u32
 pub struct smackdebt_analysis::FileId(_)
 impl smackdebt_analysis::FileId
 pub const fn smackdebt_analysis::FileId::from_index(usize) -> Self
@@ -276,6 +343,34 @@ pub const fn smackdebt_analysis::HealthPolicy::logical_lines(self) -> smackdebt_
 pub const fn smackdebt_analysis::HealthPolicy::new(smackdebt_analysis::Thresholds, smackdebt_analysis::Thresholds, smackdebt_analysis::Thresholds) -> Self
 impl core::default::Default for smackdebt_analysis::HealthPolicy
 pub fn smackdebt_analysis::HealthPolicy::default() -> Self
+pub struct smackdebt_analysis::HistoryChangeFact
+impl smackdebt_analysis::HistoryChangeFact
+pub const fn smackdebt_analysis::HistoryChangeFact::added_lines(self) -> core::option::Option<u32>
+pub const fn smackdebt_analysis::HistoryChangeFact::deleted_lines(self) -> core::option::Option<u32>
+pub const fn smackdebt_analysis::HistoryChangeFact::file(self) -> smackdebt_analysis::FileId
+pub const fn smackdebt_analysis::HistoryChangeFact::new(smackdebt_analysis::FileId, smackdebt_analysis::PackageId, core::option::Option<u32>, core::option::Option<u32>) -> Self
+pub const fn smackdebt_analysis::HistoryChangeFact::package(self) -> smackdebt_analysis::PackageId
+pub struct smackdebt_analysis::HistoryCommitFact
+impl smackdebt_analysis::HistoryCommitFact
+pub fn smackdebt_analysis::HistoryCommitFact::changes(&self) -> &[smackdebt_analysis::HistoryChangeFact]
+pub const fn smackdebt_analysis::HistoryCommitFact::contributor(&self) -> smackdebt_analysis::ContributorId
+pub fn smackdebt_analysis::HistoryCommitFact::new(smackdebt_analysis::ContributorId, alloc::vec::Vec<smackdebt_analysis::HistoryChangeFact>) -> Self
+pub struct smackdebt_analysis::HistoryCoverage
+impl smackdebt_analysis::HistoryCoverage
+pub const fn smackdebt_analysis::HistoryCoverage::availability(&self) -> smackdebt_analysis::HistoryAvailability
+pub const fn smackdebt_analysis::HistoryCoverage::commits(&self) -> u32
+pub const fn smackdebt_analysis::HistoryCoverage::excluded_paths(&self) -> u32
+pub fn smackdebt_analysis::HistoryCoverage::new(smackdebt_analysis::HistoryAvailability, core::option::Option<alloc::string::String>, u32, core::option::Option<i64>, core::option::Option<i64>, u32, u32, u32, u32, core::option::Option<alloc::string::String>) -> Self
+pub const fn smackdebt_analysis::HistoryCoverage::newest_timestamp(&self) -> core::option::Option<i64>
+pub const fn smackdebt_analysis::HistoryCoverage::oldest_timestamp(&self) -> core::option::Option<i64>
+pub fn smackdebt_analysis::HistoryCoverage::reason(&self) -> core::option::Option<&str>
+pub const fn smackdebt_analysis::HistoryCoverage::rename_gaps(&self) -> u32
+pub fn smackdebt_analysis::HistoryCoverage::revision(&self) -> core::option::Option<&str>
+pub const fn smackdebt_analysis::HistoryCoverage::textual_changes(&self) -> u32
+pub fn smackdebt_analysis::HistoryCoverage::unavailable(impl core::convert::Into<alloc::string::String>) -> Self
+pub const fn smackdebt_analysis::HistoryCoverage::uncounted_changes(&self) -> u32
+impl core::default::Default for smackdebt_analysis::HistoryCoverage
+pub fn smackdebt_analysis::HistoryCoverage::default() -> Self
 pub struct smackdebt_analysis::Instability
 impl smackdebt_analysis::Instability
 pub const fn smackdebt_analysis::Instability::denominator(self) -> u32
@@ -313,6 +408,14 @@ pub const fn smackdebt_analysis::PackageGraphMeasurement::fan_out(self) -> u32
 pub const fn smackdebt_analysis::PackageGraphMeasurement::instability(self) -> core::option::Option<smackdebt_analysis::Instability>
 pub const fn smackdebt_analysis::PackageGraphMeasurement::new(smackdebt_analysis::PackageId, u32, u32) -> Self
 pub const fn smackdebt_analysis::PackageGraphMeasurement::package(self) -> smackdebt_analysis::PackageId
+pub struct smackdebt_analysis::PackageHistory
+impl smackdebt_analysis::PackageHistory
+pub const fn smackdebt_analysis::PackageHistory::added_lines(self) -> u64
+pub const fn smackdebt_analysis::PackageHistory::deleted_lines(self) -> u64
+pub const fn smackdebt_analysis::PackageHistory::new(smackdebt_analysis::PackageId, u32, u64, u64, u32) -> Self
+pub const fn smackdebt_analysis::PackageHistory::package(self) -> smackdebt_analysis::PackageId
+pub const fn smackdebt_analysis::PackageHistory::touches(self) -> u32
+pub const fn smackdebt_analysis::PackageHistory::uncounted_changes(self) -> u32
 pub struct smackdebt_analysis::PackageId(_)
 impl smackdebt_analysis::PackageId
 pub const fn smackdebt_analysis::PackageId::from_index(usize) -> Self
@@ -327,16 +430,23 @@ pub struct smackdebt_analysis::Report
 impl smackdebt_analysis::Report
 pub fn smackdebt_analysis::Report::architecture_comparisons(&self) -> &[smackdebt_analysis::ArchitectureComparison]
 pub fn smackdebt_analysis::Report::architecture_findings(&self) -> &[smackdebt_analysis::ArchitectureFinding]
+pub fn smackdebt_analysis::Report::change_coupling(&self) -> &[smackdebt_analysis::ChangeCoupling]
 pub fn smackdebt_analysis::Report::comparisons(&self) -> &[smackdebt_analysis::Comparison]
+pub fn smackdebt_analysis::Report::contributor_concentration(&self) -> &[smackdebt_analysis::ContributorConcentration]
 pub const fn smackdebt_analysis::Report::dependency_coverage(&self) -> smackdebt_analysis::DependencyCoverage
 pub fn smackdebt_analysis::Report::dependency_edges(&self) -> &[smackdebt_analysis::DependencyEdge]
 pub fn smackdebt_analysis::Report::diagnostics(&self) -> &[smackdebt_analysis::Diagnostic]
+pub fn smackdebt_analysis::Report::evolutionary_comparisons(&self) -> &[smackdebt_analysis::EvolutionaryComparison]
+pub fn smackdebt_analysis::Report::evolutionary_findings(&self) -> &[smackdebt_analysis::EvolutionaryFinding]
 pub fn smackdebt_analysis::Report::external_dependencies(&self) -> &[smackdebt_analysis::ExternalDependency]
+pub fn smackdebt_analysis::Report::file_history(&self) -> &[smackdebt_analysis::FileHistory]
 pub fn smackdebt_analysis::Report::files(&self) -> &[smackdebt_analysis::FileRecord]
 pub fn smackdebt_analysis::Report::findings(&self) -> &[smackdebt_analysis::Finding]
+pub const fn smackdebt_analysis::Report::history_coverage(&self) -> &smackdebt_analysis::HistoryCoverage
 pub const fn smackdebt_analysis::Report::mode(&self) -> smackdebt_analysis::ReportMode
 pub fn smackdebt_analysis::Report::package_edges(&self) -> &[smackdebt_analysis::PackageEdge]
 pub fn smackdebt_analysis::Report::package_graph(&self) -> &[smackdebt_analysis::PackageGraphMeasurement]
+pub fn smackdebt_analysis::Report::package_history(&self) -> &[smackdebt_analysis::PackageHistory]
 pub fn smackdebt_analysis::Report::paths(&self) -> &[alloc::string::String]
 pub fn smackdebt_analysis::Report::resolution_diagnostics(&self) -> &[smackdebt_analysis::ResolutionDiagnostic]
 pub const fn smackdebt_analysis::Report::root(&self) -> core::option::Option<smackdebt_analysis::ScopeId>
@@ -355,10 +465,13 @@ pub fn smackdebt_analysis::ReportBuilder::finish(self) -> smackdebt_analysis::Re
 pub fn smackdebt_analysis::ReportBuilder::link_architecture_comparison(&mut self, smackdebt_analysis::ScopeId, smackdebt_analysis::ArchitectureComparisonId)
 pub fn smackdebt_analysis::ReportBuilder::link_architecture_finding(&mut self, smackdebt_analysis::ScopeId, smackdebt_analysis::ArchitectureFindingId)
 pub fn smackdebt_analysis::ReportBuilder::link_comparison(&mut self, smackdebt_analysis::ScopeId, smackdebt_analysis::ComparisonId)
+pub fn smackdebt_analysis::ReportBuilder::link_evolutionary_comparison(&mut self, smackdebt_analysis::ScopeId, smackdebt_analysis::EvolutionaryComparisonId)
+pub fn smackdebt_analysis::ReportBuilder::link_evolutionary_finding(&mut self, smackdebt_analysis::ScopeId, smackdebt_analysis::EvolutionaryFindingId)
 pub fn smackdebt_analysis::ReportBuilder::link_file(&mut self, smackdebt_analysis::ScopeId, smackdebt_analysis::FileId)
 pub fn smackdebt_analysis::ReportBuilder::link_finding(&mut self, smackdebt_analysis::ScopeId, smackdebt_analysis::FindingId)
 pub fn smackdebt_analysis::ReportBuilder::new(smackdebt_analysis::ReportMode) -> Self
 pub fn smackdebt_analysis::ReportBuilder::set_architecture(&mut self, smackdebt_analysis::ArchitectureReportFacts)
+pub fn smackdebt_analysis::ReportBuilder::set_evolution(&mut self, smackdebt_analysis::EvolutionaryReportFacts)
 pub fn smackdebt_analysis::ReportBuilder::set_root(&mut self, smackdebt_analysis::ScopeId)
 pub fn smackdebt_analysis::ReportBuilder::with_capacity(smackdebt_analysis::ReportMode, usize, usize, usize, usize, usize) -> Self
 pub struct smackdebt_analysis::ResolutionDiagnostic
@@ -375,6 +488,8 @@ pub fn smackdebt_analysis::Scope::add_architecture_comparison(&mut self, smackde
 pub fn smackdebt_analysis::Scope::add_architecture_finding(&mut self, smackdebt_analysis::ArchitectureFindingId)
 pub fn smackdebt_analysis::Scope::add_child(&mut self, smackdebt_analysis::ScopeId)
 pub fn smackdebt_analysis::Scope::add_comparison(&mut self, smackdebt_analysis::ComparisonId)
+pub fn smackdebt_analysis::Scope::add_evolutionary_comparison(&mut self, smackdebt_analysis::EvolutionaryComparisonId)
+pub fn smackdebt_analysis::Scope::add_evolutionary_finding(&mut self, smackdebt_analysis::EvolutionaryFindingId)
 pub fn smackdebt_analysis::Scope::add_file(&mut self, smackdebt_analysis::FileId)
 pub fn smackdebt_analysis::Scope::add_finding(&mut self, smackdebt_analysis::FindingId)
 pub fn smackdebt_analysis::Scope::architecture_comparisons(&self) -> &[smackdebt_analysis::ArchitectureComparisonId]
@@ -383,6 +498,8 @@ pub fn smackdebt_analysis::Scope::children(&self) -> &[smackdebt_analysis::Scope
 pub fn smackdebt_analysis::Scope::comparisons(&self) -> &[smackdebt_analysis::ComparisonId]
 pub const fn smackdebt_analysis::Scope::coverage(&self) -> smackdebt_analysis::Coverage
 pub const fn smackdebt_analysis::Scope::diff(&self) -> smackdebt_analysis::DiffCounts
+pub fn smackdebt_analysis::Scope::evolutionary_comparisons(&self) -> &[smackdebt_analysis::EvolutionaryComparisonId]
+pub fn smackdebt_analysis::Scope::evolutionary_findings(&self) -> &[smackdebt_analysis::EvolutionaryFindingId]
 pub fn smackdebt_analysis::Scope::files(&self) -> &[smackdebt_analysis::FileId]
 pub fn smackdebt_analysis::Scope::findings(&self) -> &[smackdebt_analysis::FindingId]
 pub const fn smackdebt_analysis::Scope::health(&self) -> smackdebt_analysis::HealthCounts
@@ -431,10 +548,15 @@ pub fn smackdebt_analysis::UnitIdentity::name(&self) -> &str
 pub fn smackdebt_analysis::UnitIdentity::new(impl core::convert::Into<alloc::string::String>, smackdebt_analysis::UnitKind) -> Self
 pub fn smackdebt_analysis::aggregate_comparisons(&mut [smackdebt_analysis::Scope], &[smackdebt_analysis::Comparison], smackdebt_analysis::ScopeId)
 pub fn smackdebt_analysis::aggregate_scopes(&mut [smackdebt_analysis::Scope], &[smackdebt_analysis::FileRecord], smackdebt_analysis::ScopeId)
+pub fn smackdebt_analysis::change_coupling(&[smackdebt_analysis::HistoryCommitFact]) -> alloc::vec::Vec<smackdebt_analysis::ChangeCoupling>
+pub fn smackdebt_analysis::churn(usize, usize, &[smackdebt_analysis::HistoryCommitFact]) -> (alloc::vec::Vec<smackdebt_analysis::FileHistory>, alloc::vec::Vec<smackdebt_analysis::PackageHistory>)
 pub fn smackdebt_analysis::compare_architecture(&[(smackdebt_analysis::PackageId, smackdebt_analysis::PackageId)], &[(smackdebt_analysis::PackageId, smackdebt_analysis::PackageId)], &[smackdebt_analysis::PackageCycle], &[smackdebt_analysis::PackageCycle]) -> alloc::vec::Vec<smackdebt_analysis::ArchitectureComparison>
+pub fn smackdebt_analysis::compare_evolution(&[smackdebt_analysis::ChangeCoupling], &[smackdebt_analysis::PackageEdge], &[smackdebt_analysis::PackageEdge]) -> alloc::vec::Vec<smackdebt_analysis::EvolutionaryComparison>
 pub fn smackdebt_analysis::compare_units(&[smackdebt_analysis::UnitFact], &[smackdebt_analysis::UnitFact], smackdebt_analysis::HealthPolicy) -> alloc::vec::Vec<smackdebt_analysis::Comparison>
+pub fn smackdebt_analysis::contributor_concentration(&[smackdebt_analysis::HistoryCommitFact]) -> alloc::vec::Vec<smackdebt_analysis::ContributorConcentration>
 pub fn smackdebt_analysis::cycle_witness(&[usize], &[(usize, usize)]) -> core::option::Option<alloc::vec::Vec<(usize, usize)>>
 pub fn smackdebt_analysis::dependency_degree(usize, &[(usize, usize)]) -> alloc::vec::Vec<(u32, u32)>
 pub const fn smackdebt_analysis::instability(u32, u32) -> core::option::Option<smackdebt_analysis::Instability>
 pub fn smackdebt_analysis::strongly_connected_components(usize, &[(usize, usize)]) -> alloc::vec::Vec<alloc::vec::Vec<usize>>
+pub fn smackdebt_analysis::unexplained_coupling(&[smackdebt_analysis::ChangeCoupling], &[smackdebt_analysis::PackageEdge]) -> alloc::vec::Vec<smackdebt_analysis::EvolutionaryFinding>
 pub type smackdebt_analysis::PackageCycle = (alloc::vec::Vec<smackdebt_analysis::PackageId>, alloc::vec::Vec<smackdebt_analysis::PackageId>)

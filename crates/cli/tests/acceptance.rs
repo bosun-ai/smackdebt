@@ -1,3 +1,4 @@
+use std::collections::HashSet;
 use std::fs;
 use std::path::Path;
 use std::process::Command;
@@ -209,10 +210,30 @@ fn static_architecture_diff_snapshot_uses_unchanged_return_edges() {
     )
     .unwrap();
 
-    let json = run_in(project.path(), ["diff", "main", "--json", "--jobs", "1"]);
+    let json = run_in(
+        project.path(),
+        [
+            "diff",
+            "main",
+            "--json",
+            "--jobs",
+            "1",
+            "--history",
+            "36500d",
+        ],
+    );
     let terminal = run_in(
         project.path(),
-        ["diff", "main", "--jobs", "1", "--color", "never"],
+        [
+            "diff",
+            "main",
+            "--jobs",
+            "1",
+            "--color",
+            "never",
+            "--history",
+            "36500d",
+        ],
     );
     assert_snapshot(
         "static-architecture-diff.terminal.txt",
@@ -253,7 +274,18 @@ fn static_architecture_removed_cycle_snapshot_is_reviewed() {
     )
     .unwrap();
 
-    let json = run_in(project.path(), ["diff", "main", "--json", "--jobs", "1"]);
+    let json = run_in(
+        project.path(),
+        [
+            "diff",
+            "main",
+            "--json",
+            "--jobs",
+            "1",
+            "--history",
+            "36500d",
+        ],
+    );
     assert_snapshot(
         "static-architecture-removed-cycle.json",
         &json,
@@ -269,6 +301,228 @@ fn static_architecture_removed_cycle_snapshot_is_reviewed() {
             .any(|comparison| comparison["kind"] == "cycle_removed"
                 && comparison["direction"] == "better")
     );
+}
+
+#[test]
+fn evolutionary_analysis_is_exact_private_and_deterministic() {
+    let project = evolutionary_fixture();
+    let serial_json = run_in(
+        project.path(),
+        ["--json", "--jobs", "1", "--history", "36500d"],
+    );
+    let parallel_json = run_in(
+        project.path(),
+        ["--json", "--jobs", "4", "--history", "36500d"],
+    );
+    assert_eq!(serial_json, parallel_json);
+    let serial_terminal = run_in(
+        project.path(),
+        ["--jobs", "1", "--color", "never", "--history", "36500d"],
+    );
+    let parallel_terminal = run_in(
+        project.path(),
+        ["--jobs", "4", "--color", "never", "--history", "36500d"],
+    );
+    assert_eq!(serial_terminal, parallel_terminal);
+    assert_snapshot(
+        "evolutionary-analysis.json",
+        &serial_json,
+        include_bytes!("snapshots/evolutionary-analysis.json"),
+    );
+    assert_snapshot(
+        "evolutionary-analysis.terminal.txt",
+        &serial_terminal,
+        include_bytes!("snapshots/evolutionary-analysis.terminal.txt"),
+    );
+    let report: serde_json::Value = serde_json::from_slice(&serial_json).unwrap();
+    validate_schema(&report);
+    assert_index_integrity(&report);
+    assert_eq!(report["history_coverage"]["availability"], "complete");
+    assert_eq!(report["history_coverage"]["commits"], 6);
+    assert_eq!(report["change_coupling"][0]["shared_commits"], 3);
+    assert_eq!(report["change_coupling"][0]["union_commits"], 6);
+    assert_eq!(report["change_coupling"][0]["similarity"], 0.5);
+    assert_eq!(report["evolutionary_findings"].as_array().unwrap().len(), 1);
+    for private_value in [
+        "Alice Example",
+        "alice@example.invalid",
+        "Alias Person",
+        "alias@example.invalid",
+        "Bob Example",
+        "bob@example.invalid",
+    ] {
+        assert!(
+            !serial_json
+                .windows(private_value.len())
+                .any(|window| window == private_value.as_bytes())
+        );
+        assert!(
+            !serial_terminal
+                .windows(private_value.len())
+                .any(|window| window == private_value.as_bytes())
+        );
+    }
+}
+
+#[test]
+fn diff_uses_history_as_context_and_can_explain_coupling() {
+    let project = evolutionary_fixture();
+    fs::write(
+        project.path().join("b/main.js"),
+        "import { a } from '../a/main';\nexport const b = a;\n",
+    )
+    .unwrap();
+    let json = run_in(
+        project.path(),
+        [
+            "diff",
+            "main",
+            "--json",
+            "--jobs",
+            "1",
+            "--history",
+            "36500d",
+        ],
+    );
+    let report: serde_json::Value = serde_json::from_slice(&json).unwrap();
+    validate_schema(&report);
+    assert_eq!(report["change_coupling"][0]["shared_commits"], 3);
+    assert_eq!(report["change_coupling"][0]["union_commits"], 6);
+    assert!(
+        report["evolutionary_findings"]
+            .as_array()
+            .unwrap()
+            .is_empty()
+    );
+    assert!(
+        report["evolutionary_comparisons"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .any(|value| { value["kind"] == "finding_removed" && value["direction"] == "better" })
+    );
+}
+
+#[test]
+fn selected_package_shows_file_churn_all_coupling_and_omits_unrelated_history() {
+    let project = evolutionary_fixture();
+    fs::write(
+        project.path().join("b/main.js"),
+        "import { a } from '../a/main';\nexport const b = a;\n",
+    )
+    .unwrap();
+    let terminal = run_in(
+        project.path(),
+        ["a", "--all", "--color", "never", "--history", "36500d"],
+    );
+    assert_snapshot(
+        "evolutionary-package.terminal.txt",
+        &terminal,
+        include_bytes!("snapshots/evolutionary-package.terminal.txt"),
+    );
+    let text = String::from_utf8(terminal).unwrap();
+    assert!(text.contains("file a/main.js · 5 touches"));
+    assert!(
+        text.contains("coupling a ↔ b · 3/6 shared commits · 50% similarity · static dependency")
+    );
+    assert!(!text.contains("c/main.js"));
+    assert!(!text.contains("  c ·"));
+}
+
+#[test]
+fn selected_diff_package_shows_only_relevant_evolution_context() {
+    let project = evolutionary_fixture();
+    fs::write(
+        project.path().join("b/main.js"),
+        "import { a } from '../a/main';\nexport const b = a;\n",
+    )
+    .unwrap();
+    let terminal = run_in(
+        project.path(),
+        [
+            "diff",
+            "main",
+            "b",
+            "--all",
+            "--color",
+            "never",
+            "--history",
+            "36500d",
+        ],
+    );
+    assert_snapshot(
+        "evolutionary-diff-package.terminal.txt",
+        &terminal,
+        include_bytes!("snapshots/evolutionary-diff-package.terminal.txt"),
+    );
+    let text = String::from_utf8(terminal).unwrap();
+    assert!(text.contains("b · 4 touches"));
+    assert!(text.contains("file b/main.js · 4 touches"));
+    assert!(text.contains("coupling a ↔ b · 3/6 shared commits"));
+    assert!(!text.contains("c/main.js"));
+    assert!(!text.contains("  c ·"));
+}
+
+#[test]
+fn empty_git_history_is_unavailable_in_coverage_terminal_and_diagnostics() {
+    let project = fixture();
+    git(project.path(), ["init", "-b", "main"]);
+    let json = run_in(project.path(), ["--json", "--jobs", "1"]);
+    let report: serde_json::Value = serde_json::from_slice(&json).unwrap();
+    validate_schema(&report);
+    assert_eq!(report["history_coverage"]["availability"], "unavailable");
+    assert_eq!(
+        report["history_coverage"]["reason"],
+        "repository has no commits"
+    );
+    assert!(
+        report["diagnostics"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .any(|diagnostic| {
+                diagnostic["message"] == "Git history unavailable: repository has no commits"
+            })
+    );
+    let terminal = String::from_utf8(run_in(project.path(), ["--color", "never"])).unwrap();
+    assert!(terminal.contains("history unavailable: repository has no commits"));
+    assert!(terminal.contains("! Git history unavailable: repository has no commits"));
+    assert!(!terminal.contains("history incomplete"));
+}
+
+#[test]
+fn shallow_history_is_reported_as_incomplete() {
+    let origin = evolutionary_fixture();
+    let checkout = tempfile::tempdir().unwrap();
+    let output = Command::new("git")
+        .args([
+            "clone",
+            "--depth",
+            "1",
+            &format!("file://{}", origin.path().display()),
+            ".",
+        ])
+        .current_dir(checkout.path())
+        .output()
+        .unwrap();
+    assert!(
+        output.status.success(),
+        "{}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let json = run_in(
+        checkout.path(),
+        ["--json", "--jobs", "1", "--history", "36500d"],
+    );
+    let report: serde_json::Value = serde_json::from_slice(&json).unwrap();
+    validate_schema(&report);
+    assert_eq!(report["history_coverage"]["availability"], "incomplete");
+    assert_eq!(
+        report["history_coverage"]["reason"],
+        "repository history is shallow"
+    );
+    assert_eq!(report["history_coverage"]["commits"], 1);
+    assert!(!report["files"].as_array().unwrap().is_empty());
 }
 
 fn assert_snapshot(name: &str, actual: &[u8], expected: &[u8]) {
@@ -306,6 +560,12 @@ fn assert_index_integrity(report: &serde_json::Value) {
     let package_edges = report["package_edges"].as_array().unwrap();
     let architecture_findings = report["architecture_findings"].as_array().unwrap();
     let architecture_comparisons = report["architecture_comparisons"].as_array().unwrap();
+    let file_history = report["file_history"].as_array().unwrap();
+    let package_history = report["package_history"].as_array().unwrap();
+    let change_coupling = report["change_coupling"].as_array().unwrap();
+    let contributor_concentration = report["contributor_concentration"].as_array().unwrap();
+    let evolutionary_findings = report["evolutionary_findings"].as_array().unwrap();
+    let evolutionary_comparisons = report["evolutionary_comparisons"].as_array().unwrap();
     let package_graph = report["package_graph"].as_array().unwrap();
     let external_dependencies = report["external_dependencies"].as_array().unwrap();
     let resolution_diagnostics = report["resolution_diagnostics"].as_array().unwrap();
@@ -355,6 +615,12 @@ fn assert_index_integrity(report: &serde_json::Value) {
         }
         for comparison in scope["architecture_comparisons"].as_array().unwrap() {
             assert!((comparison.as_u64().unwrap() as usize) < architecture_comparisons.len());
+        }
+        for finding in scope["evolutionary_findings"].as_array().unwrap() {
+            assert!((finding.as_u64().unwrap() as usize) < evolutionary_findings.len());
+        }
+        for comparison in scope["evolutionary_comparisons"].as_array().unwrap() {
+            assert!((comparison.as_u64().unwrap() as usize) < evolutionary_comparisons.len());
         }
     }
     for (index, file) in files.iter().enumerate() {
@@ -428,6 +694,63 @@ fn assert_index_integrity(report: &serde_json::Value) {
     for (index, measurement) in package_graph.iter().enumerate() {
         assert_eq!(measurement["package"], index);
     }
+    assert_eq!(file_history.len(), files.len());
+    let mut files_with_history = HashSet::new();
+    for history in file_history {
+        let file = history["file"].as_u64().unwrap() as usize;
+        assert!(file < files.len());
+        assert!(
+            files_with_history.insert(file),
+            "duplicate file history row"
+        );
+    }
+    assert_eq!(files_with_history.len(), files.len());
+
+    assert_eq!(package_history.len(), package_graph.len());
+    let mut packages_with_history = HashSet::new();
+    for history in package_history {
+        let package = history["package"].as_u64().unwrap() as usize;
+        assert!(package < package_graph.len());
+        assert!(
+            packages_with_history.insert(package),
+            "duplicate package history row"
+        );
+    }
+    assert_eq!(packages_with_history.len(), package_graph.len());
+
+    let mut coupling_pairs = HashSet::new();
+    for coupling in change_coupling {
+        let left = coupling["left"].as_u64().unwrap() as usize;
+        let right = coupling["right"].as_u64().unwrap() as usize;
+        assert!(left < package_graph.len());
+        assert!(right < package_graph.len());
+        assert!(left < right, "coupling pair identity is not stable");
+        assert!(
+            coupling_pairs.insert((left, right)),
+            "duplicate coupling pair"
+        );
+    }
+
+    let mut concentration_packages = HashSet::new();
+    for concentration in contributor_concentration {
+        let package = concentration["package"].as_u64().unwrap() as usize;
+        assert!(package < package_graph.len());
+        assert!(
+            concentration_packages.insert(package),
+            "duplicate concentration row"
+        );
+    }
+
+    for (index, finding) in evolutionary_findings.iter().enumerate() {
+        assert_eq!(finding["id"], index);
+        assert!((finding["left"].as_u64().unwrap() as usize) < package_graph.len());
+        assert!((finding["right"].as_u64().unwrap() as usize) < package_graph.len());
+    }
+    for (index, comparison) in evolutionary_comparisons.iter().enumerate() {
+        assert_eq!(comparison["id"], index);
+        assert!((comparison["left"].as_u64().unwrap() as usize) < package_graph.len());
+        assert!((comparison["right"].as_u64().unwrap() as usize) < package_graph.len());
+    }
     for dependency in external_dependencies {
         assert!((dependency["file"].as_u64().unwrap() as usize) < files.len());
     }
@@ -455,6 +778,73 @@ fn index_audit_rejects_a_nested_architecture_reference() {
     );
     report["architecture_findings"][0]["witness_edges"][0] = 999_999.into();
     assert!(std::panic::catch_unwind(|| assert_index_integrity(&report)).is_err());
+}
+
+#[test]
+fn index_audit_rejects_a_nested_evolution_reference() {
+    let project = evolutionary_fixture();
+    let bytes = run([
+        "--json",
+        "--history",
+        "36500d",
+        project.path().to_str().unwrap(),
+    ]);
+    let mut report: serde_json::Value = serde_json::from_slice(&bytes).unwrap();
+    assert!(
+        !report["evolutionary_findings"]
+            .as_array()
+            .unwrap()
+            .is_empty()
+    );
+    report["evolutionary_findings"][0]["right"] = 999_999.into();
+    assert!(std::panic::catch_unwind(|| assert_index_integrity(&report)).is_err());
+}
+
+#[test]
+fn report_schema_has_no_contributor_identity_fields_or_tables() {
+    let schema: serde_json::Value =
+        serde_json::from_str(include_str!("../../../schemas/report-v2.schema.json")).unwrap();
+    assert_schema_omits_identity_keys(&schema);
+}
+
+fn assert_schema_omits_identity_keys(value: &serde_json::Value) {
+    const FORBIDDEN_KEYS: &[&str] = &[
+        "author",
+        "authors",
+        "author_name",
+        "author_address",
+        "author_email",
+        "author_identity",
+        "raw_author",
+        "raw_author_name",
+        "raw_author_email",
+        "email",
+        "email_address",
+        "contributor_id",
+        "contributor_ids",
+        "contributor_identity",
+        "contributor_identities",
+        "contributor_name",
+        "contributor_address",
+        "contributor_email",
+    ];
+    match value {
+        serde_json::Value::Object(object) => {
+            for (key, child) in object {
+                assert!(
+                    !FORBIDDEN_KEYS.contains(&key.as_str()),
+                    "schema exposes contributor identity key {key}"
+                );
+                assert_schema_omits_identity_keys(child);
+            }
+        }
+        serde_json::Value::Array(items) => {
+            for item in items {
+                assert_schema_omits_identity_keys(item);
+            }
+        }
+        _ => {}
+    }
 }
 
 #[test]
@@ -549,6 +939,95 @@ fn static_architecture_fixture() -> tempfile::TempDir {
 fn git<const N: usize>(directory: &Path, arguments: [&str; N]) {
     let status = Command::new("git")
         .args(arguments)
+        .env("GIT_AUTHOR_DATE", "2026-08-01T12:00:00Z")
+        .env("GIT_COMMITTER_DATE", "2026-08-01T12:00:00Z")
+        .current_dir(directory)
+        .status()
+        .unwrap();
+    assert!(status.success());
+}
+
+fn evolutionary_fixture() -> tempfile::TempDir {
+    let project = tempfile::tempdir().unwrap();
+    git(project.path(), ["init", "-b", "main"]);
+    fs::create_dir_all(project.path().join("a")).unwrap();
+    fs::create_dir_all(project.path().join("b")).unwrap();
+    fs::create_dir_all(project.path().join("c")).unwrap();
+    fs::write(project.path().join("a/package.json"), "{}\n").unwrap();
+    fs::write(project.path().join("b/package.json"), "{}\n").unwrap();
+    fs::write(project.path().join("c/package.json"), "{}\n").unwrap();
+    fs::write(project.path().join("a/old.js"), "export const a = 1;\n").unwrap();
+    fs::write(project.path().join("b/main.js"), "export const b = 1;\n").unwrap();
+    fs::write(project.path().join("c/main.js"), "export const c = 1;\n").unwrap();
+    commit_as(
+        project.path(),
+        "Alice Example",
+        "alice@example.invalid",
+        "initial",
+    );
+    fs::rename(
+        project.path().join("a/old.js"),
+        project.path().join("a/main.js"),
+    )
+    .unwrap();
+    fs::write(project.path().join("b/main.js"), "export const b = 2;\n").unwrap();
+    commit_as(
+        project.path(),
+        "Alias Person",
+        "alias@example.invalid",
+        "rename together",
+    );
+    fs::write(
+        project.path().join(".mailmap"),
+        "Alice Example <alice@example.invalid> Alias Person <alias@example.invalid>\n",
+    )
+    .unwrap();
+    fs::write(project.path().join("a/main.js"), "export const a = 3;\n").unwrap();
+    fs::write(project.path().join("b/main.js"), "export const b = 3;\n").unwrap();
+    commit_as(
+        project.path(),
+        "Bob Example",
+        "bob@example.invalid",
+        "together again",
+    );
+    fs::write(project.path().join("a/main.js"), "export const a = 4;\n").unwrap();
+    commit_as(
+        project.path(),
+        "Alice Example",
+        "alice@example.invalid",
+        "a only one",
+    );
+    fs::write(project.path().join("a/main.js"), "export const a = 5;\n").unwrap();
+    commit_as(
+        project.path(),
+        "Alice Example",
+        "alice@example.invalid",
+        "a only two",
+    );
+    fs::write(project.path().join("b/main.js"), "export const b = 6;\n").unwrap();
+    commit_as(
+        project.path(),
+        "Bob Example",
+        "bob@example.invalid",
+        "b only",
+    );
+    project
+}
+
+fn commit_as(directory: &Path, name: &str, email: &str, message: &str) {
+    git(directory, ["add", "-A"]);
+    let status = Command::new("git")
+        .args([
+            "-c",
+            &format!("user.name={name}"),
+            "-c",
+            &format!("user.email={email}"),
+            "commit",
+            "-qm",
+            message,
+        ])
+        .env("GIT_AUTHOR_DATE", "2026-08-01T12:00:00Z")
+        .env("GIT_COMMITTER_DATE", "2026-08-01T12:00:00Z")
         .current_dir(directory)
         .status()
         .unwrap();

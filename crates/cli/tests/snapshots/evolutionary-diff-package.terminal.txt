@@ -1,0 +1,22 @@
+smackdebt · diff
+b
+1 source file changed · 1 analyzed
+
+CHANGE  0 retained units
+▲ WORSE 0 · ▼ BETTER 0 · ● CHANGED 0
+  ↓ b/main.js
+
+ARCHITECTURE CHANGE
+1 internal · 0 external · 0 unresolved · 0 ambiguous
+▲ WORSE 0 · ▼ BETTER 0 · ● CHANGED 1
+● CHANGED  edge added  b  a
+
+EVOLUTION CONTEXT
+6 commits · complete local history
+0 uncounted · 4 excluded · 0 rename gaps
+  b · 4 touches · +4 -3 · 2 contributors · 50% top share
+    file b/main.js · 4 touches · +4 -3
+  coupling a ↔ b · 3/6 shared commits · 50% similarity · static dependency
+▼ BETTER  coupling finding removed
+
+No changed units.

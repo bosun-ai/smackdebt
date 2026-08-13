@@ -4,8 +4,9 @@ use serde::Serialize;
 use serde::ser::{SerializeMap, SerializeSeq, Serializer};
 use smackdebt_analysis::{
     ArchitectureComparison, ArchitectureFinding, Comparison, DependencyEdge, Diagnostic,
-    ExternalDependency, FileRecord, Finding, HealthCounts, Measurements, PackageEdge,
-    PackageGraphMeasurement, Report, ResolutionDiagnostic, Scope, UnitKind,
+    EvolutionaryComparison, EvolutionaryFinding, ExternalDependency, FileHistory, FileRecord,
+    Finding, HealthCounts, Measurements, PackageEdge, PackageGraphMeasurement, PackageHistory,
+    Report, ResolutionDiagnostic, Scope, UnitKind,
 };
 
 use crate::output::{
@@ -33,7 +34,7 @@ impl Serialize for ReportView<'_> {
         S: Serializer,
     {
         let report = self.0;
-        let mut map = serializer.serialize_map(Some(20))?;
+        let mut map = serializer.serialize_map(Some(27))?;
         map.serialize_entry("schema_version", &report.schema_version())?;
         map.serialize_entry("mode", mode_name(report.mode()))?;
         map.serialize_entry("root", &report.root().map(|root| root.get()))?;
@@ -72,6 +73,31 @@ impl Serialize for ReportView<'_> {
             "architecture_comparisons",
             &ArchitectureComparisons(report.architecture_comparisons()),
         )?;
+        map.serialize_entry(
+            "history_coverage",
+            &HistoryCoverageView(report.history_coverage()),
+        )?;
+        map.serialize_entry("file_history", &FileHistoryRecords(report.file_history()))?;
+        map.serialize_entry(
+            "package_history",
+            &PackageHistoryRecords(report.package_history()),
+        )?;
+        map.serialize_entry(
+            "change_coupling",
+            &ChangeCouplingRecords(report.change_coupling()),
+        )?;
+        map.serialize_entry(
+            "contributor_concentration",
+            &ConcentrationRecords(report.contributor_concentration()),
+        )?;
+        map.serialize_entry(
+            "evolutionary_findings",
+            &EvolutionaryFindings(report.evolutionary_findings()),
+        )?;
+        map.serialize_entry(
+            "evolutionary_comparisons",
+            &EvolutionaryComparisons(report.evolutionary_comparisons()),
+        )?;
         map.end()
     }
 }
@@ -97,7 +123,7 @@ impl Serialize for ScopeView<'_> {
         S: Serializer,
     {
         let scope = self.0;
-        let mut map = serializer.serialize_map(Some(12))?;
+        let mut map = serializer.serialize_map(Some(14))?;
         map.serialize_entry("id", &scope.id().get())?;
         map.serialize_entry("kind", scope_kind(scope.kind()))?;
         map.serialize_entry("parent", &scope.parent().map(|id| id.get()))?;
@@ -113,10 +139,38 @@ impl Serialize for ScopeView<'_> {
             "architecture_comparisons",
             &ArchitectureComparisonIds(scope.architecture_comparisons()),
         )?;
+        map.serialize_entry(
+            "evolutionary_findings",
+            &EvolutionaryFindingIds(scope.evolutionary_findings()),
+        )?;
+        map.serialize_entry(
+            "evolutionary_comparisons",
+            &EvolutionaryComparisonIds(scope.evolutionary_comparisons()),
+        )?;
         map.serialize_entry("coverage", &CoverageView(scope.coverage()))?;
         map.serialize_entry("health", &scope.id().get())?;
         map.serialize_entry("diff", &DiffView(scope.diff()))?;
         map.end()
+    }
+}
+struct EvolutionaryFindingIds<'a>(&'a [smackdebt_analysis::EvolutionaryFindingId]);
+impl Serialize for EvolutionaryFindingIds<'_> {
+    fn serialize<S: Serializer>(&self, serializer: S) -> Result<S::Ok, S::Error> {
+        let mut sequence = serializer.serialize_seq(Some(self.0.len()))?;
+        for id in self.0 {
+            sequence.serialize_element(&id.get())?;
+        }
+        sequence.end()
+    }
+}
+struct EvolutionaryComparisonIds<'a>(&'a [smackdebt_analysis::EvolutionaryComparisonId]);
+impl Serialize for EvolutionaryComparisonIds<'_> {
+    fn serialize<S: Serializer>(&self, serializer: S) -> Result<S::Ok, S::Error> {
+        let mut sequence = serializer.serialize_seq(Some(self.0.len()))?;
+        for id in self.0 {
+            sequence.serialize_element(&id.get())?;
+        }
+        sequence.end()
     }
 }
 
@@ -386,6 +440,177 @@ impl Serialize for PackageGraphView {
     }
 }
 struct ArchitectureFindings<'a>(&'a [ArchitectureFinding]);
+
+struct HistoryCoverageView<'a>(&'a smackdebt_analysis::HistoryCoverage);
+impl Serialize for HistoryCoverageView<'_> {
+    fn serialize<S: Serializer>(&self, serializer: S) -> Result<S::Ok, S::Error> {
+        let value = self.0;
+        let mut map = serializer.serialize_map(Some(10))?;
+        let availability = match value.availability() {
+            smackdebt_analysis::HistoryAvailability::Complete => "complete",
+            smackdebt_analysis::HistoryAvailability::Incomplete => "incomplete",
+            smackdebt_analysis::HistoryAvailability::Unavailable => "unavailable",
+        };
+        map.serialize_entry("availability", availability)?;
+        map.serialize_entry("revision", &value.revision())?;
+        map.serialize_entry("commits", &value.commits())?;
+        map.serialize_entry("newest_timestamp", &value.newest_timestamp())?;
+        map.serialize_entry("oldest_timestamp", &value.oldest_timestamp())?;
+        map.serialize_entry("textual_changes", &value.textual_changes())?;
+        map.serialize_entry("uncounted_changes", &value.uncounted_changes())?;
+        map.serialize_entry("excluded_paths", &value.excluded_paths())?;
+        map.serialize_entry("rename_gaps", &value.rename_gaps())?;
+        map.serialize_entry("reason", &value.reason())?;
+        map.end()
+    }
+}
+
+struct FileHistoryRecords<'a>(&'a [FileHistory]);
+impl Serialize for FileHistoryRecords<'_> {
+    fn serialize<S: Serializer>(&self, serializer: S) -> Result<S::Ok, S::Error> {
+        let mut sequence = serializer.serialize_seq(Some(self.0.len()))?;
+        for value in self.0 {
+            sequence.serialize_element(&FileHistoryView(*value))?;
+        }
+        sequence.end()
+    }
+}
+struct FileHistoryView(FileHistory);
+impl Serialize for FileHistoryView {
+    fn serialize<S: Serializer>(&self, serializer: S) -> Result<S::Ok, S::Error> {
+        let mut map = serializer.serialize_map(Some(5))?;
+        map.serialize_entry("file", &self.0.file().get())?;
+        map.serialize_entry("touches", &self.0.touches())?;
+        map.serialize_entry("added_lines", &self.0.added_lines())?;
+        map.serialize_entry("deleted_lines", &self.0.deleted_lines())?;
+        map.serialize_entry("uncounted_changes", &self.0.uncounted_changes())?;
+        map.end()
+    }
+}
+struct PackageHistoryRecords<'a>(&'a [PackageHistory]);
+impl Serialize for PackageHistoryRecords<'_> {
+    fn serialize<S: Serializer>(&self, serializer: S) -> Result<S::Ok, S::Error> {
+        let mut sequence = serializer.serialize_seq(Some(self.0.len()))?;
+        for value in self.0 {
+            sequence.serialize_element(&PackageHistoryView(*value))?;
+        }
+        sequence.end()
+    }
+}
+struct PackageHistoryView(PackageHistory);
+impl Serialize for PackageHistoryView {
+    fn serialize<S: Serializer>(&self, serializer: S) -> Result<S::Ok, S::Error> {
+        let mut map = serializer.serialize_map(Some(5))?;
+        map.serialize_entry("package", &self.0.package().get())?;
+        map.serialize_entry("touches", &self.0.touches())?;
+        map.serialize_entry("added_lines", &self.0.added_lines())?;
+        map.serialize_entry("deleted_lines", &self.0.deleted_lines())?;
+        map.serialize_entry("uncounted_changes", &self.0.uncounted_changes())?;
+        map.end()
+    }
+}
+struct ChangeCouplingRecords<'a>(&'a [smackdebt_analysis::ChangeCoupling]);
+impl Serialize for ChangeCouplingRecords<'_> {
+    fn serialize<S: Serializer>(&self, serializer: S) -> Result<S::Ok, S::Error> {
+        let mut sequence = serializer.serialize_seq(Some(self.0.len()))?;
+        for value in self.0 {
+            sequence.serialize_element(&ChangeCouplingView(*value))?;
+        }
+        sequence.end()
+    }
+}
+struct ChangeCouplingView(smackdebt_analysis::ChangeCoupling);
+impl Serialize for ChangeCouplingView {
+    fn serialize<S: Serializer>(&self, serializer: S) -> Result<S::Ok, S::Error> {
+        let mut map = serializer.serialize_map(Some(5))?;
+        map.serialize_entry("left", &self.0.left().get())?;
+        map.serialize_entry("right", &self.0.right().get())?;
+        map.serialize_entry("shared_commits", &self.0.shared_commits())?;
+        map.serialize_entry("union_commits", &self.0.union_commits())?;
+        map.serialize_entry("similarity", &self.0.similarity())?;
+        map.end()
+    }
+}
+struct ConcentrationRecords<'a>(&'a [smackdebt_analysis::ContributorConcentration]);
+impl Serialize for ConcentrationRecords<'_> {
+    fn serialize<S: Serializer>(&self, serializer: S) -> Result<S::Ok, S::Error> {
+        let mut sequence = serializer.serialize_seq(Some(self.0.len()))?;
+        for value in self.0 {
+            sequence.serialize_element(&ConcentrationView(*value))?;
+        }
+        sequence.end()
+    }
+}
+struct ConcentrationView(smackdebt_analysis::ContributorConcentration);
+impl Serialize for ConcentrationView {
+    fn serialize<S: Serializer>(&self, serializer: S) -> Result<S::Ok, S::Error> {
+        let mut map = serializer.serialize_map(Some(5))?;
+        map.serialize_entry("package", &self.0.package().get())?;
+        map.serialize_entry("contributor_count", &self.0.contributor_count())?;
+        map.serialize_entry("numerator", &self.0.numerator())?;
+        map.serialize_entry("denominator", &self.0.denominator())?;
+        map.serialize_entry("ratio", &self.0.ratio())?;
+        map.end()
+    }
+}
+struct EvolutionaryFindings<'a>(&'a [EvolutionaryFinding]);
+impl Serialize for EvolutionaryFindings<'_> {
+    fn serialize<S: Serializer>(&self, serializer: S) -> Result<S::Ok, S::Error> {
+        let mut sequence = serializer.serialize_seq(Some(self.0.len()))?;
+        for value in self.0 {
+            sequence.serialize_element(&EvolutionaryFindingView(*value))?;
+        }
+        sequence.end()
+    }
+}
+struct EvolutionaryFindingView(EvolutionaryFinding);
+impl Serialize for EvolutionaryFindingView {
+    fn serialize<S: Serializer>(&self, serializer: S) -> Result<S::Ok, S::Error> {
+        let pair = self.0.coupling();
+        let mut map = serializer.serialize_map(Some(7))?;
+        map.serialize_entry("id", &self.0.id().get())?;
+        map.serialize_entry("rating", "watch")?;
+        map.serialize_entry("left", &pair.left().get())?;
+        map.serialize_entry("right", &pair.right().get())?;
+        map.serialize_entry("shared_commits", &pair.shared_commits())?;
+        map.serialize_entry("union_commits", &pair.union_commits())?;
+        map.serialize_entry("similarity", &pair.similarity())?;
+        map.end()
+    }
+}
+struct EvolutionaryComparisons<'a>(&'a [EvolutionaryComparison]);
+impl Serialize for EvolutionaryComparisons<'_> {
+    fn serialize<S: Serializer>(&self, serializer: S) -> Result<S::Ok, S::Error> {
+        let mut sequence = serializer.serialize_seq(Some(self.0.len()))?;
+        for value in self.0 {
+            sequence.serialize_element(&EvolutionaryComparisonView(*value))?;
+        }
+        sequence.end()
+    }
+}
+struct EvolutionaryComparisonView(EvolutionaryComparison);
+impl Serialize for EvolutionaryComparisonView {
+    fn serialize<S: Serializer>(&self, serializer: S) -> Result<S::Ok, S::Error> {
+        let pair = self.0.coupling();
+        let kind = match self.0.kind() {
+            smackdebt_analysis::EvolutionaryComparisonKind::FindingIntroduced => {
+                "finding_introduced"
+            }
+            smackdebt_analysis::EvolutionaryComparisonKind::FindingRemoved => "finding_removed",
+        };
+        let mut map = serializer.serialize_map(Some(8))?;
+        map.serialize_entry("id", &self.0.id().get())?;
+        map.serialize_entry("kind", kind)?;
+        map.serialize_entry("direction", direction_name(self.0.direction()))?;
+        map.serialize_entry("left", &pair.left().get())?;
+        map.serialize_entry("right", &pair.right().get())?;
+        map.serialize_entry("shared_commits", &pair.shared_commits())?;
+        map.serialize_entry("union_commits", &pair.union_commits())?;
+        map.serialize_entry("similarity", &pair.similarity())?;
+        map.end()
+    }
+}
+
 impl Serialize for ArchitectureFindings<'_> {
     fn serialize<S: Serializer>(&self, serializer: S) -> Result<S::Ok, S::Error> {
         let mut sequence = serializer.serialize_seq(Some(self.0.len()))?;

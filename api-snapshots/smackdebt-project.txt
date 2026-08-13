@@ -25,6 +25,7 @@ impl smackdebt_project::DiffRequest
 pub fn smackdebt_project::DiffRequest::analyze(&self) -> core::result::Result<smackdebt_project::ProjectReport, smackdebt_project::ProjectError>
 pub fn smackdebt_project::DiffRequest::automatic(impl core::convert::Into<std::path::PathBuf>) -> Self
 pub fn smackdebt_project::DiffRequest::new(impl core::convert::Into<std::path::PathBuf>) -> Self
+pub fn smackdebt_project::DiffRequest::with_history_days(self, u32) -> Self
 pub fn smackdebt_project::DiffRequest::with_reference(self, impl core::convert::Into<alloc::string::String>) -> Self
 pub fn smackdebt_project::DiffRequest::with_thresholds(self, (u32, u32), (u32, u32), (u32, u32)) -> Self
 pub fn smackdebt_project::DiffRequest::with_width(self, smackdebt_project::ExecutionWidth) -> Self
