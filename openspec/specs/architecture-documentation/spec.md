@@ -117,3 +117,72 @@ serialization.
 - **WHEN** rendering or display policy changes
 - **THEN** the architecture guide identifies whether the change belongs in report facts, presentation selection, CLI policy, or width-specific writing
 
+### Requirement: Architecture documents module placement
+`ARCHITECTURE.md` SHALL describe entry-module restrictions, private module
+responsibilities, visibility rules, and the interfaces between the seven crates.
+
+#### Scenario: Engineer extracts or adds behavior
+- **WHEN** an engineer chooses where a type or function belongs
+- **THEN** the architecture guide identifies both the owning crate and the
+  focused private module rule
+
+### Requirement: Architecture documents report construction ownership
+`ARCHITECTURE.md` SHALL describe the analysis-owned report builder, immutable
+completed report, project-owned selected scope, shared path ownership, and Git
+change interface.
+
+#### Scenario: Engineer changes report assembly
+- **WHEN** report construction or selection behavior changes
+- **THEN** the architecture guide identifies the owner and prevents project or
+  output from mutating report tables
+
+### Requirement: Architecture documentation explains evolutionary ownership
+
+`ARCHITECTURE.md` SHALL document that Git owns streamed history records,
+analysis owns evolutionary algorithms and policy, project owns current-inventory
+composition, and output only renders retained aggregate values.
+
+#### Scenario: A maintainer reads the history design
+
+- **WHEN** the maintainer opens `ARCHITECTURE.md`
+- **THEN** the document identifies the owner of history I/O, rename identity,
+  churn, coupling, concentration, comparison, and privacy enforcement
+- **AND** it explains that contributor identities stop before the report seam
+
+### Requirement: Architecture documentation states history limits
+
+`ARCHITECTURE.md` SHALL explain current-file anchoring, current package
+assignment, shallow or partial history, binary changes, and the absence of
+historical package reconstruction.
+
+#### Scenario: A maintainer evaluates a history claim
+
+- **WHEN** the maintainer reads the evolution section
+- **THEN** the document distinguishes exact retained facts from unavailable or
+  excluded history
+- **AND** it does not claim compiler, runtime, or historical build knowledge
+
+### Requirement: Architecture documentation defines evidence layers
+
+`ARCHITECTURE.md` SHALL distinguish pure policy tests, language truth fixtures,
+adapter tests, black-box CLI evidence, allocation checks, and performance
+workloads and SHALL state what each layer can prove.
+
+#### Scenario: A maintainer changes an algorithm
+
+- **WHEN** the maintainer reads the test architecture
+- **THEN** the document directs exact policy changes to pure truth tests
+- **AND** directs public behavior changes to schema and black-box evidence
+
+### Requirement: Architecture documentation defines the acceptance seam
+
+`ARCHITECTURE.md` SHALL state that acceptance invokes the built process and may
+observe test-only work counts but does not construct internal reports or repeat
+analysis policy.
+
+#### Scenario: A maintainer extends the harness
+
+- **WHEN** a new public flow is added
+- **THEN** the documented seam requires process status and stream assertions
+- **AND** prevents the harness from bypassing CLI composition
+

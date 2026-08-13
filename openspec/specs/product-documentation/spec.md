@@ -120,3 +120,51 @@ view.
 - **WHEN** the user reads output guidance
 - **THEN** the README explains how to force or disable ANSI styling and that JSON remains unstyled
 
+### Requirement: Product documentation explains evolutionary signals
+
+The README SHALL explain churn, package change coupling, contributor count,
+contributor concentration, and unexplained-coupling Watch findings in plain
+product language.
+
+#### Scenario: A user interprets evolution output
+
+- **WHEN** the user reads the README and an example report
+- **THEN** the user can distinguish present code health, static architecture,
+  and change-history evidence
+- **AND** the user is not told that any descriptive value is automatically bad
+
+### Requirement: Product documentation states privacy and coverage behavior
+
+The README SHALL state that analysis stays local, contributor identities are
+not reported, and unavailable or incomplete history is shown explicitly.
+
+#### Scenario: A user analyzes a shallow repository
+
+- **WHEN** the user consults history documentation
+- **THEN** the documented output matches the incomplete-history diagnostic
+- **AND** it explains which source and architecture results still remain usable
+
+### Requirement: Documented command examples are checked
+
+The README SHALL mark runnable console examples and associate each with a named
+public generated fixture and expected status and output.
+
+#### Scenario: Documentation tests run
+
+- **WHEN** the documentation validation command reads runnable README examples
+- **THEN** it executes them through the built CLI against their named fixtures
+- **AND** observed status and output match the documentation
+
+### Requirement: Documentation covers the unified result
+
+The README SHALL show how one command answers both code-quality and
+architecture-quality questions using separate source, static architecture, and
+evolution evidence.
+
+#### Scenario: A user reads the main example
+
+- **WHEN** the user follows the documented default and diff examples
+- **THEN** the examples show separate findings and coverage for all three
+  analysis families
+- **AND** they do not present a combined debt score
+

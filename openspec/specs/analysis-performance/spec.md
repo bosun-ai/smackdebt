@@ -174,3 +174,56 @@ on allocation count and peak memory before release limits are accepted.
 - **WHEN** scopes reserve the required child-derived link capacity
 - **THEN** the post-order aggregation update performs no new heap allocation and every retained item is linked once per applicable scope
 
+### Requirement: History work has explicit resource limits
+
+The system SHALL use one streamed Git history process per report, apply
+backpressure while aggregating commits, and keep relationship storage
+proportional to observed package pairs.
+
+#### Scenario: A repository has many commits
+
+- **WHEN** a complete correctness-checked codebase report reads its history
+- **THEN** instrumentation records exactly one history process
+- **AND** source analysis does not start an additional history process
+
+#### Scenario: One commit changes many packages
+
+- **WHEN** a generated commit touches many files and packages
+- **THEN** each package is deduplicated before pair generation
+- **AND** each unordered package pair is counted at most once for that commit
+
+### Requirement: Evolutionary output is deterministic
+
+The system SHALL order history summaries and coupling findings by stable report
+identity after aggregation.
+
+#### Scenario: Worker count changes
+
+- **WHEN** the same generated history fixture is analyzed with one worker and
+  automatic parallelism
+- **THEN** terminal and JSON bytes are identical
+
+### Requirement: Complete-flow performance evidence preserves correctness
+
+The system SHALL measure performance only for complete CLI flows whose terminal
+or JSON result has already passed semantic, schema, and byte checks.
+
+#### Scenario: A generated scaling workload is measured
+
+- **WHEN** wall time, p95, peak memory, allocations, reads, and Git process
+  counts are recorded
+- **THEN** the same invocation first passes its exact correctness assertions
+- **AND** the record includes workload identity, revision, dirty state,
+  toolchain, host, source bytes, and supported-file count
+
+### Requirement: Parallel evidence includes public byte equality
+
+The system SHALL pair any parallel speed or memory evidence with one-worker and
+automatic-parallel public-output comparison.
+
+#### Scenario: Parallel execution is evaluated
+
+- **WHEN** a complete analysis workload uses multiple workers
+- **THEN** its terminal and JSON bytes match the one-worker result
+- **AND** timing alone cannot make the performance check pass
+
