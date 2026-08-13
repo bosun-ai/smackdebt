@@ -11,6 +11,7 @@ test:
 
 architecture:
     python3 scripts/check-dependency-direction.py
+    python3 scripts/check-entry-modules.py
     python3 scripts/check-api-snapshots.py
     python3 -m unittest discover -s scripts/tests
 

@@ -1,162 +1,285 @@
-pub const fn activity(&self) -> Option<FileActivity>
-pub const fn after(&self) -> Option<Measurements>
-pub const fn after_rating(&self) -> Option<Rating>
-pub const fn analyzed_files(self) -> u32
-pub const fn assess(self, measurements: Measurements) -> HealthAssessment
-pub const fn assessment(&self) -> HealthAssessment
-pub const fn before(&self) -> Option<Measurements>
-pub const fn before_rating(&self) -> Option<Rating>
-pub const fn better(self) -> u32
-pub const fn changed(self) -> u32
-pub const fn cognitive(self) -> Thresholds
-pub const fn cognitive_complexity(self) -> u32
-pub const fn comparison_direction(comparison: &Comparison) -> ComparisonDirection
-pub const fn coverage(&self) -> Coverage
-pub const fn cyclomatic(self) -> Thresholds
-pub const fn cyclomatic_complexity(self) -> u32
-pub const fn debt(self) -> u32
-pub const fn diff(&self) -> DiffCounts
-pub const fn direction(&self) -> ComparisonDirection
-pub const fn end_line(self) -> u32
-pub const fn excluded_lines(&self) -> u32
-pub const fn excluded_lines(self) -> u32
-pub const fn failed_files(self) -> u32
-pub const fn file(&self) -> FileId
-pub const fn file(&self) -> Option<FileId>
-pub const fn from_index(index: usize) -> Self
-pub const fn get(self) -> u32
-pub const fn health(&self) -> HealthCounts
-pub const fn healthy(self) -> u32
-pub const fn high(self) -> u32
-pub const fn id(&self) -> ComparisonId
-pub const fn id(&self) -> DiagnosticId
-pub const fn id(&self) -> FileId
-pub const fn id(&self) -> FindingId
-pub const fn id(&self) -> ScopeId
-pub const fn index(self) -> usize
-pub const fn kind(&self) -> ComparisonKind
-pub const fn kind(&self) -> DiagnosticKind
-pub const fn kind(&self) -> ScopeKind
-pub const fn kind(&self) -> UnitKind
-pub const fn language(&self) -> Language
-pub const fn language(&self) -> Option<Language>
-pub const fn line_count(self) -> u32
-pub const fn local_id(&self) -> LocalUnitId
-pub const fn logical_lines(self) -> Thresholds
-pub const fn logical_lines(self) -> u32
-pub const fn measurements(&self) -> Measurements
-pub const fn mode(&self) -> ReportMode
-pub const fn new( cognitive: Thresholds, cyclomatic: Thresholds, logical_lines: Thresholds, ) -> Self
-pub const fn new( cognitive_complexity: u32, cyclomatic_complexity: u32, logical_lines: u32, ) -> Self
-pub const fn new( selected_files: u32, analyzed_files: u32, unsupported_files: u32, failed_files: u32, source_lines: u32, excluded_lines: u32, ) -> Self
-pub const fn new(healthy: u32, watch: u32, high: u32) -> Self
-pub const fn new(start_line: u32, end_line: u32) -> Self
-pub const fn new(touches: u32) -> Self
-pub const fn new(watch: u32, high: u32) -> Self
-pub const fn new(worse: u32, better: u32, changed: u32) -> Self
-pub const fn parent(&self) -> Option<LocalUnitId>
-pub const fn parent(&self) -> Option<ScopeId>
-pub const fn parse_status(&self) -> &ParseStatus
-pub const fn path(&self) -> Option<PathId>
-pub const fn path_id(&self) -> Option<PathId>
-pub const fn rating(self) -> Rating
-pub const fn root(&self) -> Option<ScopeId>
-pub const fn schema_version(&self) -> u32
-pub const fn scope(&self) -> ScopeId
-pub const fn selected_files(self) -> u32
-pub const fn selected_scope(&self) -> Option<ScopeId>
-pub const fn signal(self) -> Signal
-pub const fn signal(self, signal: Signal) -> SignalAssessment
-pub const fn signals(self) -> [SignalAssessment; 3]
-pub const fn source_lines(&self) -> u32
-pub const fn source_lines(self) -> u32
-pub const fn span(&self) -> SourceSpan
-pub const fn start_line(self) -> u32
-pub const fn total(self) -> u32
-pub const fn touches(self) -> u32
-pub const fn unit(&self) -> UnitId
-pub const fn unsupported_files(self) -> u32
-pub const fn value(self) -> u32
-pub const fn watch(self) -> u32
-pub const fn worse(self) -> u32
-pub enum ComparisonDirection
-pub enum ComparisonKind
-pub enum DiagnosticKind
-pub enum Language
-pub enum ParseStatus
-pub enum Rating
-pub enum ReportMode
-pub enum ScopeKind
-pub enum Signal
-pub enum UnitKind
-pub fn add_child(&mut self, child: ScopeId)
-pub fn add_comparison(&mut self, comparison: Comparison) -> ComparisonId
-pub fn add_comparison(&mut self, comparison: ComparisonId)
-pub fn add_counts(&mut self, other: Self)
-pub fn add_diagnostic(&mut self, diagnostic: Diagnostic) -> DiagnosticId
-pub fn add_direction(&mut self, direction: ComparisonDirection)
-pub fn add_file(&mut self, file: FileId)
-pub fn add_file(&mut self, file: FileRecord) -> FileId
-pub fn add_finding(&mut self, finding: Finding) -> FindingId
-pub fn add_finding(&mut self, finding: FindingId)
-pub fn add_rating(&mut self, rating: Rating)
-pub fn add_scope(&mut self, scope: Scope) -> ScopeId
-pub fn aggregate_comparisons(scopes: &mut [Scope], comparisons: &[Comparison], root: ScopeId)
-pub fn aggregate_scopes(scopes: &mut [Scope], files: &[FileRecord], root: ScopeId)
-pub fn children(&self) -> &[ScopeId]
-pub fn combine(self, other: Self) -> Self
-pub fn compare_units( before: &[UnitFact], after: &[UnitFact], policy: HealthPolicy, ) -> Vec<Comparison>
-pub fn comparisons(&self) -> &[ComparisonId]
-pub fn comparisons(&self) -> &[Comparison]
-pub fn container(&self) -> Option<&str>
-pub fn diagnostics(&self) -> &[Diagnostic]
-pub fn files(&self) -> &[FileId]
-pub fn files(&self) -> &[FileRecord]
-pub fn findings(&self) -> &[FindingId]
-pub fn findings(&self) -> &[Finding]
-pub fn identity(&self) -> &UnitIdentity
-pub fn in_container(mut self, container: impl Into<String>) -> Self
-pub fn message(&self) -> &str
-pub fn name(&self) -> &str
-pub fn new( file: FileId, language: Language, source_lines: u32, parse_status: ParseStatus, units: Vec<UnitFact>, ) -> Self
-pub fn new( id: ComparisonId, identity: UnitIdentity, kind: ComparisonKind, before: Option<Measurements>, after: Option<Measurements>, before_rating: Option<Rating>, after_rating: Option<Rating>, ) -> Self
-pub fn new( id: DiagnosticId, file: Option<FileId>, kind: DiagnosticKind, message: impl Into<String>, excluded_lines: u32, ) -> Self
-pub fn new( id: FileId, scope: ScopeId, path: impl Into<String>, coverage: Coverage, health: HealthCounts, ) -> Self
-pub fn new( id: FindingId, unit: UnitId, file: FileId, identity: UnitIdentity, span: SourceSpan, measurements: Measurements, assessment: HealthAssessment, ) -> Self
-pub fn new( id: ScopeId, kind: ScopeKind, name: impl Into<String>, parent: Option<ScopeId>, ) -> Self
-pub fn new( local_id: LocalUnitId, identity: UnitIdentity, span: SourceSpan, measurements: Measurements, parent: Option<LocalUnitId>, ) -> Self
-pub fn new(mode: ReportMode) -> Self
-pub fn new(name: impl Into<String>, kind: UnitKind) -> Self
-pub fn path(&self) -> &str
-pub fn paths(&self) -> &[String]
-pub fn reserve_findings(&mut self, additional: usize)
-pub fn scopes(&self) -> &[Scope]
-pub fn scopes_mut(&mut self) -> &mut [Scope]
-pub fn set_path(&mut self, path: PathId)
-pub fn set_root(&mut self, root: ScopeId)
-pub fn set_selected_scope(&mut self, scope: ScopeId)
-pub fn units(&self) -> &[UnitFact]
-pub fn with_activity(mut self, activity: FileActivity) -> Self
-pub fn with_capacity( mode: ReportMode, scopes: usize, files: usize, findings: usize, diagnostics: usize, comparisons: usize, ) -> Self
-pub fn with_file(mut self, file: FileId) -> Self
-pub fn with_language(mut self, language: Language) -> Self
-pub struct $name(u32)
-pub struct Comparison
-pub struct Coverage
-pub struct Diagnostic
-pub struct DiffCounts
-pub struct FileActivity
-pub struct FileAnalysis
-pub struct FileRecord
-pub struct Finding
-pub struct HealthAssessment
-pub struct HealthCounts
-pub struct HealthPolicy
-pub struct Measurements
-pub struct Report
-pub struct Scope
-pub struct SignalAssessment
-pub struct SourceSpan
-pub struct Thresholds
-pub struct UnitFact
-pub struct UnitIdentity
+pub mod smackdebt_analysis
+pub enum smackdebt_analysis::ComparisonDirection
+pub smackdebt_analysis::ComparisonDirection::Better
+pub smackdebt_analysis::ComparisonDirection::Changed
+pub smackdebt_analysis::ComparisonDirection::Worse
+pub enum smackdebt_analysis::ComparisonKind
+pub smackdebt_analysis::ComparisonKind::Added
+pub smackdebt_analysis::ComparisonKind::Ambiguous
+pub smackdebt_analysis::ComparisonKind::Improved
+pub smackdebt_analysis::ComparisonKind::MetricChanged
+pub smackdebt_analysis::ComparisonKind::Regressed
+pub smackdebt_analysis::ComparisonKind::Removed
+pub smackdebt_analysis::ComparisonKind::Unchanged
+pub enum smackdebt_analysis::DiagnosticKind
+pub smackdebt_analysis::DiagnosticKind::AmbiguousIdentity
+pub smackdebt_analysis::DiagnosticKind::Other
+pub smackdebt_analysis::DiagnosticKind::OversizedFile
+pub smackdebt_analysis::DiagnosticKind::ParseFailure
+pub smackdebt_analysis::DiagnosticKind::UnreadableFile
+pub smackdebt_analysis::DiagnosticKind::UnsafeReference
+pub smackdebt_analysis::DiagnosticKind::UnsupportedLanguage
+pub enum smackdebt_analysis::Language
+pub smackdebt_analysis::Language::C
+pub smackdebt_analysis::Language::Cpp
+pub smackdebt_analysis::Language::Java
+pub smackdebt_analysis::Language::JavaScript
+pub smackdebt_analysis::Language::Jsx
+pub smackdebt_analysis::Language::Kotlin
+pub smackdebt_analysis::Language::Python
+pub smackdebt_analysis::Language::Ruby
+pub smackdebt_analysis::Language::Rust
+pub smackdebt_analysis::Language::Tsx
+pub smackdebt_analysis::Language::TypeScript
+pub smackdebt_analysis::Language::Unknown
+pub smackdebt_analysis::Language::Vue
+pub enum smackdebt_analysis::ParseStatus
+pub smackdebt_analysis::ParseStatus::Failed
+pub smackdebt_analysis::ParseStatus::Parsed
+pub smackdebt_analysis::ParseStatus::Recovered
+pub enum smackdebt_analysis::Rating
+pub smackdebt_analysis::Rating::Healthy
+pub smackdebt_analysis::Rating::High
+pub smackdebt_analysis::Rating::Watch
+pub enum smackdebt_analysis::ReportMode
+pub smackdebt_analysis::ReportMode::Codebase
+pub smackdebt_analysis::ReportMode::Diff
+pub enum smackdebt_analysis::ScopeKind
+pub smackdebt_analysis::ScopeKind::Directory
+pub smackdebt_analysis::ScopeKind::File
+pub smackdebt_analysis::ScopeKind::Package
+pub smackdebt_analysis::ScopeKind::Repository
+pub enum smackdebt_analysis::Signal
+pub smackdebt_analysis::Signal::CognitiveComplexity
+pub smackdebt_analysis::Signal::CyclomaticComplexity
+pub smackdebt_analysis::Signal::LogicalLines
+pub enum smackdebt_analysis::UnitKind
+pub smackdebt_analysis::UnitKind::Closure
+pub smackdebt_analysis::UnitKind::Function
+pub smackdebt_analysis::UnitKind::Lambda
+pub smackdebt_analysis::UnitKind::Method
+pub smackdebt_analysis::UnitKind::SyntheticTopLevel
+pub smackdebt_analysis::UnitKind::Template
+pub struct smackdebt_analysis::Comparison
+impl smackdebt_analysis::Comparison
+pub const fn smackdebt_analysis::Comparison::after(&self) -> core::option::Option<smackdebt_analysis::Measurements>
+pub const fn smackdebt_analysis::Comparison::after_rating(&self) -> core::option::Option<smackdebt_analysis::Rating>
+pub const fn smackdebt_analysis::Comparison::before(&self) -> core::option::Option<smackdebt_analysis::Measurements>
+pub const fn smackdebt_analysis::Comparison::before_rating(&self) -> core::option::Option<smackdebt_analysis::Rating>
+pub const fn smackdebt_analysis::Comparison::direction(&self) -> smackdebt_analysis::ComparisonDirection
+pub const fn smackdebt_analysis::Comparison::file(&self) -> core::option::Option<smackdebt_analysis::FileId>
+pub const fn smackdebt_analysis::Comparison::id(&self) -> smackdebt_analysis::ComparisonId
+pub fn smackdebt_analysis::Comparison::identity(&self) -> &smackdebt_analysis::UnitIdentity
+pub const fn smackdebt_analysis::Comparison::kind(&self) -> smackdebt_analysis::ComparisonKind
+pub fn smackdebt_analysis::Comparison::new(smackdebt_analysis::ComparisonId, smackdebt_analysis::UnitIdentity, smackdebt_analysis::ComparisonKind, core::option::Option<smackdebt_analysis::Measurements>, core::option::Option<smackdebt_analysis::Measurements>, core::option::Option<smackdebt_analysis::Rating>, core::option::Option<smackdebt_analysis::Rating>) -> Self
+pub fn smackdebt_analysis::Comparison::with_file(self, smackdebt_analysis::FileId) -> Self
+pub struct smackdebt_analysis::ComparisonId(_)
+impl smackdebt_analysis::ComparisonId
+pub const fn smackdebt_analysis::ComparisonId::from_index(usize) -> Self
+pub const fn smackdebt_analysis::ComparisonId::get(self) -> u32
+pub const fn smackdebt_analysis::ComparisonId::index(self) -> usize
+pub struct smackdebt_analysis::Coverage
+impl smackdebt_analysis::Coverage
+pub const fn smackdebt_analysis::Coverage::analyzed_files(self) -> u32
+pub fn smackdebt_analysis::Coverage::combine(self, Self) -> Self
+pub const fn smackdebt_analysis::Coverage::excluded_lines(self) -> u32
+pub const fn smackdebt_analysis::Coverage::failed_files(self) -> u32
+pub const fn smackdebt_analysis::Coverage::new(u32, u32, u32, u32, u32, u32) -> Self
+pub const fn smackdebt_analysis::Coverage::selected_files(self) -> u32
+pub const fn smackdebt_analysis::Coverage::source_lines(self) -> u32
+pub const fn smackdebt_analysis::Coverage::unsupported_files(self) -> u32
+pub struct smackdebt_analysis::Diagnostic
+impl smackdebt_analysis::Diagnostic
+pub const fn smackdebt_analysis::Diagnostic::excluded_lines(&self) -> u32
+pub const fn smackdebt_analysis::Diagnostic::file(&self) -> core::option::Option<smackdebt_analysis::FileId>
+pub const fn smackdebt_analysis::Diagnostic::id(&self) -> smackdebt_analysis::DiagnosticId
+pub const fn smackdebt_analysis::Diagnostic::kind(&self) -> smackdebt_analysis::DiagnosticKind
+pub fn smackdebt_analysis::Diagnostic::message(&self) -> &str
+pub fn smackdebt_analysis::Diagnostic::new(smackdebt_analysis::DiagnosticId, core::option::Option<smackdebt_analysis::FileId>, smackdebt_analysis::DiagnosticKind, impl core::convert::Into<alloc::string::String>, u32) -> Self
+pub struct smackdebt_analysis::DiagnosticId(_)
+impl smackdebt_analysis::DiagnosticId
+pub const fn smackdebt_analysis::DiagnosticId::from_index(usize) -> Self
+pub const fn smackdebt_analysis::DiagnosticId::get(self) -> u32
+pub const fn smackdebt_analysis::DiagnosticId::index(self) -> usize
+pub struct smackdebt_analysis::DiffCounts
+impl smackdebt_analysis::DiffCounts
+pub fn smackdebt_analysis::DiffCounts::add_counts(&mut self, Self)
+pub fn smackdebt_analysis::DiffCounts::add_direction(&mut self, smackdebt_analysis::ComparisonDirection)
+pub const fn smackdebt_analysis::DiffCounts::better(self) -> u32
+pub const fn smackdebt_analysis::DiffCounts::changed(self) -> u32
+pub const fn smackdebt_analysis::DiffCounts::new(u32, u32, u32) -> Self
+pub const fn smackdebt_analysis::DiffCounts::total(self) -> u32
+pub const fn smackdebt_analysis::DiffCounts::worse(self) -> u32
+pub struct smackdebt_analysis::FileActivity
+impl smackdebt_analysis::FileActivity
+pub const fn smackdebt_analysis::FileActivity::new(u32) -> Self
+pub const fn smackdebt_analysis::FileActivity::touches(self) -> u32
+pub struct smackdebt_analysis::FileAnalysis
+impl smackdebt_analysis::FileAnalysis
+pub const fn smackdebt_analysis::FileAnalysis::language(&self) -> smackdebt_analysis::Language
+pub fn smackdebt_analysis::FileAnalysis::new(smackdebt_analysis::Language, u32, smackdebt_analysis::ParseStatus, alloc::vec::Vec<smackdebt_analysis::UnitFact>) -> Self
+pub const fn smackdebt_analysis::FileAnalysis::parse_status(&self) -> &smackdebt_analysis::ParseStatus
+pub const fn smackdebt_analysis::FileAnalysis::source_lines(&self) -> u32
+pub fn smackdebt_analysis::FileAnalysis::units(&self) -> &[smackdebt_analysis::UnitFact]
+pub struct smackdebt_analysis::FileId(_)
+impl smackdebt_analysis::FileId
+pub const fn smackdebt_analysis::FileId::from_index(usize) -> Self
+pub const fn smackdebt_analysis::FileId::get(self) -> u32
+pub const fn smackdebt_analysis::FileId::index(self) -> usize
+pub struct smackdebt_analysis::FileRecord
+impl smackdebt_analysis::FileRecord
+pub const fn smackdebt_analysis::FileRecord::activity(&self) -> core::option::Option<smackdebt_analysis::FileActivity>
+pub const fn smackdebt_analysis::FileRecord::coverage(&self) -> smackdebt_analysis::Coverage
+pub const fn smackdebt_analysis::FileRecord::health(&self) -> smackdebt_analysis::HealthCounts
+pub const fn smackdebt_analysis::FileRecord::id(&self) -> smackdebt_analysis::FileId
+pub const fn smackdebt_analysis::FileRecord::language(&self) -> core::option::Option<smackdebt_analysis::Language>
+pub fn smackdebt_analysis::FileRecord::new(smackdebt_analysis::FileId, smackdebt_analysis::ScopeId, impl core::convert::Into<alloc::string::String>, smackdebt_analysis::Coverage, smackdebt_analysis::HealthCounts) -> Self
+pub fn smackdebt_analysis::FileRecord::path(&self) -> &str
+pub const fn smackdebt_analysis::FileRecord::path_id(&self) -> core::option::Option<smackdebt_analysis::PathId>
+pub const fn smackdebt_analysis::FileRecord::scope(&self) -> smackdebt_analysis::ScopeId
+pub fn smackdebt_analysis::FileRecord::with_activity(self, smackdebt_analysis::FileActivity) -> Self
+pub fn smackdebt_analysis::FileRecord::with_language(self, smackdebt_analysis::Language) -> Self
+pub struct smackdebt_analysis::Finding
+impl smackdebt_analysis::Finding
+pub const fn smackdebt_analysis::Finding::assessment(&self) -> smackdebt_analysis::HealthAssessment
+pub const fn smackdebt_analysis::Finding::file(&self) -> smackdebt_analysis::FileId
+pub const fn smackdebt_analysis::Finding::id(&self) -> smackdebt_analysis::FindingId
+pub fn smackdebt_analysis::Finding::identity(&self) -> &smackdebt_analysis::UnitIdentity
+pub const fn smackdebt_analysis::Finding::measurements(&self) -> smackdebt_analysis::Measurements
+pub fn smackdebt_analysis::Finding::new(smackdebt_analysis::FindingId, smackdebt_analysis::FileId, smackdebt_analysis::UnitIdentity, smackdebt_analysis::SourceSpan, smackdebt_analysis::Measurements, smackdebt_analysis::HealthAssessment) -> Self
+pub const fn smackdebt_analysis::Finding::span(&self) -> smackdebt_analysis::SourceSpan
+pub struct smackdebt_analysis::FindingId(_)
+impl smackdebt_analysis::FindingId
+pub const fn smackdebt_analysis::FindingId::from_index(usize) -> Self
+pub const fn smackdebt_analysis::FindingId::get(self) -> u32
+pub const fn smackdebt_analysis::FindingId::index(self) -> usize
+pub struct smackdebt_analysis::HealthAssessment
+impl smackdebt_analysis::HealthAssessment
+pub const fn smackdebt_analysis::HealthAssessment::rating(self) -> smackdebt_analysis::Rating
+pub const fn smackdebt_analysis::HealthAssessment::signal(self, smackdebt_analysis::Signal) -> smackdebt_analysis::SignalAssessment
+pub const fn smackdebt_analysis::HealthAssessment::signals(self) -> [smackdebt_analysis::SignalAssessment; 3]
+pub struct smackdebt_analysis::HealthCounts
+impl smackdebt_analysis::HealthCounts
+pub fn smackdebt_analysis::HealthCounts::add_counts(&mut self, Self)
+pub fn smackdebt_analysis::HealthCounts::add_rating(&mut self, smackdebt_analysis::Rating)
+pub const fn smackdebt_analysis::HealthCounts::debt(self) -> u32
+pub const fn smackdebt_analysis::HealthCounts::healthy(self) -> u32
+pub const fn smackdebt_analysis::HealthCounts::high(self) -> u32
+pub const fn smackdebt_analysis::HealthCounts::new(u32, u32, u32) -> Self
+pub const fn smackdebt_analysis::HealthCounts::total(self) -> u32
+pub const fn smackdebt_analysis::HealthCounts::watch(self) -> u32
+pub struct smackdebt_analysis::HealthPolicy
+impl smackdebt_analysis::HealthPolicy
+pub const fn smackdebt_analysis::HealthPolicy::assess(self, smackdebt_analysis::Measurements) -> smackdebt_analysis::HealthAssessment
+pub const fn smackdebt_analysis::HealthPolicy::cognitive(self) -> smackdebt_analysis::Thresholds
+pub const fn smackdebt_analysis::HealthPolicy::cyclomatic(self) -> smackdebt_analysis::Thresholds
+pub const fn smackdebt_analysis::HealthPolicy::logical_lines(self) -> smackdebt_analysis::Thresholds
+pub const fn smackdebt_analysis::HealthPolicy::new(smackdebt_analysis::Thresholds, smackdebt_analysis::Thresholds, smackdebt_analysis::Thresholds) -> Self
+impl core::default::Default for smackdebt_analysis::HealthPolicy
+pub fn smackdebt_analysis::HealthPolicy::default() -> Self
+pub struct smackdebt_analysis::LocalUnitId(_)
+impl smackdebt_analysis::LocalUnitId
+pub const fn smackdebt_analysis::LocalUnitId::from_index(usize) -> Self
+pub const fn smackdebt_analysis::LocalUnitId::get(self) -> u32
+pub const fn smackdebt_analysis::LocalUnitId::index(self) -> usize
+pub struct smackdebt_analysis::Measurements
+impl smackdebt_analysis::Measurements
+pub const fn smackdebt_analysis::Measurements::cognitive_complexity(self) -> u32
+pub const fn smackdebt_analysis::Measurements::cyclomatic_complexity(self) -> u32
+pub const fn smackdebt_analysis::Measurements::logical_lines(self) -> u32
+pub const fn smackdebt_analysis::Measurements::new(u32, u32, u32) -> Self
+pub struct smackdebt_analysis::PackageId(_)
+impl smackdebt_analysis::PackageId
+pub const fn smackdebt_analysis::PackageId::from_index(usize) -> Self
+pub const fn smackdebt_analysis::PackageId::get(self) -> u32
+pub const fn smackdebt_analysis::PackageId::index(self) -> usize
+pub struct smackdebt_analysis::PathId(_)
+impl smackdebt_analysis::PathId
+pub const fn smackdebt_analysis::PathId::from_index(usize) -> Self
+pub const fn smackdebt_analysis::PathId::get(self) -> u32
+pub const fn smackdebt_analysis::PathId::index(self) -> usize
+pub struct smackdebt_analysis::Report
+impl smackdebt_analysis::Report
+pub fn smackdebt_analysis::Report::comparisons(&self) -> &[smackdebt_analysis::Comparison]
+pub fn smackdebt_analysis::Report::diagnostics(&self) -> &[smackdebt_analysis::Diagnostic]
+pub fn smackdebt_analysis::Report::files(&self) -> &[smackdebt_analysis::FileRecord]
+pub fn smackdebt_analysis::Report::findings(&self) -> &[smackdebt_analysis::Finding]
+pub const fn smackdebt_analysis::Report::mode(&self) -> smackdebt_analysis::ReportMode
+pub fn smackdebt_analysis::Report::paths(&self) -> &[alloc::string::String]
+pub const fn smackdebt_analysis::Report::root(&self) -> core::option::Option<smackdebt_analysis::ScopeId>
+pub const fn smackdebt_analysis::Report::schema_version(&self) -> u32
+pub fn smackdebt_analysis::Report::scopes(&self) -> &[smackdebt_analysis::Scope]
+pub struct smackdebt_analysis::ReportBuilder
+impl smackdebt_analysis::ReportBuilder
+pub fn smackdebt_analysis::ReportBuilder::add_comparison(&mut self, smackdebt_analysis::Comparison) -> smackdebt_analysis::ComparisonId
+pub fn smackdebt_analysis::ReportBuilder::add_diagnostic(&mut self, smackdebt_analysis::Diagnostic) -> smackdebt_analysis::DiagnosticId
+pub fn smackdebt_analysis::ReportBuilder::add_file(&mut self, smackdebt_analysis::FileRecord) -> smackdebt_analysis::FileId
+pub fn smackdebt_analysis::ReportBuilder::add_finding(&mut self, smackdebt_analysis::Finding) -> smackdebt_analysis::FindingId
+pub fn smackdebt_analysis::ReportBuilder::add_scope(&mut self, smackdebt_analysis::Scope) -> smackdebt_analysis::ScopeId
+pub fn smackdebt_analysis::ReportBuilder::diagnostic_count(&self) -> usize
+pub fn smackdebt_analysis::ReportBuilder::finish(self) -> smackdebt_analysis::Report
+pub fn smackdebt_analysis::ReportBuilder::link_comparison(&mut self, smackdebt_analysis::ScopeId, smackdebt_analysis::ComparisonId)
+pub fn smackdebt_analysis::ReportBuilder::link_file(&mut self, smackdebt_analysis::ScopeId, smackdebt_analysis::FileId)
+pub fn smackdebt_analysis::ReportBuilder::link_finding(&mut self, smackdebt_analysis::ScopeId, smackdebt_analysis::FindingId)
+pub fn smackdebt_analysis::ReportBuilder::new(smackdebt_analysis::ReportMode) -> Self
+pub fn smackdebt_analysis::ReportBuilder::set_root(&mut self, smackdebt_analysis::ScopeId)
+pub fn smackdebt_analysis::ReportBuilder::with_capacity(smackdebt_analysis::ReportMode, usize, usize, usize, usize, usize) -> Self
+pub struct smackdebt_analysis::Scope
+impl smackdebt_analysis::Scope
+pub fn smackdebt_analysis::Scope::add_child(&mut self, smackdebt_analysis::ScopeId)
+pub fn smackdebt_analysis::Scope::add_comparison(&mut self, smackdebt_analysis::ComparisonId)
+pub fn smackdebt_analysis::Scope::add_file(&mut self, smackdebt_analysis::FileId)
+pub fn smackdebt_analysis::Scope::add_finding(&mut self, smackdebt_analysis::FindingId)
+pub fn smackdebt_analysis::Scope::children(&self) -> &[smackdebt_analysis::ScopeId]
+pub fn smackdebt_analysis::Scope::comparisons(&self) -> &[smackdebt_analysis::ComparisonId]
+pub const fn smackdebt_analysis::Scope::coverage(&self) -> smackdebt_analysis::Coverage
+pub const fn smackdebt_analysis::Scope::diff(&self) -> smackdebt_analysis::DiffCounts
+pub fn smackdebt_analysis::Scope::files(&self) -> &[smackdebt_analysis::FileId]
+pub fn smackdebt_analysis::Scope::findings(&self) -> &[smackdebt_analysis::FindingId]
+pub const fn smackdebt_analysis::Scope::health(&self) -> smackdebt_analysis::HealthCounts
+pub const fn smackdebt_analysis::Scope::id(&self) -> smackdebt_analysis::ScopeId
+pub const fn smackdebt_analysis::Scope::kind(&self) -> smackdebt_analysis::ScopeKind
+pub fn smackdebt_analysis::Scope::name(&self) -> &str
+pub fn smackdebt_analysis::Scope::new(smackdebt_analysis::ScopeId, smackdebt_analysis::ScopeKind, impl core::convert::Into<alloc::string::String>, core::option::Option<smackdebt_analysis::ScopeId>) -> Self
+pub const fn smackdebt_analysis::Scope::parent(&self) -> core::option::Option<smackdebt_analysis::ScopeId>
+pub const fn smackdebt_analysis::Scope::path(&self) -> core::option::Option<smackdebt_analysis::PathId>
+pub fn smackdebt_analysis::Scope::reserve_findings(&mut self, usize)
+pub fn smackdebt_analysis::Scope::set_path(&mut self, smackdebt_analysis::PathId)
+pub struct smackdebt_analysis::ScopeId(_)
+impl smackdebt_analysis::ScopeId
+pub const fn smackdebt_analysis::ScopeId::from_index(usize) -> Self
+pub const fn smackdebt_analysis::ScopeId::get(self) -> u32
+pub const fn smackdebt_analysis::ScopeId::index(self) -> usize
+pub struct smackdebt_analysis::SignalAssessment
+impl smackdebt_analysis::SignalAssessment
+pub const fn smackdebt_analysis::SignalAssessment::rating(self) -> smackdebt_analysis::Rating
+pub const fn smackdebt_analysis::SignalAssessment::signal(self) -> smackdebt_analysis::Signal
+pub const fn smackdebt_analysis::SignalAssessment::value(self) -> u32
+pub struct smackdebt_analysis::SourceSpan
+impl smackdebt_analysis::SourceSpan
+pub const fn smackdebt_analysis::SourceSpan::end_line(self) -> u32
+pub const fn smackdebt_analysis::SourceSpan::new(u32, u32) -> Self
+pub const fn smackdebt_analysis::SourceSpan::start_line(self) -> u32
+pub struct smackdebt_analysis::Thresholds
+impl smackdebt_analysis::Thresholds
+pub const fn smackdebt_analysis::Thresholds::high(self) -> u32
+pub const fn smackdebt_analysis::Thresholds::new(u32, u32) -> Self
+pub const fn smackdebt_analysis::Thresholds::watch(self) -> u32
+pub struct smackdebt_analysis::UnitFact
+impl smackdebt_analysis::UnitFact
+pub fn smackdebt_analysis::UnitFact::identity(&self) -> &smackdebt_analysis::UnitIdentity
+pub const fn smackdebt_analysis::UnitFact::local_id(&self) -> smackdebt_analysis::LocalUnitId
+pub const fn smackdebt_analysis::UnitFact::measurements(&self) -> smackdebt_analysis::Measurements
+pub fn smackdebt_analysis::UnitFact::new(smackdebt_analysis::LocalUnitId, smackdebt_analysis::UnitIdentity, smackdebt_analysis::SourceSpan, smackdebt_analysis::Measurements, core::option::Option<smackdebt_analysis::LocalUnitId>) -> Self
+pub const fn smackdebt_analysis::UnitFact::parent(&self) -> core::option::Option<smackdebt_analysis::LocalUnitId>
+pub const fn smackdebt_analysis::UnitFact::span(&self) -> smackdebt_analysis::SourceSpan
+pub struct smackdebt_analysis::UnitIdentity
+impl smackdebt_analysis::UnitIdentity
+pub fn smackdebt_analysis::UnitIdentity::container(&self) -> core::option::Option<&str>
+pub fn smackdebt_analysis::UnitIdentity::in_container(self, impl core::convert::Into<alloc::string::String>) -> Self
+pub const fn smackdebt_analysis::UnitIdentity::kind(&self) -> smackdebt_analysis::UnitKind
+pub fn smackdebt_analysis::UnitIdentity::name(&self) -> &str
+pub fn smackdebt_analysis::UnitIdentity::new(impl core::convert::Into<alloc::string::String>, smackdebt_analysis::UnitKind) -> Self
+pub fn smackdebt_analysis::aggregate_comparisons(&mut [smackdebt_analysis::Scope], &[smackdebt_analysis::Comparison], smackdebt_analysis::ScopeId)
+pub fn smackdebt_analysis::aggregate_scopes(&mut [smackdebt_analysis::Scope], &[smackdebt_analysis::FileRecord], smackdebt_analysis::ScopeId)
+pub fn smackdebt_analysis::compare_units(&[smackdebt_analysis::UnitFact], &[smackdebt_analysis::UnitFact], smackdebt_analysis::HealthPolicy) -> alloc::vec::Vec<smackdebt_analysis::Comparison>

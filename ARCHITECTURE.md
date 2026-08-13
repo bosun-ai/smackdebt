@@ -21,6 +21,7 @@ flowchart TD
     Project --> Git[smackdebt-git]
     Output --> Analysis
     Languages --> Analysis
+    Discovery --> Analysis
 ```
 
 | Crate | Responsibility |
@@ -33,17 +34,46 @@ flowchart TD
 | `smackdebt-output` | Terminal and JSON writers over a borrowed report |
 | `smackdebt` | Arguments, dependency construction, streams, and exit codes |
 
-Infrastructure crates do not depend on each other. Project orchestration is the
-only place that composes filesystem, language, and Git behavior. Every crate is
-private until a separate release OpenSpec change approves publication.
+Infrastructure crates do not depend on each other. Languages and discovery use
+analysis-owned values at their seams, but do not depend on another adapter.
+Project orchestration is the only place that composes filesystem, language, and
+Git behavior. Every crate is private until a separate release OpenSpec change
+approves publication.
 
 Workspace checks read Cargo metadata and reject dependency edges outside this
-diagram. Public API snapshots make cross-crate surface changes visible during
-review. All workspace crates forbid unsafe Rust.
+diagram. Compiler-visible API snapshots make cross-crate surface changes
+visible during review. All workspace crates forbid unsafe Rust.
+
+## Module and API rules
+
+`lib.rs` and `mod.rs` are wiring files. They may declare private modules,
+import names, and explicitly reexport the small interface used by another
+crate. They do not contain behavior, inline modules, wildcard reexports, or
+tests. The CLI `main.rs` is an exception only for its call into the application
+module and return of the process exit code.
+
+Implementation stays in responsibility-led files. Analysis separates source
+facts, health policy, comparisons, and completed reports. Language dispatch
+keeps its upstream adapter separate from the owned Ruby and Vue analyzers. The
+project crate separates public requests from execution, discovery separates
+ignore matching from inventory, and output separates JSON serialization from
+terminal presentation. The CLI separates arguments, configuration, terminal
+policy, and application execution. Other crates add a module only when it gives
+a responsibility a clear owner; file size by itself is not a reason to add a
+layer.
+
+Types own their behavior. A completed report is read-only outside analysis and
+is created through `ReportBuilder`; callers cannot mutate its tables or rerun
+aggregation. `Analyzer`, `Inventory`, `GitRepository`, project requests, and
+output options likewise expose actions instead of public fields or plumbing
+types. The `unreachable_pub` lint rejects public declarations that no consumer
+can reach. The entry-module check and compiler-visible API snapshots run in the
+architecture gate.
 
 ## Analysis model
 
-Inventory owns repository-relative paths and assigns small typed indexes.
+Inventory owns repository-relative paths. Analysis owns shared package and
+report indexes, and discovery assigns the package index during its walk.
 Language analysis produces a flat list of units per file. Each unit records:
 
 - its name, container, kind, and source span;
@@ -63,9 +93,10 @@ rating. Full scans retain every `watch` and `high` finding and reduce healthy
 units to counts.
 
 The scope order is repository, package, directory, file, container, and unit.
-Codebase and diff reports use the same repository-relative hierarchy. Each
-report records an initial selected scope separately from its facts, so a
-renderer can show the repository, a package, or a directory from one report.
+Codebase and diff reports use the same repository-relative hierarchy.
+`ProjectReport` records the initial selected scope separately from report
+facts, so a renderer can show the repository, a package, or a directory from
+one report.
 Aggregation walks child scopes once in post-order and links retained findings
 and comparisons through indexes. Parent scopes add counts; they never average
 debt into a project score.

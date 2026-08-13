@@ -1,40 +1,25 @@
-pub const fn as_str(self) -> &'static str
-pub const fn byte_len(&self) -> u64
-pub const fn id(&self) -> PackageId
-pub const fn index(self) -> usize
-pub const fn is_readonly(&self) -> bool
-pub const fn is_source(&self) -> bool
-pub const fn kind(&self) -> FileKind
-pub const fn package(&self) -> PackageId
-pub const fn stats(&self) -> InventoryStats
-pub directories_visited: usize
-pub enum FileKind
-pub enum InventoryDiagnostic
-pub enum ManifestKind
-pub excludes: Vec<String>
-pub files_visited: usize
-pub fn absolute_path(&self, path: &RelativePath) -> Option<PathBuf>
-pub fn as_path(&self) -> &Path
-pub fn diagnostics(&self) -> &[InventoryDiagnostic]
-pub fn discover(root: impl AsRef<Path>) -> io::Result<Self>
-pub fn discover_with(root: impl AsRef<Path>, options: InventoryOptions) -> io::Result<Self>
-pub fn files(&self) -> &[DiscoveredFile]
-pub fn into_path(self) -> PathBuf
-pub fn manifests(&self) -> &[ManifestKind]
-pub fn new(path: impl Into<PathBuf>) -> Option<Self>
-pub fn packages(&self) -> &[Package]
-pub fn path(&self) -> &RelativePath
-pub fn root(&self) -> &Path
-pub fn root(&self) -> &RelativePath
-pub fn source_files(&self) -> impl Iterator<Item = &DiscoveredFile>
-pub ignored_entries: usize
-pub include_other_files: bool
-pub source_candidates: usize
-pub struct DiscoveredFile
-pub struct Inventory
-pub struct InventoryOptions
-pub struct InventoryStats
-pub struct Package
-pub struct PackageId(u32)
-pub struct RelativePath(PathBuf)
-pub symlinks_skipped: usize
+pub mod smackdebt_discovery
+pub use smackdebt_discovery::PackageId
+pub struct smackdebt_discovery::DiscoveredFile
+impl smackdebt_discovery::DiscoveredFile
+pub const fn smackdebt_discovery::DiscoveredFile::package(&self) -> smackdebt_analysis::report::PackageId
+pub fn smackdebt_discovery::DiscoveredFile::path(&self) -> &smackdebt_discovery::RelativePath
+pub struct smackdebt_discovery::Inventory
+impl smackdebt_discovery::Inventory
+pub fn smackdebt_discovery::Inventory::absolute_path(&self, &smackdebt_discovery::RelativePath) -> core::option::Option<std::path::PathBuf>
+pub fn smackdebt_discovery::Inventory::discover(impl core::convert::AsRef<std::path::Path>) -> core::io::error::Result<Self>
+pub fn smackdebt_discovery::Inventory::discover_sources(impl core::convert::AsRef<std::path::Path>, alloc::vec::Vec<alloc::string::String>) -> core::io::error::Result<Self>
+pub fn smackdebt_discovery::Inventory::packages(&self) -> &[smackdebt_discovery::Package]
+pub fn smackdebt_discovery::Inventory::root(&self) -> &std::path::Path
+pub fn smackdebt_discovery::Inventory::source_files(&self) -> impl core::iter::traits::iterator::Iterator<Item = &smackdebt_discovery::DiscoveredFile>
+pub const fn smackdebt_discovery::Inventory::visited_entries(&self) -> usize
+pub struct smackdebt_discovery::Package
+impl smackdebt_discovery::Package
+pub fn smackdebt_discovery::Package::root(&self) -> &smackdebt_discovery::RelativePath
+pub struct smackdebt_discovery::RelativePath(_)
+impl smackdebt_discovery::RelativePath
+pub fn smackdebt_discovery::RelativePath::as_path(&self) -> &std::path::Path
+impl core::convert::AsRef<std::path::Path> for smackdebt_discovery::RelativePath
+pub fn smackdebt_discovery::RelativePath::as_ref(&self) -> &std::path::Path
+impl core::fmt::Display for smackdebt_discovery::RelativePath
+pub fn smackdebt_discovery::RelativePath::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result

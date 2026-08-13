@@ -19,6 +19,7 @@ publish = false
 
 [workspace.lints.rust]
 unsafe_code = "forbid"
+unreachable_pub = "deny"
 
 [workspace.dependencies]
 anstyle = "1.0"

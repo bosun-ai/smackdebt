@@ -1,9 +1,11 @@
-pub enum AnalysisError
-pub file: FileId
-pub fn analyze(&mut self, source: SourceFile<'_>) -> Result<CoreFileAnalysis, AnalysisError>
-pub fn analyze(source: SourceFile<'_>) -> Result<CoreFileAnalysis, AnalysisError>
-pub fn detect(path: &Path) -> Language
-pub path: &'a Path
-pub source: Vec<u8>
-pub struct Analyzer
-pub struct SourceFile<'a>
+pub mod smackdebt_languages
+pub enum smackdebt_languages::AnalysisError
+pub smackdebt_languages::AnalysisError::Parser(alloc::string::String)
+pub smackdebt_languages::AnalysisError::Unsupported(smackdebt_analysis::source::Language)
+impl core::error::Error for smackdebt_languages::AnalysisError
+impl core::fmt::Display for smackdebt_languages::AnalysisError
+pub fn smackdebt_languages::AnalysisError::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
+pub struct smackdebt_languages::Analyzer
+impl smackdebt_languages::Analyzer
+pub fn smackdebt_languages::Analyzer::analyze(&mut self, &std::path::Path, alloc::vec::Vec<u8>) -> core::result::Result<smackdebt_analysis::source::FileAnalysis, smackdebt_languages::AnalysisError>
+pub fn smackdebt_languages::Analyzer::language(&std::path::Path) -> smackdebt_analysis::source::Language

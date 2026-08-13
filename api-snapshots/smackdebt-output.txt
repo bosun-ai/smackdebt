@@ -1,6 +1,8 @@
-pub all: bool
-pub color: bool
-pub fn write_json(writer: &mut impl Write, report: &Report) -> io::Result<()>
-pub fn write_terminal( writer: &mut impl Write, report: &Report, options: TerminalOptions, ) -> io::Result<()>
-pub struct TerminalOptions
-pub width: usize
+pub mod smackdebt_output
+pub struct smackdebt_output::TerminalOptions
+impl smackdebt_output::TerminalOptions
+pub const fn smackdebt_output::TerminalOptions::new(usize, bool, bool) -> Self
+impl core::default::Default for smackdebt_output::TerminalOptions
+pub fn smackdebt_output::TerminalOptions::default() -> Self
+pub fn smackdebt_output::write_json(&mut impl core::io::write::Write, &smackdebt_analysis::report::Report, core::option::Option<smackdebt_analysis::report::ScopeId>) -> core::io::error::Result<()>
+pub fn smackdebt_output::write_terminal(&mut impl core::io::write::Write, &smackdebt_analysis::report::Report, core::option::Option<smackdebt_analysis::report::ScopeId>, smackdebt_output::TerminalOptions) -> core::io::error::Result<()>

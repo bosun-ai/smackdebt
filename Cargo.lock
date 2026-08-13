@@ -739,6 +739,9 @@ dependencies = [
 [[package]]
 name = "smackdebt-discovery"
 version = "0.1.0"
+dependencies = [
+ "smackdebt-analysis",
+]
 
 [[package]]
 name = "smackdebt-git"

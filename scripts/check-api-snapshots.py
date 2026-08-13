@@ -5,10 +5,12 @@ from __future__ import annotations
 
 import argparse
 import difflib
+import subprocess
 import sys
 from pathlib import Path
 
 
+REQUIRED_TOOL_VERSION = "cargo-public-api 0.52.0"
 LIBRARIES = {
     "smackdebt-analysis": Path("crates/analysis/src/lib.rs"),
     "smackdebt-languages": Path("crates/languages/src/lib.rs"),
@@ -57,7 +59,37 @@ def snapshot_path(root: Path, package: str) -> Path:
     return root / "api-snapshots" / f"{package}.txt"
 
 
+def tool_problem(root: Path) -> str | None:
+    try:
+        completed = subprocess.run(
+            ["cargo", "public-api", "--version"],
+            cwd=root,
+            check=True,
+            capture_output=True,
+            text=True,
+        )
+    except (OSError, subprocess.CalledProcessError):
+        return "install cargo-public-api 0.52.0 with `cargo install cargo-public-api --version 0.52.0 --locked`"
+    if completed.stdout.strip() != REQUIRED_TOOL_VERSION:
+        return f"expected {REQUIRED_TOOL_VERSION}, found {completed.stdout.strip() or 'unknown version'}"
+    return None
+
+
+def reachable_api(root: Path, package: str) -> list[str]:
+    completed = subprocess.run(
+        ["cargo", "public-api", "-p", package, "-sss", "--color", "never"],
+        cwd=root,
+        check=True,
+        capture_output=True,
+        text=True,
+    )
+    return completed.stdout.splitlines()
+
+
 def check(root: Path, update: bool, selected: set[str] | None = None) -> list[str]:
+    problem = tool_problem(root)
+    if problem is not None:
+        return [problem]
     problems: list[str] = []
     for package, relative_source in LIBRARIES.items():
         if selected is not None and package not in selected:
@@ -67,7 +99,12 @@ def check(root: Path, update: bool, selected: set[str] | None = None) -> list[st
         if not source_path.exists():
             problems.append(f"{package}: missing library source {relative_source}")
             continue
-        actual = public_surface(source_path.read_text(encoding="utf-8"))
+        try:
+            actual = reachable_api(root, package)
+        except subprocess.CalledProcessError as error:
+            detail = error.stderr.strip() or error.stdout.strip() or str(error)
+            problems.append(f"{package}: API inspection failed: {detail}")
+            continue
         if update:
             expected_path.parent.mkdir(parents=True, exist_ok=True)
             expected_path.write_text(("\n".join(actual) + "\n") if actual else "", encoding="utf-8")
