@@ -1,0 +1,63 @@
+smackdebt · codebase
+.
+8 packages · 8 files · 19 lines
+
+QUALITY  50% need attention
+████░░░░  3 / 6 code units
+▲ 1 high · ● 2 watch · 3 healthy
+✓ all 8 source files analyzed
+
+DEBT BY AREA
+  area           high  watch   share  rate           
+  b                 1      –  33%  ████████  100%
+  c                 –      1  33%  ████████  100%
+  e                 –      1  33%  ████████  100%
+  a                 –      –  0%  ░░░░░░░░  0%
+  d                 –      –  0%  ░░░░░░░░  0%
+  h                 –      –  0%  ░░░░░░░░  0%
+  i                 –      –  0%  ░░░░░░░░  0%
+  new               –      –  0%  ░░░░░░░░  0%
+
+ARCHITECTURE
+4 internal · 0 external · 0 unresolved · 0 ambiguous
+▲ 1 high · ● 0 watch · 4 internal edges
+▲ HIGH  package dependency cycle
+        c/main.js → d/main.js
+  a/main.js → c/main.js · 1 references
+  c/main.js → d/main.js · 1 references
+  d/main.js → c/main.js · 1 references
+  h/main.js → i/main.js · 1 references
+
+EVOLUTION
+4 commits · complete local history
+0 uncounted · 11 excluded · 0 rename gaps
+  i · 4 touches · +4 -3 · 2 contributors · 50% top share
+  new · 4 touches · +4 -3 · 2 contributors · 50% top share
+  a · 1 touches · +7 -0 · 1 contributors · 100% top share
+  b · 1 touches · +2 -0 · 1 contributors · 100% top share
+  c · 1 touches · +2 -0 · 1 contributors · 100% top share
+  d · 1 touches · +1 -0 · 1 contributors · 100% top share
+  e · 0 touches · +0 -0
+  h · 0 touches · +0 -0
+    file h/main.js · 4 touches · +4 -3
+    file i/main.js · 4 touches · +4 -3
+    file a/main.js · 1 touches · +7 -0
+    file b/main.js · 1 touches · +2 -0
+    file c/main.js · 1 touches · +2 -0
+    file d/main.js · 1 touches · +1 -0
+  coupling i ↔ new · 4/4 shared commits · 100% similarity · no static dependency
+● WATCH  recurrent change coupling without a static dependency
+        i ↔ new · 4/4 shared commits · 100% similarity
+
+TOP FINDINGS
+▲ HIGH  b
+        b/main.js:1
+        cognitive 6 · cyclomatic 4 · lines 2
+● WATCH  renamed
+        e/new.js:1
+        cognitive 3 · cyclomatic 3 · lines 2
+● WATCH  c
+        c/main.js:2
+        lines 3
+
+→ Explore: smackdebt b

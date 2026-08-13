@@ -14,42 +14,74 @@ def main() -> int:
     parser.add_argument("--profile", required=True)
     parser.add_argument("--input", type=Path, required=True)
     parser.add_argument("--output", type=Path, required=True)
+    parser.add_argument("--release-state", type=Path)
     args = parser.parse_args()
-    metadata = json.loads((args.input / "metadata.json").read_text())
-    runs = [json.loads(line) for line in (args.input / "runs.jsonl").read_text().splitlines()]
+    metadata_path = args.input / "metadata.json"
+    runs_path = args.input / "runs.jsonl"
+    if not metadata_path.is_file():
+        metadata_path = args.input / f"{args.profile}.metadata.json"
+    if not runs_path.is_file():
+        runs_path = args.input / f"{args.profile}.runs.jsonl"
+    metadata = json.loads(metadata_path.read_text())
+    runs = [json.loads(line) for line in runs_path.read_text().splitlines()]
     if len(runs) != 5:
         raise SystemExit("baseline requires five measured runs")
-    stable_fields = ("source_reads", "git_processes", "inventory_walks")
+    stable_fields = (
+        "source_reads",
+        "object_reads",
+        "git_processes",
+        "inventory_walks",
+        "inventory_visits",
+        "parser_visits",
+        "algorithm_passes",
+    )
     for field in stable_fields:
         if len({run[field] for run in runs}) != 1:
             raise SystemExit(f"{field} changed between runs")
     wall_times = [run["wall_time_ns"] for run in runs]
     parser_times = [run["parser_time_ns"] for run in runs]
     peak = max(run["peak_resident_bytes"] for run in runs)
-    revision = subprocess.run(
-        ["git", "rev-parse", "HEAD"], check=True, capture_output=True, text=True
-    ).stdout.strip()
-    dirty = bool(
-        subprocess.run(
-            ["git", "status", "--porcelain"], check=True, capture_output=True, text=True
-        ).stdout
-    )
+    if args.release_state is not None:
+        release_state = json.loads(args.release_state.read_text())
+        revision = release_state["workspace_revision"]
+        dirty = release_state["workspace_dirty"]
+        host = release_state["host"]
+        rustc = release_state["rustc"]
+    else:
+        revision = subprocess.run(
+            ["git", "rev-parse", "HEAD"], check=True, capture_output=True, text=True
+        ).stdout.strip()
+        dirty = bool(
+            subprocess.run(
+                ["git", "status", "--porcelain"], check=True, capture_output=True, text=True
+            ).stdout
+        )
+        host = metadata["host"]
+        rustc = metadata["rustc"]
+    digest_path = args.input / "correctness.sha256"
+    if not digest_path.is_file():
+        raise SystemExit("baseline requires a checked report digest")
     record = {
         "schema_version": 1,
         "profile": args.profile,
         "source_engine": "owned-tree-sitter-static-and-evolutionary-analysis",
         "workspace_revision": revision,
         "workspace_dirty": dirty,
-        "host": metadata["host"],
-        "rustc": metadata["rustc"],
+        "host": host,
+        "rustc": rustc,
+        "report_digest": digest_path.read_text().strip(),
         "command": f"scripts/performance/baseline.sh {args.profile}",
         "seed": metadata["seed"],
         "content_digest": metadata["content_digest"],
         "supported_files": sum(metadata["language_files"].values()),
         "source_bytes": metadata["source_bytes"],
         "source_reads": runs[0]["source_reads"],
+        "object_reads": runs[0]["object_reads"],
         "git_processes": runs[0]["git_processes"],
         "inventory_walks": runs[0]["inventory_walks"],
+        "inventory_visits": runs[0]["inventory_visits"],
+        "parser_visits": runs[0]["parser_visits"],
+        "algorithm_passes": runs[0]["algorithm_passes"],
         "samples_parser_time_ns": parser_times,
         "p95_parser_time_ns": max(parser_times),
         "samples_wall_time_ns": wall_times,

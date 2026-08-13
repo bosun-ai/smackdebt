@@ -1,0 +1,138 @@
+smackdebt · diff
+.
+9 source files changed · 9 analyzed
+
+CHANGE  7 retained units
+▲ WORSE 2 · ▼ BETTER 1 · ● CHANGED 4
+
+CHANGE BY AREA
+  area          worse  better  changed  share              
+  e                 1       –        1  ███▍░░░░░░░░  29%
+  b                 1       –        –  █▊░░░░░░░░░░  14%
+  a                 –       1        –  █▊░░░░░░░░░░  14%
+  c                 –       –        1  █▊░░░░░░░░░░  14%
+  f                 –       –        1  █▊░░░░░░░░░░  14%
+  new               –       –        1  █▊░░░░░░░░░░  14%
+  d                 –       –        –  ░░░░░░░░░░░░  0%
+  h                 –       –        –  ░░░░░░░░░░░░  0%
+  i                 –       –        –  ░░░░░░░░░░░░  0%
+
+ARCHITECTURE CHANGE
+4 internal · 0 external · 0 unresolved · 0 ambiguous
+▲ WORSE 1 · ▼ BETTER 1 · ● CHANGED 5
+▲ WORSE  package cycle introduced  c  d  witness  c  d  c
+▼ BETTER  package cycle removed  a  b  witness  a  b  a
+● CHANGED  edge added  a  c
+● CHANGED  edge added  d  c
+● CHANGED  edge added  h  i
+● CHANGED  edge removed  a  b
+● CHANGED  edge removed  b  a
+
+EVOLUTION CONTEXT
+5 commits · complete local history
+0 uncounted · 10 excluded · 0 rename gaps
+  h · 5 touches · +6 -4 · 3 contributors · 40% top share
+  i · 4 touches · +4 -3 · 2 contributors · 50% top share
+  a · 2 touches · +9 -7 · 2 contributors · 50% top share
+  b · 2 touches · +10 -2 · 2 contributors · 50% top share
+  c · 2 touches · +3 -1 · 2 contributors · 50% top share
+  d · 2 touches · +3 -1 · 2 contributors · 50% top share
+  e · 2 touches · +2 -1 · 2 contributors · 50% top share
+  f · 2 touches · +1 -1 · 2 contributors · 50% top share
+  new · 1 touches · +1 -0 · 1 contributors · 100% top share
+    file h/main.js · 5 touches · +6 -4
+    file i/main.js · 4 touches · +4 -3
+    file a/main.js · 2 touches · +9 -7
+    file b/main.js · 2 touches · +10 -2
+    file c/main.js · 2 touches · +3 -1
+    file d/main.js · 2 touches · +3 -1
+    file e/old.js · 2 touches · +1 -1
+    file f/deleted.js · 2 touches · +1 -1
+    file e/new.js · 1 touches · +1 -0
+    file new/untracked.js · 1 touches · +1 -0
+  coupling a ↔ b · 2/2 shared commits · 100% similarity · no static dependency
+  coupling a ↔ c · 2/2 shared commits · 100% similarity · static dependency
+  coupling a ↔ d · 2/2 shared commits · 100% similarity · no static dependency
+  coupling a ↔ e · 2/2 shared commits · 100% similarity · no static dependency
+  coupling a ↔ f · 2/2 shared commits · 100% similarity · no static dependency
+  coupling a ↔ h · 2/5 shared commits · 40% similarity · no static dependency
+  coupling b ↔ c · 2/2 shared commits · 100% similarity · no static dependency
+  coupling b ↔ d · 2/2 shared commits · 100% similarity · no static dependency
+  coupling b ↔ e · 2/2 shared commits · 100% similarity · no static dependency
+  coupling b ↔ f · 2/2 shared commits · 100% similarity · no static dependency
+  coupling b ↔ h · 2/5 shared commits · 40% similarity · no static dependency
+  coupling c ↔ d · 2/2 shared commits · 100% similarity · static dependency
+  coupling c ↔ e · 2/2 shared commits · 100% similarity · no static dependency
+  coupling c ↔ f · 2/2 shared commits · 100% similarity · no static dependency
+  coupling c ↔ h · 2/5 shared commits · 40% similarity · no static dependency
+  coupling d ↔ e · 2/2 shared commits · 100% similarity · no static dependency
+  coupling d ↔ f · 2/2 shared commits · 100% similarity · no static dependency
+  coupling d ↔ h · 2/5 shared commits · 40% similarity · no static dependency
+  coupling e ↔ f · 2/2 shared commits · 100% similarity · no static dependency
+  coupling e ↔ h · 2/5 shared commits · 40% similarity · no static dependency
+  coupling f ↔ h · 2/5 shared commits · 40% similarity · no static dependency
+  coupling h ↔ i · 4/5 shared commits · 80% similarity · static dependency
+● WATCH  recurrent change coupling without a static dependency
+        a ↔ b · 2/2 shared commits · 100% similarity
+● WATCH  recurrent change coupling without a static dependency
+        a ↔ d · 2/2 shared commits · 100% similarity
+● WATCH  recurrent change coupling without a static dependency
+        a ↔ e · 2/2 shared commits · 100% similarity
+● WATCH  recurrent change coupling without a static dependency
+        a ↔ f · 2/2 shared commits · 100% similarity
+● WATCH  recurrent change coupling without a static dependency
+        a ↔ h · 2/5 shared commits · 40% similarity
+● WATCH  recurrent change coupling without a static dependency
+        b ↔ c · 2/2 shared commits · 100% similarity
+● WATCH  recurrent change coupling without a static dependency
+        b ↔ d · 2/2 shared commits · 100% similarity
+● WATCH  recurrent change coupling without a static dependency
+        b ↔ e · 2/2 shared commits · 100% similarity
+● WATCH  recurrent change coupling without a static dependency
+        b ↔ f · 2/2 shared commits · 100% similarity
+● WATCH  recurrent change coupling without a static dependency
+        b ↔ h · 2/5 shared commits · 40% similarity
+● WATCH  recurrent change coupling without a static dependency
+        c ↔ e · 2/2 shared commits · 100% similarity
+● WATCH  recurrent change coupling without a static dependency
+        c ↔ f · 2/2 shared commits · 100% similarity
+● WATCH  recurrent change coupling without a static dependency
+        c ↔ h · 2/5 shared commits · 40% similarity
+● WATCH  recurrent change coupling without a static dependency
+        d ↔ e · 2/2 shared commits · 100% similarity
+● WATCH  recurrent change coupling without a static dependency
+        d ↔ f · 2/2 shared commits · 100% similarity
+● WATCH  recurrent change coupling without a static dependency
+        d ↔ h · 2/5 shared commits · 40% similarity
+● WATCH  recurrent change coupling without a static dependency
+        e ↔ f · 2/2 shared commits · 100% similarity
+● WATCH  recurrent change coupling without a static dependency
+        e ↔ h · 2/5 shared commits · 40% similarity
+● WATCH  recurrent change coupling without a static dependency
+        f ↔ h · 2/5 shared commits · 40% similarity
+▲ WORSE  coupling finding introduced
+▼ BETTER  coupling finding removed
+▼ BETTER  coupling finding removed
+
+TOP CHANGES
+▲ WORSE  b
+        b/main.js
+        cognitive 1 → 6 · cyclomatic 2 → 4 · lines 1 → 2
+▲ WORSE  renamed
+        e/new.js
+        added as watch
+▼ BETTER  a
+        a/main.js
+        cognitive 3 → 0 · cyclomatic 3 → 1 · lines 2 → 1
+● CHANGED  c
+        c/main.js
+        lines 2 → 3
+● CHANGED  removed
+        f/deleted.js
+        removed from healthy
+● CHANGED  renamed
+        e/old.js
+        removed from healthy
+● CHANGED  untracked
+        new/untracked.js
+        added as healthy

@@ -325,10 +325,11 @@ external summaries, resolution diagnostics, package measurements, architecture
 findings, and architecture comparisons. These are flat indexed tables; source
 and architecture health remain independent.
 
-The source-engine baseline workflow is `scripts/performance/baseline.sh` with
-the `one-file`, `hundred-file`, or `small-diff` profile. It regenerates the
-declared workload, checks its identity, then records parser time, wall time,
-allocations, peak resident memory, supported files, and source bytes. Parser
+The release baseline workflow is `scripts/performance/release-baselines.sh`.
+It requires a clean tree, captures one revision/toolchain/host state, and then
+records all eight profiles against that starting state. Each measured command
+first validates its JSON against the committed schema and semantic facts, then
+checks serial/automatic bytes and a reviewed report digest. Parser
 timing is diagnostic evidence on standard error only in the allocation build;
 it is not part of terminal or JSON product output.
 
@@ -348,8 +349,9 @@ Correctness tests run outside measured intervals for generated one-file,
 one-hundred-file, small-diff, and large mixed-language workloads. Serial and
 parallel terminal and JSON output must match byte for byte.
 
-Instrumentation records inventory visits, source reads, allocations, Git
-processes, wall time, p95, peak memory, supported files, and source bytes.
+Instrumentation records inventory visits, source and object reads, parser
+visits, algorithm passes, allocations, Git processes, wall time, p95, peak
+memory, supported files, and source bytes.
 Cachegrind and DHAT commands cover complete CLI flows where the host supports
 them. A private Fluyt command also records revision, dirty state, host, and
 toolchain.
@@ -357,6 +359,36 @@ toolchain.
 The first trustworthy run sets checked latency and memory limits with ten
 percent regression room. Changing a workload creates an explicit new baseline.
 A regression is investigated before a limit changes.
+
+## Test and acceptance evidence
+
+The test suite separates six kinds of proof:
+
+- pure policy tests check exact health, graph, history, and comparison rules
+  without filesystem or process setup;
+- language truth fixtures check syntax translation, source spans, recovery,
+  nested units, and exact measurements;
+- adapter tests check discovery and Git behavior at their crate seams;
+- black-box acceptance tests start the built `smackdebt` process and check its
+  status, stdout, stderr, schema, values, and exact bytes;
+- allocation checks measure complete, already-correct command flows;
+- performance workloads add repeated timing, peak memory, reads, and process
+  counts to those complete flows.
+
+The acceptance harness creates public repositories and invokes the command. It
+does not construct a report, call analysis APIs, or repeat analysis policy.
+Feature-gated work counters observe actual inventory visits, reads, Git
+processes, parser visits, algorithm entry points, and renderer entry. The
+renderer check snapshots counters immediately before and after presentation.
+These counters do not enter normal terminal or JSON output. A policy change belongs first in a pure truth test; a
+public behavior change also requires schema review and updated black-box
+evidence.
+
+Committed terminal and JSON files are read-only during normal tests. The
+`update-unified-snapshot` command updates one named result or the complete set
+and prints every path it changes. The install smoke places the locked command
+under a temporary prefix and runs it from a generated repository outside this
+workspace.
 
 Static graph workloads cover a sparse 1,000-file graph, a dense 500-file graph,
 1,000 packages, and a 200-file dependency diff over a 1,000-file repository.

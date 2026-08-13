@@ -2,19 +2,23 @@
 set -eu
 
 usage() {
-    echo "usage: $0 --profile PROFILE --output DIR [--repeat N] [--quiet] [-- command args...]" >&2
+    echo "usage: $0 --profile PROFILE --output DIR [--repeat N] [--quiet] [--check-report] [--expected-digest SHA256] [-- command args...]" >&2
 }
 
 profile=
 output=
 repeat=1
 quiet=false
+check_report=false
+expected_digest=
 while [ "$#" -gt 0 ]; do
     case "$1" in
         --profile) profile=$2; shift 2 ;;
         --output) output=$2; shift 2 ;;
         --repeat) repeat=$2; shift 2 ;;
         --quiet) quiet=true; shift ;;
+        --check-report) check_report=true; shift ;;
+        --expected-digest) expected_digest=$2; shift 2 ;;
         --) shift; break ;;
         *) usage; exit 2 ;;
     esac
@@ -32,6 +36,29 @@ if [ "$#" -eq 0 ]; then
     cat "$output/metadata.json"
     exit 0
 fi
+
+if [ "$check_report" = true ]; then
+    # Prove the measured public flow before entering the measured interval.
+    SMACKDEBT_PERF_JOBS=1 "$@" "$output" > "$output/correctness.serial.json"
+    SMACKDEBT_PERF_JOBS=auto "$@" "$output" > "$output/correctness.parallel.json"
+    cmp "$output/correctness.serial.json" "$output/correctness.parallel.json"
+    schema="$script_dir/../../schemas/report-v2.schema.json"
+    digest_arguments=
+    if [ -n "$expected_digest" ]; then
+        digest_arguments="--expected-digest $expected_digest"
+    fi
+    # shellcheck disable=SC2086
+    python3 "$script_dir/check-report.py" \
+        --profile "$profile" \
+        --workload "$output/manifest.json" \
+        --report "$output/correctness.serial.json" \
+        --schema "$schema" \
+        --digest-output "$output/correctness.sha256" \
+        $digest_arguments
+fi
+
+# Keep the inventory shape identical for every measured run.
+: > "$output/runs.jsonl"
 
 # Prime executable loading and parser setup outside the measured interval.
 "$@" "$output" >/dev/null 2>/dev/null
@@ -67,7 +94,10 @@ record = {
     "inventory_walks": project_stats.get("inventory_walks"),
     "inventory_visits": project_stats.get("inventory_visits"),
     "source_reads": project_stats.get("source_reads"),
+    "object_reads": project_stats.get("object_reads"),
     "git_processes": project_stats.get("git_processes"),
+    "parser_visits": project_stats.get("parser_visits"),
+    "algorithm_passes": project_stats.get("algorithm_passes"),
 }
 with path.open("a") as stream:
     stream.write(json.dumps(record, sort_keys=True) + "\n")

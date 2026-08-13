@@ -527,6 +527,11 @@ fn shallow_history_is_reported_as_incomplete() {
 
 fn assert_snapshot(name: &str, actual: &[u8], expected: &[u8]) {
     if std::env::var_os("SMACKDEBT_UPDATE_SNAPSHOTS").is_some() {
+        assert_eq!(
+            std::env::var_os("SMACKDEBT_UPDATE_COMMAND").as_deref(),
+            Some(std::ffi::OsStr::new("1")),
+            "snapshot updates require the named developer command"
+        );
         fs::write(
             Path::new(env!("CARGO_MANIFEST_DIR"))
                 .join("tests/snapshots")

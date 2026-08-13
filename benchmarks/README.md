@@ -36,12 +36,14 @@ scripts/performance/run.sh \
   --profile hundred-file \
   --output benchmarks/workloads/hundred-file \
   --repeat 5 \
+  --check-report \
   -- cargo run --release --manifest-path Cargo.toml --
 ```
 
-Run correctness checks before this command and compare serial and automatic
-parallel output byte-for-byte. The wrapper does not treat a faster but
-different report as a passing performance result.
+With `--check-report`, the wrapper first validates public report facts and
+indexes and compares one-worker and automatic-worker JSON byte for byte. The
+baseline command always enables this check. A faster but different report
+cannot become a passing performance record.
 
 ## Profiling
 
@@ -79,9 +81,10 @@ source bytes, language counts, and complete-flow wall time.
 The first correctness-checked one-file and hundred-file measurements are in
 `benchmarks/baselines`. Each record includes metadata, revision, dirty state,
 toolchain, source bytes, supported-file count, wall time, p95, peak memory,
-filesystem reads, Git processes, and absolute budgets.
+allocations, inventory visits, source and object reads, parser visits,
+algorithm passes, Git processes, the checked report digest, and absolute budgets.
 
-Keep the workload profile, seed, source digest, and command in the same record.
+Keep the workload profile, seed, source digest, report digest, and command in the same record.
 If any source fixture or generation rule changes materially, create a new
 baseline name and explain the difference. Investigate a regression before
 raising a limit; the first limits should include ten percent room over the

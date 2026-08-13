@@ -39,15 +39,17 @@ pub(super) fn analyze_codebase(request: &CodebaseRequest) -> Result<ProjectRepor
                 source,
             },
         )?;
+    #[cfg(feature = "evidence-stats")]
+    crate::evidence::record_inventory(inventory.visited_entries());
     let aliases = load_resolution_aliases(&selection.inventory_root);
     let candidates: Vec<&DiscoveredFile> = inventory.source_files().collect();
-    let source_reads = AtomicUsize::new(0);
+    let work = AnalysisWork::default();
     let analyses = analyze_current_files(
         &inventory,
         &candidates,
         request.width,
         request.policy,
-        &source_reads,
+        &work,
     )?;
 
     let history_files = candidates
@@ -81,7 +83,7 @@ pub(super) fn analyze_codebase(request: &CodebaseRequest) -> Result<ProjectRepor
     for (file_index, analysis) in analyses.into_iter().enumerate() {
         builder.add_analysis(file_index, analysis);
     }
-    let report = builder.finish();
+    let report = builder.finish(&work);
     let _inventory_visits = inventory.visited_entries();
     let selected_path = selection
         .exact_file
@@ -106,7 +108,7 @@ pub(super) fn analyze_codebase(request: &CodebaseRequest) -> Result<ProjectRepor
         stats: WorkStats {
             inventory_walks: 1,
             inventory_visits: _inventory_visits,
-            source_reads: source_reads.load(Ordering::Relaxed),
+            source_reads: work.source_reads.load(Ordering::Relaxed),
             git_processes: history.processes,
         },
     })
@@ -130,6 +132,8 @@ pub(super) fn analyze_diff(request: &DiffRequest) -> Result<ProjectReport, Proje
                 source,
             }
         })?;
+    #[cfg(feature = "evidence-stats")]
+    crate::evidence::record_inventory(inventory.visited_entries());
     let aliases = load_resolution_aliases(repository.root());
 
     let path_filter = (!request.automatic_scope)
@@ -153,7 +157,7 @@ pub(super) fn analyze_diff(request: &DiffRequest) -> Result<ProjectReport, Proje
         .iter()
         .map(|package| package.root().as_path().to_path_buf())
         .collect();
-    let source_reads = Arc::new(AtomicUsize::new(0));
+    let work = AnalysisWork::default();
     let width = request.width.threads().min(changed_count.max(1));
     let mut batch = repository.object_reader(width * 2)?;
     let before_aliases = load_base_resolution_aliases(&mut batch, &base);
@@ -199,7 +203,7 @@ pub(super) fn analyze_diff(request: &DiffRequest) -> Result<ProjectReport, Proje
         batch,
         request.policy,
         width,
-        source_reads.clone(),
+        work.clone(),
     )?;
     let changed_paths: std::collections::BTreeSet<_> = results
         .iter()
@@ -218,7 +222,7 @@ pub(super) fn analyze_diff(request: &DiffRequest) -> Result<ProjectReport, Proje
         &unchanged_candidates,
         request.width,
         request.policy,
-        &source_reads,
+        &work,
     )?;
     let root = ScopeId::from_index(0);
     let mut builder = AnalysisReportBuilder::with_capacity(
@@ -311,6 +315,7 @@ pub(super) fn analyze_diff(request: &DiffRequest) -> Result<ProjectReport, Proje
         builder.add_file(record);
     }
     let current_architecture = build_architecture(
+        &work,
         builder.files(),
         &current_dependencies,
         &aliases,
@@ -318,6 +323,7 @@ pub(super) fn analyze_diff(request: &DiffRequest) -> Result<ProjectReport, Proje
         &package_roots,
     );
     let before_architecture = build_architecture(
+        &work,
         builder.files(),
         &before_dependencies,
         &before_aliases,
@@ -334,6 +340,7 @@ pub(super) fn analyze_diff(request: &DiffRequest) -> Result<ProjectReport, Proje
         .iter()
         .map(|edge| (edge.source(), edge.target()))
         .collect();
+    work.record_algorithm_pass();
     let mut architecture_comparisons = compare_architecture(
         &before_edges,
         &current_edges,
@@ -400,6 +407,7 @@ pub(super) fn analyze_diff(request: &DiffRequest) -> Result<ProjectReport, Proje
     let history_diagnostic = history.diagnostic.clone();
     let current_package_edges = current_architecture.package_edges.clone();
     let before_package_edges = before_architecture.package_edges.clone();
+    work.record_algorithm_pass();
     let evolution = history.evolution.accumulator.finish(
         history.evolution.coverage,
         builder.files().len(),
@@ -490,7 +498,7 @@ pub(super) fn analyze_diff(request: &DiffRequest) -> Result<ProjectReport, Proje
         stats: WorkStats {
             inventory_walks: 1,
             inventory_visits: inventory.visited_entries(),
-            source_reads: source_reads.load(Ordering::Relaxed),
+            source_reads: work.source_reads.load(Ordering::Relaxed),
             git_processes: repository.git_processes(),
         },
     })
@@ -531,6 +539,29 @@ struct DiffInput {
     before: InputSide,
 }
 
+#[derive(Clone, Debug, Default)]
+struct AnalysisWork {
+    source_reads: Arc<AtomicUsize>,
+}
+
+impl AnalysisWork {
+    #[cfg(feature = "evidence-stats")]
+    fn record_algorithm_pass(&self) {
+        crate::evidence::record_algorithm_pass();
+    }
+
+    #[cfg(not(feature = "evidence-stats"))]
+    fn record_algorithm_pass(&self) {}
+
+    #[cfg(feature = "evidence-stats")]
+    fn record_parser_visit(&self) {
+        crate::evidence::record_parser_visit();
+    }
+
+    #[cfg(not(feature = "evidence-stats"))]
+    fn record_parser_visit(&self) {}
+}
+
 struct DiffResult {
     index: usize,
     change: Change,
@@ -556,7 +587,7 @@ fn analyze_diff_inputs(
     mut batch: smackdebt_git::ObjectReader,
     policy: HealthPolicy,
     width: usize,
-    source_reads: Arc<AtomicUsize>,
+    work: AnalysisWork,
 ) -> Result<Vec<DiffResult>, ProjectError> {
     if changes.len() <= 1 {
         let mut analyzer = Analyzer::default();
@@ -564,9 +595,8 @@ fn analyze_diff_inputs(
             .into_iter()
             .enumerate()
             .map(|(index, change)| {
-                let input =
-                    read_diff_input(index, change, &root_path, &base, &mut batch, &source_reads);
-                analyze_diff_input(input, policy, &mut analyzer)
+                let input = read_diff_input(index, change, &root_path, &base, &mut batch, &work);
+                analyze_diff_input(input, policy, &mut analyzer, &work)
             })
             .collect());
     }
@@ -577,11 +607,12 @@ fn analyze_diff_inputs(
     let (input_tx, input_rx) = mpsc::sync_channel::<DiffInput>(worker_count * 2);
     let input_rx = Arc::new(Mutex::new(input_rx));
     let (result_tx, result_rx) = mpsc::channel();
+    let producer_work = work.clone();
     std::thread::scope(|threads| {
         let producer = threads.spawn(move || {
             for (index, change) in changes.into_iter().enumerate() {
                 let input =
-                    read_diff_input(index, change, &root_path, &base, &mut batch, &source_reads);
+                    read_diff_input(index, change, &root_path, &base, &mut batch, &producer_work);
                 if input_tx.send(input).is_err() {
                     break;
                 }
@@ -591,6 +622,7 @@ fn analyze_diff_inputs(
             for _ in 0..worker_count {
                 let input_rx = Arc::clone(&input_rx);
                 let result_tx = result_tx.clone();
+                let worker_work = work.clone();
                 scope.spawn(move |_| {
                     let mut analyzer = Analyzer::default();
                     loop {
@@ -600,7 +632,12 @@ fn analyze_diff_inputs(
                         };
                         let Ok(input) = input else { break };
                         if result_tx
-                            .send(analyze_diff_input(input, policy, &mut analyzer))
+                            .send(analyze_diff_input(
+                                input,
+                                policy,
+                                &mut analyzer,
+                                &worker_work,
+                            ))
                             .is_err()
                         {
                             break;
@@ -623,7 +660,7 @@ fn read_diff_input(
     root_path: &Path,
     base: &str,
     batch: &mut smackdebt_git::ObjectReader,
-    source_reads: &AtomicUsize,
+    work: &AnalysisWork,
 ) -> DiffInput {
     let current = if !change.current_exists() {
         InputSide::missing()
@@ -632,7 +669,9 @@ fn read_diff_input(
             .and_then(|path| fs::read(path).map_err(|error| error.to_string()))
         {
             Ok(bytes) => {
-                source_reads.fetch_add(1, Ordering::Relaxed);
+                work.source_reads.fetch_add(1, Ordering::Relaxed);
+                #[cfg(feature = "evidence-stats")]
+                crate::evidence::record_source_read();
                 InputSide::bytes(bytes)
             }
             Err(error) => InputSide::failed(format!("could not read current file: {error}")),
@@ -658,6 +697,7 @@ fn analyze_diff_input(
     input: DiffInput,
     policy: HealthPolicy,
     analyzer: &mut Analyzer,
+    work: &AnalysisWork,
 ) -> DiffResult {
     let file_id = FileId::from_index(input.index);
     let current = analyze_diff_side(
@@ -666,9 +706,10 @@ fn analyze_diff_input(
         input.change.current_path(),
         input.current,
         policy,
+        work,
     );
     let before_path = input.change.base_path();
-    let before = analyze_diff_side(analyzer, file_id, before_path, input.before, policy);
+    let before = analyze_diff_side(analyzer, file_id, before_path, input.before, policy, work);
     let current_units = match &current {
         DiffSide::Analyzed { analysis, .. } => analysis.units(),
         _ => &[],
@@ -677,6 +718,7 @@ fn analyze_diff_input(
         DiffSide::Analyzed { analysis, .. } => analysis.units(),
         _ => &[],
     };
+    work.record_algorithm_pass();
     let mut comparisons = compare_units(before_units, current_units, policy);
     comparisons
         .retain(|comparison| comparison.kind() != smackdebt_analysis::ComparisonKind::Unchanged);
@@ -695,6 +737,7 @@ fn analyze_diff_side(
     path: &Path,
     input: InputSide,
     policy: HealthPolicy,
+    work: &AnalysisWork,
 ) -> DiffSide {
     if let Some(error) = input.error {
         return DiffSide::Failed(error);
@@ -702,7 +745,7 @@ fn analyze_diff_side(
     let Some(bytes) = input.bytes else {
         return DiffSide::Missing;
     };
-    match analyze_bytes(analyzer, file, path, bytes) {
+    match analyze_bytes(analyzer, file, path, bytes, work) {
         Ok(analysis) => {
             let mut health = HealthCounts::default();
             for unit in analysis.units() {
@@ -867,7 +910,7 @@ fn analyze_current_files(
     candidates: &[&DiscoveredFile],
     width: ExecutionWidth,
     policy: HealthPolicy,
-    reads: &AtomicUsize,
+    work: &AnalysisWork,
 ) -> Result<Vec<FileResult>, ProjectError> {
     let analyze = |analyzer: &mut Analyzer, (index, file): (usize, &&DiscoveredFile)| {
         let path = file.path().as_path();
@@ -880,8 +923,10 @@ fn analyze_current_files(
         };
         match fs::read(&absolute) {
             Ok(source) => {
-                reads.fetch_add(1, Ordering::Relaxed);
-                match analyze_bytes(analyzer, FileId::from_index(index), path, source) {
+                work.source_reads.fetch_add(1, Ordering::Relaxed);
+                #[cfg(feature = "evidence-stats")]
+                crate::evidence::record_source_read();
+                match analyze_bytes(analyzer, FileId::from_index(index), path, source, work) {
                     Ok(value) => FileResult::Analyzed(rate_file(value, policy)),
                     Err(LanguageError::Unsupported(language)) => FileResult::Unsupported(language),
                     Err(error) => FileResult::Failed(error.to_string()),
@@ -916,8 +961,11 @@ fn analyze_bytes(
     file: FileId,
     path: &Path,
     source: Vec<u8>,
+    work: &AnalysisWork,
 ) -> Result<FileAnalysis, LanguageError> {
     let _ = file;
+    work.record_parser_visit();
+    work.record_algorithm_pass();
     analyzer.analyze(path, source)
 }
 
@@ -1239,12 +1287,14 @@ impl<'a> CodebaseReportBuilder<'a> {
             .filter_map(|(root, included)| included.then_some(root.clone()))
             .collect();
         let mut hierarchy = HierarchyBuilder::new(label, &included_roots);
+        let mut package_ids = Vec::with_capacity(candidates.len());
         for file in candidates {
             let included_package_index = included_packages[..file.package().index()]
                 .iter()
                 .filter(|included| **included)
                 .count();
             hierarchy.add_file(file.path().as_path(), included_package_index);
+            package_ids.push(PackageId::from_index(included_package_index));
         }
         let file_scopes = candidates
             .iter()
@@ -1259,7 +1309,7 @@ impl<'a> CodebaseReportBuilder<'a> {
             diagnostics: Vec::with_capacity(candidates.len()),
             file_scopes,
             activity,
-            package_ids: candidates.iter().map(|file| file.package()).collect(),
+            package_ids,
             dependencies: Vec::with_capacity(candidates.len()),
             aliases,
             package_roots: included_roots,
@@ -1296,12 +1346,20 @@ impl<'a> CodebaseReportBuilder<'a> {
                     analysis.dependencies().to_vec(),
                 ));
                 let failed = matches!(analysis.parse_status(), ParseStatus::Failed);
+                let recovered = matches!(analysis.parse_status(), ParseStatus::Recovered);
                 if failed {
                     self.add_diagnostic(
                         file_id,
                         DiagnosticKind::ParseFailure,
                         "parser failed",
                         analysis.source_lines(),
+                    );
+                } else if recovered {
+                    self.add_diagnostic(
+                        file_id,
+                        DiagnosticKind::ParseFailure,
+                        "parser recovered from syntax errors",
+                        0,
                     );
                 }
                 (
@@ -1370,8 +1428,9 @@ impl<'a> CodebaseReportBuilder<'a> {
             .push(Diagnostic::new(id, None, kind, message, 0));
     }
 
-    fn finish(self) -> Report {
+    fn finish(self, work: &AnalysisWork) -> Report {
         let architecture = build_architecture(
+            work,
             &self.files,
             &self.dependencies,
             &self.aliases,
@@ -1380,6 +1439,7 @@ impl<'a> CodebaseReportBuilder<'a> {
         );
         let architecture_findings_for_links = architecture.findings.clone();
         let package_edges = architecture.package_edges.clone();
+        work.record_algorithm_pass();
         let evolution = self.evolution.accumulator.finish(
             self.evolution.coverage,
             self.files.len(),
@@ -1551,12 +1611,14 @@ fn parse_resolution_aliases(source: &[u8]) -> Option<Vec<ResolutionAlias>> {
 }
 
 fn build_architecture(
+    work: &AnalysisWork,
     files: &[FileRecord],
     dependencies: &[(FileId, PathBuf, Vec<DependencySyntax>)],
     aliases: &[ResolutionAlias],
     side_package_roots: &[PathBuf],
     package_roots: &[PathBuf],
 ) -> ArchitectureBuild {
+    work.record_algorithm_pass();
     let mut index = BTreeMap::new();
     for (file, path, _) in dependencies {
         index.insert(path.clone(), *file);
@@ -2158,6 +2220,39 @@ mod tests {
     }
 
     #[test]
+    fn files_use_compact_report_package_ids_when_a_manifest_has_no_source() {
+        let root = tempfile::tempdir().unwrap();
+        for package in ["a", "b", "c"] {
+            fs::create_dir_all(root.path().join(package)).unwrap();
+            fs::write(
+                root.path().join(package).join("package.json"),
+                format!("{{\"name\":\"{package}\",\"private\":true}}\n"),
+            )
+            .unwrap();
+        }
+        fs::write(
+            root.path().join("a/main.js"),
+            "export function a() { return 1; }\n",
+        )
+        .unwrap();
+        fs::write(
+            root.path().join("c/main.js"),
+            "export function c() { return 1; }\n",
+        )
+        .unwrap();
+
+        let result = analyze_codebase(&CodebaseRequest::new(root.path())).unwrap();
+        assert_eq!(result.report().package_graph().len(), 2);
+        let package_ids: Vec<_> = result
+            .report()
+            .files()
+            .iter()
+            .map(|file| file.package().unwrap().index())
+            .collect();
+        assert_eq!(package_ids, [0, 1]);
+    }
+
+    #[test]
     fn codebase_builds_package_cycles_and_exact_dependency_coverage() {
         let root = tempfile::tempdir().unwrap();
         for package in ["app", "core"] {
@@ -2743,4 +2838,32 @@ mod tests {
         }
         assert!(result.stats().git_processes <= 6);
     }
+}
+#[cfg(feature = "evidence-stats")]
+#[test]
+fn live_evidence_snapshot_observes_analysis_started_after_the_snapshot() {
+    let root = tempfile::tempdir().unwrap();
+    fs::write(
+        root.path().join("package.json"),
+        "{\"name\":\"live-evidence\",\"private\":true}\n",
+    )
+    .unwrap();
+    fs::write(
+        root.path().join("main.js"),
+        "export function measured(value) { return value; }\n",
+    )
+    .unwrap();
+    crate::evidence::reset();
+    let before = crate::evidence::snapshot();
+
+    analyze_codebase(&CodebaseRequest::new(root.path())).unwrap();
+
+    let after = crate::evidence::snapshot();
+    let delta = after.since(before);
+    assert!(delta.inventory_walks() >= 1);
+    assert!(delta.inventory_visits() > 0);
+    assert!(delta.source_reads() >= 1);
+    assert!(delta.parser_visits() >= 1);
+    assert!(delta.algorithm_passes() >= 3);
+    assert!(delta.git_processes() > 0);
 }

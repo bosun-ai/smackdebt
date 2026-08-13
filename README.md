@@ -52,6 +52,12 @@ ARCHITECTURE
 ▲ HIGH  package dependency cycle
         crates/api/src/routes.rs → crates/core/src/orders.rs → crates/api/src/routes.rs
 
+EVOLUTION
+184 files · 3,812 commits · 127,440 lines of churn
+● 1 unexplained coupling · 12 retained package pairs
+● WATCH  packages change together without a static dependency
+         crates/api ↔ packages/web · 18/31 shared commits · 58% similarity
+
 → Explore: smackdebt crates/api
 ```
 
@@ -258,6 +264,22 @@ line totals. Shallow, partial, empty, or unavailable history is stated in the
 report while source and static architecture results remain usable.
 
 Contributor names, addresses, and internal identities stop before the report.
+
+## Checked command examples
+
+These short examples run against generated public repositories in the release
+evidence. Each comment declares the exact exit status, empty stderr, and the
+stable stdout fragments that must appear in the stated order.
+
+<!-- smackdebt-example fixture=evolution status=0 stderr=empty stdout=QUALITY|ARCHITECTURE|EVOLUTION -->
+```console
+smackdebt --color never --jobs 1
+```
+
+<!-- smackdebt-example fixture=worktree-change status=0 stderr=empty stdout=CHANGE|ARCHITECTURE_CHANGE|EVOLUTION_CONTEXT|TOP_CHANGES -->
+```console
+smackdebt diff main --color never --jobs 1 --history 36500d
+```
 Terminal and JSON output contain only aggregate contributor counts and
 concentration operands. History and all other analysis stay on the local
 machine.

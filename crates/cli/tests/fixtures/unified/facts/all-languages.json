@@ -1,0 +1,17 @@
+{
+  "fixture": "all-languages",
+  "lower_level_truth_test": "every_supported_language_has_a_complete_ordered_truth_fixture and vue_fixture_keeps_script_and_template_facts_in_original_document_positions",
+  "files": [
+    {"path":"src/c.c","units":[["controls",9,8,6]]},
+    {"path":"src/cpp.cpp","units":[["run",1,2,3],["<lambda 5>",2,3,1]]},
+    {"path":"src/java.java","units":[["Worker",1,2,1],["run",4,4,5],["<lambda 4>",1,2,0]]},
+    {"path":"src/javascript.js","units":[["handler",1,2,0],["run",2,3,3]]},
+    {"path":"src/jsx.jsx","units":[["render",1,2,2],["select",1,2,0]]},
+    {"path":"src/python.py","units":[["outer",0,1,2],["inner",4,5,4],["<lambda 11>",1,2,0]]},
+    {"path":"src/rust.rs","units":[["run",0,1,0],["run",7,4,3],["<closure 7>",2,2,0]]},
+    {"path":"src/typescript.ts","units":[["handler",1,2,0],["run",1,2,2]]},
+    {"path":"src/tsx.tsx","units":[["render",1,2,2],["select",1,2,0]]},
+    {"path":"src/ruby.rb","units":[["run",0,1,2],["<lambda 4>",3,4,2],["<closure 5>",1,2,2],["self.empty",0,1,0]]},
+    {"path":"src/vue.vue","units":[["<template>",5,6,3],["helper",1,2,0],["save",1,2,2]]}
+  ]
+}

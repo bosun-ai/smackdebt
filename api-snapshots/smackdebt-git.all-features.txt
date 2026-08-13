@@ -1,0 +1,68 @@
+pub mod smackdebt_git
+pub enum smackdebt_git::GitError
+pub smackdebt_git::GitError::Command
+pub smackdebt_git::GitError::Command::args: alloc::vec::Vec<std::ffi::os_str::OsString>
+pub smackdebt_git::GitError::Command::status: core::option::Option<i32>
+pub smackdebt_git::GitError::Command::stderr: alloc::string::String
+pub smackdebt_git::GitError::EmptyHistory
+pub smackdebt_git::GitError::InvalidOutput(alloc::string::String)
+pub smackdebt_git::GitError::Io(core::io::error::Error)
+pub smackdebt_git::GitError::MissingObject(alloc::string::String)
+pub smackdebt_git::GitError::NotRepository(std::path::PathBuf)
+pub smackdebt_git::GitError::UnsafeArgument(alloc::string::String)
+pub smackdebt_git::GitError::Utf8(alloc::string::FromUtf8Error)
+impl core::convert::From<alloc::string::FromUtf8Error> for smackdebt_git::GitError
+pub fn smackdebt_git::GitError::from(alloc::string::FromUtf8Error) -> Self
+impl core::convert::From<core::io::error::Error> for smackdebt_git::GitError
+pub fn smackdebt_git::GitError::from(core::io::error::Error) -> Self
+impl core::error::Error for smackdebt_git::GitError
+pub fn smackdebt_git::GitError::source(&self) -> core::option::Option<&(dyn core::error::Error + 'static)>
+impl core::fmt::Display for smackdebt_git::GitError
+pub fn smackdebt_git::GitError::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
+pub struct smackdebt_git::Change
+impl smackdebt_git::Change
+pub const fn smackdebt_git::Change::base_exists(&self) -> bool
+pub fn smackdebt_git::Change::base_path(&self) -> &std::path::Path
+pub const fn smackdebt_git::Change::current_exists(&self) -> bool
+pub fn smackdebt_git::Change::current_path(&self) -> &std::path::Path
+pub struct smackdebt_git::ContributorIdentity(_)
+pub struct smackdebt_git::GitEvidenceSnapshot
+pub smackdebt_git::GitEvidenceSnapshot::object_reads: usize
+pub smackdebt_git::GitEvidenceSnapshot::processes: usize
+pub struct smackdebt_git::GitRepository
+impl smackdebt_git::GitRepository
+pub fn smackdebt_git::GitRepository::changes_from(&self, &str) -> core::result::Result<alloc::vec::Vec<smackdebt_git::Change>, smackdebt_git::GitError>
+pub fn smackdebt_git::GitRepository::default_ref(&self) -> core::result::Result<core::option::Option<alloc::string::String>, smackdebt_git::GitError>
+pub fn smackdebt_git::GitRepository::discover(impl core::convert::AsRef<std::path::Path>) -> core::result::Result<Self, smackdebt_git::GitError>
+pub fn smackdebt_git::GitRepository::git_processes(&self) -> usize
+pub fn smackdebt_git::GitRepository::merge_base(&self, &str, &str) -> core::result::Result<alloc::string::String, smackdebt_git::GitError>
+pub fn smackdebt_git::GitRepository::object_reader(&self, usize) -> core::result::Result<smackdebt_git::ObjectReader, smackdebt_git::GitError>
+pub fn smackdebt_git::GitRepository::root(&self) -> &std::path::Path
+pub fn smackdebt_git::GitRepository::stream_history(&self, impl core::ops::function::FnMut(smackdebt_git::HistoryCommit) -> core::result::Result<(), smackdebt_git::GitError>) -> core::result::Result<smackdebt_git::HistoryStreamSummary, smackdebt_git::GitError>
+pub struct smackdebt_git::HistoryChange
+impl smackdebt_git::HistoryChange
+pub const fn smackdebt_git::HistoryChange::added_lines(&self) -> core::option::Option<u32>
+pub const fn smackdebt_git::HistoryChange::deleted_lines(&self) -> core::option::Option<u32>
+pub fn smackdebt_git::HistoryChange::path(&self) -> &std::path::Path
+pub fn smackdebt_git::HistoryChange::previous_path(&self) -> core::option::Option<&std::path::Path>
+pub struct smackdebt_git::HistoryCommit
+impl smackdebt_git::HistoryCommit
+pub fn smackdebt_git::HistoryCommit::changes(&self) -> &[smackdebt_git::HistoryChange]
+pub fn smackdebt_git::HistoryCommit::contributor(&self) -> &smackdebt_git::ContributorIdentity
+pub const fn smackdebt_git::HistoryCommit::timestamp(&self) -> i64
+pub struct smackdebt_git::HistoryStreamSummary
+impl smackdebt_git::HistoryStreamSummary
+pub const fn smackdebt_git::HistoryStreamSummary::commits(&self) -> u32
+pub const fn smackdebt_git::HistoryStreamSummary::is_shallow(&self) -> bool
+pub const fn smackdebt_git::HistoryStreamSummary::newest_timestamp(&self) -> core::option::Option<i64>
+pub const fn smackdebt_git::HistoryStreamSummary::oldest_timestamp(&self) -> core::option::Option<i64>
+pub fn smackdebt_git::HistoryStreamSummary::revision(&self) -> core::option::Option<&str>
+pub struct smackdebt_git::ObjectReader
+impl smackdebt_git::ObjectReader
+pub fn smackdebt_git::ObjectReader::read_path(&mut self, &str, &std::path::Path) -> core::result::Result<alloc::vec::Vec<u8>, smackdebt_git::GitError>
+impl core::fmt::Debug for smackdebt_git::ObjectReader
+pub fn smackdebt_git::ObjectReader::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
+impl core::ops::drop::Drop for smackdebt_git::ObjectReader
+pub fn smackdebt_git::ObjectReader::drop(&mut self)
+pub fn smackdebt_git::evidence_snapshot() -> smackdebt_git::GitEvidenceSnapshot
+pub fn smackdebt_git::reset_evidence()

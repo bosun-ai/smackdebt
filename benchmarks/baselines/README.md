@@ -3,11 +3,12 @@
 Baseline records belong here after the complete CLI and diff flows pass their
 correctness checks. A record must include:
 
-- workload profile, seed, source digest, and command;
+- workload profile, seed, source digest, report digest, and command;
 - Git revision and dirty state;
 - host and toolchain;
 - source bytes and supported files;
-- wall time, p95, peak memory, allocations, filesystem reads, and Git process count;
+- wall time, p95, peak memory, allocations, inventory visits, source and object
+  reads, parser visits, algorithm passes, and Git process count;
 - the resulting limits and the reason for ten percent regression room.
 
 The source measurements are in `one-file.json`, `hundred-file.json`, and
@@ -24,3 +25,8 @@ The allocation counts use the CLI's `allocation-stats` release feature. DHAT
 and Cachegrind remain available for deeper profiles on supported hosts.
 Wall-time and resident-memory budgets are ten percent above the recorded p95
 and peak values.
+
+`just release-baselines` requires a clean tree, captures one starting state,
+records every profile, and verifies that all records use that HEAD with
+`workspace_dirty` set to false. A report-byte change requires the explicit
+`--accept-report-change` baseline option and review of the new digest.

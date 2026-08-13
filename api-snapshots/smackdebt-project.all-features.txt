@@ -1,0 +1,55 @@
+pub mod smackdebt_project
+pub enum smackdebt_project::ExecutionWidth
+pub smackdebt_project::ExecutionWidth::Automatic
+pub smackdebt_project::ExecutionWidth::Fixed(core::num::nonzero::NonZeroUsize)
+impl smackdebt_project::ExecutionWidth
+pub fn smackdebt_project::ExecutionWidth::fixed(usize) -> core::option::Option<Self>
+pub enum smackdebt_project::ProjectError
+pub smackdebt_project::ProjectError::Git(smackdebt_git::repository::GitError)
+pub smackdebt_project::ProjectError::Inspect
+pub smackdebt_project::ProjectError::Inspect::path: std::path::PathBuf
+pub smackdebt_project::ProjectError::Inspect::source: core::io::error::Error
+pub smackdebt_project::ProjectError::MissingReference
+pub smackdebt_project::ProjectError::WorkerPool(rayon_core::ThreadPoolBuildError)
+pub struct smackdebt_project::CodebaseRequest
+impl smackdebt_project::CodebaseRequest
+pub fn smackdebt_project::CodebaseRequest::analyze(&self) -> core::result::Result<smackdebt_project::ProjectReport, smackdebt_project::ProjectError>
+pub fn smackdebt_project::CodebaseRequest::automatic(impl core::convert::Into<std::path::PathBuf>) -> Self
+pub fn smackdebt_project::CodebaseRequest::new(impl core::convert::Into<std::path::PathBuf>) -> Self
+pub fn smackdebt_project::CodebaseRequest::with_excludes(self, alloc::vec::Vec<alloc::string::String>) -> Self
+pub fn smackdebt_project::CodebaseRequest::with_history_days(self, u32) -> Self
+pub fn smackdebt_project::CodebaseRequest::with_thresholds(self, (u32, u32), (u32, u32), (u32, u32)) -> Self
+pub fn smackdebt_project::CodebaseRequest::with_width(self, smackdebt_project::ExecutionWidth) -> Self
+pub struct smackdebt_project::DiffRequest
+impl smackdebt_project::DiffRequest
+pub fn smackdebt_project::DiffRequest::analyze(&self) -> core::result::Result<smackdebt_project::ProjectReport, smackdebt_project::ProjectError>
+pub fn smackdebt_project::DiffRequest::automatic(impl core::convert::Into<std::path::PathBuf>) -> Self
+pub fn smackdebt_project::DiffRequest::new(impl core::convert::Into<std::path::PathBuf>) -> Self
+pub fn smackdebt_project::DiffRequest::with_history_days(self, u32) -> Self
+pub fn smackdebt_project::DiffRequest::with_reference(self, impl core::convert::Into<alloc::string::String>) -> Self
+pub fn smackdebt_project::DiffRequest::with_thresholds(self, (u32, u32), (u32, u32), (u32, u32)) -> Self
+pub fn smackdebt_project::DiffRequest::with_width(self, smackdebt_project::ExecutionWidth) -> Self
+pub struct smackdebt_project::EvidenceSnapshot
+impl smackdebt_project::EvidenceSnapshot
+pub const fn smackdebt_project::EvidenceSnapshot::algorithm_passes(self) -> usize
+pub const fn smackdebt_project::EvidenceSnapshot::git_processes(self) -> usize
+pub const fn smackdebt_project::EvidenceSnapshot::inventory_visits(self) -> usize
+pub const fn smackdebt_project::EvidenceSnapshot::inventory_walks(self) -> usize
+pub const fn smackdebt_project::EvidenceSnapshot::object_reads(self) -> usize
+pub const fn smackdebt_project::EvidenceSnapshot::parser_visits(self) -> usize
+pub const fn smackdebt_project::EvidenceSnapshot::renderer_entries(self) -> usize
+pub fn smackdebt_project::EvidenceSnapshot::since(self, Self) -> Self
+pub const fn smackdebt_project::EvidenceSnapshot::source_reads(self) -> usize
+pub struct smackdebt_project::ProjectReport
+impl smackdebt_project::ProjectReport
+pub fn smackdebt_project::ProjectReport::report(&self) -> &smackdebt_analysis::report::Report
+pub fn smackdebt_project::ProjectReport::selected_scope(&self) -> core::option::Option<smackdebt_analysis::report::ScopeId>
+pub struct smackdebt_project::WorkStats
+impl smackdebt_project::WorkStats
+pub const fn smackdebt_project::WorkStats::git_processes(self) -> usize
+pub const fn smackdebt_project::WorkStats::inventory_visits(self) -> usize
+pub const fn smackdebt_project::WorkStats::inventory_walks(self) -> usize
+pub const fn smackdebt_project::WorkStats::source_reads(self) -> usize
+pub fn smackdebt_project::evidence_snapshot() -> smackdebt_project::EvidenceSnapshot
+pub fn smackdebt_project::record_renderer_entry()
+pub fn smackdebt_project::reset_evidence()

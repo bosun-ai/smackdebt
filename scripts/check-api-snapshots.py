@@ -55,8 +55,9 @@ def declaration_delimiter(declaration: str) -> int:
     return -1
 
 
-def snapshot_path(root: Path, package: str) -> Path:
-    return root / "api-snapshots" / f"{package}.txt"
+def snapshot_path(root: Path, package: str, all_features: bool) -> Path:
+    suffix = ".all-features" if all_features else ""
+    return root / "api-snapshots" / f"{package}{suffix}.txt"
 
 
 def tool_problem(root: Path) -> str | None:
@@ -75,9 +76,19 @@ def tool_problem(root: Path) -> str | None:
     return None
 
 
-def reachable_api(root: Path, package: str) -> list[str]:
+def reachable_api(root: Path, package: str, all_features: bool = False) -> list[str]:
+    feature_arguments = ["--all-features"] if all_features else []
     completed = subprocess.run(
-        ["cargo", "public-api", "-p", package, "-sss", "--color", "never"],
+        [
+            "cargo",
+            "public-api",
+            "-p",
+            package,
+            *feature_arguments,
+            "-sss",
+            "--color",
+            "never",
+        ],
         cwd=root,
         check=True,
         capture_output=True,
@@ -86,7 +97,12 @@ def reachable_api(root: Path, package: str) -> list[str]:
     return completed.stdout.splitlines()
 
 
-def check(root: Path, update: bool, selected: set[str] | None = None) -> list[str]:
+def check(
+    root: Path,
+    update: bool,
+    selected: set[str] | None = None,
+    all_features: bool = False,
+) -> list[str]:
     problem = tool_problem(root)
     if problem is not None:
         return [problem]
@@ -95,12 +111,16 @@ def check(root: Path, update: bool, selected: set[str] | None = None) -> list[st
         if selected is not None and package not in selected:
             continue
         source_path = root / relative_source
-        expected_path = snapshot_path(root, package)
+        expected_path = snapshot_path(root, package, all_features)
         if not source_path.exists():
             problems.append(f"{package}: missing library source {relative_source}")
             continue
         try:
-            actual = reachable_api(root, package)
+            actual = (
+                reachable_api(root, package, True)
+                if all_features
+                else reachable_api(root, package)
+            )
         except subprocess.CalledProcessError as error:
             detail = error.stderr.strip() or error.stdout.strip() or str(error)
             problems.append(f"{package}: API inspection failed: {detail}")
@@ -131,10 +151,16 @@ def main() -> int:
     parser = argparse.ArgumentParser()
     parser.add_argument("--update", action="store_true")
     parser.add_argument("--package", action="append", choices=sorted(LIBRARIES))
+    parser.add_argument("--all-features", action="store_true")
     parser.add_argument("--root", type=Path, default=Path("."))
     arguments = parser.parse_args()
     root = arguments.root.resolve()
-    problems = check(root, arguments.update, set(arguments.package) if arguments.package else None)
+    problems = check(
+        root,
+        arguments.update,
+        set(arguments.package) if arguments.package else None,
+        arguments.all_features,
+    )
     if problems:
         for problem in problems:
             print(problem, file=sys.stderr)

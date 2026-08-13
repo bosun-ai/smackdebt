@@ -1,0 +1,17 @@
+{
+  "fixture": "evolution",
+  "commits": 6,
+  "shared_commits": 3,
+  "union_commits": 6,
+  "similarity_numerator": 3,
+  "similarity_denominator": 6,
+  "binary_changes_without_line_totals": 2,
+  "private_values": [
+    "Alice Example",
+    "alice@example.invalid",
+    "Alias Person",
+    "alias@example.invalid",
+    "Bob Example",
+    "bob@example.invalid"
+  ]
+}

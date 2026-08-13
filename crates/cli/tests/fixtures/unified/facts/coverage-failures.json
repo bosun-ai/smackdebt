@@ -1,0 +1,19 @@
+{
+  "fixture": "coverage-failures",
+  "unsupported_extension": "kt",
+  "selected_files": 3,
+  "analyzed_files": 1,
+  "unsupported_files": 1,
+  "failed_files": 1,
+  "failed_diagnostic_kind": "unreadable_file",
+  "history_availability": "incomplete",
+  "history_reason": "repository history is shallow",
+  "history_commits": 1,
+  "expected_invalid_ref_exit": 1,
+  "expected_invalid_ref_stderr": "smackdebt: Git comparison failed: git command [] failed with status 128: fatal: Not a valid object name does-not-exist\n",
+  "expected_invalid_argument_exit": 2,
+  "expected_invalid_argument_stderr": "error: invalid value '0' for '--jobs <JOBS>': jobs must be greater than zero\n\nFor more information, try '--help'.\n",
+  "expected_outside_git_codebase_exit": 0,
+  "expected_outside_git_diff_exit": 1,
+  "expected_outside_git_diff_stderr": "smackdebt: Git comparison failed: not a Git repository: .\n"
+}

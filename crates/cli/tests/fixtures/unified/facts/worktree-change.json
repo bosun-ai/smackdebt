@@ -1,0 +1,7 @@
+{
+  "fixture": "worktree-change",
+  "changes": ["modified", "renamed", "deleted", "untracked"],
+  "comparison_directions": ["worse", "better", "changed"],
+  "architecture_directions": ["worse", "better", "changed"],
+  "evolution_direction": "better"
+}

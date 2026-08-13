@@ -22,24 +22,37 @@ static ALLOCATOR: &StatsAlloc<System> = &INSTRUMENTED_SYSTEM;
 
 pub(crate) fn main() -> ExitCode {
     #[cfg(feature = "allocation-stats")]
-    smackdebt_project::reset_parser_time();
+    if std::env::var_os("SMACKDEBT_ALLOCATION_STATS").is_some() {
+        smackdebt_project::reset_parser_time();
+    }
     let exit = run(std::env::args_os());
     #[cfg(feature = "allocation-stats")]
-    eprintln!("smackdebt allocation stats: {:?}", ALLOCATOR.stats());
+    if std::env::var_os("SMACKDEBT_ALLOCATION_STATS").is_some() {
+        eprintln!("smackdebt allocation stats: {:?}", ALLOCATOR.stats());
+    }
     #[cfg(feature = "allocation-stats")]
-    eprintln!(
-        "smackdebt parser stats: {{\"parser_time_ns\":{}}}",
-        smackdebt_project::parser_time_ns()
-    );
+    if std::env::var_os("SMACKDEBT_ALLOCATION_STATS").is_some() {
+        eprintln!(
+            "smackdebt parser stats: {{\"parser_time_ns\":{}}}",
+            smackdebt_project::parser_time_ns()
+        );
+    }
     exit
 }
 
 fn run(arguments: impl IntoIterator<Item = OsString>) -> ExitCode {
+    #[cfg(feature = "evidence-stats")]
+    let evidence_enabled = std::env::var_os("SMACKDEBT_EVIDENCE_STATS").is_some();
+    #[cfg(feature = "evidence-stats")]
+    if evidence_enabled || std::env::var_os("SMACKDEBT_ALLOCATION_STATS").is_some() {
+        smackdebt_project::reset_evidence();
+    }
     let cli = match Cli::try_parse_from(arguments) {
         Ok(cli) => cli,
         Err(error) => {
+            let exit = error.exit_code();
             let _ = error.print();
-            return ExitCode::from(2);
+            return ExitCode::from(u8::try_from(exit).unwrap_or(2));
         }
     };
 
@@ -87,16 +100,28 @@ fn run(arguments: impl IntoIterator<Item = OsString>) -> ExitCode {
     match result {
         Ok(result) => {
             #[cfg(feature = "allocation-stats")]
-            eprintln!(
-                "smackdebt project stats: {{\"inventory_walks\":{},\"inventory_visits\":{},\"source_reads\":{},\"git_processes\":{}}}",
-                result.stats().inventory_walks(),
-                result.stats().inventory_visits(),
-                result.stats().source_reads(),
-                result.stats().git_processes(),
-            );
+            if std::env::var_os("SMACKDEBT_ALLOCATION_STATS").is_some() {
+                let stats = smackdebt_project::evidence_snapshot();
+                eprintln!(
+                    "smackdebt project stats: {{\"inventory_walks\":{},\"inventory_visits\":{},\"source_reads\":{},\"object_reads\":{},\"git_processes\":{},\"parser_visits\":{},\"algorithm_passes\":{}}}",
+                    stats.inventory_walks(),
+                    stats.inventory_visits(),
+                    stats.source_reads(),
+                    stats.object_reads(),
+                    stats.git_processes(),
+                    stats.parser_visits(),
+                    stats.algorithm_passes(),
+                );
+            }
+            #[cfg(feature = "evidence-stats")]
+            let before_render = evidence_enabled.then(smackdebt_project::evidence_snapshot);
             let stdout_is_terminal = io::stdout().is_terminal();
             let mut stdout = io::BufWriter::new(io::stdout().lock());
             let rendered = if common.json {
+                #[cfg(feature = "evidence-stats")]
+                if evidence_enabled {
+                    smackdebt_project::record_renderer_entry();
+                }
                 write_json(&mut stdout, result.report(), result.selected_scope())
                     .and_then(|()| writeln!(stdout))
             } else {
@@ -107,6 +132,10 @@ fn run(arguments: impl IntoIterator<Item = OsString>) -> ExitCode {
                     stdout_is_terminal,
                     std::env::var_os("NO_COLOR").is_some(),
                 );
+                #[cfg(feature = "evidence-stats")]
+                if evidence_enabled {
+                    smackdebt_project::record_renderer_entry();
+                }
                 write_terminal(
                     &mut stdout,
                     result.report(),
@@ -115,7 +144,34 @@ fn run(arguments: impl IntoIterator<Item = OsString>) -> ExitCode {
                 )
             };
             match rendered {
-                Ok(()) => ExitCode::SUCCESS,
+                Ok(()) => {
+                    #[cfg(feature = "evidence-stats")]
+                    if evidence_enabled {
+                        let before_render = before_render.expect("evidence snapshot");
+                        let after_render = smackdebt_project::evidence_snapshot();
+                        let render = after_render.since(before_render);
+                        eprintln!(
+                            "smackdebt evidence stats: {{\"inventory_walks\":{},\"inventory_visits\":{},\"source_reads\":{},\"object_reads\":{},\"git_processes\":{},\"parser_visits\":{},\"algorithm_passes\":{},\"renderer_entries\":{},\"render_inventory_walks\":{},\"render_inventory_visits\":{},\"render_source_reads\":{},\"render_object_reads\":{},\"render_git_processes\":{},\"render_parser_visits\":{},\"render_algorithm_passes\":{},\"render_renderer_entries\":{}}}",
+                            after_render.inventory_walks(),
+                            after_render.inventory_visits(),
+                            after_render.source_reads(),
+                            after_render.object_reads(),
+                            after_render.git_processes(),
+                            after_render.parser_visits(),
+                            after_render.algorithm_passes(),
+                            after_render.renderer_entries(),
+                            render.inventory_walks(),
+                            render.inventory_visits(),
+                            render.source_reads(),
+                            render.object_reads(),
+                            render.git_processes(),
+                            render.parser_visits(),
+                            render.algorithm_passes(),
+                            render.renderer_entries(),
+                        );
+                    }
+                    ExitCode::SUCCESS
+                }
                 Err(error) => fail(&ProjectError::Inspect {
                     path: PathBuf::from("standard output"),
                     source: error,

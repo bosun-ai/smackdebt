@@ -436,6 +436,8 @@ impl GitRepository {
             .stderr(Stdio::piped())
             .spawn()
             .map_err(GitError::Io)?;
+        #[cfg(feature = "evidence-stats")]
+        crate::evidence::record_process();
         let stdout = child
             .stdout
             .take()
@@ -493,6 +495,8 @@ impl GitRepository {
 
     fn run_raw(&self, args: Vec<OsString>) -> Result<Output, GitError> {
         let output = self.command(args.clone()).output()?;
+        #[cfg(feature = "evidence-stats")]
+        crate::evidence::record_process();
         self.processes.fetch_add(1, Ordering::Relaxed);
         Ok(output)
     }
@@ -514,6 +518,8 @@ fn run_git_counted(
 ) -> Result<Output, GitError> {
     let args: Vec<OsString> = args.into_iter().collect();
     let output = Command::new("git").args(&args).current_dir(root).output()?;
+    #[cfg(feature = "evidence-stats")]
+    crate::evidence::record_process();
     Ok(output)
 }
 
@@ -821,6 +827,8 @@ impl ObjectReader {
             .stdout(Stdio::piped())
             .stderr(Stdio::piped());
         let mut child = command.spawn()?;
+        #[cfg(feature = "evidence-stats")]
+        crate::evidence::record_process();
         let stdin = child
             .stdin
             .take()
@@ -845,6 +853,8 @@ impl ObjectReader {
     /// measured limit without changing the process contract.
     fn read_object(&mut self, object: &str) -> Result<Vec<u8>, GitError> {
         validate_object(object)?;
+        #[cfg(feature = "evidence-stats")]
+        crate::evidence::record_object_read();
         if self.pending >= self.max_pending {
             self.pending = 0;
         }
