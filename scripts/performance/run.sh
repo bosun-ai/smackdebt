@@ -34,27 +34,38 @@ if [ "$#" -eq 0 ]; then
 fi
 
 # Prime executable loading and parser setup outside the measured interval.
-"$@" "$output" >/dev/null
+"$@" "$output" >/dev/null 2>/dev/null
 
 run=1
 while [ "$run" -le "$repeat" ]; do
+    stderr_file="$output/run-$run.stderr"
     started=$(python3 -c 'import time; print(time.perf_counter_ns())')
-    if [ "$quiet" = true ]; then
-        "$@" "$output" >/dev/null
-    else
-        "$@" "$output"
-    fi
+    python3 "$script_dir/timed_command.py" "$stderr_file" "$quiet" "$@" "$output"
     finished=$(python3 -c 'import time; print(time.perf_counter_ns())')
-    python3 - "$output" "$run" "$started" "$finished" <<'PY'
+    python3 - "$output" "$run" "$started" "$finished" "$stderr_file" <<'PY'
 import json
 import pathlib
+import re
 import sys
 
-root, run, started, finished = sys.argv[1:]
+root, run, started, finished, stderr_file = sys.argv[1:]
 path = pathlib.Path(root) / "runs.jsonl"
-record = {"run": int(run), "wall_time_ns": int(finished) - int(started)}
+stderr = pathlib.Path(stderr_file).read_text()
+match = re.search(r'smackdebt parser stats: \{"parser_time_ns":(\d+)\}', stderr)
+allocations = re.search(r'allocations: (\d+).*?reallocations: (\d+).*?bytes_allocated: (\d+)', stderr)
+resident = re.search(r'smackdebt runner stats: \{"peak_resident_bytes":(\d+)\}', stderr)
+record = {
+    "run": int(run),
+    "wall_time_ns": int(finished) - int(started),
+    "parser_time_ns": int(match.group(1)) if match else None,
+    "allocation_count": int(allocations.group(1)) if allocations else None,
+    "reallocation_count": int(allocations.group(2)) if allocations else None,
+    "allocated_bytes": int(allocations.group(3)) if allocations else None,
+    "peak_resident_bytes": int(resident.group(1)) if resident else None,
+}
 with path.open("a") as stream:
     stream.write(json.dumps(record, sort_keys=True) + "\n")
 PY
+    rm -f "$stderr_file"
     run=$((run + 1))
 done

@@ -1,56 +1,38 @@
 //! Compiled source-language dispatch.
-//!
-//! The public values in this crate are Smackdebt facts.  The parser and metric
-//! structures from `rust-code-analysis` are reduced at this boundary and never
-//! appear in a public signature.
 
 use std::path::Path;
+use std::sync::atomic::{AtomicU64, Ordering};
 
-use crate::ruby::{RubyBlock, RubyLambda, analyze_ruby};
-use crate::upstream::analyze_upstream;
+use smackdebt_analysis::{FileAnalysis, Language};
+use tree_sitter::Parser;
+
+use crate::c_language::C;
+use crate::cpp_language::Cpp;
+use crate::engine::{self, Scratch};
+use crate::java_language::Java;
+use crate::javascript_language::{JavaScript, Jsx, Tsx, TypeScript};
+use crate::python_language::Python;
+use crate::ruby_language::Ruby;
+use crate::rust_language::Rust;
 use crate::vue::analyze_vue;
-use smackdebt_analysis::{
-    FileAnalysis as CoreFileAnalysis, Language, LocalUnitId, Measurements as CoreMeasurements,
-    ParseStatus, SourceSpan, UnitFact, UnitIdentity, UnitKind as CoreUnitKind,
-};
 
-#[derive(Clone, Copy, Debug, Eq, Ord, PartialEq, PartialOrd)]
-pub(super) enum UnitKind {
-    Function,
-    Method,
-    Lambda,
-    Template,
+static PARSER_TIME_NS: AtomicU64 = AtomicU64::new(0);
+
+pub(crate) fn record_parser_time(elapsed: std::time::Duration) {
+    PARSER_TIME_NS.fetch_add(
+        u64::try_from(elapsed.as_nanos()).unwrap_or(u64::MAX),
+        Ordering::Relaxed,
+    );
 }
 
-#[derive(Clone, Copy, Debug, Default, PartialEq)]
-pub(super) struct Measurements {
-    pub(super) cognitive_complexity: u32,
-    pub(super) cyclomatic_complexity: u32,
-    pub(super) logical_lines: u32,
+#[doc(hidden)]
+pub fn reset_parser_time() {
+    PARSER_TIME_NS.store(0, Ordering::Relaxed);
 }
 
-#[derive(Clone, Copy, Debug, Eq, Ord, PartialEq, PartialOrd)]
-pub(super) struct Span {
-    pub(super) start_line: u32,
-    pub(super) end_line: u32,
-}
-
-#[derive(Clone, Debug, PartialEq)]
-pub(super) struct CodeUnit {
-    pub(super) name: String,
-    pub(super) container: Option<String>,
-    pub(super) kind: UnitKind,
-    pub(super) span: Span,
-    pub(super) measurements: Measurements,
-    pub(super) parent: Option<usize>,
-}
-
-#[derive(Clone, Debug, PartialEq)]
-pub(super) struct RawFileAnalysis {
-    pub(super) language: Language,
-    pub(super) source_lines: u32,
-    pub(super) parse_status: ParseStatus,
-    pub(super) units: Vec<CodeUnit>,
+#[doc(hidden)]
+pub fn parser_time_ns() -> u64 {
+    PARSER_TIME_NS.load(Ordering::Relaxed)
 }
 
 fn language_name(language: Language) -> &'static str {
@@ -69,17 +51,12 @@ fn language_name(language: Language) -> &'static str {
     }
 }
 
-fn supported(language: Language) -> bool {
-    !matches!(language, Language::Kotlin | Language::Unknown)
-}
-
-/// Detects a language from a source path. Detection never reads source bytes.
 fn detect(path: &Path) -> Language {
     let name = path
         .file_name()
         .and_then(|name| name.to_str())
         .unwrap_or_default();
-    if name == "Rakefile" || name == "Gemfile" {
+    if matches!(name, "Rakefile" | "Gemfile") {
         return Language::Ruby;
     }
     match path
@@ -103,7 +80,6 @@ fn detect(path: &Path) -> Language {
     }
 }
 
-/// An error before a file analysis can be produced.
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub enum AnalysisError {
     Unsupported(Language),
@@ -123,198 +99,116 @@ impl std::fmt::Display for AnalysisError {
 
 impl std::error::Error for AnalysisError {}
 
-/// An owned source buffer supplied by the project worker.
-/// Per-worker language state. Parser and scratch details stay private while
-/// project orchestration reuses this value across files on the same worker.
+/// Per-worker source analysis state. Each parser is reused by consecutive files.
 #[derive(Default)]
 pub struct Analyzer {
-    ruby_methods: Vec<RubyBlock>,
-    ruby_lambdas: Vec<RubyLambda>,
+    c: Parser,
+    cpp: Parser,
+    java: Parser,
+    javascript: Parser,
+    jsx: Parser,
+    python: Parser,
+    rust: Parser,
+    ruby: Parser,
+    typescript: Parser,
+    tsx: Parser,
+    vue: Parser,
+    scratch: Scratch,
 }
 
 impl Analyzer {
-    /// Detects a language from a source path without reading it.
     pub fn language(path: &Path) -> Language {
         detect(path)
     }
 
-    /// Analyzes one source buffer through the compiled language registry.
-    pub fn analyze(
-        &mut self,
-        path: &Path,
-        source: Vec<u8>,
-    ) -> Result<CoreFileAnalysis, AnalysisError> {
-        let language = detect(path);
-        if !supported(language) {
-            return Err(AnalysisError::Unsupported(language));
-        }
-        let raw = match language {
-            Language::Ruby => Ok(analyze_ruby(
+    pub fn analyze(&mut self, path: &Path, source: Vec<u8>) -> Result<FileAnalysis, AnalysisError> {
+        let result = match detect(path) {
+            Language::C => engine::analyze::<C>(&mut self.c, &source, &mut self.scratch),
+            Language::Cpp => engine::analyze::<Cpp>(&mut self.cpp, &source, &mut self.scratch),
+            Language::Java => engine::analyze::<Java>(&mut self.java, &source, &mut self.scratch),
+            Language::JavaScript => {
+                engine::analyze::<JavaScript>(&mut self.javascript, &source, &mut self.scratch)
+            }
+            Language::Jsx => engine::analyze::<Jsx>(&mut self.jsx, &source, &mut self.scratch),
+            Language::Python => {
+                engine::analyze::<Python>(&mut self.python, &source, &mut self.scratch)
+            }
+            Language::Rust => engine::analyze::<Rust>(&mut self.rust, &source, &mut self.scratch),
+            Language::TypeScript => {
+                engine::analyze::<TypeScript>(&mut self.typescript, &source, &mut self.scratch)
+            }
+            Language::Tsx => engine::analyze::<Tsx>(&mut self.tsx, &source, &mut self.scratch),
+            Language::Ruby => engine::analyze::<Ruby>(&mut self.ruby, &source, &mut self.scratch),
+            Language::Vue => analyze_vue(
+                &mut self.vue,
+                &mut self.javascript,
+                &mut self.typescript,
                 &source,
-                &mut self.ruby_methods,
-                &mut self.ruby_lambdas,
-            )),
-            Language::Vue => analyze_vue(&source),
-            Language::C
-            | Language::Cpp
-            | Language::Java
-            | Language::JavaScript
-            | Language::Jsx
-            | Language::Python
-            | Language::Rust
-            | Language::TypeScript
-            | Language::Tsx => analyze_upstream(language, source, path),
-            Language::Kotlin | Language::Unknown => Err(AnalysisError::Unsupported(language)),
-        }?;
-        Ok(to_core(raw))
-    }
-}
-
-fn to_core(raw: RawFileAnalysis) -> CoreFileAnalysis {
-    let units = raw
-        .units
-        .into_iter()
-        .enumerate()
-        .map(|(index, unit)| {
-            let kind = match unit.kind {
-                UnitKind::Function => CoreUnitKind::Function,
-                UnitKind::Method => CoreUnitKind::Method,
-                UnitKind::Lambda => CoreUnitKind::Lambda,
-                UnitKind::Template => CoreUnitKind::Template,
-            };
-            let identity = match unit.container {
-                Some(container) => UnitIdentity::new(unit.name, kind).in_container(container),
-                None => UnitIdentity::new(unit.name, kind),
-            };
-            UnitFact::new(
-                LocalUnitId::from_index(index),
-                identity,
-                SourceSpan::new(unit.span.start_line, unit.span.end_line),
-                CoreMeasurements::new(
-                    unit.measurements.cognitive_complexity,
-                    unit.measurements.cyclomatic_complexity,
-                    unit.measurements.logical_lines,
-                ),
-                unit.parent.map(LocalUnitId::from_index),
-            )
-        })
-        .collect();
-    CoreFileAnalysis::new(raw.language, raw.source_lines, raw.parse_status, units)
-}
-
-pub(super) fn line_count(source: &[u8]) -> u32 {
-    if source.is_empty() {
-        0
-    } else {
-        source.iter().filter(|&&byte| byte == b'\n').count() as u32
-            + u32::from(source.last() != Some(&b'\n'))
+                &mut self.scratch,
+            ),
+            language @ (Language::Kotlin | Language::Unknown) => {
+                return Err(AnalysisError::Unsupported(language));
+            }
+        };
+        result.map_err(AnalysisError::Parser)
     }
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+    use smackdebt_analysis::{ParseStatus, UnitKind};
 
-    fn analyze(path: &str, source: &str) -> CoreFileAnalysis {
+    fn analyze(path: &str, source: &str) -> FileAnalysis {
         Analyzer::default()
             .analyze(Path::new(path), source.as_bytes().to_vec())
             .unwrap()
     }
 
     #[test]
-    fn only_verified_languages_are_supported() {
-        assert_eq!(detect(Path::new("x.kt")), Language::Kotlin);
-        assert!(
-            Analyzer::default()
-                .analyze(Path::new("x.kt"), b"fun x() {}".to_vec())
-                .is_err()
-        );
-        for path in ["x.c", "x.cpp", "x.java", "x.js", "x.py", "x.rs", "x.ts"] {
-            assert!(supported(detect(Path::new(path))), "{path}");
-        }
-    }
-
-    #[test]
-    fn upstream_nested_units_have_direct_measurements() {
-        let samples = [
-            (
-                "x.c",
-                "int inner(int x) { if (x) return 1; return 0; }\nint outer(int x) { return inner(x); }",
-            ),
-            (
-                "x.cpp",
-                "int inner(int x) { if (x) return 1; return 0; }\nint outer(int x) { return inner(x); }",
-            ),
-            (
-                "x.java",
-                "class A { int inner(int x) { if (x > 0) return 1; return 0; } }",
-            ),
-            (
-                "x.js",
-                "function inner(x) { if (x) return 1; return 0; }\nfunction outer(x) { return inner(x); }",
-            ),
-            (
-                "x.py",
-                "def inner(x):\n    if x:\n        return 1\n    return 0\n",
-            ),
-            ("x.rs", "fn inner(x: bool) -> i32 { if x { return 1; } 0 }"),
-            (
-                "x.ts",
-                "function inner(x: boolean): number { if (x) return 1; return 0; }",
-            ),
-        ];
-        for (path, source) in samples {
-            let result = analyze(path, source);
-            assert!(!result.units().is_empty(), "{path}");
-            assert!(
-                result
-                    .units()
-                    .iter()
-                    .any(|unit| unit.measurements().cyclomatic_complexity() > 0),
-                "{path}"
-            );
-            assert!(
-                result
-                    .units()
-                    .iter()
-                    .any(|unit| unit.measurements().logical_lines() > 0),
-                "{path}"
-            );
-            assert!(
-                result
-                    .units()
-                    .iter()
-                    .any(|unit| unit.measurements().cognitive_complexity() > 0),
-                "{path}"
-            );
-        }
-    }
-
-    #[test]
-    fn jsx_and_tsx_use_their_syntax_aware_parsers() {
+    fn listed_languages_use_owned_parsers_and_kotlin_stays_unsupported() {
         for (path, source) in [
-            (
-                "x.jsx",
-                "function View() { return <section>{ready && <b>yes</b>}</section>; }",
-            ),
-            (
-                "x.tsx",
-                "function View(props: { ready: boolean }) { return <section>{props.ready && <b>yes</b>}</section>; }",
-            ),
+            ("x.c", "int x(void) { return 1; }"),
+            ("x.cpp", "int x() { return 1; }"),
+            ("x.java", "class X { int x() { return 1; } }"),
+            ("x.js", "function x() { return 1; }"),
+            ("x.jsx", "function X() { return <div />; }"),
+            ("x.py", "def x():\n    return 1\n"),
+            ("x.rs", "fn x() -> i32 { 1 }"),
+            ("x.ts", "function x(): number { return 1; }"),
+            ("x.tsx", "function X() { return <div />; }"),
+            ("x.rb", "def x\n  1\nend\n"),
         ] {
             let result = analyze(path, source);
             assert_eq!(result.parse_status(), &ParseStatus::Parsed, "{path}");
             assert!(!result.units().is_empty(), "{path}");
         }
+        assert!(matches!(
+            Analyzer::default().analyze(Path::new("x.kt"), b"fun x() {}".to_vec()),
+            Err(AnalysisError::Unsupported(Language::Kotlin))
+        ));
     }
 
     #[test]
-    fn ruby_methods_singletons_and_lambdas_are_owned_units() {
+    fn nested_units_have_independent_measurements_and_original_spans() {
+        let result = analyze(
+            "x.rs",
+            "fn outer() {\n let inner = || { if ready { work(); } };\n if done { work(); }\n}\n",
+        );
+        let outer = &result.units()[0];
+        let closure = &result.units()[1];
+        assert_eq!(outer.measurements().cyclomatic_complexity(), 2);
+        assert!(closure.measurements().cyclomatic_complexity() > 1);
+        assert_eq!(closure.parent(), Some(outer.local_id()));
+        assert_eq!(closure.span().start_line(), 2);
+    }
+
+    #[test]
+    fn ruby_methods_singletons_and_closures_share_metric_algorithms() {
         let result = analyze(
             "x.rb",
-            "class Cart\n  def total(items)\n    items.each do |item|\n      if item\n        puts item\n      end\n    end\n    mapper = ->(item) { item * 2 }\n  end\n  def self.empty\n    []\n  end\nend\n",
+            "class Cart\n  def total(items)\n    items.each do |item|\n      if item\n        puts item\n      end\n    end\n  end\n  def self.empty\n    []\n  end\nend\n",
         );
-        assert_eq!(result.language(), Language::Ruby);
         assert!(
             result
                 .units()
@@ -331,64 +225,13 @@ mod tests {
             result
                 .units()
                 .iter()
-                .any(|unit| unit.identity().kind() == CoreUnitKind::Lambda)
-        );
-        assert!(
-            result
-                .units()
-                .iter()
-                .any(|unit| unit.measurements().cognitive_complexity() > 0)
+                .any(|unit| unit.identity().kind() == UnitKind::Closure)
         );
     }
 
     #[test]
-    fn empty_ruby_method_has_no_control_flow_complexity() {
-        let result = analyze("x.rb", "def empty\nend\n");
-        let method = result.units().first().unwrap();
-        assert_eq!(method.measurements().cognitive_complexity(), 0);
-        assert_eq!(method.measurements().cyclomatic_complexity(), 1);
-    }
-
-    #[test]
-    fn vue_delegates_scripts_and_adds_a_template_unit() {
-        let result = analyze(
-            "App.vue",
-            "<template>\n  <div v-if=\"ok\" @click=\"save\">{{ ok ? 'yes' : 'no' }}</div>\n</template>\n<script setup lang=\"ts\">\nfunction save(value: boolean) { if (value) return 1; return 0 }\n</script>\n<style scoped>\n.x { color: red }\n</style>\n",
-        );
-        assert_eq!(result.language(), Language::Vue);
-        assert!(
-            result
-                .units()
-                .iter()
-                .any(|unit| unit.identity().kind() == CoreUnitKind::Template
-                    && unit.measurements().cognitive_complexity() > 0)
-        );
-        assert!(
-            result
-                .units()
-                .iter()
-                .any(|unit| unit.identity().name() == "save" && unit.span().start_line() > 3)
-        );
-        assert_eq!(result.source_lines(), 9);
-    }
-
-    #[test]
-    fn vue_handles_compact_scripts_and_general_event_handlers() {
-        let result = analyze(
-            "App.vue",
-            "<template><input v-on:focus=\"load\" @keydown.enter=\"save\"></template>\n<script>function save() { return 1 }</script>\n",
-        );
-        assert!(
-            result
-                .units()
-                .iter()
-                .any(|unit| unit.identity().name() == "save")
-        );
-        let template = result
-            .units()
-            .iter()
-            .find(|unit| unit.identity().kind() == CoreUnitKind::Template)
-            .unwrap();
-        assert!(template.measurements().cognitive_complexity() >= 2);
+    fn recovered_trees_still_return_visible_facts() {
+        let result = analyze("x.py", "def broken(:\n    if yes:\n        pass\n");
+        assert_eq!(result.parse_status(), &ParseStatus::Recovered);
     }
 }

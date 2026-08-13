@@ -549,7 +549,7 @@ impl Report {
         comparisons: usize,
     ) -> Self {
         Self {
-            schema_version: 1,
+            schema_version: 2,
             mode,
             root: None,
             scopes: Vec::with_capacity(scopes),

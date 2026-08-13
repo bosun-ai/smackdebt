@@ -21,9 +21,16 @@ use crate::terminal;
 static ALLOCATOR: &StatsAlloc<System> = &INSTRUMENTED_SYSTEM;
 
 pub(crate) fn main() -> ExitCode {
+    #[cfg(feature = "allocation-stats")]
+    smackdebt_project::reset_parser_time();
     let exit = run(std::env::args_os());
     #[cfg(feature = "allocation-stats")]
     eprintln!("smackdebt allocation stats: {:?}", ALLOCATOR.stats());
+    #[cfg(feature = "allocation-stats")]
+    eprintln!(
+        "smackdebt parser stats: {{\"parser_time_ns\":{}}}",
+        smackdebt_project::parser_time_ns()
+    );
     exit
 }
 

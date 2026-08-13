@@ -1,0 +1,29 @@
+{
+  "content_digest": "db3434a4446aaa5df206c4ea63cd6e3be2e6eac64d39f364d99040c15035a3d7",
+  "diff_files": 4,
+  "files": 102,
+  "generated_at_unix": 1786636618,
+  "git_dirty": true,
+  "git_revision": "fcb2ba73e4f178c61bb4415121fdeb9049dbe72a",
+  "host": "macOS-26.3.1-arm64-arm-64bit",
+  "language_files": {
+    "c": 10,
+    "cpp": 10,
+    "java": 10,
+    "javascript": 10,
+    "python": 10,
+    "ruby": 10,
+    "rust": 10,
+    "tsx": 10,
+    "typescript": 10,
+    "vue": 10
+  },
+  "lines_per_file": 12,
+  "profile": "small-diff",
+  "python": "3.11.13",
+  "rustc": "rustc 1.97.0 (2d8144b78 2026-07-07)",
+  "schema_version": 1,
+  "seed": 1,
+  "source_bytes": 36851,
+  "verified": true
+}

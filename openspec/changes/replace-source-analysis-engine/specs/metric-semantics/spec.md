@@ -3,7 +3,7 @@
 ### Requirement: Language syntax is translated once
 Each supported language SHALL implement the private language contract that
 translates its grammar nodes into unit boundaries, control-flow events, logical
-statements, dependency syntax, injection regions, names, containers, and source
+statements, injection regions, names, containers, and source
 spans. A node SHALL be classified at most once during one unit traversal.
 
 #### Scenario: Two languages express a condition differently

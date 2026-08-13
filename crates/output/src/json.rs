@@ -4,6 +4,7 @@ use serde::Serialize;
 use serde::ser::{SerializeMap, SerializeSeq, Serializer};
 use smackdebt_analysis::{
     Comparison, Diagnostic, FileRecord, Finding, HealthCounts, Measurements, Report, Scope,
+    UnitKind,
 };
 
 use crate::output::{
@@ -11,7 +12,7 @@ use crate::output::{
     scope_kind,
 };
 
-/// Streams JSON schema version 1 without cloning report strings or arrays.
+/// Streams JSON schema version 2 without cloning report strings or arrays.
 pub fn write_json(
     writer: &mut impl Write,
     report: &Report,
@@ -31,23 +32,19 @@ impl Serialize for ReportView<'_> {
         S: Serializer,
     {
         let report = self.0;
-        let mut map = serializer.serialize_map(Some(11))?;
+        let mut map = serializer.serialize_map(Some(12))?;
         map.serialize_entry("schema_version", &report.schema_version())?;
         map.serialize_entry("mode", mode_name(report.mode()))?;
-        map.serialize_entry(
-            "root",
-            &report
-                .root()
-                .map(|root| report.scopes()[root.index()].name()),
-        )?;
+        map.serialize_entry("root", &report.root().map(|root| root.get()))?;
         map.serialize_entry("selected_scope", &self.1.map(|id| id.get()))?;
         map.serialize_entry("paths", &report.paths())?;
         map.serialize_entry("scopes", &Scopes(report.scopes()))?;
-        map.serialize_entry("files", &Files(report.files()))?;
+        map.serialize_entry("files", &Files(report.files(), report.scopes().len()))?;
         map.serialize_entry("findings", &Findings(report.findings()))?;
         map.serialize_entry("diagnostics", &Diagnostics(report.diagnostics()))?;
         map.serialize_entry("comparisons", &Comparisons(report.comparisons()))?;
-        map.serialize_entry("summary", &Summary(report))?;
+        map.serialize_entry("health", &HealthRecords(report))?;
+        map.serialize_entry("activity", &ActivityRecords(report.files()))?;
         map.end()
     }
 }
@@ -73,17 +70,16 @@ impl Serialize for ScopeView<'_> {
         S: Serializer,
     {
         let scope = self.0;
-        let mut map = serializer.serialize_map(Some(11))?;
+        let mut map = serializer.serialize_map(Some(10))?;
         map.serialize_entry("id", &scope.id().get())?;
         map.serialize_entry("kind", scope_kind(scope.kind()))?;
-        map.serialize_entry("name", scope.name())?;
         map.serialize_entry("parent", &scope.parent().map(|id| id.get()))?;
         map.serialize_entry("children", &ChildIds(scope.children()))?;
         map.serialize_entry("path", &scope.path().map(|id| id.get()))?;
         map.serialize_entry("findings", &FindingIds(scope.findings()))?;
         map.serialize_entry("comparisons", &ComparisonIds(scope.comparisons()))?;
         map.serialize_entry("coverage", &CoverageView(scope.coverage()))?;
-        map.serialize_entry("health", &HealthView(scope.health()))?;
+        map.serialize_entry("health", &scope.id().get())?;
         map.serialize_entry("diff", &DiffView(scope.diff()))?;
         map.end()
     }
@@ -147,7 +143,7 @@ impl Serialize for ChildIds<'_> {
     }
 }
 
-struct Files<'a>(&'a [FileRecord]);
+struct Files<'a>(&'a [FileRecord], usize);
 impl Serialize for Files<'_> {
     fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
     where
@@ -155,28 +151,98 @@ impl Serialize for Files<'_> {
     {
         let mut sequence = serializer.serialize_seq(Some(self.0.len()))?;
         for file in self.0 {
-            sequence.serialize_element(&FileView(file))?;
+            sequence.serialize_element(&FileView(file, self.1))?;
         }
         sequence.end()
     }
 }
 
-struct FileView<'a>(&'a FileRecord);
+struct FileView<'a>(&'a FileRecord, usize);
 impl Serialize for FileView<'_> {
     fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
     where
         S: Serializer,
     {
         let file = self.0;
-        let mut map = serializer.serialize_map(Some(8))?;
+        let mut map = serializer.serialize_map(Some(7))?;
         map.serialize_entry("id", &file.id().get())?;
         map.serialize_entry("scope", &file.scope().get())?;
-        map.serialize_entry("path", file.path())?;
+        map.serialize_entry("path", &file.path_id().map(|id| id.get()))?;
         map.serialize_entry("language", &file.language().map(language_name))?;
         map.serialize_entry("coverage", &CoverageView(file.coverage()))?;
-        map.serialize_entry("health", &HealthView(file.health()))?;
-        map.serialize_entry("touches", &file.activity().map(|value| value.touches()))?;
-        map.serialize_entry("path_id", &file.path_id().map(|id| id.get()))?;
+        map.serialize_entry("health", &(self.1 as u32 + file.id().get()))?;
+        map.serialize_entry("activity", &file.id().get())?;
+        map.end()
+    }
+}
+
+struct HealthRecords<'a>(&'a Report);
+
+impl Serialize for HealthRecords<'_> {
+    fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
+    where
+        S: Serializer,
+    {
+        let report = self.0;
+        let mut sequence = serializer.serialize_seq(Some(
+            report.scopes().len().saturating_add(report.files().len()),
+        ))?;
+        for scope in report.scopes() {
+            sequence.serialize_element(&HealthRecord(scope.id().get(), scope.health()))?;
+        }
+        let offset = report.scopes().len() as u32;
+        for file in report.files() {
+            sequence.serialize_element(&HealthRecord(offset + file.id().get(), file.health()))?;
+        }
+        sequence.end()
+    }
+}
+
+struct HealthRecord(u32, HealthCounts);
+
+impl Serialize for HealthRecord {
+    fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
+    where
+        S: Serializer,
+    {
+        let mut map = serializer.serialize_map(Some(4))?;
+        map.serialize_entry("id", &self.0)?;
+        map.serialize_entry("healthy", &self.1.healthy())?;
+        map.serialize_entry("watch", &self.1.watch())?;
+        map.serialize_entry("high", &self.1.high())?;
+        map.end()
+    }
+}
+
+struct ActivityRecords<'a>(&'a [FileRecord]);
+
+impl Serialize for ActivityRecords<'_> {
+    fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
+    where
+        S: Serializer,
+    {
+        let mut sequence = serializer.serialize_seq(Some(self.0.len()))?;
+        for file in self.0 {
+            sequence.serialize_element(&ActivityRecord(file))?;
+        }
+        sequence.end()
+    }
+}
+
+struct ActivityRecord<'a>(&'a FileRecord);
+
+impl Serialize for ActivityRecord<'_> {
+    fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
+    where
+        S: Serializer,
+    {
+        let mut map = serializer.serialize_map(Some(3))?;
+        map.serialize_entry("id", &self.0.id().get())?;
+        map.serialize_entry("file", &self.0.id().get())?;
+        map.serialize_entry(
+            "touches",
+            &self.0.activity().map(|activity| activity.touches()),
+        )?;
         map.end()
     }
 }
@@ -202,11 +268,12 @@ impl Serialize for FindingView<'_> {
         S: Serializer,
     {
         let finding = self.0;
-        let mut map = serializer.serialize_map(Some(8))?;
+        let mut map = serializer.serialize_map(Some(9))?;
         map.serialize_entry("id", &finding.id().get())?;
         map.serialize_entry("file", &finding.file().get())?;
         map.serialize_entry("name", finding.identity().name())?;
         map.serialize_entry("container", &finding.identity().container())?;
+        map.serialize_entry("kind", unit_kind_name(finding.identity().kind()))?;
         map.serialize_entry("start_line", &finding.span().start_line())?;
         map.serialize_entry("end_line", &finding.span().end_line())?;
         map.serialize_entry("rating", rating_name(finding.assessment().rating()))?;
@@ -267,51 +334,30 @@ impl Serialize for ComparisonView<'_> {
         S: Serializer,
     {
         let comparison = self.0;
-        let mut map = serializer.serialize_map(Some(9))?;
+        let mut map = serializer.serialize_map(Some(10))?;
         map.serialize_entry("id", &comparison.id().get())?;
         map.serialize_entry("file", &comparison.file().map(|id| id.get()))?;
         map.serialize_entry("name", comparison.identity().name())?;
         map.serialize_entry("container", &comparison.identity().container())?;
+        map.serialize_entry("unit_kind", unit_kind_name(comparison.identity().kind()))?;
         map.serialize_entry("kind", comparison_name(comparison.kind()))?;
         map.serialize_entry("direction", direction_name(comparison.direction()))?;
         map.serialize_entry("before", &comparison.before().map(MeasurementsView))?;
         map.serialize_entry("after", &comparison.after().map(MeasurementsView))?;
-        map.serialize_entry(
-            "ratings",
-            &(
-                comparison.before_rating().map(rating_name),
-                comparison.after_rating().map(rating_name),
-            ),
-        )?;
+        map.serialize_entry("ratings", &RatingsView(comparison))?;
         map.end()
     }
 }
 
-struct Summary<'a>(&'a Report);
-impl Serialize for Summary<'_> {
+struct RatingsView<'a>(&'a Comparison);
+impl Serialize for RatingsView<'_> {
     fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
     where
         S: Serializer,
     {
-        let health = self
-            .0
-            .root()
-            .and_then(|id| self.0.scopes().get(id.index()))
-            .map_or_else(HealthCounts::default, Scope::health);
-        HealthView(health).serialize(serializer)
-    }
-}
-
-struct HealthView(HealthCounts);
-impl Serialize for HealthView {
-    fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
-    where
-        S: Serializer,
-    {
-        let mut map = serializer.serialize_map(Some(3))?;
-        map.serialize_entry("healthy", &self.0.healthy())?;
-        map.serialize_entry("watch", &self.0.watch())?;
-        map.serialize_entry("high", &self.0.high())?;
+        let mut map = serializer.serialize_map(Some(2))?;
+        map.serialize_entry("before", &self.0.before_rating().map(rating_name))?;
+        map.serialize_entry("after", &self.0.after_rating().map(rating_name))?;
         map.end()
     }
 }
@@ -330,6 +376,17 @@ impl Serialize for CoverageView {
         map.serialize_entry("source_lines", &self.0.source_lines())?;
         map.serialize_entry("excluded_lines", &self.0.excluded_lines())?;
         map.end()
+    }
+}
+
+fn unit_kind_name(kind: UnitKind) -> &'static str {
+    match kind {
+        UnitKind::Function => "function",
+        UnitKind::Method => "method",
+        UnitKind::Closure => "closure",
+        UnitKind::Lambda => "lambda",
+        UnitKind::SyntheticTopLevel => "synthetic_top_level",
+        UnitKind::Template => "template",
     }
 }
 

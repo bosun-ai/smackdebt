@@ -1,0 +1,5 @@
+{"allocated_bytes": 169890, "allocation_count": 808, "parser_time_ns": 624334, "peak_resident_bytes": 23871488, "reallocation_count": 328, "run": 1, "wall_time_ns": 143356042}
+{"allocated_bytes": 169826, "allocation_count": 807, "parser_time_ns": 617332, "peak_resident_bytes": 23838720, "reallocation_count": 328, "run": 2, "wall_time_ns": 121902542}
+{"allocated_bytes": 169826, "allocation_count": 807, "parser_time_ns": 630041, "peak_resident_bytes": 23871488, "reallocation_count": 328, "run": 3, "wall_time_ns": 124122625}
+{"allocated_bytes": 169890, "allocation_count": 808, "parser_time_ns": 691000, "peak_resident_bytes": 23838720, "reallocation_count": 328, "run": 4, "wall_time_ns": 121907709}
+{"allocated_bytes": 169826, "allocation_count": 807, "parser_time_ns": 723334, "peak_resident_bytes": 23773184, "reallocation_count": 328, "run": 5, "wall_time_ns": 121404500}

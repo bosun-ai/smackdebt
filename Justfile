@@ -9,6 +9,9 @@ lint:
 test:
     cargo test --workspace --all-features
 
+update-source-snapshots:
+    SMACKDEBT_UPDATE_SNAPSHOTS=1 cargo test -p smackdebt --test acceptance source_engine
+
 architecture:
     python3 scripts/check-dependency-direction.py
     python3 scripts/check-entry-modules.py

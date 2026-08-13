@@ -48,13 +48,17 @@ The trait supplies meaningful syntax values for:
 - unit boundaries, identities, containers, kinds, bodies, and original spans;
 - control-flow events, alternatives, boolean operators, and nesting effects;
 - logical statements and exclusions;
-- dependency syntax and document injection regions needed by later changes;
+- document injection regions;
 - parse recovery and language-specific exceptions.
 
 Concrete implementations may inspect their tree-sitter node kinds, fields,
 queries, and source text. Shared algorithm modules may use only trait-provided
 values. They may not match a concrete language identifier, grammar node name,
 or language module.
+
+`add-static-architecture-analysis` extends this private language seam with
+dependency syntax when project resolution can consume it. This change does not
+calculate and discard dependency facts before that owner exists.
 
 The trait and tree-sitter types remain private to the language crate. The
 existing public seam continues to return analysis-owned `FileAnalysis` values.

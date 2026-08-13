@@ -54,6 +54,7 @@ class WorkloadHarnessTests(unittest.TestCase):
             records = (root / "runs.jsonl").read_text().splitlines()
             self.assertEqual(len(records), 2)
             self.assertTrue(all(json.loads(record)["wall_time_ns"] > 0 for record in records))
+            self.assertTrue(all("parser_time_ns" in json.loads(record) for record in records))
 
 
 if __name__ == "__main__":

@@ -6,7 +6,7 @@ Smackdebt answers two questions:
 2. Did this worktree improve or worsen that debt compared with a Git ref?
 
 The implementation favors small crates, inward dependencies, stable output,
-and predictable memory use. Command behavior and JSON schema version 1 are the
+and predictable memory use. Command behavior and JSON schema version 2 are the
 product interfaces. Rust crate APIs remain private implementation seams.
 
 ## Crates and dependency direction
@@ -54,7 +54,7 @@ module and return of the process exit code.
 
 Implementation stays in responsibility-led files. Analysis separates source
 facts, health policy, comparisons, and completed reports. Language dispatch
-keeps its upstream adapter separate from the owned Ruby and Vue analyzers. The
+keeps grammar-specific syntax separate from shared measurements. The
 project crate separates public requests from execution, discovery separates
 ignore matching from inventory, and output separates JSON serialization from
 terminal presentation. The CLI separates arguments, configuration, terminal
@@ -129,29 +129,37 @@ Language selection is a private enum and `match`, compiled into the binary.
 There are no runtime plugins, analyzer trait objects, callbacks, or parser types
 in public APIs.
 
-The temporary upstream adapter pins `rust-code-analysis` revision
-`37e5d83c056c8cbf827223d5814a93c5218df1a9`. It calls per-file analysis and
-bypasses the upstream walker, worker setup, channels, and output. It immediately
-reduces upstream data to the three measurements Smackdebt needs.
+The language crate has a private generic `Language` trait and one concrete
+marker implementation per grammar. Static dispatch chooses `analyze::<Rust>`,
+`analyze::<Ruby>`, or another compiled implementation. A language owns its node
+kinds, fields, unit names, containers, recovery exceptions, control-flow
+meaning, logical statements, and injection regions. Shared measurement code
+never matches a grammar node name. Dependency syntax joins this private seam in
+the static architecture change, when project resolution can consume it.
 
-Verified upstream-backed languages are C, C++, Java, JavaScript, JSX, Python,
-Rust, TypeScript, and TSX. Kotlin stays unsupported because the pinned engine
-does not supply the required measurements.
+One iterative traversal classifies each node visited in a rated unit and feeds
+three independent modules. Cognitive complexity owns structural, nesting,
+alternative, jump, and boolean-run state. Cyclomatic complexity owns decision
+counts. Logical lines own statement counts. A nested rated unit is skipped in
+its parent's traversal and measured separately, so direct complexity and
+exclusive statements need no child-result subtraction.
 
-Ruby and Vue are owned analyzers. Ruby reports methods, singleton methods, and
-lambdas while treating classes and modules as containers. Vue delegates script
-regions to JavaScript or TypeScript analysis, reports template control flow as
-a template unit, and counts style regions as covered source without rating
-them.
+The engine constructs analysis-owned `FileAnalysis` and `UnitFact` values
+directly. Tree-sitter nodes, trees, grammars, and semantic traversal values do
+not cross the language crate seam. C, C++, Java, JavaScript, JSX, Python, Rust,
+TypeScript, TSX, Ruby, and Vue have checked exact fixtures. Kotlin remains a
+visible unsupported file and contributes no healthy unit.
 
-Nested syntax needs metric-specific handling. Cognitive and cyclomatic values
-come from the unit itself. Exclusive logical lines subtract direct nested-unit
-line totals. Repository aggregation never uses the upstream metric merge
-operation.
+Vue is a document grammar. It parses each JavaScript or TypeScript `script`
+region from a borrowed slice, keeps the region's original line offset, and
+creates a separate template unit. Template directives and expressions feed the
+same metric modules. Style regions count toward document coverage without
+creating a rated unit.
 
-Replacing an upstream-backed language requires compatibility fixtures, an
-owned implementation, performance evidence, and one registry switch. No other
-crate should change.
+Adding a language means adding its private marker, syntax translation, exact
+unit and metric fixtures, recovery and original-span fixtures, nested-unit
+proof, serial/parallel proof, and performance evidence. Shared algorithms
+change only when the measurement rule itself changes.
 
 ## Execution and memory ownership
 
@@ -160,10 +168,15 @@ width; otherwise it uses available parallelism. One-file work stays serial.
 Indexed parallel collection preserves the same order as serial execution.
 
 Discovery owns paths. The project crate opens each selected current file once
-and moves its source buffer into analysis. A worker owns parser and scratch
-state and reuses them across files. In a diff, one worker holds at most the base
-and worktree buffers for its current file. Source memory therefore follows
-active worker count instead of repository size.
+and moves its source buffer into analysis. A worker owns one parser per grammar
+and reuses it across files. Trees and borrowed nodes live only until that file's
+facts are complete; query cursors, traversal stacks, semantic observations, and
+result scratch remain with the worker and retain capacity between files.
+Compiled unit queries are retained by grammar and their mutable cursors are not
+shared between workers. Vue borrows included source ranges instead of copying
+the complete document. A diff worker holds at most the base and worktree buffers
+for its current file. Source memory therefore follows active worker count
+instead of repository size.
 
 Health policy runs on analysis workers. Healthy details are reduced before
 results return to aggregation. Terminal and JSON output write directly to an
@@ -218,12 +231,20 @@ whole. Finding detail names only signals that reached Watch or High, while diff
 detail names only changed measurements. Terminal-only `--all` restores every
 area and retained detail.
 
-JSON starts with `schema_version: 1` and retains all `watch` and `high`
+JSON starts with `schema_version: 2` and retains all `watch` and `high`
 findings, aggregate healthy counts, coverage, activity, diagnostics, and diff
 facts when present. It also exposes the selected scope, indexed paths, scope
 finding/comparison links, three-way diff counts, comparison ownership, and
-derived direction. Additive fields may extend version 1. Removing a field,
-changing its meaning, or changing its type requires a new schema version.
+derived direction. The output crate streams this model from borrowed report
+facts, and `schemas/report-v2.schema.json` plus black-box snapshots check it.
+There is no version-1 serializer or command-line version selector.
+
+The source-engine baseline workflow is `scripts/performance/baseline.sh` with
+the `one-file`, `hundred-file`, or `small-diff` profile. It regenerates the
+declared workload, checks its identity, then records parser time, wall time,
+allocations, peak resident memory, supported files, and source bytes. Parser
+timing is diagnostic evidence on standard error only in the allocation build;
+it is not part of terminal or JSON product output.
 
 Exit codes describe report production, not code health:
 

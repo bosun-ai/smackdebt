@@ -1,0 +1,169 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://smackdebt.dev/schema/report-v2.json",
+  "title": "Smackdebt report version 2",
+  "type": "object",
+  "required": ["schema_version", "mode", "root", "selected_scope", "paths", "scopes", "files", "findings", "diagnostics", "comparisons", "health", "activity"],
+  "properties": {
+    "schema_version": { "const": 2 },
+    "mode": { "enum": ["codebase", "diff"] },
+    "root": { "$ref": "#/$defs/nullable_index" },
+    "selected_scope": { "$ref": "#/$defs/nullable_index" },
+    "paths": { "type": "array", "items": { "type": "string" } },
+    "scopes": { "type": "array", "items": { "$ref": "#/$defs/scope" } },
+    "files": { "type": "array", "items": { "$ref": "#/$defs/file" } },
+    "findings": { "type": "array", "items": { "$ref": "#/$defs/finding" } },
+    "diagnostics": { "type": "array", "items": { "$ref": "#/$defs/diagnostic" } },
+    "comparisons": { "type": "array", "items": { "$ref": "#/$defs/comparison" } },
+    "health": { "type": "array", "items": { "$ref": "#/$defs/health" } },
+    "activity": { "type": "array", "items": { "$ref": "#/$defs/activity" } }
+  },
+  "additionalProperties": false,
+  "$defs": {
+    "index": { "type": "integer", "minimum": 0 },
+    "nullable_index": { "type": ["integer", "null"], "minimum": 0 },
+    "rating": { "enum": ["healthy", "watch", "high"] },
+    "nullable_rating": { "type": ["string", "null"], "enum": ["healthy", "watch", "high", null] },
+    "unit_kind": { "enum": ["function", "method", "closure", "lambda", "synthetic_top_level", "template"] },
+    "coverage": {
+      "type": "object",
+      "required": ["selected_files", "analyzed_files", "unsupported_files", "failed_files", "source_lines", "excluded_lines"],
+      "properties": {
+        "selected_files": { "type": "integer", "minimum": 0 },
+        "analyzed_files": { "type": "integer", "minimum": 0 },
+        "unsupported_files": { "type": "integer", "minimum": 0 },
+        "failed_files": { "type": "integer", "minimum": 0 },
+        "source_lines": { "type": "integer", "minimum": 0 },
+        "excluded_lines": { "type": "integer", "minimum": 0 }
+      },
+      "additionalProperties": false
+    },
+    "diff": {
+      "type": "object",
+      "required": ["worse", "better", "changed", "total"],
+      "properties": {
+        "worse": { "type": "integer", "minimum": 0 },
+        "better": { "type": "integer", "minimum": 0 },
+        "changed": { "type": "integer", "minimum": 0 },
+        "total": { "type": "integer", "minimum": 0 }
+      },
+      "additionalProperties": false
+    },
+    "measurements": {
+      "type": "object",
+      "required": ["cognitive_complexity", "cyclomatic_complexity", "logical_lines"],
+      "properties": {
+        "cognitive_complexity": { "type": "integer", "minimum": 0 },
+        "cyclomatic_complexity": { "type": "integer", "minimum": 0 },
+        "logical_lines": { "type": "integer", "minimum": 0 }
+      },
+      "additionalProperties": false
+    },
+    "scope": {
+      "type": "object",
+      "required": ["id", "kind", "parent", "children", "path", "findings", "comparisons", "coverage", "health", "diff"],
+      "properties": {
+        "id": { "$ref": "#/$defs/index" },
+        "kind": { "enum": ["repository", "package", "directory", "file"] },
+        "parent": { "$ref": "#/$defs/nullable_index" },
+        "children": { "type": "array", "items": { "$ref": "#/$defs/index" }, "uniqueItems": true },
+        "path": { "$ref": "#/$defs/nullable_index" },
+        "findings": { "type": "array", "items": { "$ref": "#/$defs/index" }, "uniqueItems": true },
+        "comparisons": { "type": "array", "items": { "$ref": "#/$defs/index" }, "uniqueItems": true },
+        "coverage": { "$ref": "#/$defs/coverage" },
+        "health": { "$ref": "#/$defs/index" },
+        "diff": { "$ref": "#/$defs/diff" }
+      },
+      "additionalProperties": false
+    },
+    "file": {
+      "type": "object",
+      "required": ["id", "scope", "path", "language", "coverage", "health", "activity"],
+      "properties": {
+        "id": { "$ref": "#/$defs/index" },
+        "scope": { "$ref": "#/$defs/index" },
+        "path": { "$ref": "#/$defs/nullable_index" },
+        "language": { "type": ["string", "null"], "enum": ["c", "cpp", "java", "javascript", "jsx", "python", "rust", "typescript", "tsx", "ruby", "vue", "kotlin", "unknown", null] },
+        "coverage": { "$ref": "#/$defs/coverage" },
+        "health": { "$ref": "#/$defs/index" },
+        "activity": { "$ref": "#/$defs/index" }
+      },
+      "additionalProperties": false
+    },
+    "finding": {
+      "type": "object",
+      "required": ["id", "file", "name", "container", "kind", "start_line", "end_line", "rating", "measurements"],
+      "properties": {
+        "id": { "$ref": "#/$defs/index" },
+        "file": { "$ref": "#/$defs/index" },
+        "name": { "type": "string" },
+        "container": { "type": ["string", "null"] },
+        "kind": { "$ref": "#/$defs/unit_kind" },
+        "start_line": { "type": "integer", "minimum": 1 },
+        "end_line": { "type": "integer", "minimum": 1 },
+        "rating": { "$ref": "#/$defs/rating" },
+        "measurements": { "$ref": "#/$defs/measurements" }
+      },
+      "additionalProperties": false
+    },
+    "diagnostic": {
+      "type": "object",
+      "required": ["id", "file", "kind", "message", "excluded_lines"],
+      "properties": {
+        "id": { "$ref": "#/$defs/index" },
+        "file": { "$ref": "#/$defs/nullable_index" },
+        "kind": { "enum": ["unsupported_language", "unreadable_file", "oversized_file", "parse_failure", "ambiguous_identity", "unsafe_reference", "other"] },
+        "message": { "type": "string" },
+        "excluded_lines": { "type": "integer", "minimum": 0 }
+      },
+      "additionalProperties": false
+    },
+    "ratings": {
+      "type": "object",
+      "required": ["before", "after"],
+      "properties": {
+        "before": { "$ref": "#/$defs/nullable_rating" },
+        "after": { "$ref": "#/$defs/nullable_rating" }
+      },
+      "additionalProperties": false
+    },
+    "comparison": {
+      "type": "object",
+      "required": ["id", "file", "name", "container", "unit_kind", "kind", "direction", "before", "after", "ratings"],
+      "properties": {
+        "id": { "$ref": "#/$defs/index" },
+        "file": { "$ref": "#/$defs/nullable_index" },
+        "name": { "type": "string" },
+        "container": { "type": ["string", "null"] },
+        "unit_kind": { "$ref": "#/$defs/unit_kind" },
+        "kind": { "enum": ["added", "removed", "improved", "regressed", "metric_changed", "ambiguous", "unchanged"] },
+        "direction": { "enum": ["worse", "better", "changed"] },
+        "before": { "oneOf": [{ "$ref": "#/$defs/measurements" }, { "type": "null" }] },
+        "after": { "oneOf": [{ "$ref": "#/$defs/measurements" }, { "type": "null" }] },
+        "ratings": { "$ref": "#/$defs/ratings" }
+      },
+      "additionalProperties": false
+    },
+    "health": {
+      "type": "object",
+      "required": ["id", "healthy", "watch", "high"],
+      "properties": {
+        "id": { "$ref": "#/$defs/index" },
+        "healthy": { "type": "integer", "minimum": 0 },
+        "watch": { "type": "integer", "minimum": 0 },
+        "high": { "type": "integer", "minimum": 0 }
+      },
+      "additionalProperties": false
+    },
+    "activity": {
+      "type": "object",
+      "required": ["id", "file", "touches"],
+      "properties": {
+        "id": { "$ref": "#/$defs/index" },
+        "file": { "$ref": "#/$defs/index" },
+        "touches": { "type": ["integer", "null"], "minimum": 0 }
+      },
+      "additionalProperties": false
+    }
+  }
+}

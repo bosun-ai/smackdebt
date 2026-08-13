@@ -25,6 +25,8 @@ def validate(path: Path) -> list[str]:
         "reallocation_count",
         "allocated_bytes",
         "samples_wall_time_ns",
+        "samples_parser_time_ns",
+        "p95_parser_time_ns",
         "p95_wall_time_ns",
         "peak_resident_bytes",
         "wall_time_budget_ns",
@@ -37,6 +39,10 @@ def validate(path: Path) -> list[str]:
         return problems
     if max(record["samples_wall_time_ns"]) != record["p95_wall_time_ns"]:
         problems.append(f"{path.name}: five-sample p95 must equal the slowest sample")
+    if max(record["samples_parser_time_ns"]) != record["p95_parser_time_ns"]:
+        problems.append(f"{path.name}: parser p95 must equal the slowest sample")
+    if record["p95_parser_time_ns"] <= 0:
+        problems.append(f"{path.name}: parser time must be observable")
     for observed, budget, label in [
         (record["p95_wall_time_ns"], record["wall_time_budget_ns"], "wall time"),
         (record["peak_resident_bytes"], record["peak_resident_budget_bytes"], "memory"),

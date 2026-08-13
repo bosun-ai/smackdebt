@@ -14,7 +14,9 @@ while measurement policy must have one implementation per algorithm.
 - Replace every current source engine with one private, statically dispatched
   tree-sitter engine.
 - Add a private generic language trait whose implementations own all grammar,
-  query, naming, unit, control-flow, dependency-syntax, and injection details.
+  query, naming, unit, control-flow, and injection details. The static
+  architecture change extends that same private seam with dependency syntax
+  when it has a consumer.
 - Put cognitive complexity, cyclomatic complexity, and logical-line behavior in
   one focused module per algorithm.
 - Define exact cross-language metric semantics and accept documented corrections

@@ -35,7 +35,7 @@ pub(crate) struct DiffArgs {
 
 #[derive(Clone, Debug, Args)]
 pub(crate) struct Common {
-    /// Write JSON schema version 1.
+    /// Write JSON schema version 2.
     #[arg(long)]
     pub(crate) json: bool,
     /// Number of analysis workers. Must be greater than zero.

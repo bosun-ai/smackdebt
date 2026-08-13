@@ -494,35 +494,14 @@ fn nearest_package(path: &Path, packages: &BTreeMap<PathBuf, PackageId>) -> Opti
 mod tests {
     use super::*;
     use std::fs;
-    use std::time::{SystemTime, UNIX_EPOCH};
-
-    struct TempDir(PathBuf);
-
-    impl TempDir {
-        fn new() -> Self {
-            let suffix = SystemTime::now()
-                .duration_since(UNIX_EPOCH)
-                .unwrap()
-                .as_nanos();
-            let path = std::env::temp_dir().join(format!("smackdebt-discovery-{suffix}"));
-            fs::create_dir_all(&path).unwrap();
-            Self(path)
-        }
-    }
-
-    impl Drop for TempDir {
-        fn drop(&mut self) {
-            let _ = fs::remove_dir_all(&self.0);
-        }
-    }
 
     #[test]
     fn co_located_manifests_form_one_package() {
-        let directory = TempDir::new();
-        fs::write(directory.0.join("Cargo.toml"), "[package]\nname='x'\n").unwrap();
-        fs::write(directory.0.join("package.json"), "{}\n").unwrap();
-        fs::write(directory.0.join("main.rs"), "fn main() {}\n").unwrap();
-        let inventory = Inventory::discover(&directory.0).unwrap();
+        let directory = tempfile::tempdir().unwrap();
+        fs::write(directory.path().join("Cargo.toml"), "[package]\nname='x'\n").unwrap();
+        fs::write(directory.path().join("package.json"), "{}\n").unwrap();
+        fs::write(directory.path().join("main.rs"), "fn main() {}\n").unwrap();
+        let inventory = Inventory::discover(directory.path()).unwrap();
         assert_eq!(inventory.packages().len(), 1);
         assert_eq!(
             inventory.packages()[0].manifests(),
@@ -534,12 +513,12 @@ mod tests {
 
     #[test]
     fn nested_file_uses_nearest_package() {
-        let directory = TempDir::new();
-        fs::create_dir_all(directory.0.join("nested/src")).unwrap();
-        fs::write(directory.0.join("Cargo.toml"), "").unwrap();
-        fs::write(directory.0.join("nested/package.json"), "{}").unwrap();
-        fs::write(directory.0.join("nested/src/main.js"), "let x = 1;\n").unwrap();
-        let inventory = Inventory::discover(&directory.0).unwrap();
+        let directory = tempfile::tempdir().unwrap();
+        fs::create_dir_all(directory.path().join("nested/src")).unwrap();
+        fs::write(directory.path().join("Cargo.toml"), "").unwrap();
+        fs::write(directory.path().join("nested/package.json"), "{}").unwrap();
+        fs::write(directory.path().join("nested/src/main.js"), "let x = 1;\n").unwrap();
+        let inventory = Inventory::discover(directory.path()).unwrap();
         let file = inventory.source_files().next().unwrap();
         assert_eq!(file.package(), inventory.packages()[1].id());
         assert_eq!(file.path().as_path(), Path::new("nested/src/main.js"));
@@ -547,16 +526,20 @@ mod tests {
 
     #[test]
     fn gitignore_generated_and_symlink_entries_are_not_source() {
-        let directory = TempDir::new();
-        fs::create_dir_all(directory.0.join("target")).unwrap();
-        fs::write(directory.0.join(".gitignore"), "ignored/\n").unwrap();
-        fs::create_dir_all(directory.0.join("ignored")).unwrap();
-        fs::write(directory.0.join("ignored/no.rs"), "").unwrap();
-        fs::write(directory.0.join("target/no.rs"), "").unwrap();
-        fs::write(directory.0.join("ok.rs"), "").unwrap();
+        let directory = tempfile::tempdir().unwrap();
+        fs::create_dir_all(directory.path().join("target")).unwrap();
+        fs::write(directory.path().join(".gitignore"), "ignored/\n").unwrap();
+        fs::create_dir_all(directory.path().join("ignored")).unwrap();
+        fs::write(directory.path().join("ignored/no.rs"), "").unwrap();
+        fs::write(directory.path().join("target/no.rs"), "").unwrap();
+        fs::write(directory.path().join("ok.rs"), "").unwrap();
         #[cfg(unix)]
-        std::os::unix::fs::symlink(directory.0.join("ok.rs"), directory.0.join("link.rs")).unwrap();
-        let inventory = Inventory::discover(&directory.0).unwrap();
+        std::os::unix::fs::symlink(
+            directory.path().join("ok.rs"),
+            directory.path().join("link.rs"),
+        )
+        .unwrap();
+        let inventory = Inventory::discover(directory.path()).unwrap();
         assert_eq!(inventory.source_files().count(), 1);
         assert!(
             inventory
@@ -569,9 +552,9 @@ mod tests {
 
     #[test]
     fn no_manifest_uses_root_package() {
-        let directory = TempDir::new();
-        fs::write(directory.0.join("main.py"), "print(1)\n").unwrap();
-        let inventory = Inventory::discover(&directory.0).unwrap();
+        let directory = tempfile::tempdir().unwrap();
+        fs::write(directory.path().join("main.py"), "print(1)\n").unwrap();
+        let inventory = Inventory::discover(directory.path()).unwrap();
         assert_eq!(inventory.packages().len(), 1);
         assert_eq!(inventory.packages()[0].root().as_path(), Path::new(""));
     }
@@ -588,12 +571,12 @@ mod tests {
     fn unreadable_directory_stays_visible_as_a_diagnostic() {
         use std::os::unix::fs::PermissionsExt;
 
-        let directory = TempDir::new();
-        let private = directory.0.join("private");
+        let directory = tempfile::tempdir().unwrap();
+        let private = directory.path().join("private");
         fs::create_dir(&private).unwrap();
         fs::write(private.join("hidden.rs"), "fn hidden() {}\n").unwrap();
         fs::set_permissions(&private, fs::Permissions::from_mode(0o000)).unwrap();
-        let inventory = Inventory::discover(&directory.0).unwrap();
+        let inventory = Inventory::discover(directory.path()).unwrap();
         fs::set_permissions(&private, fs::Permissions::from_mode(0o700)).unwrap();
         assert!(inventory.diagnostics().iter().any(|diagnostic| matches!(
             diagnostic,

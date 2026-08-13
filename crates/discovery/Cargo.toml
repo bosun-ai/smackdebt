@@ -9,5 +9,8 @@ publish.workspace = true
 [dependencies]
 smackdebt-analysis = { path = "../analysis" }
 
+[dev-dependencies]
+tempfile.workspace = true
+
 [lints]
 workspace = true

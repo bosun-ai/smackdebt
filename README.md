@@ -148,6 +148,34 @@ A function takes its highest signal rating. Package, directory, and file views
 show counts of healthy, watch, and high functions. They do not average one bad
 function into a reassuring project score.
 
+Cognitive complexity starts at zero. A control-flow break adds one plus its
+nesting depth. Alternatives and labeled jumps add one. A run of `&&` or `and`
+adds one, and changing that run to `||` or `or` adds another. A separately
+rated closure or nested function does not increase its parent's value.
+Recursion is not inferred from syntax alone.
+
+Cyclomatic complexity starts at one and adds one for each independent decision.
+Logical lines count statements, not physical lines: `a(); b();` counts as two,
+while one statement spread over several lines counts as one. Blank lines,
+comments, wrappers, markup, and nested rated units do not count.
+
+These equivalent functions each have cognitive complexity 1, cyclomatic
+complexity 2, and two logical statements:
+
+```rust
+fn choose(ready: bool) -> i32 {
+    if ready { return 1; }
+    0
+}
+```
+
+```ruby
+def choose(ready)
+  return 1 if ready
+  return 0
+end
+```
+
 Recent activity comes from distinct non-merge commits that touched a file in
 the selected history window. Smackdebt uses activity to order code that already
 needs attention; activity does not change the code-health rating.
@@ -175,9 +203,7 @@ does not quietly count them as healthy.
 
 ## Languages
 
-The first source engine uses
-[`rust-code-analysis`](https://github.com/mozilla/rust-code-analysis) and
-supports:
+One tree-sitter source engine supports:
 
 - C and C++
 - Java
@@ -189,9 +215,10 @@ supports:
 - Vue single-file components, including script and template regions
 
 Kotlin files remain visible as unsupported coverage; they are not counted as
-healthy. Language dispatch is compiled into the binary. An owned engine can
-replace one upstream-backed language without changing Git analysis, health
-policy, aggregation, or output.
+healthy. Language dispatch is compiled into the binary. Each language translates
+its own syntax into the same cognitive, cyclomatic, and logical-statement rules.
+Exact fixtures check units, recovery, spans, nesting, and measurements before a
+language is listed here.
 
 ## JSON
 
@@ -203,13 +230,17 @@ smackdebt diff main --json
 ```
 
 JSON contains the same report as the terminal view. The top-level object starts
-with `schema_version: 1` and includes mode, root, selected scope, a flat path
+with `schema_version: 2` and includes mode, root, selected scope, a flat path
 table, flat scopes, files, findings, diagnostics, comparisons, and the health
-summary. Scope entries carry parent and child indexes, finding and comparison
+and activity tables. Root and selected scope are scope indexes. Scope entries
+carry parent and child indexes, finding and comparison
 links, coverage, health, and Worse/Better/Changed counts. Files and comparisons
-carry indexed path and file ownership where available.
+carry indexed path and file ownership where available. Paths and root health
+have one owner; referencing records do not repeat their text or counts.
 It retains every `watch` and `high` finding while healthy units are represented
-by aggregate counts.
+by aggregate counts. The checked schema is
+[`schemas/report-v2.schema.json`](schemas/report-v2.schema.json). Version 1 is
+not emitted.
 
 Finding debt does not fail the command. Exit codes describe whether Smackdebt
 could produce a report:
@@ -259,8 +290,6 @@ each implementation change under [`openspec/changes`](openspec/changes).
 
 ## Credits
 
-Smackdebt builds on Mozilla's
-[`rust-code-analysis`](https://github.com/mozilla/rust-code-analysis), released
-under the Mozilla Public License 2.0. It supplies the syntax-aware source
-metrics; Smackdebt supplies repository discovery, health policy, Git context,
+Smackdebt uses tree-sitter and its language grammars for syntax trees. Smackdebt
+owns the measurement rules, repository discovery, health policy, Git context,
 aggregation, comparison, and reports.
