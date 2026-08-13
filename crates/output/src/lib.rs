@@ -5,11 +5,13 @@
 use std::borrow::Cow;
 use std::cmp::Reverse;
 use std::io::{self, Write};
+use std::path::{Path, PathBuf};
 
 use serde::ser::{Serialize, SerializeMap, SerializeSeq, Serializer};
 use smackdebt_analysis::{
-    Comparison, ComparisonKind, Diagnostic, DiagnosticKind, FileRecord, Finding, HealthCounts,
-    Language, Measurements, Rating, Report, ReportMode, Scope, ScopeKind,
+    Comparison, ComparisonDirection, ComparisonKind, Diagnostic, DiagnosticKind, FileRecord,
+    Finding, HealthCounts, Language, Measurements, Rating, Report, ReportMode, Scope, ScopeKind,
+    Signal,
 };
 
 /// Terminal display choices. Color is intentionally absent until styling adds
@@ -18,11 +20,15 @@ use smackdebt_analysis::{
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub struct TerminalOptions {
     pub width: usize,
+    pub all: bool,
 }
 
 impl Default for TerminalOptions {
     fn default() -> Self {
-        Self { width: 100 }
+        Self {
+            width: 100,
+            all: false,
+        }
     }
 }
 
@@ -36,18 +42,17 @@ pub fn write_terminal(
         ReportMode::Codebase => "smackdebt",
         ReportMode::Diff => "smackdebt diff",
     };
-    let root = report.root().and_then(|id| report.scopes().get(id.index()));
-    writeln!(writer, "{mode}  {}", root.map_or(".", Scope::name))?;
+    let selected = report
+        .selected_scope()
+        .or_else(|| report.root())
+        .and_then(|id| report.scopes().get(id.index()));
+    writeln!(writer, "{mode}  {}", selected.map_or(".", Scope::name))?;
 
-    if let Some(root) = root {
-        let coverage = root.coverage();
+    if let Some(scope) = selected {
+        let coverage = scope.coverage();
         match report.mode() {
             ReportMode::Codebase => {
-                let packages = report
-                    .scopes()
-                    .iter()
-                    .filter(|scope| scope.kind() == ScopeKind::Package)
-                    .count();
+                let packages = selected.map_or(0, |scope| package_count(report, scope));
                 let analyzed_percent = if coverage.selected_files() == 0 {
                     100
                 } else {
@@ -59,7 +64,11 @@ pub fn write_terminal(
                     coverage.selected_files(),
                     coverage.source_lines(),
                 )?;
-                write_health(writer, root.health())?;
+                write_health(
+                    writer,
+                    scope.health(),
+                    coverage.unsupported_files() + coverage.failed_files(),
+                )?;
             }
             ReportMode::Diff => writeln!(
                 writer,
@@ -72,8 +81,8 @@ pub fn write_terminal(
     }
 
     match report.mode() {
-        ReportMode::Codebase => write_findings(writer, report, options.width)?,
-        ReportMode::Diff => write_comparisons(writer, report, options.width)?,
+        ReportMode::Codebase => write_codebase_view(writer, report, selected, options)?,
+        ReportMode::Diff => write_diff_view(writer, report, selected, options)?,
     }
 
     if !report.diagnostics().is_empty() {
@@ -84,111 +93,436 @@ pub fn write_terminal(
     }
 
     if report.mode() == ReportMode::Codebase
-        && let Some(path) = drill_path(report)
+        && let Some(selected) = selected
+        && let Some(path) = drill_path(report, selected)
     {
         writeln!(writer, "\nExplore")?;
-        writeln!(writer, "  smackdebt {path}")?;
+        writeln!(writer, "  smackdebt {}", path.display())?;
     }
     Ok(())
 }
 
-fn write_health(writer: &mut impl Write, health: HealthCounts) -> io::Result<()> {
-    writeln!(writer, "\nHealth")?;
-    writeln!(writer, "  high    {} units", health.high())?;
-    writeln!(writer, "  watch   {} units", health.watch())?;
-    writeln!(writer, "  healthy {} units", health.healthy())
+fn display_scope<'a>(
+    report: &'a Report,
+    mut scope: &'a Scope,
+    writer: &mut impl Write,
+) -> io::Result<&'a Scope> {
+    while scope.kind() != ScopeKind::File && scope.children().len() == 1 {
+        let child = &report.scopes()[scope.children()[0].index()];
+        if child.name() != "." {
+            writeln!(writer, "  ↓ {}", child.name())?;
+        }
+        scope = child;
+    }
+    Ok(scope)
 }
 
-fn write_findings(writer: &mut impl Write, report: &Report, width: usize) -> io::Result<()> {
-    if report.findings().is_empty() {
+fn write_codebase_view(
+    writer: &mut impl Write,
+    report: &Report,
+    selected: Option<&Scope>,
+    options: TerminalOptions,
+) -> io::Result<()> {
+    let Some(selected) = selected else {
+        return Ok(());
+    };
+    let scope = display_scope(report, selected, writer)?;
+    write_scope_distribution(writer, report, scope, options.all)?;
+    write_scope_findings(writer, report, scope, options.width, options.all)?;
+    Ok(())
+}
+
+fn write_diff_view(
+    writer: &mut impl Write,
+    report: &Report,
+    selected: Option<&Scope>,
+    options: TerminalOptions,
+) -> io::Result<()> {
+    let Some(selected) = selected else {
+        return Ok(());
+    };
+    let scope = display_scope(report, selected, writer)?;
+    write_diff_distribution(writer, report, scope, options.all)?;
+    write_scope_comparisons(writer, report, scope, options.width, options.all)?;
+    Ok(())
+}
+
+fn write_health(
+    writer: &mut impl Write,
+    health: HealthCounts,
+    excluded_files: u32,
+) -> io::Result<()> {
+    writeln!(writer, "\nQuality")?;
+    writeln!(
+        writer,
+        "  {} of {} rated units need attention ({})",
+        health.debt(),
+        health.total(),
+        DisplayPercent::new(health.debt(), health.total())
+    )?;
+    writeln!(
+        writer,
+        "  {} high · {} watch · {} healthy · {excluded_files} files excluded",
+        health.high(),
+        health.watch(),
+        health.healthy()
+    )
+}
+
+fn write_scope_distribution(
+    writer: &mut impl Write,
+    report: &Report,
+    scope: &Scope,
+    all: bool,
+) -> io::Result<()> {
+    if scope.children().is_empty() {
+        return Ok(());
+    }
+    let denominator = scope.health().debt();
+    let mut children = display_children(report, scope);
+    children.sort_by(|left, right| codebase_child_order(left, right));
+    let healthy_only = children
+        .iter()
+        .filter(|child| child.health().debt() == 0)
+        .count();
+    if !all {
+        children.retain(|child| child.health().debt() > 0);
+    }
+    if children.is_empty() {
+        writeln!(writer, "\nNo child areas need attention.")?;
+        if healthy_only > 0 {
+            writeln!(writer, "  {healthy_only} quiet areas hidden (use --all)")?;
+        }
+        return Ok(());
+    }
+    let limit = if all {
+        children.len()
+    } else {
+        children.len().min(10)
+    };
+    writeln!(writer, "\nDebt by area")?;
+    writeln!(writer, "  area  high  watch  share  rate")?;
+    for child in children.iter().take(limit) {
+        writeln!(
+            writer,
+            "  {}  {}  {}  {}  {}",
+            child.name(),
+            child.health().high(),
+            child.health().watch(),
+            DisplayPercent::new(child.health().debt(), denominator),
+            DisplayPercent::new(child.health().debt(), child.health().total())
+        )?;
+    }
+    if !all && children.len() > limit && healthy_only > 0 {
+        writeln!(
+            writer,
+            "  … {} more debt-bearing · {healthy_only} quiet areas hidden (use --all)",
+            children.len() - limit
+        )?;
+    } else if !all && children.len() > limit {
+        writeln!(
+            writer,
+            "  … {} more debt-bearing areas hidden (use --all)",
+            children.len() - limit
+        )?;
+    } else if !all && healthy_only > 0 {
+        writeln!(writer, "  … {healthy_only} quiet areas hidden (use --all)")?;
+    }
+    Ok(())
+}
+
+fn codebase_child_order(left: &Scope, right: &Scope) -> std::cmp::Ordering {
+    right
+        .health()
+        .high()
+        .cmp(&left.health().high())
+        .then_with(|| right.health().watch().cmp(&left.health().watch()))
+        .then_with(|| left.name().cmp(right.name()))
+}
+
+fn write_diff_distribution(
+    writer: &mut impl Write,
+    report: &Report,
+    scope: &Scope,
+    all: bool,
+) -> io::Result<()> {
+    if scope.children().is_empty() {
+        return Ok(());
+    }
+    let denominator = scope.diff().total();
+    let mut children = display_children(report, scope);
+    children.sort_by(|left, right| {
+        right
+            .diff()
+            .worse()
+            .cmp(&left.diff().worse())
+            .then_with(|| right.diff().better().cmp(&left.diff().better()))
+            .then_with(|| right.diff().changed().cmp(&left.diff().changed()))
+            .then_with(|| left.name().cmp(right.name()))
+    });
+    let limit = if all {
+        children.len()
+    } else {
+        children.len().min(10)
+    };
+    writeln!(writer, "\nChange by area")?;
+    writeln!(writer, "  area  worse  better  changed  share")?;
+    for child in children.iter().take(limit) {
+        let diff = child.diff();
+        writeln!(
+            writer,
+            "  {}  {}  {}  {}  {}%",
+            child.name(),
+            diff.worse(),
+            diff.better(),
+            diff.changed(),
+            percent(diff.total(), denominator)
+        )?;
+    }
+    if !all && children.len() > limit {
+        writeln!(
+            writer,
+            "  … {} areas omitted (use --all)",
+            children.len() - limit
+        )?;
+    }
+    Ok(())
+}
+
+fn percent(value: u32, denominator: u32) -> u32 {
+    value
+        .saturating_mul(100)
+        .saturating_add(denominator / 2)
+        .checked_div(denominator)
+        .unwrap_or(0)
+}
+
+struct DisplayPercent {
+    value: u32,
+    denominator: u32,
+}
+
+impl DisplayPercent {
+    const fn new(value: u32, denominator: u32) -> Self {
+        Self { value, denominator }
+    }
+}
+
+impl std::fmt::Display for DisplayPercent {
+    fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        let rounded = percent(self.value, self.denominator);
+        if self.value > 0 && rounded == 0 {
+            formatter.write_str("<1%")
+        } else {
+            write!(formatter, "{rounded}%")
+        }
+    }
+}
+
+fn display_children<'a>(report: &'a Report, scope: &'a Scope) -> Vec<&'a Scope> {
+    let mut children = Vec::new();
+    for id in scope.children() {
+        let child = &report.scopes()[id.index()];
+        if scope.kind() == ScopeKind::Repository
+            && child.kind() == ScopeKind::Package
+            && child.name() == "."
+        {
+            children.extend(
+                child
+                    .children()
+                    .iter()
+                    .map(|id| &report.scopes()[id.index()]),
+            );
+        } else {
+            children.push(child);
+        }
+    }
+    children
+}
+
+fn package_count(report: &Report, scope: &Scope) -> usize {
+    let own = usize::from(scope.kind() == ScopeKind::Package);
+    let descendants = own
+        + scope
+            .children()
+            .iter()
+            .map(|id| package_count(report, &report.scopes()[id.index()]))
+            .sum::<usize>();
+    if descendants == 0 && scope.kind() != ScopeKind::Repository {
+        1
+    } else {
+        descendants
+    }
+}
+
+fn write_scope_findings(
+    writer: &mut impl Write,
+    report: &Report,
+    scope: &Scope,
+    _width: usize,
+    all: bool,
+) -> io::Result<()> {
+    if scope.findings().is_empty() {
         writeln!(writer, "\nNo watch or high findings.")?;
         return Ok(());
     }
-    if let Some(threshold) = activity_threshold(report) {
-        write_finding_group(writer, report, width, "Hotspots", Some((true, threshold)))?;
-        write_finding_group(
-            writer,
-            report,
-            width,
-            "Other debt findings",
-            Some((false, threshold)),
-        )?;
+    let mut findings: Vec<&Finding> = scope
+        .findings()
+        .iter()
+        .map(|id| &report.findings()[id.index()])
+        .collect();
+    findings.sort_by(|left, right| finding_order(report, left, right));
+    let limit = if all || scope.kind() == ScopeKind::File {
+        findings.len()
     } else {
-        write_finding_group(writer, report, width, "Debt findings", None)?;
-    }
-    Ok(())
-}
-
-fn write_finding_group(
-    writer: &mut impl Write,
-    report: &Report,
-    width: usize,
-    heading: &str,
-    hotspot: Option<(bool, u32)>,
-) -> io::Result<()> {
-    let findings = top_findings(report, hotspot);
-    if findings[0].is_none() {
-        return Ok(());
-    }
-    writeln!(writer, "\n{heading}")?;
-    for finding in findings.into_iter().flatten() {
+        findings.len().min(3)
+    };
+    writeln!(writer, "\nDebt findings")?;
+    for finding in findings.into_iter().take(limit) {
         let file = &report.files()[finding.file().index()];
-        let path = truncate(file.path(), width.saturating_sub(8));
-        writeln!(writer, "  {path}")?;
-        let measurements = finding.measurements();
+        if let Some(container) = finding.identity().container() {
+            writeln!(
+                writer,
+                "  {}:{}  {container}::{}",
+                file.path(),
+                finding.span().start_line(),
+                finding.identity().name()
+            )?;
+        } else {
+            writeln!(
+                writer,
+                "  {}:{}  {}",
+                file.path(),
+                finding.span().start_line(),
+                finding.identity().name()
+            )?;
+        }
+        write_attention_reasons(writer, finding, file)?;
+    }
+    if !all && limit < scope.findings().len() {
         writeln!(
             writer,
-            "    {}  {} · cognitive {} · cyclomatic {} · {} lines · {} touches",
-            finding.identity().name(),
-            rating_name(finding.assessment().rating()),
-            measurements.cognitive_complexity(),
-            measurements.cyclomatic_complexity(),
-            measurements.logical_lines(),
-            file.activity().map_or(0, |activity| activity.touches())
+            "  … {} findings omitted (use --all)",
+            scope.findings().len() - limit
         )?;
     }
     Ok(())
 }
 
-fn top_findings(report: &Report, hotspot: Option<(bool, u32)>) -> [Option<&Finding>; 10] {
-    let mut selected = [None; 10];
-    for finding in report.findings() {
-        if let Some((expected, threshold)) = hotspot
-            && is_hotspot(report, finding, threshold) != expected
-        {
+fn write_attention_reasons(
+    writer: &mut impl Write,
+    finding: &Finding,
+    file: &FileRecord,
+) -> io::Result<()> {
+    write!(
+        writer,
+        "    {} because ",
+        rating_name(finding.assessment().rating())
+    )?;
+    let mut first = true;
+    for signal in finding.assessment().signals() {
+        if signal.rating() == Rating::Healthy {
             continue;
         }
-        let Some(position) = selected.iter().position(|entry| {
-            entry.is_none_or(|current| finding_order(report, finding, current).is_lt())
-        }) else {
-            continue;
-        };
-        for index in (position + 1..selected.len()).rev() {
-            selected[index] = selected[index - 1];
+        if !first {
+            write!(writer, " · ")?;
         }
-        selected[position] = Some(finding);
+        write!(
+            writer,
+            "{} {}",
+            signal_name(signal.signal()),
+            signal.value()
+        )?;
+        first = false;
     }
-    selected
+    writeln!(
+        writer,
+        " · {} touches",
+        file.activity().map_or(0, |activity| activity.touches())
+    )
 }
 
-fn activity_threshold(report: &Report) -> Option<u32> {
-    let mut touches: Vec<u32> = report
-        .files()
+fn signal_name(signal: Signal) -> &'static str {
+    match signal {
+        Signal::CognitiveComplexity => "cognitive",
+        Signal::CyclomaticComplexity => "cyclomatic",
+        Signal::LogicalLines => "lines",
+    }
+}
+
+fn write_scope_comparisons(
+    writer: &mut impl Write,
+    report: &Report,
+    scope: &Scope,
+    width: usize,
+    all: bool,
+) -> io::Result<()> {
+    if scope.comparisons().is_empty() {
+        writeln!(writer, "\nNo changed units.")?;
+        return Ok(());
+    }
+    let mut comparisons: Vec<&Comparison> = scope
+        .comparisons()
         .iter()
-        .filter_map(|file| file.activity().map(|value| value.touches()))
-        .filter(|touches| *touches >= 2)
+        .map(|id| &report.comparisons()[id.index()])
         .collect();
-    if touches.is_empty() {
-        return None;
+    comparisons.sort_by(|left, right| {
+        direction_rank(left.direction())
+            .cmp(&direction_rank(right.direction()))
+            .then_with(|| left.identity().name().cmp(right.identity().name()))
+    });
+    let limit = if all || scope.kind() == ScopeKind::File {
+        comparisons.len()
+    } else {
+        comparisons.len().min(3)
+    };
+    writeln!(writer, "\nHealth change")?;
+    for comparison in comparisons.into_iter().take(limit) {
+        let name = truncate(comparison.identity().name(), width.saturating_sub(24));
+        writeln!(
+            writer,
+            "  {name}  {}",
+            direction_name(comparison.direction())
+        )?;
+        if let Some(file_id) = comparison.file() {
+            writeln!(writer, "    {}", report.files()[file_id.index()].path())?;
+        }
+        if let (Some(before), Some(after)) = (comparison.before(), comparison.after()) {
+            writeln!(
+                writer,
+                "    cognitive {} → {} · cyclomatic {} → {} · lines {} → {}",
+                before.cognitive_complexity(),
+                after.cognitive_complexity(),
+                before.cyclomatic_complexity(),
+                after.cyclomatic_complexity(),
+                before.logical_lines(),
+                after.logical_lines()
+            )?;
+        }
     }
-    touches.sort_unstable();
-    Some(touches[(touches.len() - 1) * 3 / 4])
+    if !all && limit < scope.comparisons().len() {
+        writeln!(
+            writer,
+            "  … {} comparisons omitted (use --all)",
+            scope.comparisons().len() - limit
+        )?;
+    }
+    Ok(())
 }
 
-fn is_hotspot(report: &Report, finding: &Finding, threshold: u32) -> bool {
-    report.files()[finding.file().index()]
-        .activity()
-        .is_some_and(|activity| activity.touches() >= 2 && activity.touches() >= threshold)
+fn direction_rank(direction: ComparisonDirection) -> u8 {
+    match direction {
+        ComparisonDirection::Worse => 0,
+        ComparisonDirection::Better => 1,
+        ComparisonDirection::Changed => 2,
+    }
+}
+fn direction_name(direction: ComparisonDirection) -> &'static str {
+    match direction {
+        ComparisonDirection::Worse => "worse",
+        ComparisonDirection::Better => "better",
+        ComparisonDirection::Changed => "changed",
+    }
 }
 
 fn finding_order(report: &Report, left: &Finding, right: &Finding) -> std::cmp::Ordering {
@@ -222,43 +556,28 @@ fn finding_order(report: &Report, left: &Finding, right: &Finding) -> std::cmp::
         ))
 }
 
-fn write_comparisons(writer: &mut impl Write, report: &Report, width: usize) -> io::Result<()> {
-    let changed = report
-        .comparisons()
-        .iter()
-        .filter(|comparison| comparison.kind() != ComparisonKind::Unchanged)
-        .count();
-    writeln!(writer, "\nHealth change")?;
-    writeln!(writer, "  {changed} changed units")?;
-    for comparison in report
-        .comparisons()
-        .iter()
-        .filter(|value| value.kind() != ComparisonKind::Unchanged)
-        .take(10)
-    {
-        let name = truncate(comparison.identity().name(), width.saturating_sub(24));
-        writeln!(writer, "  {name}  {}", comparison_name(comparison.kind()))?;
-        if let (Some(before), Some(after)) = (comparison.before(), comparison.after()) {
-            writeln!(
-                writer,
-                "    cognitive {} → {} · cyclomatic {} → {} · lines {} → {}",
-                before.cognitive_complexity(),
-                after.cognitive_complexity(),
-                before.cyclomatic_complexity(),
-                after.cyclomatic_complexity(),
-                before.logical_lines(),
-                after.logical_lines()
-            )?;
-        }
+fn drill_path(report: &Report, selected: &Scope) -> Option<PathBuf> {
+    let scope = skipped_scope(report, selected);
+    let mut children = display_children(report, scope);
+    children.retain(|child| child.health().debt() > 0);
+    children.sort_by(|left, right| codebase_child_order(left, right));
+    let child = children.first()?;
+    let root = report.root().map(|id| &report.scopes()[id.index()])?;
+    let invocation_path = Path::new(root.name());
+    if invocation_path == Path::new(".") {
+        return Some(PathBuf::from(child.name()));
     }
-    Ok(())
+    let suffix = Path::new(child.name())
+        .strip_prefix(selected.name())
+        .unwrap_or_else(|_| Path::new(child.name()));
+    Some(invocation_path.join(suffix))
 }
 
-fn drill_path(report: &Report) -> Option<&str> {
-    top_findings(report, None)[0]
-        .and_then(|finding| report.files().get(finding.file().index()))
-        .map(FileRecord::path)
-        .or_else(|| report.files().first().map(FileRecord::path))
+fn skipped_scope<'a>(report: &'a Report, mut scope: &'a Scope) -> &'a Scope {
+    while scope.kind() != ScopeKind::File && scope.children().len() == 1 {
+        scope = &report.scopes()[scope.children()[0].index()];
+    }
+    scope
 }
 
 fn truncate(value: &str, width: usize) -> Cow<'_, str> {
@@ -295,7 +614,7 @@ impl Serialize for ReportView<'_> {
         S: Serializer,
     {
         let report = self.0;
-        let mut map = serializer.serialize_map(Some(9))?;
+        let mut map = serializer.serialize_map(Some(11))?;
         map.serialize_entry("schema_version", &report.schema_version())?;
         map.serialize_entry("mode", mode_name(report.mode()))?;
         map.serialize_entry(
@@ -304,6 +623,11 @@ impl Serialize for ReportView<'_> {
                 .root()
                 .map(|root| report.scopes()[root.index()].name()),
         )?;
+        map.serialize_entry(
+            "selected_scope",
+            &report.selected_scope().map(|id| id.get()),
+        )?;
+        map.serialize_entry("paths", &report.paths())?;
         map.serialize_entry("scopes", &Scopes(report.scopes()))?;
         map.serialize_entry("files", &Files(report.files()))?;
         map.serialize_entry("findings", &Findings(report.findings()))?;
@@ -335,14 +659,61 @@ impl Serialize for ScopeView<'_> {
         S: Serializer,
     {
         let scope = self.0;
-        let mut map = serializer.serialize_map(Some(7))?;
+        let mut map = serializer.serialize_map(Some(11))?;
         map.serialize_entry("id", &scope.id().get())?;
         map.serialize_entry("kind", scope_kind(scope.kind()))?;
         map.serialize_entry("name", scope.name())?;
         map.serialize_entry("parent", &scope.parent().map(|id| id.get()))?;
         map.serialize_entry("children", &ChildIds(scope.children()))?;
+        map.serialize_entry("path", &scope.path().map(|id| id.get()))?;
+        map.serialize_entry("findings", &FindingIds(scope.findings()))?;
+        map.serialize_entry("comparisons", &ComparisonIds(scope.comparisons()))?;
         map.serialize_entry("coverage", &CoverageView(scope.coverage()))?;
         map.serialize_entry("health", &HealthView(scope.health()))?;
+        map.serialize_entry("diff", &DiffView(scope.diff()))?;
+        map.end()
+    }
+}
+
+struct FindingIds<'a>(&'a [smackdebt_analysis::FindingId]);
+impl Serialize for FindingIds<'_> {
+    fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
+    where
+        S: Serializer,
+    {
+        let mut sequence = serializer.serialize_seq(Some(self.0.len()))?;
+        for id in self.0 {
+            sequence.serialize_element(&id.get())?;
+        }
+        sequence.end()
+    }
+}
+
+struct ComparisonIds<'a>(&'a [smackdebt_analysis::ComparisonId]);
+impl Serialize for ComparisonIds<'_> {
+    fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
+    where
+        S: Serializer,
+    {
+        let mut sequence = serializer.serialize_seq(Some(self.0.len()))?;
+        for id in self.0 {
+            sequence.serialize_element(&id.get())?;
+        }
+        sequence.end()
+    }
+}
+
+struct DiffView(smackdebt_analysis::DiffCounts);
+impl Serialize for DiffView {
+    fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
+    where
+        S: Serializer,
+    {
+        let mut map = serializer.serialize_map(Some(4))?;
+        map.serialize_entry("worse", &self.0.worse())?;
+        map.serialize_entry("better", &self.0.better())?;
+        map.serialize_entry("changed", &self.0.changed())?;
+        map.serialize_entry("total", &self.0.total())?;
         map.end()
     }
 }
@@ -383,7 +754,7 @@ impl Serialize for FileView<'_> {
         S: Serializer,
     {
         let file = self.0;
-        let mut map = serializer.serialize_map(Some(7))?;
+        let mut map = serializer.serialize_map(Some(8))?;
         map.serialize_entry("id", &file.id().get())?;
         map.serialize_entry("scope", &file.scope().get())?;
         map.serialize_entry("path", file.path())?;
@@ -391,6 +762,7 @@ impl Serialize for FileView<'_> {
         map.serialize_entry("coverage", &CoverageView(file.coverage()))?;
         map.serialize_entry("health", &HealthView(file.health()))?;
         map.serialize_entry("touches", &file.activity().map(|value| value.touches()))?;
+        map.serialize_entry("path_id", &file.path_id().map(|id| id.get()))?;
         map.end()
     }
 }
@@ -481,11 +853,13 @@ impl Serialize for ComparisonView<'_> {
         S: Serializer,
     {
         let comparison = self.0;
-        let mut map = serializer.serialize_map(Some(7))?;
+        let mut map = serializer.serialize_map(Some(9))?;
         map.serialize_entry("id", &comparison.id().get())?;
+        map.serialize_entry("file", &comparison.file().map(|id| id.get()))?;
         map.serialize_entry("name", comparison.identity().name())?;
         map.serialize_entry("container", &comparison.identity().container())?;
         map.serialize_entry("kind", comparison_name(comparison.kind()))?;
+        map.serialize_entry("direction", direction_name(comparison.direction()))?;
         map.serialize_entry("before", &comparison.before().map(MeasurementsView))?;
         map.serialize_entry("after", &comparison.after().map(MeasurementsView))?;
         map.serialize_entry(
@@ -638,7 +1012,7 @@ mod tests {
     use super::*;
     use smackdebt_analysis::{
         Coverage, FileActivity, FileId, FileRecord, FindingId, HealthPolicy, Report, ReportMode,
-        Scope, ScopeId, SourceSpan, UnitId, UnitIdentity,
+        Scope, ScopeId, SourceSpan, UnitId, UnitIdentity, aggregate_scopes,
     };
 
     fn report_with_findings(activity: bool) -> Report {
@@ -673,6 +1047,7 @@ mod tests {
                 measurements,
                 policy.assess(measurements),
             ));
+            report.scopes_mut()[0].add_finding(FindingId::from_index(index));
         }
         report
     }
@@ -705,10 +1080,9 @@ mod tests {
         let mut terminal = Vec::new();
         write_terminal(&mut terminal, &report, TerminalOptions::default()).unwrap();
         let terminal = String::from_utf8(terminal).unwrap();
-        assert!(terminal.contains("Hotspots"));
-        let hotspot_section = terminal.split("Other debt findings").next().unwrap();
-        assert!(!hotspot_section.contains("file-0.rs"));
-        assert!(terminal.find("file-10.rs").unwrap() < terminal.find("file-1.rs").unwrap());
+        assert!(terminal.contains("Debt findings"));
+        assert!(terminal.contains("file-10.rs"));
+        assert!(!terminal.contains("file-1.rs"));
     }
 
     #[test]
@@ -718,7 +1092,6 @@ mod tests {
         write_terminal(&mut terminal, &report, TerminalOptions::default()).unwrap();
         let terminal = String::from_utf8(terminal).unwrap();
         assert!(terminal.contains("Debt findings"));
-        assert!(!terminal.contains("Hotspots"));
     }
 
     #[test]
@@ -749,5 +1122,56 @@ mod tests {
         write_json(&mut json, &report).unwrap();
         let value: serde_json::Value = serde_json::from_slice(&json).unwrap();
         assert_eq!(value["scopes"][0]["children"], serde_json::json!([1, 2]));
+    }
+
+    #[test]
+    fn small_nonzero_percentages_are_not_shown_as_zero() {
+        assert_eq!(DisplayPercent::new(1, 201).to_string(), "<1%");
+        assert_eq!(DisplayPercent::new(0, 200).to_string(), "0%");
+        assert_eq!(DisplayPercent::new(3, 100).to_string(), "3%");
+    }
+
+    #[test]
+    fn drill_path_preserves_an_external_invocation_path() {
+        let mut report = Report::new(ReportMode::Codebase);
+        let root = ScopeId::from_index(0);
+        let package = ScopeId::from_index(1);
+        let child = ScopeId::from_index(2);
+        let quiet = ScopeId::from_index(3);
+        let mut root_scope = Scope::new(root, ScopeKind::Repository, "/work/project/bow", None);
+        root_scope.add_child(package);
+        report.add_scope(root_scope);
+        let mut package_scope = Scope::new(package, ScopeKind::Package, "bow", Some(root));
+        package_scope.add_child(child);
+        package_scope.add_child(quiet);
+        report.add_scope(package_scope);
+        report.add_scope(Scope::new(
+            child,
+            ScopeKind::Directory,
+            "bow/src",
+            Some(package),
+        ));
+        report.add_scope(Scope::new(
+            quiet,
+            ScopeKind::Directory,
+            "bow/tests",
+            Some(package),
+        ));
+        report.set_root(root);
+        let file_id = FileId::from_index(0);
+        report.add_file(FileRecord::new(
+            file_id,
+            child,
+            "bow/src/lib.rs",
+            Coverage::new(1, 1, 0, 0, 10, 0),
+            HealthCounts::new(0, 1, 0),
+        ));
+        report.scopes_mut()[child.index()].add_file(file_id);
+        let files = report.files().to_vec();
+        aggregate_scopes(report.scopes_mut(), &files, root);
+
+        let path = drill_path(&report, &report.scopes()[package.index()]);
+
+        assert_eq!(path, Some(PathBuf::from("/work/project/bow/src")));
     }
 }

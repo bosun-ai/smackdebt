@@ -6,11 +6,17 @@ pub const fn assess(self, measurements: Measurements) -> HealthAssessment
 pub const fn assessment(&self) -> HealthAssessment
 pub const fn before(&self) -> Option<Measurements>
 pub const fn before_rating(&self) -> Option<Rating>
+pub const fn better(self) -> u32
+pub const fn changed(self) -> u32
 pub const fn cognitive(self) -> Thresholds
 pub const fn cognitive_complexity(self) -> u32
+pub const fn comparison_direction(comparison: &Comparison) -> ComparisonDirection
 pub const fn coverage(&self) -> Coverage
 pub const fn cyclomatic(self) -> Thresholds
 pub const fn cyclomatic_complexity(self) -> u32
+pub const fn debt(self) -> u32
+pub const fn diff(&self) -> DiffCounts
+pub const fn direction(&self) -> ComparisonDirection
 pub const fn end_line(self) -> u32
 pub const fn excluded_lines(&self) -> u32
 pub const fn excluded_lines(self) -> u32
@@ -47,14 +53,18 @@ pub const fn new(healthy: u32, watch: u32, high: u32) -> Self
 pub const fn new(start_line: u32, end_line: u32) -> Self
 pub const fn new(touches: u32) -> Self
 pub const fn new(watch: u32, high: u32) -> Self
+pub const fn new(worse: u32, better: u32, changed: u32) -> Self
 pub const fn parent(&self) -> Option<LocalUnitId>
 pub const fn parent(&self) -> Option<ScopeId>
 pub const fn parse_status(&self) -> &ParseStatus
+pub const fn path(&self) -> Option<PathId>
+pub const fn path_id(&self) -> Option<PathId>
 pub const fn rating(self) -> Rating
 pub const fn root(&self) -> Option<ScopeId>
 pub const fn schema_version(&self) -> u32
 pub const fn scope(&self) -> ScopeId
 pub const fn selected_files(self) -> u32
+pub const fn selected_scope(&self) -> Option<ScopeId>
 pub const fn signal(self) -> Signal
 pub const fn signal(self, signal: Signal) -> SignalAssessment
 pub const fn signals(self) -> [SignalAssessment; 3]
@@ -68,6 +78,8 @@ pub const fn unit(&self) -> UnitId
 pub const fn unsupported_files(self) -> u32
 pub const fn value(self) -> u32
 pub const fn watch(self) -> u32
+pub const fn worse(self) -> u32
+pub enum ComparisonDirection
 pub enum ComparisonKind
 pub enum DiagnosticKind
 pub enum Language
@@ -79,18 +91,22 @@ pub enum Signal
 pub enum UnitKind
 pub fn add_child(&mut self, child: ScopeId)
 pub fn add_comparison(&mut self, comparison: Comparison) -> ComparisonId
+pub fn add_comparison(&mut self, comparison: ComparisonId)
 pub fn add_counts(&mut self, other: Self)
 pub fn add_diagnostic(&mut self, diagnostic: Diagnostic) -> DiagnosticId
+pub fn add_direction(&mut self, direction: ComparisonDirection)
 pub fn add_file(&mut self, file: FileId)
 pub fn add_file(&mut self, file: FileRecord) -> FileId
 pub fn add_finding(&mut self, finding: Finding) -> FindingId
 pub fn add_finding(&mut self, finding: FindingId)
 pub fn add_rating(&mut self, rating: Rating)
 pub fn add_scope(&mut self, scope: Scope) -> ScopeId
+pub fn aggregate_comparisons(scopes: &mut [Scope], comparisons: &[Comparison], root: ScopeId)
 pub fn aggregate_scopes(scopes: &mut [Scope], files: &[FileRecord], root: ScopeId)
 pub fn children(&self) -> &[ScopeId]
 pub fn combine(self, other: Self) -> Self
 pub fn compare_units( before: &[UnitFact], after: &[UnitFact], policy: HealthPolicy, ) -> Vec<Comparison>
+pub fn comparisons(&self) -> &[ComparisonId]
 pub fn comparisons(&self) -> &[Comparison]
 pub fn container(&self) -> Option<&str>
 pub fn diagnostics(&self) -> &[Diagnostic]
@@ -112,18 +128,23 @@ pub fn new( local_id: LocalUnitId, identity: UnitIdentity, span: SourceSpan, mea
 pub fn new(mode: ReportMode) -> Self
 pub fn new(name: impl Into<String>, kind: UnitKind) -> Self
 pub fn path(&self) -> &str
+pub fn paths(&self) -> &[String]
 pub fn reserve_findings(&mut self, additional: usize)
 pub fn scopes(&self) -> &[Scope]
 pub fn scopes_mut(&mut self) -> &mut [Scope]
+pub fn set_path(&mut self, path: PathId)
 pub fn set_root(&mut self, root: ScopeId)
+pub fn set_selected_scope(&mut self, scope: ScopeId)
 pub fn units(&self) -> &[UnitFact]
 pub fn with_activity(mut self, activity: FileActivity) -> Self
 pub fn with_capacity( mode: ReportMode, scopes: usize, files: usize, findings: usize, diagnostics: usize, comparisons: usize, ) -> Self
+pub fn with_file(mut self, file: FileId) -> Self
 pub fn with_language(mut self, language: Language) -> Self
 pub struct $name(u32)
 pub struct Comparison
 pub struct Coverage
 pub struct Diagnostic
+pub struct DiffCounts
 pub struct FileActivity
 pub struct FileAnalysis
 pub struct FileRecord

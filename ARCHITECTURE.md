@@ -55,14 +55,20 @@ The health policy stores the three signals in fixed-size values. The highest
 signal sets the result: `healthy`, `watch`, or `high`. Rating a unit does not
 allocate.
 
-The report uses flat arrays for scopes, findings, diagnostics, activity, and
-comparisons. Indexes connect related values. A finding is owned once even when
-several parent summaries include its rating. Full scans retain every `watch`
-and `high` finding and reduce healthy units to counts.
+The report uses flat arrays for paths, scopes, findings, diagnostics, activity,
+and comparisons. Typed indexes connect related values. A path is interned once;
+scopes and files refer to that path, and a comparison refers to its owning
+file. A finding is owned once even when several parent summaries include its
+rating. Full scans retain every `watch` and `high` finding and reduce healthy
+units to counts.
 
 The scope order is repository, package, directory, file, container, and unit.
-Aggregation reserves its storage and walks child scopes once in post-order.
-Parent scopes add counts; they never average debt into a project score.
+Codebase and diff reports use the same repository-relative hierarchy. Each
+report records an initial selected scope separately from its facts, so a
+renderer can show the repository, a package, or a directory from one report.
+Aggregation walks child scopes once in post-order and links retained findings
+and comparisons through indexes. Parent scopes add counts; they never average
+debt into a project score.
 
 ## Package discovery
 
@@ -75,6 +81,13 @@ Cargo, npm, Python, Maven, Gradle, CMake, Bundler, and gemspec manifests in the
 same directory are ecosystem evidence for that single package. Each source file
 belongs to its nearest package ancestor. A repository with no recognized
 manifest gets `.` as its package.
+
+Discovery owns the package assignment for every codebase file, including the
+fallback used when a file has no manifest-root ancestor. Project hierarchy
+construction consumes that package identity directly. It does not repeat
+nearest-package policy from path prefixes. Diff reports derive package roots
+from current and changed manifests because no discovery inventory exists for
+the base tree.
 
 Unreadable paths, links, unsupported source, oversized files, and parse errors
 remain visible as coverage diagnostics. They are never counted as healthy.
@@ -150,13 +163,20 @@ file-level comparison diagnostic instead of a guessed match.
 
 ## Output and failure behavior
 
-Terminal output shows a short summary, stable hotspot ranking, and one useful
-drill command. It adapts to display width. `NO_COLOR` and redirected output
-disable ANSI styling.
+Terminal output shows a short summary, a progressive debt or change
+distribution, concise detail, and one useful drill command. It passes through
+single-child structural scopes with visible breadcrumbs, limits area rows to
+ten debt-bearing areas and detail to three by default, and summarizes
+healthy-only areas as quiet. Codebase rows show both debt share within the
+selection and local attention rate. Finding detail names only signals that
+reached Watch or High. Terminal-only `--all` restores every area and retained
+detail. `NO_COLOR` and redirected output disable ANSI styling.
 
 JSON starts with `schema_version: 1` and retains all `watch` and `high`
 findings, aggregate healthy counts, coverage, activity, diagnostics, and diff
-facts when present. Additive fields may extend version 1. Removing a field,
+facts when present. It also exposes the selected scope, indexed paths, scope
+finding/comparison links, three-way diff counts, comparison ownership, and
+derived direction. Additive fields may extend version 1. Removing a field,
 changing its meaning, or changing its type requires a new schema version.
 
 Exit codes describe report production, not code health:

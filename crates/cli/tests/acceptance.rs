@@ -11,8 +11,8 @@ fn serial_and_parallel_codebase_output_match() {
     let parallel = run(["--jobs", "4", project.path().to_str().unwrap()]);
     assert_eq!(serial, parallel);
     let text = String::from_utf8(serial).unwrap();
-    assert!(text.contains("Health"));
-    assert!(text.contains("Explore"));
+    assert!(text.contains("Quality"));
+    assert!(text.contains("No child areas need attention"));
 }
 
 #[test]

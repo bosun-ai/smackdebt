@@ -34,6 +34,7 @@ index_type!(UnitId);
 index_type!(FindingId);
 index_type!(DiagnosticId);
 index_type!(ComparisonId);
+index_type!(PathId);
 
 /// The progressive levels at which a report can be explored.
 #[derive(Clone, Copy, Debug, Eq, Hash, Ord, PartialEq, PartialOrd)]
@@ -488,6 +489,10 @@ impl HealthCounts {
         self.healthy + self.watch + self.high
     }
 
+    pub const fn debt(self) -> u32 {
+        self.watch + self.high
+    }
+
     pub fn add_rating(&mut self, rating: Rating) {
         match rating {
             Rating::Healthy => self.healthy += 1,
@@ -589,6 +594,7 @@ pub struct FileRecord {
     coverage: Coverage,
     health: HealthCounts,
     activity: Option<FileActivity>,
+    path_id: Option<PathId>,
 }
 
 impl FileRecord {
@@ -607,6 +613,7 @@ impl FileRecord {
             coverage,
             health,
             activity: None,
+            path_id: None,
         }
     }
 
@@ -641,6 +648,12 @@ impl FileRecord {
     pub const fn activity(&self) -> Option<FileActivity> {
         self.activity
     }
+    pub const fn path_id(&self) -> Option<PathId> {
+        self.path_id
+    }
+    fn set_path_id(&mut self, path: PathId) {
+        self.path_id = Some(path);
+    }
 }
 
 /// One flat scope summary and its child links.
@@ -653,8 +666,11 @@ pub struct Scope {
     children: Vec<ScopeId>,
     files: Vec<FileId>,
     findings: Vec<FindingId>,
+    comparisons: Vec<ComparisonId>,
     coverage: Coverage,
     health: HealthCounts,
+    diff: DiffCounts,
+    path: Option<PathId>,
 }
 
 impl Scope {
@@ -672,8 +688,11 @@ impl Scope {
             children: Vec::new(),
             files: Vec::new(),
             findings: Vec::new(),
+            comparisons: Vec::new(),
             coverage: Coverage::default(),
             health: HealthCounts::default(),
+            diff: DiffCounts::default(),
+            path: None,
         }
     }
 
@@ -698,6 +717,15 @@ impl Scope {
     pub fn findings(&self) -> &[FindingId] {
         &self.findings
     }
+    pub fn comparisons(&self) -> &[ComparisonId] {
+        &self.comparisons
+    }
+    pub const fn diff(&self) -> DiffCounts {
+        self.diff
+    }
+    pub const fn path(&self) -> Option<PathId> {
+        self.path
+    }
     pub const fn coverage(&self) -> Coverage {
         self.coverage
     }
@@ -720,9 +748,59 @@ impl Scope {
             self.findings.push(finding);
         }
     }
+    pub fn add_comparison(&mut self, comparison: ComparisonId) {
+        if !self.comparisons.contains(&comparison) {
+            self.comparisons.push(comparison);
+        }
+    }
+    pub fn set_path(&mut self, path: PathId) {
+        self.path = Some(path);
+    }
     /// Reserves finding links before aggregation.
     pub fn reserve_findings(&mut self, additional: usize) {
         self.findings.reserve(additional);
+    }
+}
+
+/// Direction counts retained by diff scopes.
+#[derive(Clone, Copy, Debug, Default, Eq, Hash, PartialEq)]
+pub struct DiffCounts {
+    worse: u32,
+    better: u32,
+    changed: u32,
+}
+
+impl DiffCounts {
+    pub const fn new(worse: u32, better: u32, changed: u32) -> Self {
+        Self {
+            worse,
+            better,
+            changed,
+        }
+    }
+    pub const fn worse(self) -> u32 {
+        self.worse
+    }
+    pub const fn better(self) -> u32 {
+        self.better
+    }
+    pub const fn changed(self) -> u32 {
+        self.changed
+    }
+    pub const fn total(self) -> u32 {
+        self.worse + self.better + self.changed
+    }
+    pub fn add_direction(&mut self, direction: ComparisonDirection) {
+        match direction {
+            ComparisonDirection::Worse => self.worse += 1,
+            ComparisonDirection::Better => self.better += 1,
+            ComparisonDirection::Changed => self.changed += 1,
+        }
+    }
+    pub fn add_counts(&mut self, other: Self) {
+        self.worse += other.worse;
+        self.better += other.better;
+        self.changed += other.changed;
     }
 }
 
@@ -850,6 +928,14 @@ pub enum ComparisonKind {
     Unchanged,
 }
 
+/// The user-facing direction of a retained diff comparison.
+#[derive(Clone, Copy, Debug, Eq, Hash, Ord, PartialEq, PartialOrd)]
+pub enum ComparisonDirection {
+    Worse,
+    Better,
+    Changed,
+}
+
 /// A named unit comparison between two source versions.
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct Comparison {
@@ -860,6 +946,7 @@ pub struct Comparison {
     after: Option<Measurements>,
     before_rating: Option<Rating>,
     after_rating: Option<Rating>,
+    file: Option<FileId>,
 }
 
 impl Comparison {
@@ -880,6 +967,7 @@ impl Comparison {
             after,
             before_rating,
             after_rating,
+            file: None,
         }
     }
 
@@ -904,6 +992,30 @@ impl Comparison {
     pub const fn after_rating(&self) -> Option<Rating> {
         self.after_rating
     }
+    pub const fn file(&self) -> Option<FileId> {
+        self.file
+    }
+    pub fn with_file(mut self, file: FileId) -> Self {
+        self.file = Some(file);
+        self
+    }
+    pub const fn direction(&self) -> ComparisonDirection {
+        match self.kind {
+            ComparisonKind::Regressed => ComparisonDirection::Worse,
+            ComparisonKind::Improved => ComparisonDirection::Better,
+            ComparisonKind::Added => match self.after_rating {
+                Some(Rating::Watch | Rating::High) => ComparisonDirection::Worse,
+                _ => ComparisonDirection::Changed,
+            },
+            ComparisonKind::Removed => match self.before_rating {
+                Some(Rating::Watch | Rating::High) => ComparisonDirection::Better,
+                _ => ComparisonDirection::Changed,
+            },
+            ComparisonKind::MetricChanged
+            | ComparisonKind::Ambiguous
+            | ComparisonKind::Unchanged => ComparisonDirection::Changed,
+        }
+    }
 }
 
 /// A full report consumed by output adapters.
@@ -917,6 +1029,8 @@ pub struct Report {
     findings: Vec<Finding>,
     diagnostics: Vec<Diagnostic>,
     comparisons: Vec<Comparison>,
+    paths: Vec<String>,
+    selected_scope: Option<ScopeId>,
 }
 
 /// The source operation represented by a report.
@@ -944,6 +1058,8 @@ impl Report {
             findings: Vec::with_capacity(findings),
             diagnostics: Vec::with_capacity(diagnostics),
             comparisons: Vec::with_capacity(comparisons),
+            paths: Vec::new(),
+            selected_scope: None,
         }
     }
 
@@ -978,11 +1094,33 @@ impl Report {
     pub fn comparisons(&self) -> &[Comparison] {
         &self.comparisons
     }
+    pub fn paths(&self) -> &[String] {
+        &self.paths
+    }
+    pub const fn selected_scope(&self) -> Option<ScopeId> {
+        self.selected_scope
+    }
+    pub fn set_selected_scope(&mut self, scope: ScopeId) {
+        self.selected_scope = Some(scope);
+    }
 
     pub fn add_scope(&mut self, scope: Scope) -> ScopeId {
         let id = scope.id();
+        let path_id = self.intern_path(scope.name());
+        let mut scope = scope;
+        scope.set_path(path_id);
         self.scopes.push(scope);
         id
+    }
+
+    fn intern_path(&mut self, path: &str) -> PathId {
+        if let Some(index) = self.paths.iter().position(|value| value == path) {
+            PathId::from_index(index)
+        } else {
+            let id = PathId::from_index(self.paths.len());
+            self.paths.push(path.to_owned());
+            id
+        }
     }
 
     pub fn set_root(&mut self, root: ScopeId) {
@@ -991,6 +1129,9 @@ impl Report {
 
     pub fn add_file(&mut self, file: FileRecord) -> FileId {
         let id = file.id();
+        let mut file = file;
+        let path_id = self.intern_path(file.path());
+        file.set_path_id(path_id);
         self.files.push(file);
         id
     }
@@ -1157,6 +1298,42 @@ pub fn aggregate_scopes(scopes: &mut [Scope], files: &[FileRecord], root: ScopeI
     aggregate_scope(scopes, files, root);
 }
 
+/// Aggregates retained comparison links and direction counts after comparisons
+/// have been added to a report.
+pub fn aggregate_comparisons(scopes: &mut [Scope], comparisons: &[Comparison], root: ScopeId) {
+    aggregate_comparison_scope(scopes, comparisons, root);
+}
+
+/// Classifies a comparison into the compact direction used by distribution views.
+pub const fn comparison_direction(comparison: &Comparison) -> ComparisonDirection {
+    comparison.direction()
+}
+
+fn aggregate_comparison_scope(scopes: &mut [Scope], comparisons: &[Comparison], scope_id: ScopeId) {
+    let index = scope_id.index();
+    let children = scopes[index].children.clone();
+    for child in children {
+        aggregate_comparison_scope(scopes, comparisons, child);
+    }
+    let mut counts = DiffCounts::default();
+    let child_ids = scopes[index].children.clone();
+    for child in child_ids {
+        let child_comparisons = scopes[child.index()].comparisons.clone();
+        let child_diff = scopes[child.index()].diff();
+        for comparison_id in child_comparisons {
+            scopes[index].add_comparison(comparison_id);
+        }
+        counts.add_counts(child_diff);
+    }
+    let own_ids = scopes[index].comparisons.clone();
+    if scopes[index].kind() == ScopeKind::File {
+        for comparison_id in own_ids {
+            counts.add_direction(comparisons[comparison_id.index()].direction());
+        }
+    }
+    scopes[index].diff = counts;
+}
+
 fn aggregate_scope(scopes: &mut [Scope], files: &[FileRecord], scope_id: ScopeId) {
     let index = scope_id.index();
     // Child links are already stable table indexes. Recursing over them keeps
@@ -1286,6 +1463,76 @@ mod tests {
                 ComparisonKind::Unchanged,
             ]
         );
+    }
+
+    #[test]
+    fn comparison_direction_groups_added_removed_and_metric_changes() {
+        let identity = UnitIdentity::new("work", UnitKind::Function);
+        let measurements = Measurements::new(1, 1, 1);
+        let cases = [
+            (
+                ComparisonKind::Regressed,
+                Some(Rating::Watch),
+                ComparisonDirection::Worse,
+            ),
+            (
+                ComparisonKind::Improved,
+                Some(Rating::Healthy),
+                ComparisonDirection::Better,
+            ),
+            (
+                ComparisonKind::Added,
+                Some(Rating::High),
+                ComparisonDirection::Worse,
+            ),
+            (
+                ComparisonKind::Added,
+                Some(Rating::Healthy),
+                ComparisonDirection::Changed,
+            ),
+            (
+                ComparisonKind::Removed,
+                Some(Rating::High),
+                ComparisonDirection::Better,
+            ),
+            (
+                ComparisonKind::Removed,
+                Some(Rating::Healthy),
+                ComparisonDirection::Changed,
+            ),
+            (
+                ComparisonKind::MetricChanged,
+                Some(Rating::Watch),
+                ComparisonDirection::Changed,
+            ),
+            (
+                ComparisonKind::Ambiguous,
+                None,
+                ComparisonDirection::Changed,
+            ),
+        ];
+        for (kind, after_rating, expected) in cases {
+            let before_rating = if kind == ComparisonKind::Removed {
+                after_rating
+            } else {
+                None
+            };
+            let after_rating = if kind == ComparisonKind::Removed {
+                None
+            } else {
+                after_rating
+            };
+            let comparison = Comparison::new(
+                ComparisonId::from_index(0),
+                identity.clone(),
+                kind,
+                (kind != ComparisonKind::Added).then_some(measurements),
+                (kind != ComparisonKind::Removed).then_some(measurements),
+                before_rating,
+                after_rating,
+            );
+            assert_eq!(comparison.direction(), expected, "{kind:?}");
+        }
     }
 
     #[test]

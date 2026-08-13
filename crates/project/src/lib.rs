@@ -15,7 +15,7 @@ use smackdebt_analysis::{
     Comparison, ComparisonId, Coverage, Diagnostic, DiagnosticId, DiagnosticKind, FileActivity,
     FileAnalysis, FileId, FileRecord, Finding, FindingId, HealthAssessment, HealthCounts,
     HealthPolicy, Language, ParseStatus, Rating, Report, ReportMode, Scope, ScopeId, ScopeKind,
-    Thresholds, UnitId, aggregate_scopes, compare_units,
+    Thresholds, UnitId, aggregate_comparisons, aggregate_scopes, compare_units,
 };
 use smackdebt_discovery::{DiscoveredFile, Inventory, InventoryOptions};
 use smackdebt_git::{ChangeStatus, GitRepository, HistoryWindow};
@@ -187,6 +187,10 @@ impl ProjectReport {
         &self.report
     }
 
+    pub fn selected_scope(&self) -> Option<ScopeId> {
+        self.report.selected_scope()
+    }
+
     pub const fn stats(&self) -> WorkStats {
         self.stats
     }
@@ -257,8 +261,28 @@ pub fn analyze_codebase(request: &CodebaseRequest) -> Result<ProjectReport, Proj
     for (file_index, analysis) in analyses.into_iter().enumerate() {
         builder.add_analysis(file_index, analysis);
     }
-    let report = builder.finish();
+    let mut report = builder.finish();
     let inventory_stats = inventory.stats();
+    let selected_path = selection
+        .exact_file
+        .as_deref()
+        .or(selection.prefix.as_deref())
+        .and_then(Path::to_str)
+        .filter(|value| !value.is_empty())
+        .unwrap_or(".");
+    let selected_scope = if selected_path == "." {
+        report.root()
+    } else {
+        report
+            .scopes()
+            .iter()
+            .find(|scope| scope.name() == selected_path && scope.kind() != ScopeKind::Repository)
+            .map(Scope::id)
+            .or_else(|| report.root())
+    };
+    if let Some(selected_scope) = selected_scope {
+        report.set_selected_scope(selected_scope);
+    }
     Ok(ProjectReport {
         report,
         stats: WorkStats {
@@ -299,10 +323,20 @@ pub fn analyze_diff(request: &DiffRequest) -> Result<ProjectReport, ProjectError
             .as_ref()
             .is_none_or(|path| entry.path.starts_with(path))
     });
-    let changed_path_count = changed.len();
+    let all_changed = changed.clone();
     changed.retain(|entry| smackdebt_languages::detect(&entry.path) != Language::Unknown);
-    let skipped_non_source = changed_path_count - changed.len();
     let selected_count = changed.len();
+    let package_roots = diff_package_roots(repository.root(), &all_changed);
+    let mut hierarchy = HierarchyBuilder::new(".".to_owned(), &package_roots);
+    for entry in &changed {
+        let package_root = nearest_package_root(&entry.path, &package_roots);
+        let package_index = package_roots
+            .iter()
+            .position(|root| root == &package_root)
+            .unwrap_or(0);
+        hierarchy.add_file(&entry.path, package_index);
+    }
+    let file_scopes = hierarchy.file_scopes.clone();
     let source_reads = Arc::new(AtomicUsize::new(0));
     let width = request.width.threads().min(selected_count.max(1));
     let batch = repository.batch_reader(width * 2)?;
@@ -318,29 +352,29 @@ pub fn analyze_diff(request: &DiffRequest) -> Result<ProjectReport, ProjectError
     let root = ScopeId::from_index(0);
     let mut report = Report::with_capacity(
         ReportMode::Diff,
-        selected_count + 1,
+        selected_count * 2 + 2,
         selected_count,
         0,
         selected_count * 2,
         selected_count,
     );
-    report.add_scope(Scope::new(root, ScopeKind::Repository, ".", None));
+    for scope in hierarchy.scopes {
+        report.add_scope(scope);
+    }
     report.set_root(root);
     let mut comparison_index = 0usize;
     for result in results {
-        add_diff_result(&mut report, result, &mut comparison_index);
-    }
-    if skipped_non_source > 0 {
-        report.add_diagnostic(Diagnostic::new(
-            DiagnosticId::from_index(report.diagnostics().len()),
-            None,
-            DiagnosticKind::Other,
-            format!("{skipped_non_source} changed non-source files were skipped"),
-            0,
-        ));
+        let scope_id = file_scopes
+            .get(&result.change.path)
+            .copied()
+            .expect("diff hierarchy contains every changed file");
+        add_diff_result(&mut report, result, &mut comparison_index, scope_id);
     }
     let files = report.files().to_vec();
     aggregate_scopes(report.scopes_mut(), &files, root);
+    let comparisons = report.comparisons().to_vec();
+    aggregate_comparisons(report.scopes_mut(), &comparisons, root);
+    report.set_selected_scope(root);
 
     Ok(ProjectReport {
         report,
@@ -571,27 +605,29 @@ fn analyze_diff_side(
     }
 }
 
-fn add_diff_result(report: &mut Report, result: DiffResult, comparison_index: &mut usize) {
+fn add_diff_result(
+    report: &mut Report,
+    result: DiffResult,
+    comparison_index: &mut usize,
+    scope_id: ScopeId,
+) {
     let file_id = FileId::from_index(result.index);
-    let scope_id = ScopeId::from_index(report.scopes().len());
-    report.scopes_mut()[0].add_child(scope_id);
-    report.add_scope(Scope::new(
-        scope_id,
-        ScopeKind::File,
-        result.change.path.to_string_lossy(),
-        Some(ScopeId::from_index(0)),
-    ));
 
     for comparison in &result.comparisons {
-        report.add_comparison(Comparison::new(
-            ComparisonId::from_index(*comparison_index),
-            comparison.identity().clone(),
-            comparison.kind(),
-            comparison.before(),
-            comparison.after(),
-            comparison.before_rating(),
-            comparison.after_rating(),
-        ));
+        let comparison_id = ComparisonId::from_index(*comparison_index);
+        report.add_comparison(
+            Comparison::new(
+                comparison_id,
+                comparison.identity().clone(),
+                comparison.kind(),
+                comparison.before(),
+                comparison.after(),
+                comparison.before_rating(),
+                comparison.after_rating(),
+            )
+            .with_file(file_id),
+        );
+        report.scopes_mut()[scope_id.index()].add_comparison(comparison_id);
         *comparison_index += 1;
     }
 
@@ -823,40 +859,74 @@ enum FileResult {
 struct Selection {
     inventory_root: PathBuf,
     exact_file: Option<PathBuf>,
+    prefix: Option<PathBuf>,
     label: String,
 }
 
 impl Selection {
     fn resolve(path: &Path, automatic_scope: bool) -> Result<Self, ProjectError> {
-        if automatic_scope && let Ok(repository) = GitRepository::discover(path) {
-            return Ok(Self {
-                inventory_root: repository.root().to_path_buf(),
-                exact_file: None,
-                label: ".".to_owned(),
-            });
-        }
         let absolute = std::path::absolute(path).map_err(|source| ProjectError::Inspect {
             path: path.to_path_buf(),
             source,
         })?;
+        if let Ok(repository) = GitRepository::discover(&absolute) {
+            let root = repository
+                .root()
+                .canonicalize()
+                .unwrap_or_else(|_| repository.root().to_path_buf());
+            let selected_absolute = absolute.canonicalize().unwrap_or_else(|_| absolute.clone());
+            let prefix = if automatic_scope {
+                None
+            } else {
+                Some(
+                    selected_absolute
+                        .strip_prefix(&root)
+                        .unwrap_or(Path::new(""))
+                        .to_path_buf(),
+                )
+            };
+            let exact_file = selected_absolute.is_file().then(|| {
+                selected_absolute
+                    .strip_prefix(&root)
+                    .unwrap_or(Path::new(""))
+                    .to_path_buf()
+            });
+            return Ok(Self {
+                inventory_root: root,
+                exact_file,
+                prefix,
+                label: if automatic_scope {
+                    ".".to_owned()
+                } else {
+                    path.display().to_string()
+                },
+            });
+        }
         if absolute.is_file() {
             let root = absolute.parent().unwrap_or(Path::new(".")).to_path_buf();
             let exact_file = absolute.file_name().map(PathBuf::from);
             return Ok(Self {
                 inventory_root: root,
                 exact_file,
+                prefix: None,
                 label: path.display().to_string(),
             });
         }
         Ok(Self {
             inventory_root: absolute,
             exact_file: None,
+            prefix: None,
             label: path.display().to_string(),
         })
     }
 
     fn includes(&self, path: &Path) -> bool {
-        self.exact_file.as_ref().is_none_or(|exact| exact == path)
+        if let Some(exact) = &self.exact_file {
+            return exact == path;
+        }
+        self.prefix
+            .as_ref()
+            .is_none_or(|prefix| path.starts_with(prefix))
     }
 }
 
@@ -878,68 +948,39 @@ impl<'a> ReportBuilder<'a> {
         candidates: &[&DiscoveredFile],
         activity: &'a HashMap<PathBuf, u32>,
     ) -> Self {
-        let root = ScopeId::from_index(0);
-        let mut scopes = vec![Scope::new(root, ScopeKind::Repository, label, None)];
-        let mut package_scopes = Vec::with_capacity(inventory.packages().len());
-        for package in inventory.packages() {
-            let id = ScopeId::from_index(scopes.len());
-            scopes[root.index()].add_child(id);
-            scopes.push(Scope::new(
-                id,
-                ScopeKind::Package,
-                package.root().to_string(),
-                Some(root),
-            ));
-            package_scopes.push(id);
-        }
-
-        let mut directory_scopes: BTreeMap<(usize, PathBuf), ScopeId> = BTreeMap::new();
-        let mut file_scopes = Vec::with_capacity(candidates.len());
+        let package_roots: Vec<PathBuf> = inventory
+            .packages()
+            .iter()
+            .map(|package| package.root().as_path().to_path_buf())
+            .collect();
+        let included_packages: Vec<bool> = (0..package_roots.len())
+            .map(|index| {
+                candidates
+                    .iter()
+                    .any(|file| file.package().index() == index)
+            })
+            .collect();
+        let included_roots: Vec<PathBuf> = package_roots
+            .iter()
+            .zip(&included_packages)
+            .filter_map(|(root, included)| included.then_some(root.clone()))
+            .collect();
+        let mut hierarchy = HierarchyBuilder::new(label, &included_roots);
         for file in candidates {
-            let package_index = file.package().index();
-            let package_scope = package_scopes[package_index];
-            let package_root = inventory.packages()[package_index].root().as_path();
-            let relative_directory = file
-                .path()
-                .as_path()
-                .parent()
-                .unwrap_or(Path::new(""))
-                .strip_prefix(package_root)
-                .unwrap_or(Path::new(""));
-            let mut parent = package_scope;
-            let mut accumulated = PathBuf::new();
-            for component in relative_directory.components() {
-                accumulated.push(component);
-                let key = (package_index, accumulated.clone());
-                parent = if let Some(id) = directory_scopes.get(&key) {
-                    *id
-                } else {
-                    let id = ScopeId::from_index(scopes.len());
-                    scopes[parent.index()].add_child(id);
-                    scopes.push(Scope::new(
-                        id,
-                        ScopeKind::Directory,
-                        accumulated.display().to_string(),
-                        Some(parent),
-                    ));
-                    directory_scopes.insert(key, id);
-                    id
-                };
-            }
-            let file_scope = ScopeId::from_index(scopes.len());
-            scopes[parent.index()].add_child(file_scope);
-            scopes.push(Scope::new(
-                file_scope,
-                ScopeKind::File,
-                file.path().to_string(),
-                Some(parent),
-            ));
-            file_scopes.push(file_scope);
+            let included_package_index = included_packages[..file.package().index()]
+                .iter()
+                .filter(|included| **included)
+                .count();
+            hierarchy.add_file(file.path().as_path(), included_package_index);
         }
+        let file_scopes = candidates
+            .iter()
+            .map(|file| hierarchy.file_scopes[file.path().as_path()])
+            .collect();
 
         Self {
             mode,
-            scopes,
+            scopes: hierarchy.scopes,
             files: Vec::with_capacity(candidates.len()),
             findings: Vec::with_capacity(candidates.len()),
             diagnostics: Vec::with_capacity(candidates.len()),
@@ -1079,6 +1120,141 @@ fn diff_filter(root: &Path, selected: &Path) -> Option<PathBuf> {
     absolute.strip_prefix(root).ok().map(Path::to_path_buf)
 }
 
+const DIFF_MANIFEST_NAMES: &[&str] = &[
+    "Cargo.toml",
+    "package.json",
+    "pyproject.toml",
+    "setup.py",
+    "setup.cfg",
+    "pom.xml",
+    "settings.gradle",
+    "settings.gradle.kts",
+    "build.gradle",
+    "build.gradle.kts",
+    "CMakeLists.txt",
+    "Gemfile",
+    "gems.rb",
+];
+
+fn diff_package_roots(
+    repository_root: &Path,
+    changed: &[smackdebt_git::ChangedPath],
+) -> Vec<PathBuf> {
+    let mut roots = std::collections::BTreeSet::new();
+    for change in changed {
+        for path in [
+            &change.path,
+            change.previous_path.as_ref().unwrap_or(&change.path),
+        ] {
+            let mut directory = path.parent().unwrap_or(Path::new(""));
+            loop {
+                let absolute = repository_root.join(directory);
+                let changed_manifest = path
+                    .file_name()
+                    .and_then(|name| name.to_str())
+                    .is_some_and(|name| DIFF_MANIFEST_NAMES.contains(&name));
+                let working_tree_manifest = DIFF_MANIFEST_NAMES
+                    .iter()
+                    .any(|name| absolute.join(name).is_file());
+                if changed_manifest || working_tree_manifest {
+                    roots.insert(directory.to_path_buf());
+                    break;
+                }
+                if directory.as_os_str().is_empty() {
+                    break;
+                }
+                directory = directory.parent().unwrap_or(Path::new(""));
+            }
+        }
+    }
+    if roots.is_empty() {
+        roots.insert(PathBuf::new());
+    }
+    roots.into_iter().collect()
+}
+
+fn nearest_package_root(path: &Path, package_roots: &[PathBuf]) -> PathBuf {
+    package_roots
+        .iter()
+        .filter(|root| path.starts_with(root))
+        .max_by_key(|root| root.components().count())
+        .cloned()
+        .unwrap_or_default()
+}
+
+struct HierarchyBuilder {
+    scopes: Vec<Scope>,
+    file_scopes: BTreeMap<PathBuf, ScopeId>,
+    directories: BTreeMap<(PathBuf, PathBuf), ScopeId>,
+    package_roots: Vec<PathBuf>,
+}
+
+impl HierarchyBuilder {
+    fn new(label: String, package_roots: &[PathBuf]) -> Self {
+        let root = ScopeId::from_index(0);
+        let mut scopes = vec![Scope::new(root, ScopeKind::Repository, label, None)];
+        for package_root in package_roots {
+            let id = ScopeId::from_index(scopes.len());
+            scopes[root.index()].add_child(id);
+            scopes.push(Scope::new(
+                id,
+                ScopeKind::Package,
+                if package_root.as_os_str().is_empty() {
+                    ".".to_owned()
+                } else {
+                    package_root.display().to_string()
+                },
+                Some(root),
+            ));
+        }
+        Self {
+            scopes,
+            file_scopes: BTreeMap::new(),
+            directories: BTreeMap::new(),
+            package_roots: package_roots.to_vec(),
+        }
+    }
+
+    fn add_file(&mut self, path: &Path, package_index: usize) {
+        let package_root = self.package_roots[package_index].clone();
+        let package_scope = self.scopes[0].children()[package_index];
+        let relative_directory = path
+            .parent()
+            .unwrap_or(Path::new(""))
+            .strip_prefix(&package_root)
+            .unwrap_or(Path::new(""));
+        let mut parent = package_scope;
+        let mut accumulated = package_root.clone();
+        for component in relative_directory.components() {
+            accumulated.push(component);
+            let key = (package_root.clone(), accumulated.clone());
+            parent = if let Some(id) = self.directories.get(&key) {
+                *id
+            } else {
+                let id = ScopeId::from_index(self.scopes.len());
+                self.scopes[parent.index()].add_child(id);
+                self.scopes.push(Scope::new(
+                    id,
+                    ScopeKind::Directory,
+                    accumulated.display().to_string(),
+                    Some(parent),
+                ));
+                self.directories.insert(key, id);
+                id
+            };
+        }
+        let file_scope = ScopeId::from_index(self.scopes.len());
+        self.scopes[parent.index()].add_child(file_scope);
+        self.scopes.push(Scope::new(
+            file_scope,
+            ScopeKind::File,
+            path.display().to_string(),
+            Some(parent),
+        ));
+        self.file_scopes.insert(path.to_path_buf(), file_scope);
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -1158,6 +1334,58 @@ mod tests {
     }
 
     #[test]
+    fn codebase_path_selection_keeps_repository_relative_scope_identity() {
+        let root = repository();
+        let repository_path = root.path().join("repo");
+        fs::create_dir_all(repository_path.join("src")).unwrap();
+        fs::write(
+            repository_path.join("src/lib.rs"),
+            "fn selected() { if true {} }\n",
+        )
+        .unwrap();
+        let result = analyze_codebase(&CodebaseRequest::new(repository_path.join("src"))).unwrap();
+        assert_ne!(result.report().selected_scope(), result.report().root());
+        assert!(
+            result
+                .report()
+                .files()
+                .iter()
+                .any(|file| file.path() == "src/lib.rs")
+        );
+        assert!(
+            result
+                .report()
+                .scopes()
+                .iter()
+                .any(|scope| scope.name() == "src")
+        );
+    }
+
+    #[test]
+    fn source_outside_manifest_roots_uses_discoverys_fallback_package() {
+        let root = tempfile::tempdir().unwrap();
+        fs::create_dir_all(root.path().join("app/src")).unwrap();
+        fs::write(
+            root.path().join("app/Cargo.toml"),
+            "[package]\nname='app'\nversion='0.1.0'\n",
+        )
+        .unwrap();
+        fs::write(root.path().join("app/src/lib.rs"), "fn app() {}\n").unwrap();
+        fs::write(root.path().join("outside.rs"), "fn outside() {}\n").unwrap();
+
+        let result = analyze_codebase(&CodebaseRequest::new(root.path())).unwrap();
+
+        assert_eq!(result.report().files().len(), 2);
+        assert!(
+            result
+                .report()
+                .files()
+                .iter()
+                .any(|file| file.path() == "outside.rs")
+        );
+    }
+
+    #[test]
     fn diff_retains_changed_file_scopes_and_reports_side_failures() {
         let root = repository();
         let repository_path = root.path().join("repo");
@@ -1174,7 +1402,7 @@ mod tests {
         )
         .unwrap();
         assert_eq!(result.report().files().len(), 2);
-        assert_eq!(result.report().scopes().len(), 3);
+        assert_eq!(result.report().scopes().len(), 4);
         assert_eq!(result.report().root(), Some(ScopeId::from_index(0)));
         assert!(!result.report().comparisons().is_empty());
         assert_eq!(result.stats().source_reads, 2);

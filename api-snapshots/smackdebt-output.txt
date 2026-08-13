@@ -1,3 +1,4 @@
+pub all: bool
 pub fn write_json(writer: &mut impl Write, report: &Report) -> io::Result<()>
 pub fn write_terminal( writer: &mut impl Write, report: &Report, options: TerminalOptions, ) -> io::Result<()>
 pub struct TerminalOptions

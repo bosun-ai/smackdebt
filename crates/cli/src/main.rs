@@ -70,6 +70,10 @@ struct Common {
     /// Recent activity window, for example 90d.
     #[arg(long, value_parser = parse_days)]
     history: Option<u32>,
+
+    /// Show every terminal row and retained detail.
+    #[arg(long, conflicts_with = "json")]
+    all: bool,
 }
 
 #[derive(Debug, Default, Deserialize)]
@@ -150,14 +154,14 @@ fn run(arguments: impl IntoIterator<Item = OsString>) -> ExitCode {
         }
     };
 
-    let (result, json) = match cli.command {
+    let (result, json, all) = match cli.command {
         None => {
             let request = match cli.path {
                 Some(path) => CodebaseRequest::new(path),
                 None => CodebaseRequest::automatic("."),
             };
             let request = apply_codebase_common(request, &cli.common, &config);
-            (analyze_codebase(&request), cli.common.json)
+            (analyze_codebase(&request), cli.common.json, cli.common.all)
         }
         Some(Command::Diff(args)) => {
             let json = args.common.json;
@@ -172,7 +176,7 @@ fn run(arguments: impl IntoIterator<Item = OsString>) -> ExitCode {
                 request = request.with_width(width);
             }
             request = apply_diff_config(request, &config);
-            (analyze_diff(&request), json)
+            (analyze_diff(&request), json, args.common.all)
         }
     };
 
@@ -183,7 +187,7 @@ fn run(arguments: impl IntoIterator<Item = OsString>) -> ExitCode {
                 write_json(&mut stdout, result.report()).and_then(|()| writeln!(stdout))
             } else {
                 let width = terminal_width();
-                write_terminal(&mut stdout, result.report(), TerminalOptions { width })
+                write_terminal(&mut stdout, result.report(), TerminalOptions { width, all })
             };
             match rendered {
                 Ok(()) => ExitCode::SUCCESS,
