@@ -18,6 +18,17 @@ impl Language for Cpp {
         "[(function_definition) (lambda_expression)] @unit"
     }
 
+    fn generated_marker(source: &[u8]) -> bool {
+        std::str::from_utf8(source).is_ok_and(|text| {
+            text.lines().take(5).any(|line| {
+                let line = line.to_ascii_lowercase();
+                line.contains("generated file")
+                    || line.contains("code generated")
+                    || line.contains("automatically generated")
+            })
+        })
+    }
+
     fn unit_kind(node: Node<'_>) -> Option<UnitKind> {
         match node.kind() {
             "function_definition" if has_class_ancestor(node) => Some(UnitKind::Method),

@@ -18,6 +18,7 @@ pub(super) trait Language {
     fn unit_kind(node: Node<'_>) -> Option<UnitKind>;
     fn is_container(node: Node<'_>) -> bool;
     fn syntax(node: Node<'_>, source: &[u8]) -> Syntax;
+    fn generated_marker(source: &[u8]) -> bool;
 
     fn dependency(_node: Node<'_>, _source: &[u8]) -> Option<DependencySyntax> {
         None

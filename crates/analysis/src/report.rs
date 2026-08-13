@@ -1,6 +1,6 @@
 use crate::comparison::{Comparison, ComparisonDirection};
 use crate::health::{HealthAssessment, HealthCounts, Measurements};
-use crate::source::{Language, SourceSpan, UnitIdentity};
+use crate::source::{Language, ParseStatus, SourceRole, SourceSpan, SourceTrust, UnitIdentity};
 use crate::{
     ArchitectureComparison, ArchitectureComparisonId, ArchitectureFinding, ArchitectureFindingId,
     ArchitectureReportFacts, DependencyCoverage, DependencyEdge, ExternalDependency, PackageEdge,
@@ -46,6 +46,51 @@ index_type!(DiagnosticId);
 index_type!(ComparisonId);
 index_type!(PathId);
 
+#[derive(Clone, Copy, Debug, Eq, Hash, Ord, PartialEq, PartialOrd)]
+pub enum PackagePresence {
+    Current,
+    BaseOnly,
+}
+
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct PackageRecord {
+    id: PackageId,
+    scope: ScopeId,
+    path: String,
+    presence: PackagePresence,
+}
+
+impl PackageRecord {
+    pub fn current(id: PackageId, scope: ScopeId, path: impl Into<String>) -> Self {
+        Self {
+            id,
+            scope,
+            path: path.into(),
+            presence: PackagePresence::Current,
+        }
+    }
+    pub fn base_only(id: PackageId, scope: ScopeId, path: impl Into<String>) -> Self {
+        Self {
+            id,
+            scope,
+            path: path.into(),
+            presence: PackagePresence::BaseOnly,
+        }
+    }
+    pub const fn id(&self) -> PackageId {
+        self.id
+    }
+    pub const fn scope(&self) -> ScopeId {
+        self.scope
+    }
+    pub fn path(&self) -> &str {
+        &self.path
+    }
+    pub const fn presence(&self) -> PackagePresence {
+        self.presence
+    }
+}
+
 /// The progressive levels at which a report can be explored.
 #[derive(Clone, Copy, Debug, Eq, Hash, Ord, PartialEq, PartialOrd)]
 pub enum ScopeKind {
@@ -56,12 +101,24 @@ pub enum ScopeKind {
 }
 
 /// Coverage values for a source selection.
+#[derive(Clone, Copy, Debug, Eq, Hash, PartialEq)]
+pub enum SourceCoverageOutcome {
+    Clean,
+    Recovered,
+    Unsupported,
+    Failed,
+    Context,
+}
+
+/// Coverage values for a source selection.
 #[derive(Clone, Copy, Debug, Default, Eq, Hash, PartialEq)]
 pub struct Coverage {
     selected_files: u32,
-    analyzed_files: u32,
+    clean_files: u32,
+    recovered_files: u32,
     unsupported_files: u32,
     failed_files: u32,
+    context_files: u32,
     source_lines: u32,
     excluded_lines: u32,
 }
@@ -77,9 +134,49 @@ impl Coverage {
     ) -> Self {
         Self {
             selected_files,
-            analyzed_files,
+            clean_files: analyzed_files,
+            recovered_files: 0,
             unsupported_files,
             failed_files,
+            context_files: 0,
+            source_lines,
+            excluded_lines,
+        }
+    }
+
+    pub const fn classified(
+        selected_files: u32,
+        outcome: SourceCoverageOutcome,
+        source_lines: u32,
+        excluded_lines: u32,
+    ) -> Self {
+        Self {
+            selected_files,
+            clean_files: if matches!(outcome, SourceCoverageOutcome::Clean) {
+                selected_files
+            } else {
+                0
+            },
+            recovered_files: if matches!(outcome, SourceCoverageOutcome::Recovered) {
+                selected_files
+            } else {
+                0
+            },
+            unsupported_files: if matches!(outcome, SourceCoverageOutcome::Unsupported) {
+                selected_files
+            } else {
+                0
+            },
+            failed_files: if matches!(outcome, SourceCoverageOutcome::Failed) {
+                selected_files
+            } else {
+                0
+            },
+            context_files: if matches!(outcome, SourceCoverageOutcome::Context) {
+                selected_files
+            } else {
+                0
+            },
             source_lines,
             excluded_lines,
         }
@@ -89,13 +186,22 @@ impl Coverage {
         self.selected_files
     }
     pub const fn analyzed_files(self) -> u32 {
-        self.analyzed_files
+        self.clean_files + self.recovered_files + self.context_files
+    }
+    pub const fn clean_files(self) -> u32 {
+        self.clean_files
+    }
+    pub const fn recovered_files(self) -> u32 {
+        self.recovered_files
     }
     pub const fn unsupported_files(self) -> u32 {
         self.unsupported_files
     }
     pub const fn failed_files(self) -> u32 {
         self.failed_files
+    }
+    pub const fn context_files(self) -> u32 {
+        self.context_files
     }
     pub const fn source_lines(self) -> u32 {
         self.source_lines
@@ -105,14 +211,16 @@ impl Coverage {
     }
 
     pub fn combine(self, other: Self) -> Self {
-        Self::new(
-            self.selected_files + other.selected_files,
-            self.analyzed_files + other.analyzed_files,
-            self.unsupported_files + other.unsupported_files,
-            self.failed_files + other.failed_files,
-            self.source_lines + other.source_lines,
-            self.excluded_lines + other.excluded_lines,
-        )
+        Self {
+            selected_files: self.selected_files + other.selected_files,
+            clean_files: self.clean_files + other.clean_files,
+            recovered_files: self.recovered_files + other.recovered_files,
+            unsupported_files: self.unsupported_files + other.unsupported_files,
+            failed_files: self.failed_files + other.failed_files,
+            context_files: self.context_files + other.context_files,
+            source_lines: self.source_lines + other.source_lines,
+            excluded_lines: self.excluded_lines + other.excluded_lines,
+        }
     }
 }
 
@@ -143,6 +251,8 @@ pub struct FileRecord {
     activity: Option<FileActivity>,
     path_id: Option<PathId>,
     package: Option<PackageId>,
+    role: SourceRole,
+    parse_status: Option<ParseStatus>,
 }
 
 impl FileRecord {
@@ -163,6 +273,8 @@ impl FileRecord {
             activity: None,
             path_id: None,
             package: None,
+            role: SourceRole::Primary,
+            parse_status: None,
         }
     }
 
@@ -206,6 +318,22 @@ impl FileRecord {
     pub fn with_package(mut self, package: PackageId) -> Self {
         self.package = Some(package);
         self
+    }
+    pub fn with_source_state(mut self, role: SourceRole, status: ParseStatus) -> Self {
+        self.role = role;
+        self.parse_status = Some(status);
+        self
+    }
+    pub const fn role(&self) -> SourceRole {
+        self.role
+    }
+    pub const fn parse_status(&self) -> Option<&ParseStatus> {
+        self.parse_status.as_ref()
+    }
+    pub fn trust(&self) -> SourceTrust {
+        self.parse_status
+            .as_ref()
+            .map_or(SourceTrust::Failed, ParseStatus::trust)
     }
     fn set_path_id(&mut self, path: PathId) {
         self.path_id = Some(path);
@@ -409,6 +537,8 @@ pub struct Finding {
     span: SourceSpan,
     measurements: Measurements,
     assessment: HealthAssessment,
+    role: SourceRole,
+    trust: SourceTrust,
 }
 
 impl Finding {
@@ -427,6 +557,8 @@ impl Finding {
             span,
             measurements,
             assessment,
+            role: SourceRole::Primary,
+            trust: SourceTrust::Trusted,
         }
     }
 
@@ -447,6 +579,20 @@ impl Finding {
     }
     pub const fn assessment(&self) -> HealthAssessment {
         self.assessment
+    }
+    pub fn with_evidence(mut self, role: SourceRole, trust: SourceTrust) -> Self {
+        self.role = role;
+        self.trust = trust;
+        self
+    }
+    pub const fn role(&self) -> SourceRole {
+        self.role
+    }
+    pub const fn trust(&self) -> SourceTrust {
+        self.trust
+    }
+    pub const fn affects_verdict(&self) -> bool {
+        self.role.affects_verdict() && matches!(self.trust, SourceTrust::Trusted)
     }
 }
 
@@ -518,6 +664,7 @@ pub struct Report {
     diagnostics: Vec<Diagnostic>,
     comparisons: Vec<Comparison>,
     paths: Vec<String>,
+    packages: Vec<PackageRecord>,
     dependency_coverage: DependencyCoverage,
     dependency_edges: Vec<DependencyEdge>,
     package_edges: Vec<PackageEdge>,
@@ -577,6 +724,10 @@ impl ReportBuilder {
 
     pub fn add_file(&mut self, file: FileRecord) -> FileId {
         self.report.add_file(file)
+    }
+
+    pub fn set_packages(&mut self, packages: Vec<PackageRecord>) {
+        self.report.packages = packages;
     }
 
     pub fn add_finding(&mut self, finding: Finding) -> FindingId {
@@ -681,6 +832,7 @@ impl Report {
             diagnostics: Vec::with_capacity(diagnostics),
             comparisons: Vec::with_capacity(comparisons),
             paths: Vec::new(),
+            packages: Vec::new(),
             dependency_coverage: DependencyCoverage::default(),
             dependency_edges: Vec::new(),
             package_edges: Vec::new(),
@@ -728,6 +880,9 @@ impl Report {
     }
     pub fn paths(&self) -> &[String] {
         &self.paths
+    }
+    pub fn packages(&self) -> &[PackageRecord] {
+        &self.packages
     }
     pub const fn dependency_coverage(&self) -> DependencyCoverage {
         self.dependency_coverage

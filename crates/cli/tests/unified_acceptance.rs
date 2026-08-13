@@ -617,7 +617,7 @@ fn assert_unified_facts(report: &Value) {
     );
     assert!(!report["change_coupling"].as_array().unwrap().is_empty());
     assert!(
-        !report["evolutionary_findings"]
+        report["evolutionary_findings"]
             .as_array()
             .unwrap()
             .is_empty()

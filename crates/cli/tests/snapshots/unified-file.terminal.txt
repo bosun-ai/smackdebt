@@ -5,7 +5,7 @@ a/main.js
 QUALITY  0% need attention
 ░░░░░░░░░░░░  0 / 1 code units
 ▲ 0 high · ● 0 watch · 1 healthy
-✓ all 1 source file analyzed
+✓ all 1 source file analyzed cleanly
 
 ARCHITECTURE
 4 internal · 0 external · 0 unresolved · 0 ambiguous

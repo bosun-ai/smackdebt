@@ -1,11 +1,11 @@
 smackdebt · codebase
-.
+repository root
 3 packages · 7 files · 35 lines
 
 QUALITY  0% need attention
 ░░░░░░░░░░░░  0 / 7 code units
 ▲ 0 high · ● 0 watch · 7 healthy
-✓ all 7 source files analyzed
+✓ all 7 source files analyzed cleanly
 
 No child areas need attention.
   … 3 quiet areas hidden (use --all)

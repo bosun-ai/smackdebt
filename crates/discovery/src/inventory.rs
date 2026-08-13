@@ -10,6 +10,7 @@ use std::io;
 use std::path::{Component, Path, PathBuf};
 
 pub use smackdebt_analysis::PackageId;
+use smackdebt_analysis::SourceRole;
 
 #[cfg(test)]
 use crate::ignore::glob_matches;
@@ -125,7 +126,6 @@ pub struct Package {
 }
 
 impl Package {
-    /// Returns this package's stable identifier.
     #[cfg(test)]
     const fn id(&self) -> PackageId {
         self.id
@@ -141,6 +141,40 @@ impl Package {
     fn manifests(&self) -> &[ManifestKind] {
         &self.manifests
     }
+}
+
+pub fn generic_source_roles(path: &Path) -> Vec<SourceRole> {
+    let normalized = path
+        .to_string_lossy()
+        .replace('\\', "/")
+        .to_ascii_lowercase();
+    let components: Vec<_> = normalized.split('/').collect();
+    let name = components.last().copied().unwrap_or_default();
+    let component_role = |names: &[&str]| components.iter().any(|part| names.contains(part));
+    let role = if component_role(&["fixture", "fixtures", "testdata", "__fixtures__"]) {
+        Some(SourceRole::Fixture)
+    } else if component_role(&["bench", "benches", "benchmark", "benchmarks"])
+        || name.contains("bench")
+    {
+        Some(SourceRole::Benchmark)
+    } else if component_role(&["example", "examples"]) {
+        Some(SourceRole::Example)
+    } else if component_role(&["generated", "gen", "dist", "build", "coverage", "tmp"])
+        || name.ends_with(".generated.rs")
+        || name.ends_with(".generated.ts")
+        || name.ends_with(".generated.js")
+    {
+        Some(SourceRole::Generated)
+    } else if component_role(&["test", "tests", "spec", "specs"])
+        || name.contains("_test.")
+        || name.contains(".test.")
+        || name.contains(".spec.")
+    {
+        Some(SourceRole::Test)
+    } else {
+        None
+    };
+    role.into_iter().collect()
 }
 
 /// A non-fatal inventory diagnostic.
@@ -164,7 +198,7 @@ struct InventoryStats {
 /// Options for one filesystem inventory walk.
 #[derive(Clone, Debug, Default)]
 struct InventoryOptions {
-    /// Ignore patterns in addition to `.gitignore` and generated directories.
+    /// Ignore patterns in addition to `.gitignore` and dependency directories.
     excludes: Vec<String>,
     /// Include non-source files in [`Inventory::files`].
     include_other_files: bool,
@@ -525,7 +559,7 @@ mod tests {
     }
 
     #[test]
-    fn gitignore_generated_and_symlink_entries_are_not_source() {
+    fn gitignore_dependencies_and_symlink_entries_are_not_source() {
         let directory = tempfile::tempdir().unwrap();
         fs::create_dir_all(directory.path().join("target")).unwrap();
         fs::write(directory.path().join(".gitignore"), "ignored/\n").unwrap();
@@ -548,6 +582,42 @@ mod tests {
                 .any(|diagnostic| matches!(diagnostic, InventoryDiagnostic::SymlinkSkipped { .. }))
         );
         assert!(inventory.stats().directories_visited >= 1);
+    }
+
+    #[test]
+    fn tracked_generated_directories_remain_role_candidates() {
+        let directory = tempfile::tempdir().unwrap();
+        fs::create_dir_all(directory.path().join("generated")).unwrap();
+        fs::write(
+            directory.path().join("generated/client.ts"),
+            "export const x = 1\n",
+        )
+        .unwrap();
+        let inventory = Inventory::discover(directory.path()).unwrap();
+        let file = inventory.source_files().next().unwrap();
+        assert_eq!(file.path().as_path(), Path::new("generated/client.ts"));
+        assert_eq!(
+            generic_source_roles(file.path().as_path()),
+            vec![SourceRole::Generated]
+        );
+    }
+
+    #[test]
+    fn nested_test_support_directories_have_one_specific_role() {
+        for (path, role) in [
+            ("crates/cli/tests/fixtures/data.rs", SourceRole::Fixture),
+            ("crates/cli/tests/examples/demo.rs", SourceRole::Example),
+            (
+                "crates/cli/tests/benchmarks/large.rs",
+                SourceRole::Benchmark,
+            ),
+            (
+                "crates/cli/tests/generated/client.rs",
+                SourceRole::Generated,
+            ),
+        ] {
+            assert_eq!(generic_source_roles(Path::new(path)), vec![role], "{path}");
+        }
     }
 
     #[test]

@@ -121,6 +121,24 @@ impl Analyzer {
         detect(path)
     }
 
+    pub fn has_generated_marker(path: &Path, source: &[u8]) -> bool {
+        use crate::language::Language as _;
+        match detect(path) {
+            Language::C => C::generated_marker(source),
+            Language::Cpp => Cpp::generated_marker(source),
+            Language::Java => Java::generated_marker(source),
+            Language::JavaScript => JavaScript::generated_marker(source),
+            Language::Jsx => Jsx::generated_marker(source),
+            Language::Python => Python::generated_marker(source),
+            Language::Rust => Rust::generated_marker(source),
+            Language::TypeScript => TypeScript::generated_marker(source),
+            Language::Tsx => Tsx::generated_marker(source),
+            Language::Ruby => Ruby::generated_marker(source),
+            Language::Vue => crate::vue::has_generated_marker(source),
+            Language::Kotlin | Language::Unknown => false,
+        }
+    }
+
     pub fn analyze(&mut self, path: &Path, source: Vec<u8>) -> Result<FileAnalysis, AnalysisError> {
         let result = match detect(path) {
             Language::C => engine::analyze::<C>(&mut self.c, &source, &mut self.scratch),
@@ -233,5 +251,43 @@ mod tests {
     fn recovered_trees_still_return_visible_facts() {
         let result = analyze("x.py", "def broken(:\n    if yes:\n        pass\n");
         assert_eq!(result.parse_status(), &ParseStatus::Recovered);
+    }
+
+    #[test]
+    fn each_language_owns_its_generated_header_rules() {
+        for (path, source) in [
+            ("x.c", "/* generated file */\n"),
+            ("x.cpp", "// code generated\n"),
+            ("X.java", "// auto generated\n"),
+            ("x.js", "// @generated\n"),
+            ("x.jsx", "// @generated\n"),
+            ("x.py", "# generated - do not edit\n"),
+            ("x.rs", "// @generated\n"),
+            ("x.ts", "// @generated\n"),
+            ("x.tsx", "// @generated\n"),
+            ("x.rb", "# generated - do not edit\n"),
+            ("x.vue", "<!-- @generated -->\n"),
+        ] {
+            assert!(
+                Analyzer::has_generated_marker(Path::new(path), source.as_bytes()),
+                "{path}"
+            );
+        }
+        assert!(!Analyzer::has_generated_marker(
+            Path::new("x.py"),
+            b"# generated helper\n"
+        ));
+        for path in [
+            "x.c", "x.cpp", "X.java", "x.js", "x.jsx", "x.py", "x.rs", "x.ts", "x.tsx", "x.rb",
+            "x.vue",
+        ] {
+            assert!(
+                !Analyzer::has_generated_marker(
+                    Path::new(path),
+                    b"// do not edit this hand-written section\n"
+                ),
+                "{path}"
+            );
+        }
     }
 }

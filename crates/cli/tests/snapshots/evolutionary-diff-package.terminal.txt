@@ -1,6 +1,6 @@
 smackdebt · diff
 b
-1 source file changed · 1 analyzed
+1 source file changed · 1 clean
 
 CHANGE  0 retained units
 ▲ WORSE 0 · ▼ BETTER 0 · ● CHANGED 0

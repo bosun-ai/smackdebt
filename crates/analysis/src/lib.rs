@@ -46,10 +46,12 @@ pub use health::{
 };
 pub use report::{
     ComparisonId, Coverage, Diagnostic, DiagnosticId, DiagnosticKind, DiffCounts, FileActivity,
-    FileId, FileRecord, Finding, FindingId, PackageId, PathId, Report, ReportBuilder, ReportMode,
-    Scope, ScopeId, ScopeKind, aggregate_comparisons, aggregate_scopes,
+    FileId, FileRecord, Finding, FindingId, PackageId, PackagePresence, PackageRecord, PathId,
+    Report, ReportBuilder, ReportMode, Scope, ScopeId, ScopeKind, SourceCoverageOutcome,
+    aggregate_comparisons, aggregate_scopes,
 };
 pub use source::{
     DependencyIntent, DependencyKind, DependencySyntax, DependencySyntaxState, FileAnalysis,
-    Language, LocalUnitId, ParseStatus, SourceSpan, UnitFact, UnitIdentity, UnitKind,
+    Language, LocalUnitId, ParseStatus, SourceRole, SourceSpan, SourceTrust, UnitFact,
+    UnitIdentity, UnitKind,
 };

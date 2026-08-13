@@ -3,4 +3,7 @@
 mod ignore;
 mod inventory;
 
-pub use inventory::{DiscoveredFile, Inventory, Package, PackageId, RelativePath};
+pub use ignore::glob_matches;
+pub use inventory::{
+    DiscoveredFile, Inventory, Package, PackageId, RelativePath, generic_source_roles,
+};

@@ -60,10 +60,15 @@ pub smackdebt_analysis::Language::Tsx
 pub smackdebt_analysis::Language::TypeScript
 pub smackdebt_analysis::Language::Unknown
 pub smackdebt_analysis::Language::Vue
+pub enum smackdebt_analysis::PackagePresence
+pub smackdebt_analysis::PackagePresence::BaseOnly
+pub smackdebt_analysis::PackagePresence::Current
 pub enum smackdebt_analysis::ParseStatus
 pub smackdebt_analysis::ParseStatus::Failed
 pub smackdebt_analysis::ParseStatus::Parsed
 pub smackdebt_analysis::ParseStatus::Recovered
+impl smackdebt_analysis::ParseStatus
+pub const fn smackdebt_analysis::ParseStatus::trust(&self) -> smackdebt_analysis::SourceTrust
 pub enum smackdebt_analysis::Rating
 pub smackdebt_analysis::Rating::Healthy
 pub smackdebt_analysis::Rating::High
@@ -83,6 +88,25 @@ pub enum smackdebt_analysis::Signal
 pub smackdebt_analysis::Signal::CognitiveComplexity
 pub smackdebt_analysis::Signal::CyclomaticComplexity
 pub smackdebt_analysis::Signal::LogicalLines
+pub enum smackdebt_analysis::SourceCoverageOutcome
+pub smackdebt_analysis::SourceCoverageOutcome::Clean
+pub smackdebt_analysis::SourceCoverageOutcome::Context
+pub smackdebt_analysis::SourceCoverageOutcome::Failed
+pub smackdebt_analysis::SourceCoverageOutcome::Recovered
+pub smackdebt_analysis::SourceCoverageOutcome::Unsupported
+pub enum smackdebt_analysis::SourceRole
+pub smackdebt_analysis::SourceRole::Benchmark
+pub smackdebt_analysis::SourceRole::Example
+pub smackdebt_analysis::SourceRole::Fixture
+pub smackdebt_analysis::SourceRole::Generated
+pub smackdebt_analysis::SourceRole::Primary
+pub smackdebt_analysis::SourceRole::Test
+impl smackdebt_analysis::SourceRole
+pub const fn smackdebt_analysis::SourceRole::affects_verdict(self) -> bool
+pub enum smackdebt_analysis::SourceTrust
+pub smackdebt_analysis::SourceTrust::Advisory
+pub smackdebt_analysis::SourceTrust::Failed
+pub smackdebt_analysis::SourceTrust::Trusted
 pub enum smackdebt_analysis::UnitKind
 pub smackdebt_analysis::UnitKind::Closure
 pub smackdebt_analysis::UnitKind::Function
@@ -168,10 +192,14 @@ pub const fn smackdebt_analysis::ContributorId::index(self) -> usize
 pub struct smackdebt_analysis::Coverage
 impl smackdebt_analysis::Coverage
 pub const fn smackdebt_analysis::Coverage::analyzed_files(self) -> u32
+pub const fn smackdebt_analysis::Coverage::classified(u32, smackdebt_analysis::SourceCoverageOutcome, u32, u32) -> Self
+pub const fn smackdebt_analysis::Coverage::clean_files(self) -> u32
 pub fn smackdebt_analysis::Coverage::combine(self, Self) -> Self
+pub const fn smackdebt_analysis::Coverage::context_files(self) -> u32
 pub const fn smackdebt_analysis::Coverage::excluded_lines(self) -> u32
 pub const fn smackdebt_analysis::Coverage::failed_files(self) -> u32
 pub const fn smackdebt_analysis::Coverage::new(u32, u32, u32, u32, u32, u32) -> Self
+pub const fn smackdebt_analysis::Coverage::recovered_files(self) -> u32
 pub const fn smackdebt_analysis::Coverage::selected_files(self) -> u32
 pub const fn smackdebt_analysis::Coverage::source_lines(self) -> u32
 pub const fn smackdebt_analysis::Coverage::unsupported_files(self) -> u32
@@ -185,12 +213,16 @@ pub const fn smackdebt_analysis::DependencyCoverage::total(self) -> u32
 pub const fn smackdebt_analysis::DependencyCoverage::unresolved(self) -> u32
 pub struct smackdebt_analysis::DependencyEdge
 impl smackdebt_analysis::DependencyEdge
+pub const fn smackdebt_analysis::DependencyEdge::affects_verdict(&self) -> bool
 pub const fn smackdebt_analysis::DependencyEdge::id(&self) -> smackdebt_analysis::DependencyEdgeId
 pub fn smackdebt_analysis::DependencyEdge::locations(&self) -> &[smackdebt_analysis::SourceSpan]
 pub fn smackdebt_analysis::DependencyEdge::new(smackdebt_analysis::DependencyEdgeId, smackdebt_analysis::FileId, smackdebt_analysis::FileId, u32, alloc::vec::Vec<smackdebt_analysis::SourceSpan>) -> Self
 pub const fn smackdebt_analysis::DependencyEdge::references(&self) -> u32
+pub const fn smackdebt_analysis::DependencyEdge::role(&self) -> smackdebt_analysis::SourceRole
 pub const fn smackdebt_analysis::DependencyEdge::source(&self) -> smackdebt_analysis::FileId
 pub const fn smackdebt_analysis::DependencyEdge::target(&self) -> smackdebt_analysis::FileId
+pub const fn smackdebt_analysis::DependencyEdge::trust(&self) -> smackdebt_analysis::SourceTrust
+pub fn smackdebt_analysis::DependencyEdge::with_evidence(self, smackdebt_analysis::SourceRole, smackdebt_analysis::SourceTrust) -> Self
 pub struct smackdebt_analysis::DependencyEdgeId(_)
 impl smackdebt_analysis::DependencyEdgeId
 pub const fn smackdebt_analysis::DependencyEdgeId::from_index(usize) -> Self
@@ -299,21 +331,29 @@ pub const fn smackdebt_analysis::FileRecord::id(&self) -> smackdebt_analysis::Fi
 pub const fn smackdebt_analysis::FileRecord::language(&self) -> core::option::Option<smackdebt_analysis::Language>
 pub fn smackdebt_analysis::FileRecord::new(smackdebt_analysis::FileId, smackdebt_analysis::ScopeId, impl core::convert::Into<alloc::string::String>, smackdebt_analysis::Coverage, smackdebt_analysis::HealthCounts) -> Self
 pub const fn smackdebt_analysis::FileRecord::package(&self) -> core::option::Option<smackdebt_analysis::PackageId>
+pub const fn smackdebt_analysis::FileRecord::parse_status(&self) -> core::option::Option<&smackdebt_analysis::ParseStatus>
 pub fn smackdebt_analysis::FileRecord::path(&self) -> &str
 pub const fn smackdebt_analysis::FileRecord::path_id(&self) -> core::option::Option<smackdebt_analysis::PathId>
+pub const fn smackdebt_analysis::FileRecord::role(&self) -> smackdebt_analysis::SourceRole
 pub const fn smackdebt_analysis::FileRecord::scope(&self) -> smackdebt_analysis::ScopeId
+pub fn smackdebt_analysis::FileRecord::trust(&self) -> smackdebt_analysis::SourceTrust
 pub fn smackdebt_analysis::FileRecord::with_activity(self, smackdebt_analysis::FileActivity) -> Self
 pub fn smackdebt_analysis::FileRecord::with_language(self, smackdebt_analysis::Language) -> Self
 pub fn smackdebt_analysis::FileRecord::with_package(self, smackdebt_analysis::PackageId) -> Self
+pub fn smackdebt_analysis::FileRecord::with_source_state(self, smackdebt_analysis::SourceRole, smackdebt_analysis::ParseStatus) -> Self
 pub struct smackdebt_analysis::Finding
 impl smackdebt_analysis::Finding
+pub const fn smackdebt_analysis::Finding::affects_verdict(&self) -> bool
 pub const fn smackdebt_analysis::Finding::assessment(&self) -> smackdebt_analysis::HealthAssessment
 pub const fn smackdebt_analysis::Finding::file(&self) -> smackdebt_analysis::FileId
 pub const fn smackdebt_analysis::Finding::id(&self) -> smackdebt_analysis::FindingId
 pub fn smackdebt_analysis::Finding::identity(&self) -> &smackdebt_analysis::UnitIdentity
 pub const fn smackdebt_analysis::Finding::measurements(&self) -> smackdebt_analysis::Measurements
 pub fn smackdebt_analysis::Finding::new(smackdebt_analysis::FindingId, smackdebt_analysis::FileId, smackdebt_analysis::UnitIdentity, smackdebt_analysis::SourceSpan, smackdebt_analysis::Measurements, smackdebt_analysis::HealthAssessment) -> Self
+pub const fn smackdebt_analysis::Finding::role(&self) -> smackdebt_analysis::SourceRole
 pub const fn smackdebt_analysis::Finding::span(&self) -> smackdebt_analysis::SourceSpan
+pub const fn smackdebt_analysis::Finding::trust(&self) -> smackdebt_analysis::SourceTrust
+pub fn smackdebt_analysis::Finding::with_evidence(self, smackdebt_analysis::SourceRole, smackdebt_analysis::SourceTrust) -> Self
 pub struct smackdebt_analysis::FindingId(_)
 impl smackdebt_analysis::FindingId
 pub const fn smackdebt_analysis::FindingId::from_index(usize) -> Self
@@ -421,6 +461,14 @@ impl smackdebt_analysis::PackageId
 pub const fn smackdebt_analysis::PackageId::from_index(usize) -> Self
 pub const fn smackdebt_analysis::PackageId::get(self) -> u32
 pub const fn smackdebt_analysis::PackageId::index(self) -> usize
+pub struct smackdebt_analysis::PackageRecord
+impl smackdebt_analysis::PackageRecord
+pub fn smackdebt_analysis::PackageRecord::base_only(smackdebt_analysis::PackageId, smackdebt_analysis::ScopeId, impl core::convert::Into<alloc::string::String>) -> Self
+pub fn smackdebt_analysis::PackageRecord::current(smackdebt_analysis::PackageId, smackdebt_analysis::ScopeId, impl core::convert::Into<alloc::string::String>) -> Self
+pub const fn smackdebt_analysis::PackageRecord::id(&self) -> smackdebt_analysis::PackageId
+pub fn smackdebt_analysis::PackageRecord::path(&self) -> &str
+pub const fn smackdebt_analysis::PackageRecord::presence(&self) -> smackdebt_analysis::PackagePresence
+pub const fn smackdebt_analysis::PackageRecord::scope(&self) -> smackdebt_analysis::ScopeId
 pub struct smackdebt_analysis::PathId(_)
 impl smackdebt_analysis::PathId
 pub const fn smackdebt_analysis::PathId::from_index(usize) -> Self
@@ -447,6 +495,7 @@ pub const fn smackdebt_analysis::Report::mode(&self) -> smackdebt_analysis::Repo
 pub fn smackdebt_analysis::Report::package_edges(&self) -> &[smackdebt_analysis::PackageEdge]
 pub fn smackdebt_analysis::Report::package_graph(&self) -> &[smackdebt_analysis::PackageGraphMeasurement]
 pub fn smackdebt_analysis::Report::package_history(&self) -> &[smackdebt_analysis::PackageHistory]
+pub fn smackdebt_analysis::Report::packages(&self) -> &[smackdebt_analysis::PackageRecord]
 pub fn smackdebt_analysis::Report::paths(&self) -> &[alloc::string::String]
 pub fn smackdebt_analysis::Report::resolution_diagnostics(&self) -> &[smackdebt_analysis::ResolutionDiagnostic]
 pub const fn smackdebt_analysis::Report::root(&self) -> core::option::Option<smackdebt_analysis::ScopeId>
@@ -472,6 +521,7 @@ pub fn smackdebt_analysis::ReportBuilder::link_finding(&mut self, smackdebt_anal
 pub fn smackdebt_analysis::ReportBuilder::new(smackdebt_analysis::ReportMode) -> Self
 pub fn smackdebt_analysis::ReportBuilder::set_architecture(&mut self, smackdebt_analysis::ArchitectureReportFacts)
 pub fn smackdebt_analysis::ReportBuilder::set_evolution(&mut self, smackdebt_analysis::EvolutionaryReportFacts)
+pub fn smackdebt_analysis::ReportBuilder::set_packages(&mut self, alloc::vec::Vec<smackdebt_analysis::PackageRecord>)
 pub fn smackdebt_analysis::ReportBuilder::set_root(&mut self, smackdebt_analysis::ScopeId)
 pub fn smackdebt_analysis::ReportBuilder::with_capacity(smackdebt_analysis::ReportMode, usize, usize, usize, usize, usize) -> Self
 pub struct smackdebt_analysis::ResolutionDiagnostic

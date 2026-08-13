@@ -101,6 +101,55 @@ fn invalid_project_config_uses_argument_exit_code() {
 }
 
 #[test]
+fn same_level_source_role_conflict_has_exact_argument_failure_streams() {
+    let project = fixture();
+    fs::write(
+        project.path().join("conflict.js"),
+        "export function work() { return 1; }\n",
+    )
+    .unwrap();
+    fs::write(
+        project.path().join(".smackdebt.toml"),
+        "[source_roles]\ntest = ['*.js']\nfixture = ['conflict.js']\n",
+    )
+    .unwrap();
+
+    cargo_bin_cmd!("smackdebt")
+        .arg(project.path())
+        .assert()
+        .code(2)
+        .stdout("")
+        .stderr("smackdebt: source role conflict for conflict.js: test, fixture\n");
+}
+
+#[test]
+fn configured_source_role_overrides_the_generic_path_role() {
+    let project = fixture();
+    fs::create_dir_all(project.path().join("tests")).unwrap();
+    fs::write(
+        project.path().join("tests/work.js"),
+        "export function work() { return 1; }\n",
+    )
+    .unwrap();
+    fs::write(
+        project.path().join(".smackdebt.toml"),
+        "[source_roles]\nexample = ['tests/work.js']\n",
+    )
+    .unwrap();
+
+    let output = run(["--json", project.path().to_str().unwrap()]);
+    let report: serde_json::Value = serde_json::from_slice(&output).unwrap();
+    let paths = report["paths"].as_array().unwrap();
+    let file = report["files"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .find(|file| paths[file["path"].as_u64().unwrap() as usize] == "tests/work.js")
+        .unwrap();
+    assert_eq!(file["role"], "example");
+}
+
+#[test]
 fn terminal_color_can_be_forced_or_disabled_through_a_pipe() {
     let project = fixture();
     let path = project.path().to_str().unwrap();

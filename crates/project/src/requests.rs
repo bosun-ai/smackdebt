@@ -1,12 +1,70 @@
 use std::num::NonZeroUsize;
 use std::path::PathBuf;
 
-use smackdebt_analysis::{HealthPolicy, Report, ScopeId, Thresholds};
+use smackdebt_analysis::{HealthPolicy, Report, ScopeId, SourceRole, Thresholds};
 use thiserror::Error;
 
 use crate::project::{analyze_codebase, analyze_diff};
 
 const DEFAULT_HISTORY_DAYS: u32 = 90;
+
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct SourceRoleRule {
+    role: SourceRole,
+    pattern: String,
+}
+
+impl SourceRoleRule {
+    fn new(role: SourceRole, pattern: impl Into<String>) -> Self {
+        Self {
+            role,
+            pattern: pattern.into(),
+        }
+    }
+
+    pub fn primary(pattern: impl Into<String>) -> Self {
+        Self::new(SourceRole::Primary, pattern)
+    }
+
+    pub fn test(pattern: impl Into<String>) -> Self {
+        Self::new(SourceRole::Test, pattern)
+    }
+
+    pub fn example(pattern: impl Into<String>) -> Self {
+        Self::new(SourceRole::Example, pattern)
+    }
+
+    pub fn benchmark(pattern: impl Into<String>) -> Self {
+        Self::new(SourceRole::Benchmark, pattern)
+    }
+
+    pub fn fixture(pattern: impl Into<String>) -> Self {
+        Self::new(SourceRole::Fixture, pattern)
+    }
+
+    pub fn generated(pattern: impl Into<String>) -> Self {
+        Self::new(SourceRole::Generated, pattern)
+    }
+
+    pub(super) const fn role(&self) -> SourceRole {
+        self.role
+    }
+
+    pub fn role_name(&self) -> &'static str {
+        match self.role {
+            SourceRole::Primary => "primary",
+            SourceRole::Test => "test",
+            SourceRole::Example => "example",
+            SourceRole::Benchmark => "benchmark",
+            SourceRole::Fixture => "fixture",
+            SourceRole::Generated => "generated",
+        }
+    }
+
+    pub fn pattern(&self) -> &str {
+        &self.pattern
+    }
+}
 
 /// The requested execution width.
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
@@ -37,6 +95,7 @@ pub struct CodebaseRequest {
     pub(super) history_days: u32,
     pub(super) excludes: Vec<String>,
     pub(super) policy: HealthPolicy,
+    pub(super) role_rules: Vec<SourceRoleRule>,
 }
 
 impl CodebaseRequest {
@@ -48,6 +107,7 @@ impl CodebaseRequest {
             history_days: DEFAULT_HISTORY_DAYS,
             excludes: Vec::new(),
             policy: HealthPolicy::default(),
+            role_rules: Vec::new(),
         }
     }
 
@@ -69,6 +129,11 @@ impl CodebaseRequest {
 
     pub fn with_excludes(mut self, excludes: Vec<String>) -> Self {
         self.excludes = excludes;
+        self
+    }
+
+    pub fn with_role_rules(mut self, rules: Vec<SourceRoleRule>) -> Self {
+        self.role_rules = rules;
         self
     }
 
@@ -101,6 +166,7 @@ pub struct DiffRequest {
     pub(super) width: ExecutionWidth,
     pub(super) history_days: u32,
     pub(super) policy: HealthPolicy,
+    pub(super) role_rules: Vec<SourceRoleRule>,
 }
 
 impl DiffRequest {
@@ -112,6 +178,7 @@ impl DiffRequest {
             width: ExecutionWidth::Automatic,
             history_days: DEFAULT_HISTORY_DAYS,
             policy: HealthPolicy::default(),
+            role_rules: Vec::new(),
         }
     }
 
@@ -133,6 +200,11 @@ impl DiffRequest {
 
     pub fn with_history_days(mut self, days: u32) -> Self {
         self.history_days = days;
+        self
+    }
+
+    pub fn with_role_rules(mut self, rules: Vec<SourceRoleRule>) -> Self {
+        self.role_rules = rules;
         self
     }
 
@@ -217,4 +289,6 @@ pub enum ProjectError {
     Git(#[from] smackdebt_git::GitError),
     #[error("no default Git ref was found; pass a ref explicitly")]
     MissingReference,
+    #[error("source role conflict for {path}: {roles}")]
+    SourceRoleConflict { path: PathBuf, roles: String },
 }

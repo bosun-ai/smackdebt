@@ -12,6 +12,9 @@ test:
 update-source-snapshots:
     SMACKDEBT_UPDATE_COMMAND=1 SMACKDEBT_UPDATE_SNAPSHOTS=1 cargo test -p smackdebt --test acceptance source_engine
 
+update-acceptance-snapshots:
+    SMACKDEBT_UPDATE_COMMAND=1 SMACKDEBT_UPDATE_SNAPSHOTS=1 cargo test -p smackdebt --test acceptance
+
 update-unified-snapshot case:
     SMACKDEBT_UPDATE_COMMAND=1 SMACKDEBT_UPDATE_CASE={{case}} cargo test -p smackdebt --test unified_acceptance
 

@@ -5,7 +5,7 @@ src
 QUALITY  100% need attention
 ████████████  27 / 27 code units
 ▲ 25 high · ● 2 watch · 0 healthy
-✓ all 11 source files analyzed
+✓ all 11 source files analyzed cleanly
 
 DEBT BY AREA
   area                high  watch   share  rate               

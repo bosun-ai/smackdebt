@@ -6,7 +6,7 @@ use smackdebt_analysis::{
     ArchitectureComparison, ArchitectureFinding, Comparison, DependencyEdge, Diagnostic,
     EvolutionaryComparison, EvolutionaryFinding, ExternalDependency, FileHistory, FileRecord,
     Finding, HealthCounts, Measurements, PackageEdge, PackageGraphMeasurement, PackageHistory,
-    Report, ResolutionDiagnostic, Scope, UnitKind,
+    Report, ResolutionDiagnostic, Scope, SourceRole, SourceTrust, UnitKind,
 };
 
 use crate::output::{
@@ -274,7 +274,7 @@ impl Serialize for FileView<'_> {
         S: Serializer,
     {
         let file = self.0;
-        let mut map = serializer.serialize_map(Some(8))?;
+        let mut map = serializer.serialize_map(Some(10))?;
         map.serialize_entry("id", &file.id().get())?;
         map.serialize_entry("scope", &file.scope().get())?;
         map.serialize_entry("path", &file.path_id().map(|id| id.get()))?;
@@ -283,6 +283,8 @@ impl Serialize for FileView<'_> {
         map.serialize_entry("health", &(self.1 as u32 + file.id().get()))?;
         map.serialize_entry("activity", &file.id().get())?;
         map.serialize_entry("package", &file.package().map(|id| id.get()))?;
+        map.serialize_entry("role", source_role_name(file.role()))?;
+        map.serialize_entry("trust", source_trust_name(file.trust()))?;
         map.end()
     }
 }
@@ -290,7 +292,7 @@ impl Serialize for FileView<'_> {
 struct DependencyCoverageView(smackdebt_analysis::DependencyCoverage);
 impl Serialize for DependencyCoverageView {
     fn serialize<S: Serializer>(&self, serializer: S) -> Result<S::Ok, S::Error> {
-        let mut map = serializer.serialize_map(Some(5))?;
+        let mut map = serializer.serialize_map(Some(7))?;
         map.serialize_entry("internal", &self.0.internal())?;
         map.serialize_entry("external", &self.0.external())?;
         map.serialize_entry("unresolved", &self.0.unresolved())?;
@@ -319,6 +321,8 @@ impl Serialize for DependencyEdgeView<'_> {
         map.serialize_entry("target", &self.0.target().get())?;
         map.serialize_entry("references", &self.0.references())?;
         map.serialize_entry("locations", &Locations(self.0.locations()))?;
+        map.serialize_entry("role", source_role_name(self.0.role()))?;
+        map.serialize_entry("trust", source_trust_name(self.0.trust()))?;
         map.end()
     }
 }
@@ -779,7 +783,7 @@ impl Serialize for FindingView<'_> {
         S: Serializer,
     {
         let finding = self.0;
-        let mut map = serializer.serialize_map(Some(9))?;
+        let mut map = serializer.serialize_map(Some(11))?;
         map.serialize_entry("id", &finding.id().get())?;
         map.serialize_entry("file", &finding.file().get())?;
         map.serialize_entry("name", finding.identity().name())?;
@@ -789,7 +793,28 @@ impl Serialize for FindingView<'_> {
         map.serialize_entry("end_line", &finding.span().end_line())?;
         map.serialize_entry("rating", rating_name(finding.assessment().rating()))?;
         map.serialize_entry("measurements", &MeasurementsView(finding.measurements()))?;
+        map.serialize_entry("role", source_role_name(finding.role()))?;
+        map.serialize_entry("trust", source_trust_name(finding.trust()))?;
         map.end()
+    }
+}
+
+fn source_role_name(role: SourceRole) -> &'static str {
+    match role {
+        SourceRole::Primary => "primary",
+        SourceRole::Test => "test",
+        SourceRole::Example => "example",
+        SourceRole::Benchmark => "benchmark",
+        SourceRole::Fixture => "fixture",
+        SourceRole::Generated => "generated",
+    }
+}
+
+fn source_trust_name(trust: SourceTrust) -> &'static str {
+    match trust {
+        SourceTrust::Trusted => "trusted",
+        SourceTrust::Advisory => "advisory",
+        SourceTrust::Failed => "failed",
     }
 }
 
@@ -879,11 +904,14 @@ impl Serialize for CoverageView {
     where
         S: Serializer,
     {
-        let mut map = serializer.serialize_map(Some(6))?;
+        let mut map = serializer.serialize_map(Some(9))?;
         map.serialize_entry("selected_files", &self.0.selected_files())?;
         map.serialize_entry("analyzed_files", &self.0.analyzed_files())?;
+        map.serialize_entry("clean_files", &self.0.clean_files())?;
+        map.serialize_entry("recovered_files", &self.0.recovered_files())?;
         map.serialize_entry("unsupported_files", &self.0.unsupported_files())?;
         map.serialize_entry("failed_files", &self.0.failed_files())?;
+        map.serialize_entry("context_files", &self.0.context_files())?;
         map.serialize_entry("source_lines", &self.0.source_lines())?;
         map.serialize_entry("excluded_lines", &self.0.excluded_lines())?;
         map.end()

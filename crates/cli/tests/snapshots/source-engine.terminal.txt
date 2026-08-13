@@ -1,11 +1,11 @@
 smackdebt · codebase
-.
+repository root
 1 package · 1 file · 7 lines
 
 QUALITY  0% need attention
 ░░░░░░░░░░░░  0 / 2 code units
 ▲ 0 high · ● 0 watch · 2 healthy
-✓ all 1 source file analyzed
+✓ all 1 source file analyzed cleanly
   ↓ src
   ↓ src/work.rb
 

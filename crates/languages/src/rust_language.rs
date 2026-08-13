@@ -18,6 +18,17 @@ impl Language for Rust {
         "[(function_item) (function_signature_item) (closure_expression)] @unit"
     }
 
+    fn generated_marker(source: &[u8]) -> bool {
+        std::str::from_utf8(source).is_ok_and(|text| {
+            text.lines().take(5).any(|line| {
+                let line = line.to_ascii_lowercase();
+                line.contains("@generated")
+                    || line.contains("code generated")
+                    || line.contains("automatically generated")
+            })
+        })
+    }
+
     fn unit_kind(node: Node<'_>) -> Option<UnitKind> {
         match node.kind() {
             "function_item" if has_method_ancestor(node) => Some(UnitKind::Method),

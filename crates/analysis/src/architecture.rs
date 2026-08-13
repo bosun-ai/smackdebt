@@ -1,4 +1,4 @@
-use crate::{ComparisonDirection, FileId, PackageId, Rating, SourceSpan};
+use crate::{ComparisonDirection, FileId, PackageId, Rating, SourceRole, SourceSpan, SourceTrust};
 
 #[derive(Clone, Debug, Default, Eq, PartialEq)]
 pub struct ArchitectureGraph {
@@ -84,6 +84,8 @@ pub struct DependencyEdge {
     target: FileId,
     references: u32,
     locations: Vec<SourceSpan>,
+    role: SourceRole,
+    trust: SourceTrust,
 }
 
 impl DependencyEdge {
@@ -100,7 +102,14 @@ impl DependencyEdge {
             target,
             references,
             locations,
+            role: SourceRole::Primary,
+            trust: SourceTrust::Trusted,
         }
+    }
+    pub fn with_evidence(mut self, role: SourceRole, trust: SourceTrust) -> Self {
+        self.role = role;
+        self.trust = trust;
+        self
     }
     pub const fn id(&self) -> DependencyEdgeId {
         self.id
@@ -116,6 +125,15 @@ impl DependencyEdge {
     }
     pub fn locations(&self) -> &[SourceSpan] {
         &self.locations
+    }
+    pub const fn role(&self) -> SourceRole {
+        self.role
+    }
+    pub const fn trust(&self) -> SourceTrust {
+        self.trust
+    }
+    pub const fn affects_verdict(&self) -> bool {
+        self.role.affects_verdict() && matches!(self.trust, SourceTrust::Trusted)
     }
 }
 

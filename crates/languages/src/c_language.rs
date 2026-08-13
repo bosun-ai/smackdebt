@@ -18,6 +18,10 @@ impl Language for C {
         "(function_definition) @unit"
     }
 
+    fn generated_marker(source: &[u8]) -> bool {
+        generated_comment(source)
+    }
+
     fn unit_kind(node: Node<'_>) -> Option<UnitKind> {
         (node.kind() == "function_definition").then_some(UnitKind::Function)
     }
@@ -40,6 +44,20 @@ impl Language for C {
     fn dependency(node: Node<'_>, source: &[u8]) -> Option<DependencySyntax> {
         crate::dependency::include(node, source)
     }
+}
+
+fn generated_comment(source: &[u8]) -> bool {
+    std::str::from_utf8(source).is_ok_and(|text| {
+        let head = text
+            .lines()
+            .take(5)
+            .collect::<Vec<_>>()
+            .join(" ")
+            .to_ascii_lowercase();
+        head.contains("generated file")
+            || head.contains("code generated")
+            || head.contains("automatically generated")
+    })
 }
 
 pub(super) fn declarator_name(node: Node<'_>, source: &[u8]) -> String {

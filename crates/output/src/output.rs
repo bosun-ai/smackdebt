@@ -106,8 +106,8 @@ impl<'a> Presentation<'a> {
             && scope.children().len() == 1
         {
             let child = &report.scopes()[scope.children()[0].index()];
-            if child.name() != "." {
-                breadcrumbs.push(child.name());
+            if child.name() != "." || scope.name() != "." {
+                breadcrumbs.push(terminal_path(child.name()));
             }
             displayed = Some(child);
         }
@@ -146,6 +146,9 @@ impl<'a> Presentation<'a> {
                 .iter()
                 .map(|id| &report.findings()[id.index()])
                 .collect();
+            if !all {
+                findings.retain(|finding| finding.affects_verdict());
+            }
             findings.sort_by(|left, right| finding_order(report, left, right));
             let finding_limit = if all || scope.kind() == ScopeKind::File {
                 findings.len()
@@ -261,7 +264,11 @@ impl<'a, W: Write> Renderer<'a, W> {
             writeln!(self.writer)?;
             self.theme
                 .write(self.writer, Role::Navigation, "→ Explore")?;
-            writeln!(self.writer, ": smackdebt {}", path.display())?;
+            if path == Path::new(".") {
+                writeln!(self.writer, " repository root: smackdebt .")?;
+            } else {
+                writeln!(self.writer, ": smackdebt {}", path.display())?;
+            }
         }
         Ok(())
     }
@@ -617,7 +624,11 @@ impl<'a, W: Write> Renderer<'a, W> {
         self.theme.write(self.writer, Role::Brand, "smackdebt")?;
         write!(self.writer, " · {}", mode_name(view.report.mode()))?;
         writeln!(self.writer)?;
-        writeln!(self.writer, "{}", view.selected.map_or(".", Scope::name))?;
+        writeln!(
+            self.writer,
+            "{}",
+            terminal_path(view.selected.map_or(".", Scope::name))
+        )?;
         if let Some(scope) = view.selected {
             let coverage = scope.coverage();
             match view.report.mode() {
@@ -630,13 +641,13 @@ impl<'a, W: Write> Renderer<'a, W> {
                 ),
                 ReportMode::Diff => writeln!(
                     self.writer,
-                    "{} · {} analyzed",
+                    "{} · {} clean",
                     Counted::new(
                         coverage.selected_files() as usize,
                         "source file changed",
                         "source files changed"
                     ),
-                    Grouped(coverage.analyzed_files() as usize)
+                    Grouped(coverage.clean_files() as usize)
                 ),
             }?;
         }
@@ -673,14 +684,17 @@ impl<'a, W: Write> Renderer<'a, W> {
             Grouped(health.watch() as usize),
             Grouped(health.healthy() as usize)
         )?;
-        let excluded = coverage.unsupported_files() + coverage.failed_files();
-        if excluded == 0 {
+        let partial = coverage.recovered_files()
+            + coverage.unsupported_files()
+            + coverage.failed_files()
+            + coverage.context_files();
+        if partial == 0 {
             self.theme.write(self.writer, Role::Good, "✓")?;
             writeln!(
                 self.writer,
-                " all {} analyzed",
+                " all {} analyzed cleanly",
                 Counted::new(
-                    coverage.selected_files() as usize,
+                    coverage.clean_files() as usize,
                     "source file",
                     "source files"
                 )
@@ -689,9 +703,12 @@ impl<'a, W: Write> Renderer<'a, W> {
             self.theme.write(self.writer, Role::Warning, "!")?;
             writeln!(
                 self.writer,
-                " {} of {} excluded from analysis",
-                Counted::new(excluded as usize, "source file", "source files"),
-                Grouped(coverage.selected_files() as usize)
+                " {} clean · {} recovered · {} context · {} unsupported · {} failed",
+                Grouped(coverage.clean_files() as usize),
+                Grouped(coverage.recovered_files() as usize),
+                Grouped(coverage.context_files() as usize),
+                Grouped(coverage.unsupported_files() as usize),
+                Grouped(coverage.failed_files() as usize)
             )?;
         }
         Ok(())
@@ -746,7 +763,7 @@ impl<'a, W: Write> Renderer<'a, W> {
         let available = self.options.width.saturating_sub(fixed).max(12);
         let label_width = areas
             .iter()
-            .map(|area| UnicodeWidthStr::width(area.name()))
+            .map(|area| UnicodeWidthStr::width(terminal_path(area.name())))
             .max()
             .unwrap_or(12)
             .min(available)
@@ -765,7 +782,7 @@ impl<'a, W: Write> Renderer<'a, W> {
         )?;
         for area in areas {
             let health = area.health();
-            let label = middle_truncate(area.name(), label_width);
+            let label = middle_truncate(terminal_path(area.name()), label_width);
             write!(self.writer, "  {}  ", Padded::new(&label, label_width))?;
             self.table_count(health.high(), Role::Bad, 5)?;
             write!(self.writer, "  ")?;
@@ -799,7 +816,7 @@ impl<'a, W: Write> Renderer<'a, W> {
             };
             let marker = if health.high() > 0 { "▲" } else { "●" };
             self.theme.write(self.writer, role, marker)?;
-            writeln!(self.writer, " {}", area.name())?;
+            writeln!(self.writer, " {}", terminal_path(area.name()))?;
             writeln!(
                 self.writer,
                 "  {} high · {} watch · {} share",
@@ -850,7 +867,7 @@ impl<'a, W: Write> Renderer<'a, W> {
         let available = self.options.width.saturating_sub(fixed).max(12);
         let label_width = areas
             .iter()
-            .map(|area| UnicodeWidthStr::width(area.name()))
+            .map(|area| UnicodeWidthStr::width(terminal_path(area.name())))
             .max()
             .unwrap_or(12)
             .min(available)
@@ -869,7 +886,7 @@ impl<'a, W: Write> Renderer<'a, W> {
         )?;
         for area in areas {
             let diff = area.diff();
-            let label = middle_truncate(area.name(), label_width);
+            let label = middle_truncate(terminal_path(area.name()), label_width);
             write!(self.writer, "  {}  ", Padded::new(&label, label_width))?;
             self.table_count(diff.worse(), Role::Bad, 5)?;
             write!(self.writer, "  ")?;
@@ -902,7 +919,7 @@ impl<'a, W: Write> Renderer<'a, W> {
                 ("●", Role::Watch)
             };
             self.theme.write(self.writer, role, marker)?;
-            writeln!(self.writer, " {}", area.name())?;
+            writeln!(self.writer, " {}", terminal_path(area.name()))?;
             writeln!(
                 self.writer,
                 "  {} worse · {} better · {} changed",
@@ -1169,11 +1186,13 @@ impl<'a, W: Write> Renderer<'a, W> {
 
 fn package_name(report: &Report, package_index: usize) -> Option<&str> {
     report
-        .scopes()
-        .iter()
-        .filter(|scope| scope.kind() == ScopeKind::Package)
-        .nth(package_index)
-        .map(Scope::name)
+        .packages()
+        .get(package_index)
+        .map(|package| terminal_path(package.path()))
+}
+
+fn terminal_path(path: &str) -> &str {
+    if path == "." { "repository root" } else { path }
 }
 
 #[derive(Clone, Copy, Eq, PartialEq)]
@@ -1631,7 +1650,8 @@ mod tests {
     use crate::json::write_json;
     use smackdebt_analysis::{
         Coverage, FileActivity, FileId, FileRecord, FindingId, HealthCounts, HealthPolicy,
-        Measurements, Report, ReportBuilder, ReportMode, Scope, ScopeId, SourceSpan, UnitIdentity,
+        Measurements, PackageId, PackageRecord, Report, ReportBuilder, ReportMode, Scope, ScopeId,
+        SourceRole, SourceSpan, SourceTrust, UnitIdentity,
     };
 
     fn report_with_findings(activity: bool) -> Report {
@@ -1668,6 +1688,97 @@ mod tests {
             builder.link_finding(root, FindingId::from_index(index));
         }
         builder.finish()
+    }
+
+    #[test]
+    fn package_labels_come_from_the_package_table_not_scope_position() {
+        let mut builder = ReportBuilder::new(ReportMode::Codebase);
+        let root = ScopeId::from_index(0);
+        let directory = ScopeId::from_index(1);
+        let package_scope = ScopeId::from_index(2);
+        builder.add_scope(Scope::new(root, ScopeKind::Repository, ".", None));
+        builder.add_scope(Scope::new(
+            directory,
+            ScopeKind::Directory,
+            "unrelated",
+            Some(root),
+        ));
+        builder.add_scope(Scope::new(
+            package_scope,
+            ScopeKind::Package,
+            "scope-label",
+            Some(root),
+        ));
+        builder.set_root(root);
+        builder.set_packages(vec![PackageRecord::current(
+            PackageId::from_index(0),
+            package_scope,
+            "table-label",
+        )]);
+        let report = builder.finish();
+
+        assert_eq!(package_name(&report, 0), Some("table-label"));
+    }
+
+    #[test]
+    fn machine_root_dot_is_presented_as_repository_root() {
+        let mut builder = ReportBuilder::new(ReportMode::Codebase);
+        let root = ScopeId::from_index(0);
+        builder.add_scope(Scope::new(root, ScopeKind::Repository, ".", None));
+        builder.set_root(root);
+        let report = builder.finish();
+        let mut output = Vec::new();
+        write_terminal(
+            &mut output,
+            &report,
+            report.root(),
+            TerminalOptions::default(),
+        )
+        .unwrap();
+        let output = String::from_utf8(output).unwrap();
+        assert!(output.starts_with("smackdebt · codebase\nrepository root\n"));
+        assert_eq!(report.scopes()[0].name(), ".");
+    }
+
+    #[test]
+    fn advisory_findings_are_visible_only_with_all() {
+        let mut builder = ReportBuilder::new(ReportMode::Codebase);
+        let root = ScopeId::from_index(0);
+        let file = FileId::from_index(0);
+        let finding = FindingId::from_index(0);
+        builder.add_scope(Scope::new(root, ScopeKind::Repository, ".", None));
+        builder.set_root(root);
+        builder.add_file(FileRecord::new(
+            file,
+            root,
+            "broken.py",
+            Coverage::new(1, 1, 0, 0, 4, 0),
+            HealthCounts::default(),
+        ));
+        builder.add_finding(
+            Finding::new(
+                finding,
+                file,
+                UnitIdentity::new("broken", smackdebt_analysis::UnitKind::Function),
+                SourceSpan::new(1, 4),
+                Measurements::new(25, 3, 4),
+                HealthPolicy::default().assess(Measurements::new(25, 3, 4)),
+            )
+            .with_evidence(SourceRole::Primary, SourceTrust::Advisory),
+        );
+        builder.link_finding(root, finding);
+        let report = builder.finish();
+        assert!(
+            Presentation::new(&report, report.root(), false)
+                .findings
+                .is_empty()
+        );
+        assert_eq!(
+            Presentation::new(&report, report.root(), true)
+                .findings
+                .len(),
+            1
+        );
     }
 
     #[test]

@@ -135,6 +135,44 @@ pub enum Language {
     Unknown,
 }
 
+/// The repository role of a selected source file.
+#[derive(Clone, Copy, Debug, Eq, Hash, Ord, PartialEq, PartialOrd)]
+pub enum SourceRole {
+    Primary,
+    Test,
+    Example,
+    Benchmark,
+    Fixture,
+    Generated,
+}
+
+impl SourceRole {
+    pub const fn affects_verdict(self) -> bool {
+        matches!(
+            self,
+            Self::Primary | Self::Test | Self::Example | Self::Benchmark
+        )
+    }
+}
+
+/// Whether parsed facts may affect a verdict.
+#[derive(Clone, Copy, Debug, Eq, Hash, Ord, PartialEq, PartialOrd)]
+pub enum SourceTrust {
+    Trusted,
+    Advisory,
+    Failed,
+}
+
+impl ParseStatus {
+    pub const fn trust(&self) -> SourceTrust {
+        match self {
+            Self::Parsed => SourceTrust::Trusted,
+            Self::Recovered => SourceTrust::Advisory,
+            Self::Failed => SourceTrust::Failed,
+        }
+    }
+}
+
 /// The kind of a measured code unit.
 #[derive(Clone, Copy, Debug, Eq, Hash, Ord, PartialEq, PartialOrd)]
 pub enum UnitKind {

@@ -11,7 +11,8 @@ pub use evidence::{
 };
 
 pub use requests::{
-    CodebaseRequest, DiffRequest, ExecutionWidth, ProjectError, ProjectReport, WorkStats,
+    CodebaseRequest, DiffRequest, ExecutionWidth, ProjectError, ProjectReport, SourceRoleRule,
+    WorkStats,
 };
 
 #[doc(hidden)]

@@ -10,6 +10,9 @@ pub smackdebt_project::ProjectError::Inspect
 pub smackdebt_project::ProjectError::Inspect::path: std::path::PathBuf
 pub smackdebt_project::ProjectError::Inspect::source: core::io::error::Error
 pub smackdebt_project::ProjectError::MissingReference
+pub smackdebt_project::ProjectError::SourceRoleConflict
+pub smackdebt_project::ProjectError::SourceRoleConflict::path: std::path::PathBuf
+pub smackdebt_project::ProjectError::SourceRoleConflict::roles: alloc::string::String
 pub smackdebt_project::ProjectError::WorkerPool(rayon_core::ThreadPoolBuildError)
 pub struct smackdebt_project::CodebaseRequest
 impl smackdebt_project::CodebaseRequest
@@ -18,6 +21,7 @@ pub fn smackdebt_project::CodebaseRequest::automatic(impl core::convert::Into<st
 pub fn smackdebt_project::CodebaseRequest::new(impl core::convert::Into<std::path::PathBuf>) -> Self
 pub fn smackdebt_project::CodebaseRequest::with_excludes(self, alloc::vec::Vec<alloc::string::String>) -> Self
 pub fn smackdebt_project::CodebaseRequest::with_history_days(self, u32) -> Self
+pub fn smackdebt_project::CodebaseRequest::with_role_rules(self, alloc::vec::Vec<smackdebt_project::SourceRoleRule>) -> Self
 pub fn smackdebt_project::CodebaseRequest::with_thresholds(self, (u32, u32), (u32, u32), (u32, u32)) -> Self
 pub fn smackdebt_project::CodebaseRequest::with_width(self, smackdebt_project::ExecutionWidth) -> Self
 pub struct smackdebt_project::DiffRequest
@@ -27,6 +31,7 @@ pub fn smackdebt_project::DiffRequest::automatic(impl core::convert::Into<std::p
 pub fn smackdebt_project::DiffRequest::new(impl core::convert::Into<std::path::PathBuf>) -> Self
 pub fn smackdebt_project::DiffRequest::with_history_days(self, u32) -> Self
 pub fn smackdebt_project::DiffRequest::with_reference(self, impl core::convert::Into<alloc::string::String>) -> Self
+pub fn smackdebt_project::DiffRequest::with_role_rules(self, alloc::vec::Vec<smackdebt_project::SourceRoleRule>) -> Self
 pub fn smackdebt_project::DiffRequest::with_thresholds(self, (u32, u32), (u32, u32), (u32, u32)) -> Self
 pub fn smackdebt_project::DiffRequest::with_width(self, smackdebt_project::ExecutionWidth) -> Self
 pub struct smackdebt_project::EvidenceSnapshot
@@ -44,6 +49,16 @@ pub struct smackdebt_project::ProjectReport
 impl smackdebt_project::ProjectReport
 pub fn smackdebt_project::ProjectReport::report(&self) -> &smackdebt_analysis::report::Report
 pub fn smackdebt_project::ProjectReport::selected_scope(&self) -> core::option::Option<smackdebt_analysis::report::ScopeId>
+pub struct smackdebt_project::SourceRoleRule
+impl smackdebt_project::SourceRoleRule
+pub fn smackdebt_project::SourceRoleRule::benchmark(impl core::convert::Into<alloc::string::String>) -> Self
+pub fn smackdebt_project::SourceRoleRule::example(impl core::convert::Into<alloc::string::String>) -> Self
+pub fn smackdebt_project::SourceRoleRule::fixture(impl core::convert::Into<alloc::string::String>) -> Self
+pub fn smackdebt_project::SourceRoleRule::generated(impl core::convert::Into<alloc::string::String>) -> Self
+pub fn smackdebt_project::SourceRoleRule::pattern(&self) -> &str
+pub fn smackdebt_project::SourceRoleRule::primary(impl core::convert::Into<alloc::string::String>) -> Self
+pub fn smackdebt_project::SourceRoleRule::role_name(&self) -> &'static str
+pub fn smackdebt_project::SourceRoleRule::test(impl core::convert::Into<alloc::string::String>) -> Self
 pub struct smackdebt_project::WorkStats
 impl smackdebt_project::WorkStats
 pub const fn smackdebt_project::WorkStats::git_processes(self) -> usize

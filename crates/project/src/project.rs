@@ -15,17 +15,20 @@ use smackdebt_analysis::{
     DiagnosticId, DiagnosticKind, EvolutionAccumulator, ExternalDependency, FileActivity,
     FileAnalysis, FileId, FileRecord, Finding, FindingId, HealthAssessment, HealthCounts,
     HealthPolicy, HistoryAvailability, HistoryChangeFact, HistoryCommitFact, HistoryCoverage,
-    Language, PackageEdge, PackageEdgeId, PackageGraphMeasurement, PackageId, ParseStatus, Rating,
-    Report, ReportBuilder as AnalysisReportBuilder, ReportMode, ResolutionDiagnostic,
-    ResolutionIssueKind, Scope, ScopeId, ScopeKind, compare_architecture, compare_units,
-    cycle_witness, dependency_degree, strongly_connected_components,
+    Language, PackageEdge, PackageEdgeId, PackageGraphMeasurement, PackageId, PackageRecord,
+    ParseStatus, Rating, Report, ReportBuilder as AnalysisReportBuilder, ReportMode,
+    ResolutionDiagnostic, ResolutionIssueKind, Scope, ScopeId, ScopeKind, SourceCoverageOutcome,
+    SourceRole, SourceTrust, compare_architecture, compare_units, cycle_witness, dependency_degree,
+    strongly_connected_components,
 };
-use smackdebt_discovery::{DiscoveredFile, Inventory};
+use smackdebt_discovery::{DiscoveredFile, Inventory, generic_source_roles, glob_matches};
 use smackdebt_git::{Change, ContributorIdentity, GitRepository};
 use smackdebt_languages::{AnalysisError as LanguageError, Analyzer};
 
-use crate::requests::WorkStats;
-use crate::requests::{CodebaseRequest, DiffRequest, ExecutionWidth, ProjectError, ProjectReport};
+use crate::requests::{
+    CodebaseRequest, DiffRequest, ExecutionWidth, ProjectError, ProjectReport, SourceRoleRule,
+    WorkStats,
+};
 
 const PARALLEL_FILE_CUTOVER: usize = 100;
 
@@ -49,17 +52,24 @@ pub(super) fn analyze_codebase(request: &CodebaseRequest) -> Result<ProjectRepor
         &candidates,
         request.width,
         request.policy,
+        &request.role_rules,
         &work,
     )?;
 
     let history_files = candidates
         .iter()
         .enumerate()
-        .map(|(index, file)| {
+        .zip(&analyses)
+        .map(|((index, file), result)| {
+            let eligible = matches!(
+                result,
+                FileResult::Analyzed(rated) if verdict_eligible(&rated.analysis, rated.role)
+            );
             (
                 file.path().as_path().to_path_buf(),
                 FileId::from_index(index),
                 file.package(),
+                eligible,
             )
         })
         .collect::<Vec<_>>();
@@ -163,12 +173,28 @@ pub(super) fn analyze_diff(request: &DiffRequest) -> Result<ProjectReport, Proje
     let before_aliases = load_base_resolution_aliases(&mut batch, &base);
     let before_package_roots =
         base_package_roots(&current_package_roots, &all_changed, &mut batch, &base);
+    let mut base_only_roots = before_package_roots.clone();
+    base_only_roots.extend(diff_package_roots(repository.root(), &all_changed));
+    base_only_roots.retain(|root| !current_package_roots.contains(root));
+    base_only_roots.sort();
+    base_only_roots.dedup();
     let mut package_roots = current_package_roots.clone();
-    package_roots.extend(before_package_roots.iter().cloned());
-    package_roots.extend(diff_package_roots(repository.root(), &all_changed));
-    package_roots.sort();
-    package_roots.dedup();
+    package_roots.extend(base_only_roots.iter().cloned());
     let mut hierarchy = HierarchyBuilder::new(".".to_owned(), &package_roots);
+    let package_records: Vec<_> = package_roots
+        .iter()
+        .enumerate()
+        .map(|(index, root)| {
+            let id = PackageId::from_index(index);
+            let scope = hierarchy.package_scopes[index];
+            let path = report_package_path(root);
+            if index < current_package_roots.len() {
+                PackageRecord::current(id, scope, path)
+            } else {
+                PackageRecord::base_only(id, scope, path)
+            }
+        })
+        .collect();
     let changed_paths_for_hierarchy: std::collections::BTreeSet<_> = changed
         .iter()
         .map(|entry| entry.current_path().to_path_buf())
@@ -201,7 +227,10 @@ pub(super) fn analyze_diff(request: &DiffRequest) -> Result<ProjectReport, Proje
         repository.root().to_path_buf(),
         base,
         batch,
-        request.policy,
+        DiffAnalysisPolicy {
+            health: request.policy,
+            roles: request.role_rules.clone(),
+        },
         width,
         work.clone(),
     )?;
@@ -222,6 +251,7 @@ pub(super) fn analyze_diff(request: &DiffRequest) -> Result<ProjectReport, Proje
         &unchanged_candidates,
         request.width,
         request.policy,
+        &request.role_rules,
         &work,
     )?;
     let root = ScopeId::from_index(0);
@@ -237,24 +267,28 @@ pub(super) fn analyze_diff(request: &DiffRequest) -> Result<ProjectReport, Proje
         builder.add_scope(scope);
     }
     builder.set_root(root);
-    let mut comparison_index = 0usize;
+    let mut indexes = DiffIndexes::default();
     let mut current_dependencies = Vec::new();
     let mut before_dependencies = Vec::new();
     for result in results {
         let file_id = FileId::from_index(result.index);
-        if let DiffSide::Analyzed { analysis, .. } = &result.current {
-            current_dependencies.push((
-                file_id,
-                result.change.current_path().to_path_buf(),
-                analysis.dependencies().to_vec(),
-            ));
+        if let DiffSide::Analyzed { analysis, role, .. } = &result.current {
+            current_dependencies.push(SourceDependencies {
+                file: file_id,
+                path: result.change.current_path().to_path_buf(),
+                references: analysis.dependencies().to_vec(),
+                role: *role,
+                trust: analysis.parse_status().trust(),
+            });
         }
-        if let DiffSide::Analyzed { analysis, .. } = &result.before {
-            before_dependencies.push((
-                file_id,
-                result.change.base_path().to_path_buf(),
-                analysis.dependencies().to_vec(),
-            ));
+        if let DiffSide::Analyzed { analysis, role, .. } = &result.before {
+            before_dependencies.push(SourceDependencies {
+                file: file_id,
+                path: result.change.base_path().to_path_buf(),
+                references: analysis.dependencies().to_vec(),
+                role: *role,
+                trust: analysis.parse_status().trust(),
+            });
         }
         let is_selected = selected_paths.contains(result.change.current_path());
         let scope_id = file_scopes
@@ -271,10 +305,11 @@ pub(super) fn analyze_diff(request: &DiffRequest) -> Result<ProjectReport, Proje
         add_diff_result(
             &mut builder,
             result,
-            &mut comparison_index,
+            &mut indexes,
             scope_id,
             package,
             is_selected,
+            request.policy,
         );
     }
     for (offset, (file, result)) in unchanged_candidates.iter().zip(unchanged).enumerate() {
@@ -297,20 +332,29 @@ pub(super) fn analyze_diff(request: &DiffRequest) -> Result<ProjectReport, Proje
         match result {
             FileResult::Analyzed(rated) => {
                 record = record.with_language(rated.analysis.language());
-                let dependencies = rated.analysis.dependencies().to_vec();
-                current_dependencies.push((
-                    file_id,
-                    file.path().as_path().to_path_buf(),
-                    dependencies.clone(),
-                ));
-                before_dependencies.push((
-                    file_id,
-                    file.path().as_path().to_path_buf(),
-                    dependencies,
-                ));
+                record =
+                    record.with_source_state(rated.role, rated.analysis.parse_status().clone());
+                let dependencies = SourceDependencies {
+                    file: file_id,
+                    path: file.path().as_path().to_path_buf(),
+                    references: rated.analysis.dependencies().to_vec(),
+                    role: rated.role,
+                    trust: rated.analysis.parse_status().trust(),
+                };
+                current_dependencies.push(dependencies.clone());
+                before_dependencies.push(dependencies);
             }
-            FileResult::Unsupported(language) => record = record.with_language(language),
-            FileResult::Failed(_) => {}
+            FileResult::Unsupported { language, role } => {
+                record = record
+                    .with_language(language)
+                    .with_source_state(role, ParseStatus::Failed);
+            }
+            FileResult::Failed { role, language, .. } => {
+                record = record
+                    .with_language(language)
+                    .with_source_state(role, ParseStatus::Failed);
+            }
+            FileResult::RoleConflict { .. } => unreachable!("role conflicts stop composition"),
         }
         builder.add_file(record);
     }
@@ -399,8 +443,14 @@ pub(super) fn analyze_diff(request: &DiffRequest) -> Result<ProjectReport, Proje
         .files()
         .iter()
         .filter_map(|file| {
-            file.package()
-                .map(|package| (PathBuf::from(file.path()), file.id(), package))
+            file.package().map(|package| {
+                (
+                    PathBuf::from(file.path()),
+                    file.id(),
+                    package,
+                    file.role().affects_verdict() && file.trust() == SourceTrust::Trusted,
+                )
+            })
         })
         .collect::<Vec<_>>();
     let history = load_evolution(repository.root(), request.history_days, &history_files);
@@ -438,19 +488,19 @@ pub(super) fn analyze_diff(request: &DiffRequest) -> Result<ProjectReport, Proje
         builder.link_evolutionary_finding(root, finding.id());
         let pair = finding.coupling();
         builder
-            .link_evolutionary_finding(ScopeId::from_index(1 + pair.left().index()), finding.id());
+            .link_evolutionary_finding(package_records[pair.left().index()].scope(), finding.id());
         builder
-            .link_evolutionary_finding(ScopeId::from_index(1 + pair.right().index()), finding.id());
+            .link_evolutionary_finding(package_records[pair.right().index()].scope(), finding.id());
     }
     for comparison in evolutionary_comparisons {
         builder.link_evolutionary_comparison(root, comparison.id());
         let pair = comparison.coupling();
         builder.link_evolutionary_comparison(
-            ScopeId::from_index(1 + pair.left().index()),
+            package_records[pair.left().index()].scope(),
             comparison.id(),
         );
         builder.link_evolutionary_comparison(
-            ScopeId::from_index(1 + pair.right().index()),
+            package_records[pair.right().index()].scope(),
             comparison.id(),
         );
     }
@@ -458,7 +508,7 @@ pub(super) fn analyze_diff(request: &DiffRequest) -> Result<ProjectReport, Proje
         builder.link_architecture_comparison(root, id);
         let comparison = &architecture_comparisons_for_links[id.index()];
         for package in comparison.packages() {
-            builder.link_architecture_comparison(ScopeId::from_index(1 + package.index()), id);
+            builder.link_architecture_comparison(package_records[package.index()].scope(), id);
         }
         for file in comparison.files() {
             let scope = builder.files()[file.index()].scope();
@@ -469,13 +519,14 @@ pub(super) fn analyze_diff(request: &DiffRequest) -> Result<ProjectReport, Proje
         builder.link_architecture_finding(root, id);
         let finding = &architecture_findings_for_links[id.index()];
         for package in finding.packages() {
-            builder.link_architecture_finding(ScopeId::from_index(1 + package.index()), id);
+            builder.link_architecture_finding(package_records[package.index()].scope(), id);
         }
         for file in finding.files() {
             let scope = builder.files()[file.index()].scope();
             builder.link_architecture_finding(scope, id);
         }
     }
+    builder.set_packages(package_records);
     let report = builder.finish();
     let selected_scope = path_filter
         .as_ref()
@@ -575,9 +626,26 @@ enum DiffSide {
     Analyzed {
         analysis: FileAnalysis,
         health: HealthCounts,
+        role: SourceRole,
     },
-    Unsupported(Language),
-    Failed(String),
+    Unsupported {
+        language: Language,
+        role: SourceRole,
+    },
+    Failed {
+        message: String,
+        role: SourceRole,
+    },
+    RoleConflict {
+        path: PathBuf,
+        roles: String,
+    },
+}
+
+#[derive(Clone)]
+struct DiffAnalysisPolicy {
+    health: HealthPolicy,
+    roles: Vec<SourceRoleRule>,
 }
 
 fn analyze_diff_inputs(
@@ -585,20 +653,24 @@ fn analyze_diff_inputs(
     root_path: PathBuf,
     base: String,
     mut batch: smackdebt_git::ObjectReader,
-    policy: HealthPolicy,
+    policy: DiffAnalysisPolicy,
     width: usize,
     work: AnalysisWork,
 ) -> Result<Vec<DiffResult>, ProjectError> {
     if changes.len() <= 1 {
         let mut analyzer = Analyzer::default();
-        return Ok(changes
+        let results = changes
             .into_iter()
             .enumerate()
             .map(|(index, change)| {
                 let input = read_diff_input(index, change, &root_path, &base, &mut batch, &work);
-                analyze_diff_input(input, policy, &mut analyzer, &work)
+                analyze_diff_input(input, policy.health, &policy.roles, &mut analyzer, &work)
             })
-            .collect());
+            .collect::<Vec<_>>();
+        if let Some((path, roles)) = results.iter().find_map(diff_role_conflict) {
+            return Err(ProjectError::SourceRoleConflict { path, roles });
+        }
+        return Ok(results);
     }
     let worker_count = width.max(1).min(changes.len());
     let pool = rayon::ThreadPoolBuilder::new()
@@ -608,6 +680,7 @@ fn analyze_diff_inputs(
     let input_rx = Arc::new(Mutex::new(input_rx));
     let (result_tx, result_rx) = mpsc::channel();
     let producer_work = work.clone();
+    let policy = Arc::new(policy);
     std::thread::scope(|threads| {
         let producer = threads.spawn(move || {
             for (index, change) in changes.into_iter().enumerate() {
@@ -623,6 +696,7 @@ fn analyze_diff_inputs(
                 let input_rx = Arc::clone(&input_rx);
                 let result_tx = result_tx.clone();
                 let worker_work = work.clone();
+                let policy = Arc::clone(&policy);
                 scope.spawn(move |_| {
                     let mut analyzer = Analyzer::default();
                     loop {
@@ -634,7 +708,8 @@ fn analyze_diff_inputs(
                         if result_tx
                             .send(analyze_diff_input(
                                 input,
-                                policy,
+                                policy.health,
+                                policy.roles.as_slice(),
                                 &mut analyzer,
                                 &worker_work,
                             ))
@@ -651,7 +726,19 @@ fn analyze_diff_inputs(
     drop(result_tx);
     let mut results: Vec<_> = result_rx.into_iter().collect();
     results.sort_by_key(|result| result.index);
+    if let Some((path, roles)) = results.iter().find_map(diff_role_conflict) {
+        return Err(ProjectError::SourceRoleConflict { path, roles });
+    }
     Ok(results)
+}
+
+fn diff_role_conflict(result: &DiffResult) -> Option<(PathBuf, String)> {
+    [&result.current, &result.before]
+        .into_iter()
+        .find_map(|side| match side {
+            DiffSide::RoleConflict { path, roles } => Some((path.clone(), roles.clone())),
+            _ => None,
+        })
 }
 
 fn read_diff_input(
@@ -696,6 +783,7 @@ fn read_diff_input(
 fn analyze_diff_input(
     input: DiffInput,
     policy: HealthPolicy,
+    role_rules: &[SourceRoleRule],
     analyzer: &mut Analyzer,
     work: &AnalysisWork,
 ) -> DiffResult {
@@ -706,20 +794,24 @@ fn analyze_diff_input(
         input.change.current_path(),
         input.current,
         policy,
+        role_rules,
         work,
     );
     let before_path = input.change.base_path();
-    let before = analyze_diff_side(analyzer, file_id, before_path, input.before, policy, work);
-    let current_units = match &current {
-        DiffSide::Analyzed { analysis, .. } => analysis.units(),
-        _ => &[],
-    };
-    let before_units = match &before {
-        DiffSide::Analyzed { analysis, .. } => analysis.units(),
-        _ => &[],
-    };
+    let before = analyze_diff_side(
+        analyzer,
+        file_id,
+        before_path,
+        input.before,
+        policy,
+        role_rules,
+        work,
+    );
     work.record_algorithm_pass();
-    let mut comparisons = compare_units(before_units, current_units, policy);
+    let mut comparisons = match (diff_units(&before), diff_units(&current)) {
+        (Some(before), Some(current)) => compare_units(before, current, policy),
+        _ => Vec::new(),
+    };
     comparisons
         .retain(|comparison| comparison.kind() != smackdebt_analysis::ComparisonKind::Unchanged);
     DiffResult {
@@ -731,45 +823,79 @@ fn analyze_diff_input(
     }
 }
 
+fn diff_units(side: &DiffSide) -> Option<&[smackdebt_analysis::UnitFact]> {
+    match side {
+        DiffSide::Missing => Some(&[]),
+        DiffSide::Analyzed { analysis, role, .. } if verdict_eligible(analysis, *role) => {
+            Some(analysis.units())
+        }
+        _ => None,
+    }
+}
+
 fn analyze_diff_side(
     analyzer: &mut Analyzer,
     file: FileId,
     path: &Path,
     input: InputSide,
     policy: HealthPolicy,
+    role_rules: &[SourceRoleRule],
     work: &AnalysisWork,
 ) -> DiffSide {
     if let Some(error) = input.error {
-        return DiffSide::Failed(error);
+        return role_for_unavailable_source(path, role_rules).map_or_else(
+            |roles| DiffSide::RoleConflict {
+                path: path.to_path_buf(),
+                roles,
+            },
+            |role| DiffSide::Failed {
+                message: error,
+                role,
+            },
+        );
     }
     let Some(bytes) = input.bytes else {
         return DiffSide::Missing;
     };
+    let role = match classify_source_role(path, &bytes, role_rules) {
+        Ok(role) => role,
+        Err(roles) => {
+            return DiffSide::RoleConflict {
+                path: path.to_path_buf(),
+                roles,
+            };
+        }
+    };
     match analyze_bytes(analyzer, file, path, bytes, work) {
         Ok(analysis) => {
-            let mut health = HealthCounts::default();
-            for unit in analysis.units() {
-                health.add_rating(policy.assess(unit.measurements()).rating());
+            let health = rated_health(&analysis, role, policy);
+            DiffSide::Analyzed {
+                analysis,
+                health,
+                role,
             }
-            DiffSide::Analyzed { analysis, health }
         }
-        Err(LanguageError::Unsupported(language)) => DiffSide::Unsupported(language),
-        Err(error) => DiffSide::Failed(error.to_string()),
+        Err(LanguageError::Unsupported(language)) => DiffSide::Unsupported { language, role },
+        Err(error) => DiffSide::Failed {
+            message: error.to_string(),
+            role,
+        },
     }
 }
 
 fn add_diff_result(
     report: &mut AnalysisReportBuilder,
     result: DiffResult,
-    comparison_index: &mut usize,
+    indexes: &mut DiffIndexes,
     scope_id: ScopeId,
     package: PackageId,
     included_in_code_diff: bool,
+    policy: HealthPolicy,
 ) {
     let file_id = FileId::from_index(result.index);
 
     for comparison in result.comparisons.iter().filter(|_| included_in_code_diff) {
-        let comparison_id = ComparisonId::from_index(*comparison_index);
+        let comparison_id = ComparisonId::from_index(indexes.comparison);
         report.add_comparison(
             Comparison::new(
                 comparison_id,
@@ -783,13 +909,37 @@ fn add_diff_result(
             .with_file(file_id),
         );
         report.link_comparison(scope_id, comparison_id);
-        *comparison_index += 1;
+        indexes.comparison += 1;
     }
 
     let selected = match &result.current {
         DiffSide::Missing => &result.before,
         current => current,
     };
+    if let DiffSide::Analyzed { analysis, role, .. } = selected
+        && !verdict_eligible(analysis, *role)
+    {
+        for unit in analysis.units() {
+            let assessment = policy.assess(unit.measurements());
+            if assessment.rating() == Rating::Healthy {
+                continue;
+            }
+            let id = FindingId::from_index(indexes.finding);
+            report.add_finding(
+                Finding::new(
+                    id,
+                    file_id,
+                    unit.identity().clone(),
+                    unit.span(),
+                    unit.measurements(),
+                    assessment,
+                )
+                .with_evidence(*role, analysis.parse_status().trust()),
+            );
+            report.link_finding(scope_id, id);
+            indexes.finding += 1;
+        }
+    }
     let (coverage, health, language) = if included_in_code_diff {
         diff_side_summary(selected)
     } else {
@@ -807,10 +957,21 @@ fn add_diff_result(
     if let Some(language) = language {
         file = file.with_language(language);
     }
+    if let DiffSide::Analyzed { analysis, role, .. } = selected {
+        file = file.with_source_state(*role, analysis.parse_status().clone());
+    } else if let DiffSide::Unsupported { role, .. } | DiffSide::Failed { role, .. } = selected {
+        file = file.with_source_state(*role, ParseStatus::Failed);
+    }
     report.add_file(file);
     report.link_file(scope_id, file_id);
     add_diff_diagnostic(report, file_id, &result.current, "current");
     add_diff_diagnostic(report, file_id, &result.before, "base");
+}
+
+#[derive(Default)]
+struct DiffIndexes {
+    comparison: usize,
+    finding: usize,
 }
 
 fn diff_side_summary(side: &DiffSide) -> (Coverage, HealthCounts, Option<Language>) {
@@ -820,32 +981,42 @@ fn diff_side_summary(side: &DiffSide) -> (Coverage, HealthCounts, Option<Languag
             HealthCounts::default(),
             None,
         ),
-        DiffSide::Unsupported(language) => (
-            Coverage::new(1, 0, 1, 0, 0, 0),
+        DiffSide::Unsupported { language, .. } => (
+            Coverage::classified(1, SourceCoverageOutcome::Unsupported, 0, 0),
             HealthCounts::default(),
             Some(*language),
         ),
-        DiffSide::Failed(_) => (
-            Coverage::new(1, 0, 0, 1, 0, 0),
+        DiffSide::Failed { .. } | DiffSide::RoleConflict { .. } => (
+            Coverage::classified(1, SourceCoverageOutcome::Failed, 0, 0),
             HealthCounts::default(),
             None,
         ),
-        DiffSide::Analyzed { analysis, health } => {
-            let failed = matches!(analysis.parse_status(), ParseStatus::Failed);
-            (
-                Coverage::new(
-                    1,
-                    u32::from(!failed),
-                    0,
-                    u32::from(failed),
-                    analysis.source_lines(),
-                    u32::from(failed) * analysis.source_lines(),
-                ),
-                *health,
-                Some(analysis.language()),
-            )
-        }
+        DiffSide::Analyzed {
+            analysis,
+            health,
+            role,
+            ..
+        } => (
+            source_coverage(analysis, *role),
+            *health,
+            Some(analysis.language()),
+        ),
     }
+}
+
+fn source_coverage(analysis: &FileAnalysis, role: SourceRole) -> Coverage {
+    let outcome = match analysis.parse_status() {
+        ParseStatus::Parsed if role.affects_verdict() => SourceCoverageOutcome::Clean,
+        ParseStatus::Parsed => SourceCoverageOutcome::Context,
+        ParseStatus::Recovered => SourceCoverageOutcome::Recovered,
+        ParseStatus::Failed => SourceCoverageOutcome::Failed,
+    };
+    Coverage::classified(
+        1,
+        outcome,
+        analysis.source_lines(),
+        u32::from(matches!(outcome, SourceCoverageOutcome::Failed)) * analysis.source_lines(),
+    )
 }
 
 fn add_diff_diagnostic(
@@ -855,11 +1026,13 @@ fn add_diff_diagnostic(
     label: &str,
 ) {
     let (kind, message) = match side {
-        DiffSide::Unsupported(language) => (
+        DiffSide::Unsupported { language, .. } => (
             DiagnosticKind::UnsupportedLanguage,
             format!("{label} side uses unsupported language: {language:?}"),
         ),
-        DiffSide::Failed(message) => (DiagnosticKind::Other, format!("{label} side: {message}")),
+        DiffSide::Failed { message, .. } => {
+            (DiagnosticKind::Other, format!("{label} side: {message}"))
+        }
         DiffSide::Analyzed { analysis, .. }
             if matches!(analysis.parse_status(), ParseStatus::Failed) =>
         {
@@ -868,6 +1041,15 @@ fn add_diff_diagnostic(
                 format!("{label} side parser failed"),
             )
         }
+        DiffSide::Analyzed { analysis, .. }
+            if matches!(analysis.parse_status(), ParseStatus::Recovered) =>
+        {
+            (
+                DiagnosticKind::ParseFailure,
+                format!("{label} side parser recovered from syntax errors"),
+            )
+        }
+        DiffSide::RoleConflict { .. } => return,
         DiffSide::Missing | DiffSide::Analyzed { .. } => return,
     };
     report.add_diagnostic(Diagnostic::new(
@@ -910,50 +1092,151 @@ fn analyze_current_files(
     candidates: &[&DiscoveredFile],
     width: ExecutionWidth,
     policy: HealthPolicy,
+    role_rules: &[SourceRoleRule],
     work: &AnalysisWork,
 ) -> Result<Vec<FileResult>, ProjectError> {
     let analyze = |analyzer: &mut Analyzer, (index, file): (usize, &&DiscoveredFile)| {
         let path = file.path().as_path();
         let language = Analyzer::language(path);
         if matches!(language, Language::Kotlin | Language::Unknown) {
-            return FileResult::Unsupported(language);
+            return match role_for_unavailable_source(path, role_rules) {
+                Ok(role) => FileResult::Unsupported { language, role },
+                Err(roles) => FileResult::RoleConflict {
+                    path: path.to_path_buf(),
+                    roles,
+                },
+            };
         }
         let Some(absolute) = inventory.absolute_path(file.path()) else {
-            return FileResult::Failed("source path escaped the selected root".to_owned());
+            return match role_for_unavailable_source(path, role_rules) {
+                Ok(role) => FileResult::Failed {
+                    message: "source path escaped the selected root".to_owned(),
+                    role,
+                    language,
+                },
+                Err(roles) => FileResult::RoleConflict {
+                    path: path.to_path_buf(),
+                    roles,
+                },
+            };
         };
         match fs::read(&absolute) {
             Ok(source) => {
                 work.source_reads.fetch_add(1, Ordering::Relaxed);
                 #[cfg(feature = "evidence-stats")]
                 crate::evidence::record_source_read();
+                let role = match classify_source_role(path, &source, role_rules) {
+                    Ok(role) => role,
+                    Err(roles) => {
+                        return FileResult::RoleConflict {
+                            path: path.to_path_buf(),
+                            roles,
+                        };
+                    }
+                };
                 match analyze_bytes(analyzer, FileId::from_index(index), path, source, work) {
-                    Ok(value) => FileResult::Analyzed(rate_file(value, policy)),
-                    Err(LanguageError::Unsupported(language)) => FileResult::Unsupported(language),
-                    Err(error) => FileResult::Failed(error.to_string()),
+                    Ok(value) => FileResult::Analyzed(rate_file(value, role, policy)),
+                    Err(LanguageError::Unsupported(language)) => {
+                        FileResult::Unsupported { language, role }
+                    }
+                    Err(error) => FileResult::Failed {
+                        message: error.to_string(),
+                        role,
+                        language,
+                    },
                 }
             }
-            Err(error) => FileResult::Failed(error.to_string()),
+            Err(error) => match role_for_unavailable_source(path, role_rules) {
+                Ok(role) => FileResult::Failed {
+                    message: error.to_string(),
+                    role,
+                    language,
+                },
+                Err(roles) => FileResult::RoleConflict {
+                    path: path.to_path_buf(),
+                    roles,
+                },
+            },
         }
     };
 
     if candidates.len() < PARALLEL_FILE_CUTOVER || width.threads() == 1 {
         let mut analyzer = Analyzer::default();
-        return Ok(candidates
+        let results = candidates
             .iter()
             .enumerate()
             .map(|entry| analyze(&mut analyzer, entry))
-            .collect());
+            .collect::<Vec<_>>();
+        return role_results(results);
     }
     let pool = rayon::ThreadPoolBuilder::new()
         .num_threads(width.threads())
         .build()?;
-    Ok(pool.install(|| {
+    let results = pool.install(|| {
         candidates
             .par_iter()
             .enumerate()
             .map_init(Analyzer::default, analyze)
             .collect()
-    }))
+    });
+    role_results(results)
+}
+
+fn role_results(results: Vec<FileResult>) -> Result<Vec<FileResult>, ProjectError> {
+    if let Some((path, roles)) = results.iter().find_map(|result| match result {
+        FileResult::RoleConflict { path, roles } => Some((path.clone(), roles.clone())),
+        _ => None,
+    }) {
+        Err(ProjectError::SourceRoleConflict { path, roles })
+    } else {
+        Ok(results)
+    }
+}
+
+fn classify_source_role(
+    path: &Path,
+    source: &[u8],
+    rules: &[SourceRoleRule],
+) -> Result<SourceRole, String> {
+    let normalized = path.to_string_lossy().replace('\\', "/");
+    let mut explicit: Vec<_> = rules
+        .iter()
+        .filter(|rule| glob_matches(rule.pattern(), &normalized))
+        .map(SourceRoleRule::role)
+        .collect();
+    explicit.sort();
+    explicit.dedup();
+    if !explicit.is_empty() {
+        return one_role(explicit);
+    }
+    if Analyzer::has_generated_marker(path, source) {
+        return Ok(SourceRole::Generated);
+    }
+    let generic = generic_source_roles(path);
+    if generic.is_empty() {
+        Ok(SourceRole::Primary)
+    } else {
+        one_role(generic)
+    }
+}
+
+fn role_for_unavailable_source(
+    path: &Path,
+    rules: &[SourceRoleRule],
+) -> Result<SourceRole, String> {
+    classify_source_role(path, &[], rules)
+}
+
+fn one_role(roles: Vec<SourceRole>) -> Result<SourceRole, String> {
+    if roles.len() == 1 {
+        Ok(roles[0])
+    } else {
+        Err(roles
+            .iter()
+            .map(|role| format!("{role:?}").to_ascii_lowercase())
+            .collect::<Vec<_>>()
+            .join(", "))
+    }
 }
 
 fn analyze_bytes(
@@ -983,14 +1266,14 @@ struct LoadedEvolution {
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 enum HistoryAlias {
-    Resolved(FileId, PackageId),
+    Resolved(FileId, PackageId, bool),
     Unusable,
 }
 
 fn load_evolution(
     inventory_root: &Path,
     history_days: u32,
-    files: &[(PathBuf, FileId, PackageId)],
+    files: &[(PathBuf, FileId, PackageId, bool)],
 ) -> LoadedEvolution {
     let Ok(repository) = GitRepository::discover(inventory_root) else {
         return LoadedEvolution {
@@ -1008,7 +1291,16 @@ fn load_evolution(
         .unwrap_or(Path::new(""));
     let mut aliases: HashMap<PathBuf, HistoryAlias> = files
         .iter()
-        .map(|(path, file, package)| (path.clone(), HistoryAlias::Resolved(*file, *package)))
+        .map(|(path, file, package, eligible)| {
+            (
+                path.clone(),
+                HistoryAlias::Resolved(*file, *package, *eligible),
+            )
+        })
+        .collect();
+    let file_paths: HashMap<FileId, PathBuf> = files
+        .iter()
+        .map(|(path, file, _, _)| (*file, path.clone()))
         .collect();
     let mut contributors = HashMap::<ContributorIdentity, ContributorId>::new();
     let mut accumulator = EvolutionAccumulator::default();
@@ -1036,7 +1328,7 @@ fn load_evolution(
                 .strip_prefix(relative_root)
                 .unwrap_or(change.path());
             let identity = aliases.get(path).copied();
-            let Some(HistoryAlias::Resolved(file, package)) = identity else {
+            let Some(HistoryAlias::Resolved(file, package, eligible)) = identity else {
                 excluded_paths += 1;
                 continue;
             };
@@ -1046,7 +1338,7 @@ fn load_evolution(
                     .unwrap_or(previous)
                     .to_path_buf();
                 match aliases.get(&previous) {
-                    Some(HistoryAlias::Resolved(existing_file, existing_package))
+                    Some(HistoryAlias::Resolved(existing_file, existing_package, _))
                         if (*existing_file, *existing_package) != (file, package) =>
                     {
                         rename_gaps += 1;
@@ -1054,7 +1346,7 @@ fn load_evolution(
                     }
                     Some(HistoryAlias::Unusable) => {}
                     _ => {
-                        aliases.insert(previous, HistoryAlias::Resolved(file, package));
+                        aliases.insert(previous, HistoryAlias::Resolved(file, package, eligible));
                     }
                 }
             }
@@ -1063,15 +1355,17 @@ fn load_evolution(
             } else {
                 uncounted_changes += 1;
             }
-            if contributes_activity {
-                *activity.entry(files[file.index()].0.clone()).or_default() += 1;
+            if contributes_activity && let Some(path) = file_paths.get(&file) {
+                *activity.entry(path.clone()).or_default() += 1;
             }
-            changes.push(HistoryChangeFact::new(
-                file,
-                package,
-                change.added_lines(),
-                change.deleted_lines(),
-            ));
+            if eligible {
+                changes.push(HistoryChangeFact::new(
+                    file,
+                    package,
+                    change.added_lines(),
+                    change.deleted_lines(),
+                ));
+            }
         }
         if !changes.is_empty() {
             accumulator.accept(HistoryCommitFact::new(contributor, changes));
@@ -1152,22 +1446,26 @@ fn failed_history_availability(
 
 struct RatedFile {
     analysis: FileAnalysis,
+    role: SourceRole,
     health: HealthCounts,
     debt: Vec<(usize, HealthAssessment)>,
 }
 
-fn rate_file(analysis: FileAnalysis, policy: HealthPolicy) -> RatedFile {
+fn rate_file(analysis: FileAnalysis, role: SourceRole, policy: HealthPolicy) -> RatedFile {
     let mut health = HealthCounts::default();
     let mut debt = Vec::new();
     for (index, unit) in analysis.units().iter().enumerate() {
         let assessment = policy.assess(unit.measurements());
-        health.add_rating(assessment.rating());
+        if verdict_eligible(&analysis, role) {
+            health.add_rating(assessment.rating());
+        }
         if assessment.rating() != Rating::Healthy {
             debt.push((index, assessment));
         }
     }
     RatedFile {
         analysis,
+        role,
         health,
         debt,
     }
@@ -1175,8 +1473,33 @@ fn rate_file(analysis: FileAnalysis, policy: HealthPolicy) -> RatedFile {
 
 enum FileResult {
     Analyzed(RatedFile),
-    Unsupported(Language),
-    Failed(String),
+    Unsupported {
+        language: Language,
+        role: SourceRole,
+    },
+    Failed {
+        message: String,
+        role: SourceRole,
+        language: Language,
+    },
+    RoleConflict {
+        path: PathBuf,
+        roles: String,
+    },
+}
+
+fn verdict_eligible(analysis: &FileAnalysis, role: SourceRole) -> bool {
+    role.affects_verdict() && matches!(analysis.parse_status(), ParseStatus::Parsed)
+}
+
+fn rated_health(analysis: &FileAnalysis, role: SourceRole, policy: HealthPolicy) -> HealthCounts {
+    let mut health = HealthCounts::default();
+    if verdict_eligible(analysis, role) {
+        for unit in analysis.units() {
+            health.add_rating(policy.assess(unit.measurements()).rating());
+        }
+    }
+    health
 }
 
 struct Selection {
@@ -1253,9 +1576,10 @@ struct CodebaseReportBuilder<'a> {
     file_scopes: Vec<ScopeId>,
     activity: &'a HashMap<PathBuf, u32>,
     package_ids: Vec<PackageId>,
-    dependencies: Vec<(FileId, PathBuf, Vec<DependencySyntax>)>,
+    dependencies: Vec<SourceDependencies>,
     aliases: Vec<ResolutionAlias>,
     package_roots: Vec<PathBuf>,
+    packages: Vec<PackageRecord>,
     evolution: EvolutionInput,
 }
 
@@ -1274,27 +1598,22 @@ impl<'a> CodebaseReportBuilder<'a> {
             .iter()
             .map(|package| package.root().as_path().to_path_buf())
             .collect();
-        let included_packages: Vec<bool> = (0..package_roots.len())
-            .map(|index| {
-                candidates
-                    .iter()
-                    .any(|file| file.package().index() == index)
+        let mut hierarchy = HierarchyBuilder::new(label, &package_roots);
+        let packages = package_roots
+            .iter()
+            .enumerate()
+            .map(|(index, root)| {
+                PackageRecord::current(
+                    PackageId::from_index(index),
+                    hierarchy.package_scopes[index],
+                    report_package_path(root),
+                )
             })
             .collect();
-        let included_roots: Vec<PathBuf> = package_roots
-            .iter()
-            .zip(&included_packages)
-            .filter_map(|(root, included)| included.then_some(root.clone()))
-            .collect();
-        let mut hierarchy = HierarchyBuilder::new(label, &included_roots);
         let mut package_ids = Vec::with_capacity(candidates.len());
         for file in candidates {
-            let included_package_index = included_packages[..file.package().index()]
-                .iter()
-                .filter(|included| **included)
-                .count();
-            hierarchy.add_file(file.path().as_path(), included_package_index);
-            package_ids.push(PackageId::from_index(included_package_index));
+            hierarchy.add_file(file.path().as_path(), file.package().index());
+            package_ids.push(file.package());
         }
         let file_scopes = candidates
             .iter()
@@ -1312,7 +1631,8 @@ impl<'a> CodebaseReportBuilder<'a> {
             package_ids,
             dependencies: Vec::with_capacity(candidates.len()),
             aliases,
-            package_roots: included_roots,
+            package_roots,
+            packages,
             evolution,
         }
     }
@@ -1330,23 +1650,28 @@ impl<'a> CodebaseReportBuilder<'a> {
                     let unit = &rated.analysis.units()[unit_index];
                     let finding_id = FindingId::from_index(self.findings.len());
                     self.scopes[scope_id.index()].add_finding(finding_id);
-                    self.findings.push(Finding::new(
-                        finding_id,
-                        file_id,
-                        unit.identity().clone(),
-                        unit.span(),
-                        unit.measurements(),
-                        assessment,
-                    ));
+                    self.findings.push(
+                        Finding::new(
+                            finding_id,
+                            file_id,
+                            unit.identity().clone(),
+                            unit.span(),
+                            unit.measurements(),
+                            assessment,
+                        )
+                        .with_evidence(rated.role, rated.analysis.parse_status().trust()),
+                    );
                 }
                 let analysis = rated.analysis;
-                self.dependencies.push((
-                    file_id,
-                    PathBuf::from(&path),
-                    analysis.dependencies().to_vec(),
-                ));
-                let failed = matches!(analysis.parse_status(), ParseStatus::Failed);
+                self.dependencies.push(SourceDependencies {
+                    file: file_id,
+                    path: PathBuf::from(&path),
+                    references: analysis.dependencies().to_vec(),
+                    role: rated.role,
+                    trust: analysis.parse_status().trust(),
+                });
                 let recovered = matches!(analysis.parse_status(), ParseStatus::Recovered);
+                let failed = matches!(analysis.parse_status(), ParseStatus::Failed);
                 if failed {
                     self.add_diagnostic(
                         file_id,
@@ -1363,40 +1688,48 @@ impl<'a> CodebaseReportBuilder<'a> {
                     );
                 }
                 (
-                    Coverage::new(
-                        1,
-                        u32::from(!failed),
-                        0,
-                        u32::from(failed),
-                        analysis.source_lines(),
-                        u32::from(failed) * analysis.source_lines(),
-                    ),
-                    Some(analysis.language()),
+                    source_coverage(&analysis, rated.role),
+                    Some((
+                        analysis.language(),
+                        rated.role,
+                        analysis.parse_status().clone(),
+                    )),
                 )
             }
-            FileResult::Unsupported(language) => {
+            FileResult::Unsupported { language, role } => {
                 self.add_diagnostic(
                     file_id,
                     DiagnosticKind::UnsupportedLanguage,
                     format!("{path} uses an unsupported language"),
                     0,
                 );
-                (Coverage::new(1, 0, 1, 0, 0, 0), Some(language))
+                (
+                    Coverage::classified(1, SourceCoverageOutcome::Unsupported, 0, 0),
+                    Some((language, role, ParseStatus::Failed)),
+                )
             }
-            FileResult::Failed(message) => {
+            FileResult::Failed {
+                message,
+                role,
+                language,
+            } => {
                 self.add_diagnostic(
                     file_id,
                     DiagnosticKind::UnreadableFile,
                     format!("{path}: {message}"),
                     0,
                 );
-                (Coverage::new(1, 0, 0, 1, 0, 0), None)
+                (
+                    Coverage::classified(1, SourceCoverageOutcome::Failed, 0, 0),
+                    Some((language, role, ParseStatus::Failed)),
+                )
             }
+            FileResult::RoleConflict { .. } => unreachable!("role conflicts stop composition"),
         };
         let mut file = FileRecord::new(file_id, scope_id, path, coverage, health);
         file = file.with_package(self.package_ids[index]);
-        if let Some(language) = language {
-            file = file.with_language(language);
+        if let Some((language, role, status)) = language {
+            file = file.with_language(language).with_source_state(role, status);
         }
         if let Some(touches) = touches {
             file = file.with_activity(FileActivity::new(touches));
@@ -1487,11 +1820,11 @@ impl<'a> CodebaseReportBuilder<'a> {
             builder.link_evolutionary_finding(root, finding.id());
             let pair = finding.coupling();
             builder.link_evolutionary_finding(
-                ScopeId::from_index(1 + pair.left().index()),
+                self.packages[pair.left().index()].scope(),
                 finding.id(),
             );
             builder.link_evolutionary_finding(
-                ScopeId::from_index(1 + pair.right().index()),
+                self.packages[pair.right().index()].scope(),
                 finding.id(),
             );
         }
@@ -1501,7 +1834,7 @@ impl<'a> CodebaseReportBuilder<'a> {
         for finding in &architecture_findings_for_links {
             for package in finding.packages() {
                 builder.link_architecture_finding(
-                    ScopeId::from_index(1 + package.index()),
+                    self.packages[package.index()].scope(),
                     finding.id(),
                 );
             }
@@ -1510,6 +1843,7 @@ impl<'a> CodebaseReportBuilder<'a> {
                     .link_architecture_finding(builder.files()[file.index()].scope(), finding.id());
             }
         }
+        builder.set_packages(self.packages);
         builder.finish()
     }
 }
@@ -1525,6 +1859,18 @@ struct ArchitectureBuild {
     finding_links: Vec<(ScopeId, ArchitectureFindingId)>,
     cycles: Vec<smackdebt_analysis::PackageCycle>,
 }
+
+#[derive(Clone)]
+struct SourceDependencies {
+    file: FileId,
+    path: PathBuf,
+    references: Vec<DependencySyntax>,
+    role: SourceRole,
+    trust: SourceTrust,
+}
+
+type DependencyEdgeKey = (FileId, FileId, SourceRole, SourceTrust);
+type DependencyEdgeValue = (u32, Vec<smackdebt_analysis::SourceSpan>);
 
 #[derive(Clone)]
 struct ResolutionAlias {
@@ -1613,38 +1959,38 @@ fn parse_resolution_aliases(source: &[u8]) -> Option<Vec<ResolutionAlias>> {
 fn build_architecture(
     work: &AnalysisWork,
     files: &[FileRecord],
-    dependencies: &[(FileId, PathBuf, Vec<DependencySyntax>)],
+    dependencies: &[SourceDependencies],
     aliases: &[ResolutionAlias],
     side_package_roots: &[PathBuf],
     package_roots: &[PathBuf],
 ) -> ArchitectureBuild {
     work.record_algorithm_pass();
     let mut index = BTreeMap::new();
-    for (file, path, _) in dependencies {
-        index.insert(path.clone(), *file);
+    for source in dependencies {
+        index.insert(source.path.clone(), source.file);
     }
     let mut internal = 0u32;
     let mut external_count = 0u32;
     let mut unresolved = 0u32;
     let mut ambiguous = 0u32;
-    let mut edge_values: BTreeMap<(FileId, FileId), (u32, Vec<smackdebt_analysis::SourceSpan>)> =
-        BTreeMap::new();
+    let mut edge_values: BTreeMap<DependencyEdgeKey, DependencyEdgeValue> = BTreeMap::new();
     let mut external_values: BTreeMap<(FileId, String), u32> = BTreeMap::new();
     let mut diagnostics = Vec::new();
 
-    for (source, source_path, references) in dependencies {
-        for reference in references {
+    for dependencies in dependencies {
+        let source = dependencies.file;
+        for reference in &dependencies.references {
             match reference.state() {
                 DependencySyntaxState::External => {
                     external_count += 1;
                     *external_values
-                        .entry((*source, reference.target().to_owned()))
+                        .entry((source, reference.target().to_owned()))
                         .or_default() += 1;
                 }
                 DependencySyntaxState::Unresolved(reason) => {
                     unresolved += 1;
                     diagnostics.push(ResolutionDiagnostic::new(
-                        *source,
+                        source,
                         reference.span(),
                         reference.target(),
                         ResolutionIssueKind::Unresolved,
@@ -1652,14 +1998,15 @@ fn build_architecture(
                     ));
                 }
                 DependencySyntaxState::Candidates(candidates) => {
-                    let matches = resolve_candidates(source_path, candidates, &index, aliases);
+                    let matches =
+                        resolve_candidates(&dependencies.path, candidates, &index, aliases);
                     match matches.as_slice() {
                         [] if reference.intent()
                             == smackdebt_analysis::DependencyIntent::Internal =>
                         {
                             unresolved += 1;
                             diagnostics.push(ResolutionDiagnostic::new(
-                                *source,
+                                source,
                                 reference.span(),
                                 reference.target(),
                                 ResolutionIssueKind::Unresolved,
@@ -1669,13 +2016,15 @@ fn build_architecture(
                         [] => {
                             external_count += 1;
                             *external_values
-                                .entry((*source, reference.target().to_owned()))
+                                .entry((source, reference.target().to_owned()))
                                 .or_default() += 1;
                         }
                         [target] => {
                             internal += 1;
-                            if source != target {
-                                let entry = edge_values.entry((*source, *target)).or_default();
+                            if source != *target {
+                                let entry = edge_values
+                                    .entry((source, *target, dependencies.role, dependencies.trust))
+                                    .or_default();
                                 entry.0 += 1;
                                 if entry.1.len() < 3 {
                                     entry.1.push(reference.span());
@@ -1685,7 +2034,7 @@ fn build_architecture(
                         _ => {
                             ambiguous += 1;
                             diagnostics.push(ResolutionDiagnostic::new(
-                                *source,
+                                source,
                                 reference.span(),
                                 reference.target(),
                                 ResolutionIssueKind::Ambiguous,
@@ -1702,7 +2051,7 @@ fn build_architecture(
         .into_iter()
         .enumerate()
         .map(
-            |(edge_index, ((source, target), (references, locations)))| {
+            |(edge_index, ((source, target, role, trust), (references, locations)))| {
                 DependencyEdge::new(
                     DependencyEdgeId::from_index(edge_index),
                     source,
@@ -1710,6 +2059,7 @@ fn build_architecture(
                     references,
                     locations,
                 )
+                .with_evidence(role, trust)
             },
         )
         .collect();
@@ -1721,15 +2071,18 @@ fn build_architecture(
     let mut package_values: BTreeMap<(PackageId, PackageId), (u32, u32, Vec<DependencyEdgeId>)> =
         BTreeMap::new();
     for edge in &file_edges {
+        if !edge.affects_verdict() {
+            continue;
+        }
         let source_path = dependencies
             .iter()
-            .find(|(id, _, _)| *id == edge.source())
-            .map(|(_, path, _)| path.as_path())
+            .find(|source| source.file == edge.source())
+            .map(|source| source.path.as_path())
             .unwrap_or_else(|| Path::new(files[edge.source().index()].path()));
         let target_path = dependencies
             .iter()
-            .find(|(id, _, _)| *id == edge.target())
-            .map(|(_, path, _)| path.as_path())
+            .find(|source| source.file == edge.target())
+            .map(|source| source.path.as_path())
             .unwrap_or_else(|| Path::new(files[edge.target().index()].path()));
         let source_root = nearest_package_root(source_path, side_package_roots);
         let target_root = nearest_package_root(target_path, side_package_roots);
@@ -1835,6 +2188,7 @@ fn build_architecture(
     }
     let file_pairs: Vec<_> = file_edges
         .iter()
+        .filter(|edge| edge.affects_verdict())
         .map(|edge| (edge.source().index(), edge.target().index()))
         .collect();
     for component in strongly_connected_components(files.len(), &file_pairs)
@@ -1854,7 +2208,11 @@ fn build_architecture(
             .filter_map(|&(source, target)| {
                 file_edges
                     .iter()
-                    .find(|edge| edge.source().index() == source && edge.target().index() == target)
+                    .find(|edge| {
+                        edge.affects_verdict()
+                            && edge.source().index() == source
+                            && edge.target().index() == target
+                    })
                     .map(DependencyEdge::id)
             })
             .collect();
@@ -2028,8 +2386,17 @@ fn nearest_package_root(path: &Path, package_roots: &[PathBuf]) -> PathBuf {
         .unwrap_or_default()
 }
 
+fn report_package_path(path: &Path) -> String {
+    if path.as_os_str().is_empty() {
+        ".".to_owned()
+    } else {
+        path.display().to_string()
+    }
+}
+
 struct HierarchyBuilder {
     scopes: Vec<Scope>,
+    package_scopes: Vec<ScopeId>,
     file_scopes: BTreeMap<PathBuf, ScopeId>,
     directories: BTreeMap<(PathBuf, PathBuf), ScopeId>,
     package_roots: Vec<PathBuf>,
@@ -2039,8 +2406,10 @@ impl HierarchyBuilder {
     fn new(label: String, package_roots: &[PathBuf]) -> Self {
         let root = ScopeId::from_index(0);
         let mut scopes = vec![Scope::new(root, ScopeKind::Repository, label, None)];
+        let mut package_scopes = Vec::with_capacity(package_roots.len());
         for package_root in package_roots {
             let id = ScopeId::from_index(scopes.len());
+            package_scopes.push(id);
             scopes[root.index()].add_child(id);
             scopes.push(Scope::new(
                 id,
@@ -2055,6 +2424,7 @@ impl HierarchyBuilder {
         }
         Self {
             scopes,
+            package_scopes,
             file_scopes: BTreeMap::new(),
             directories: BTreeMap::new(),
             package_roots: package_roots.to_vec(),
@@ -2063,7 +2433,7 @@ impl HierarchyBuilder {
 
     fn add_file(&mut self, path: &Path, package_index: usize) {
         let package_root = self.package_roots[package_index].clone();
-        let package_scope = self.scopes[0].children()[package_index];
+        let package_scope = self.package_scopes[package_index];
         let relative_directory = path
             .parent()
             .unwrap_or(Path::new(""))
@@ -2146,6 +2516,286 @@ mod tests {
     }
 
     #[test]
+    fn source_role_precedence_is_explicit_then_marker_then_generic_then_primary() {
+        let generated = b"// @generated\nexport function work() {}\n";
+        assert_eq!(
+            classify_source_role(
+                Path::new("tests/work.js"),
+                generated,
+                &[SourceRoleRule::example("tests/*.js")],
+            ),
+            Ok(SourceRole::Example)
+        );
+        assert_eq!(
+            classify_source_role(Path::new("tests/work.js"), generated, &[]),
+            Ok(SourceRole::Generated)
+        );
+        assert_eq!(
+            classify_source_role(Path::new("tests/work.js"), b"function work() {}", &[]),
+            Ok(SourceRole::Test)
+        );
+        assert_eq!(
+            classify_source_role(Path::new("src/work.js"), b"function work() {}", &[]),
+            Ok(SourceRole::Primary)
+        );
+    }
+
+    #[test]
+    fn explicit_role_conflicts_report_every_disagreeing_role() {
+        let error = classify_source_role(
+            Path::new("src/work.js"),
+            b"function work() {}",
+            &[
+                SourceRoleRule::test("src/*.js"),
+                SourceRoleRule::fixture("src/work.js"),
+            ],
+        )
+        .unwrap_err();
+        assert_eq!(error, "test, fixture");
+    }
+
+    #[test]
+    fn every_source_role_is_retained_and_only_verdict_roles_change_health() {
+        let mut analyzer = Analyzer::default();
+        let source = b"function work(a, b) { if (a) { if (b) { return 1; } } return 0; }\n";
+        let policy = HealthPolicy::new(
+            smackdebt_analysis::Thresholds::new(1, 2),
+            smackdebt_analysis::Thresholds::new(1, 2),
+            smackdebt_analysis::Thresholds::new(1, 2),
+        );
+        for role in [
+            SourceRole::Primary,
+            SourceRole::Test,
+            SourceRole::Example,
+            SourceRole::Benchmark,
+            SourceRole::Fixture,
+            SourceRole::Generated,
+        ] {
+            let analysis = analyzer
+                .analyze(Path::new("src/work.js"), source.to_vec())
+                .unwrap();
+            let rated = rate_file(analysis, role, policy);
+            assert_eq!(rated.role, role);
+            assert!(!rated.debt.is_empty());
+            if role.affects_verdict() {
+                assert!(rated.health.debt() > 0, "{role:?}");
+            } else {
+                assert_eq!(rated.health.debt(), 0, "{role:?}");
+            }
+        }
+    }
+
+    #[test]
+    fn workspace_test_fixture_has_one_role_and_stays_outside_the_verdict() {
+        let root = tempfile::tempdir().unwrap();
+        fs::create_dir_all(root.path().join("crates/cli/tests/fixtures")).unwrap();
+        fs::write(
+            root.path().join("crates/cli/Cargo.toml"),
+            "[package]\nname='fixture'\nversion='0.1.0'\n",
+        )
+        .unwrap();
+        fs::write(
+            root.path().join("crates/cli/tests/fixtures/complex.js"),
+            "export function fixture(a, b) { if (a) { if (b) { return 1; } } return 0; }\n",
+        )
+        .unwrap();
+
+        let result = analyze_codebase(&CodebaseRequest::new(root.path()).with_thresholds(
+            (1, 2),
+            (1, 2),
+            (1, 2),
+        ))
+        .unwrap();
+        let report = result.report();
+        let fixture = report
+            .files()
+            .iter()
+            .find(|file| file.path() == "crates/cli/tests/fixtures/complex.js")
+            .unwrap();
+
+        assert_eq!(fixture.role(), SourceRole::Fixture);
+        assert_eq!(fixture.health(), HealthCounts::default());
+        assert_eq!(fixture.coverage().context_files(), 1);
+        assert_eq!(
+            report.scopes()[report.root().unwrap().index()].health(),
+            HealthCounts::default()
+        );
+    }
+
+    #[test]
+    fn recovered_findings_are_advisory_and_do_not_change_health() {
+        let analysis = Analyzer::default()
+            .analyze(
+                Path::new("src/work.py"),
+                b"def broken(:\n    if yes:\n        if more:\n            pass\n".to_vec(),
+            )
+            .unwrap();
+        assert_eq!(analysis.parse_status(), &ParseStatus::Recovered);
+        let rated = rate_file(
+            analysis,
+            SourceRole::Primary,
+            HealthPolicy::new(
+                smackdebt_analysis::Thresholds::new(1, 2),
+                smackdebt_analysis::Thresholds::new(1, 2),
+                smackdebt_analysis::Thresholds::new(1, 2),
+            ),
+        );
+        assert_eq!(rated.health, HealthCounts::default());
+        assert!(!rated.debt.is_empty());
+    }
+
+    #[test]
+    fn recovered_dependency_is_retained_but_cannot_enter_the_verdict_graph() {
+        let root = tempfile::tempdir().unwrap();
+        for package in ["app", "core"] {
+            fs::create_dir_all(root.path().join(package)).unwrap();
+            fs::write(root.path().join(package).join("package.json"), "{}").unwrap();
+        }
+        fs::write(
+            root.path().join("app/main.js"),
+            "import core from '../core/main';\nfunction broken( { if (a) { if (b) { core(); } }\n",
+        )
+        .unwrap();
+        fs::write(
+            root.path().join("core/main.js"),
+            "export default function core() {}\n",
+        )
+        .unwrap();
+        fs::create_dir_all(root.path().join("app/fixtures")).unwrap();
+        fs::write(
+            root.path().join("app/fixtures/context.js"),
+            "export function context() {}\n",
+        )
+        .unwrap();
+        fs::write(
+            root.path().join("app/unsupported.kt"),
+            "fun unsupported() = Unit\n",
+        )
+        .unwrap();
+
+        let result = analyze_codebase(&CodebaseRequest::new(root.path()).with_thresholds(
+            (1, 2),
+            (1, 2),
+            (1, 2),
+        ))
+        .unwrap();
+        let report = result.report();
+        let recovered = report
+            .files()
+            .iter()
+            .find(|file| file.path() == "app/main.js")
+            .unwrap();
+        assert_eq!(recovered.trust(), SourceTrust::Advisory);
+        assert_eq!(recovered.health(), HealthCounts::default());
+        assert_eq!(recovered.coverage().clean_files(), 0);
+        assert_eq!(recovered.coverage().recovered_files(), 1);
+        let root_coverage = report.scopes()[report.root().unwrap().index()].coverage();
+        assert_eq!(root_coverage.clean_files(), 1);
+        assert_eq!(root_coverage.recovered_files(), 1);
+        assert_eq!(root_coverage.unsupported_files(), 1);
+        assert_eq!(root_coverage.failed_files(), 0);
+        assert_eq!(root_coverage.context_files(), 1);
+        assert_eq!(root_coverage.selected_files(), 4);
+        assert!(report.findings().iter().any(|finding| {
+            finding.file() == recovered.id() && finding.trust() == SourceTrust::Advisory
+        }));
+        assert_eq!(report.dependency_edges().len(), 1);
+        assert_eq!(report.dependency_edges()[0].trust(), SourceTrust::Advisory);
+        assert!(report.package_edges().is_empty());
+        assert!(report.architecture_findings().is_empty());
+    }
+
+    #[test]
+    fn fixture_dependency_is_visible_without_affecting_architecture_health() {
+        let root = tempfile::tempdir().unwrap();
+        for package in ["app", "core"] {
+            fs::create_dir_all(root.path().join(package)).unwrap();
+            fs::write(root.path().join(package).join("package.json"), "{}").unwrap();
+        }
+        fs::create_dir_all(root.path().join("app/fixtures")).unwrap();
+        fs::write(
+            root.path().join("app/fixtures/main.js"),
+            "import core from '../../core/main';\nimport { helper } from './helper';\nexport function fixture() { helper(); core(); }\n",
+        )
+        .unwrap();
+        fs::write(
+            root.path().join("app/fixtures/helper.js"),
+            "import { fixture } from './main';\nexport function helper() { fixture(); }\n",
+        )
+        .unwrap();
+        fs::write(
+            root.path().join("core/main.js"),
+            "export default function core() {}\n",
+        )
+        .unwrap();
+
+        let result = analyze_codebase(&CodebaseRequest::new(root.path())).unwrap();
+        let report = result.report();
+        assert_eq!(report.dependency_edges().len(), 3);
+        assert!(
+            report
+                .dependency_edges()
+                .iter()
+                .all(|edge| edge.role() == SourceRole::Fixture && !edge.affects_verdict())
+        );
+        assert!(report.package_edges().is_empty());
+        assert!(report.architecture_findings().is_empty());
+        let root_coverage = report.scopes()[report.root().unwrap().index()].coverage();
+        assert_eq!(root_coverage.clean_files(), 1);
+        assert_eq!(root_coverage.context_files(), 2);
+        assert_eq!(root_coverage.recovered_files(), 0);
+    }
+
+    #[test]
+    fn recovered_worktree_units_remain_advisory_without_diff_verdicts() {
+        let root = tempfile::tempdir().unwrap();
+        git(root.path(), ["init", "-q"]);
+        git(
+            root.path(),
+            ["config", "user.email", "test@example.invalid"],
+        );
+        git(root.path(), ["config", "user.name", "Smackdebt Test"]);
+        fs::write(
+            root.path().join("main.js"),
+            "export function work() { return 1; }\n",
+        )
+        .unwrap();
+        git(root.path(), ["add", "-A"]);
+        git(root.path(), ["commit", "-qm", "base"]);
+        fs::write(
+            root.path().join("main.js"),
+            "export function work( { if (a) { if (b) { return 1; } }\n",
+        )
+        .unwrap();
+
+        let result = analyze_diff(
+            &DiffRequest::new(root.path())
+                .with_reference("HEAD")
+                .with_thresholds((1, 2), (1, 2), (1, 2)),
+        )
+        .unwrap();
+        let report = result.report();
+        assert!(report.comparisons().is_empty());
+        assert!(!report.findings().is_empty());
+        assert!(
+            report
+                .findings()
+                .iter()
+                .all(|finding| finding.trust() == SourceTrust::Advisory)
+        );
+        assert_eq!(report.files()[0].health(), HealthCounts::default());
+        assert_eq!(report.files()[0].coverage().clean_files(), 0);
+        assert_eq!(report.files()[0].coverage().recovered_files(), 1);
+        let root_coverage = report.scopes()[report.root().unwrap().index()].coverage();
+        assert_eq!(root_coverage.clean_files(), 0);
+        assert_eq!(root_coverage.recovered_files(), 1);
+        assert_eq!(root_coverage.unsupported_files(), 0);
+        assert_eq!(root_coverage.failed_files(), 0);
+        assert_eq!(root_coverage.context_files(), 0);
+        assert_eq!(root_coverage.selected_files(), 1);
+    }
+
+    #[test]
     fn malformed_or_interrupted_history_is_incomplete_but_empty_history_is_unavailable() {
         assert_eq!(
             failed_history_availability(
@@ -2217,10 +2867,12 @@ mod tests {
         assert_eq!(result.stats().inventory_walks, 1);
         assert_eq!(result.stats().source_reads, 1);
         assert_eq!(result.report().files().len(), 1);
+        assert_eq!(result.report().packages().len(), 1);
+        assert_eq!(result.report().packages()[0].path(), ".");
     }
 
     #[test]
-    fn files_use_compact_report_package_ids_when_a_manifest_has_no_source() {
+    fn package_rows_keep_empty_packages_and_discovery_ids() {
         let root = tempfile::tempdir().unwrap();
         for package in ["a", "b", "c"] {
             fs::create_dir_all(root.path().join(package)).unwrap();
@@ -2242,14 +2894,164 @@ mod tests {
         .unwrap();
 
         let result = analyze_codebase(&CodebaseRequest::new(root.path())).unwrap();
-        assert_eq!(result.report().package_graph().len(), 2);
+        assert_eq!(result.report().package_graph().len(), 3);
+        let packages: Vec<_> = result
+            .report()
+            .packages()
+            .iter()
+            .map(|package| {
+                let scope = &result.report().scopes()[package.scope().index()];
+                assert_eq!(scope.kind(), ScopeKind::Package);
+                assert_eq!(scope.name(), package.path());
+                (
+                    package.id().index(),
+                    package.path(),
+                    package.presence(),
+                    package.scope(),
+                )
+            })
+            .collect();
+        assert_eq!(
+            packages,
+            [
+                (
+                    0,
+                    "a",
+                    smackdebt_analysis::PackagePresence::Current,
+                    ScopeId::from_index(1)
+                ),
+                (
+                    1,
+                    "b",
+                    smackdebt_analysis::PackagePresence::Current,
+                    ScopeId::from_index(2)
+                ),
+                (
+                    2,
+                    "c",
+                    smackdebt_analysis::PackagePresence::Current,
+                    ScopeId::from_index(3)
+                ),
+            ]
+        );
         let package_ids: Vec<_> = result
             .report()
             .files()
             .iter()
             .map(|file| file.package().unwrap().index())
             .collect();
-        assert_eq!(package_ids, [0, 1]);
+        assert_eq!(package_ids, [0, 2]);
+    }
+
+    #[test]
+    fn path_view_keeps_the_codebase_package_table() {
+        let root = repository();
+        let repo = root.path().join("repo");
+        for package in ["a", "b"] {
+            fs::create_dir_all(repo.join(package)).unwrap();
+            fs::write(repo.join(package).join("package.json"), "{}").unwrap();
+            fs::write(
+                repo.join(package).join("main.js"),
+                "export function work() { return 1; }\n",
+            )
+            .unwrap();
+        }
+
+        let codebase = analyze_codebase(&CodebaseRequest::new(&repo)).unwrap();
+        let path = analyze_codebase(&CodebaseRequest::new(repo.join("b"))).unwrap();
+        let package_paths = |report: &Report| {
+            report
+                .packages()
+                .iter()
+                .map(|package| (package.id(), package.path().to_owned()))
+                .collect::<Vec<_>>()
+        };
+        assert_eq!(
+            package_paths(codebase.report()),
+            package_paths(path.report())
+        );
+    }
+
+    #[test]
+    fn diff_appends_base_only_packages_after_current_ids() {
+        let root = tempfile::tempdir().unwrap();
+        git(root.path(), ["init", "-q"]);
+        git(
+            root.path(),
+            ["config", "user.email", "test@example.invalid"],
+        );
+        git(root.path(), ["config", "user.name", "Smackdebt Test"]);
+        for package in ["a", "m"] {
+            fs::create_dir_all(root.path().join(package)).unwrap();
+            fs::write(root.path().join(package).join("package.json"), "{}").unwrap();
+            fs::write(
+                root.path().join(package).join("main.js"),
+                "export function work() { return 1; }\n",
+            )
+            .unwrap();
+        }
+        git(root.path(), ["add", "-A"]);
+        git(root.path(), ["commit", "-qm", "base"]);
+        fs::remove_dir_all(root.path().join("m")).unwrap();
+        fs::create_dir_all(root.path().join("z")).unwrap();
+        fs::write(root.path().join("z/package.json"), "{}").unwrap();
+        fs::write(
+            root.path().join("z/main.js"),
+            "export function work() { return 1; }\n",
+        )
+        .unwrap();
+
+        let codebase = analyze_codebase(&CodebaseRequest::new(root.path())).unwrap();
+        let diff = analyze_diff(
+            &DiffRequest::new(root.path())
+                .with_reference("HEAD")
+                .with_history_days(0),
+        )
+        .unwrap();
+        let current: Vec<_> = codebase
+            .report()
+            .packages()
+            .iter()
+            .map(|package| (package.id(), package.path()))
+            .collect();
+        assert_eq!(
+            current,
+            [
+                (PackageId::from_index(0), "a"),
+                (PackageId::from_index(1), "z")
+            ]
+        );
+        let packages: Vec<_> = diff
+            .report()
+            .packages()
+            .iter()
+            .map(|package| {
+                let scope = &diff.report().scopes()[package.scope().index()];
+                assert_eq!(scope.kind(), ScopeKind::Package);
+                assert_eq!(scope.name(), package.path());
+                (package.id(), package.path(), package.presence())
+            })
+            .collect();
+        assert_eq!(
+            packages,
+            [
+                (
+                    PackageId::from_index(0),
+                    "a",
+                    smackdebt_analysis::PackagePresence::Current
+                ),
+                (
+                    PackageId::from_index(1),
+                    "z",
+                    smackdebt_analysis::PackagePresence::Current
+                ),
+                (
+                    PackageId::from_index(2),
+                    "m",
+                    smackdebt_analysis::PackagePresence::BaseOnly
+                ),
+            ]
+        );
     }
 
     #[test]

@@ -1,16 +1,16 @@
 ## 1. SourceRole and recovery trust
 
-- [ ] 1.1 Add primary, test, example, benchmark, fixture, and generated roles and prove verdict participation for each.
-- [ ] 1.2 Implement precedence from explicit configuration through language-generated markers, generic filename and path rules, and primary fallback.
-- [ ] 1.3 Reject same-level role conflicts with exit 2, exact stderr, and empty stdout.
-- [ ] 1.4 Remove the blanket generated-directory ignore while preserving Git, user, and dependency ignores.
-- [ ] 1.5 Retain recovered units and dependency context as advisory JSON and `--all` facts while excluding them from health, default, architecture verdicts, coupling, and diff verdicts.
+- [x] 1.1 Add primary, test, example, benchmark, fixture, and generated roles and prove verdict participation for each.
+- [x] 1.2 Implement precedence from explicit configuration through language-generated markers, generic filename and path rules, and primary fallback.
+- [x] 1.3 Reject same-level role conflicts with exit 2, exact stderr, and empty stdout.
+- [x] 1.4 Remove the blanket generated-directory ignore while preserving Git, user, and dependency ignores.
+- [x] 1.5 Retain recovered units and dependency context as advisory JSON and `--all` facts while excluding them from health, default, architecture verdicts, coupling, and diff verdicts.
 
 ## 2. Stable package identity and root labels
 
-- [ ] 2.1 Build package rows before source filtering and assign stable typed IDs in repository-relative order.
-- [ ] 2.2 Preserve empty packages and append base-only packages without renumbering current rows across codebase, path, and diff views.
-- [ ] 2.3 Keep machine root path `.` and render it as `repository root` in every terminal context.
+- [x] 2.1 Build package rows before source filtering and assign stable typed IDs in repository-relative order.
+- [x] 2.2 Preserve empty packages and append base-only packages without renumbering current rows across codebase, path, and diff views.
+- [x] 2.3 Keep machine root path `.` and render it as `repository root` in every terminal context.
 
 ## 3. Static relation meaning
 

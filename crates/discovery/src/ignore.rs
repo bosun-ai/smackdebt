@@ -71,7 +71,7 @@ pub(super) fn should_ignore(path: &Path, is_dir: bool, patterns: &[Pattern]) -> 
     ignored
 }
 
-pub(super) fn glob_matches(pattern: &str, text: &str) -> bool {
+pub fn glob_matches(pattern: &str, text: &str) -> bool {
     let pattern: Vec<char> = pattern.chars().collect();
     let text: Vec<char> = text.chars().collect();
     let mut states = vec![false; text.len() + 1];
@@ -114,18 +114,6 @@ pub(super) fn glob_matches(pattern: &str, text: &str) -> bool {
 pub(super) fn is_generated_dir(name: &std::ffi::OsStr) -> bool {
     matches!(
         name.to_str(),
-        Some(
-            ".git"
-                | ".hg"
-                | ".svn"
-                | "target"
-                | "node_modules"
-                | "vendor"
-                | "dist"
-                | "build"
-                | "coverage"
-                | "tmp"
-                | "generated"
-        )
+        Some(".git" | ".hg" | ".svn" | "target" | "node_modules" | "vendor")
     )
 }

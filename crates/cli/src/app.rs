@@ -193,7 +193,8 @@ fn apply_codebase_common(
         .and_then(|value| parse_days(value).ok());
     let request = request
         .with_history_days(common.history.or(configured_history).unwrap_or(90))
-        .with_excludes(config.exclude.clone());
+        .with_excludes(config.exclude.clone())
+        .with_role_rules(config.role_rules());
     let request = apply_codebase_thresholds(request, config);
     match execution_width(common.jobs) {
         Some(width) => request.with_width(width),
@@ -214,6 +215,7 @@ fn apply_diff_common(request: DiffRequest, common: &Common, config: &ProjectConf
     let (cognitive, cyclomatic, lines) = config.thresholds();
     request
         .with_history_days(common.history.or(configured_history).unwrap_or(90))
+        .with_role_rules(config.role_rules())
         .with_thresholds(cognitive, cyclomatic, lines)
 }
 
@@ -223,5 +225,9 @@ fn execution_width(jobs: Option<usize>) -> Option<ExecutionWidth> {
 
 fn fail(error: &ProjectError) -> ExitCode {
     let _ = writeln!(io::stderr().lock(), "smackdebt: {error}");
-    ExitCode::from(1)
+    if matches!(error, ProjectError::SourceRoleConflict { .. }) {
+        ExitCode::from(2)
+    } else {
+        ExitCode::from(1)
+    }
 }

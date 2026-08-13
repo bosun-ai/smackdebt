@@ -1,6 +1,6 @@
 smackdebt · diff
-.
-9 source files changed · 9 analyzed
+repository root
+9 source files changed · 9 clean
 
 CHANGE  7 retained units
 ▲ WORSE 2 · ▼ BETTER 1 · ● CHANGED 4

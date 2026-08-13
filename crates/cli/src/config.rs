@@ -2,6 +2,7 @@ use std::fs;
 use std::path::Path;
 
 use serde::Deserialize;
+use smackdebt_project::SourceRoleRule;
 
 use crate::arguments::parse_days;
 
@@ -12,6 +13,63 @@ pub(crate) struct ProjectConfig {
     #[serde(default)]
     pub(crate) exclude: Vec<String>,
     thresholds: Option<ThresholdConfig>,
+    #[serde(default)]
+    source_roles: RoleConfig,
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn role_configuration_builds_declarative_project_rules() {
+        let config: ProjectConfig = toml::from_str(
+            "[source_roles]\ntest = ['spec/**']\nfixture = ['samples/**']\ngenerated = ['src/api.rs']\n",
+        )
+        .unwrap();
+        config.validate().unwrap();
+        let rules = config.role_rules();
+        let values: Vec<_> = rules
+            .iter()
+            .map(|rule| (rule.role_name(), rule.pattern()))
+            .collect();
+        assert_eq!(
+            values,
+            [
+                ("test", "spec/**"),
+                ("fixture", "samples/**"),
+                ("generated", "src/api.rs")
+            ]
+        );
+    }
+
+    #[test]
+    fn one_pattern_cannot_be_assigned_two_configured_roles() {
+        let config: ProjectConfig =
+            toml::from_str("[source_roles]\ntest = ['shared/**']\nfixture = ['shared/**']\n")
+                .unwrap();
+        assert_eq!(
+            config.validate(),
+            Err("source_roles assigns pattern \"shared/**\" to both test and fixture".to_owned())
+        );
+    }
+}
+
+#[derive(Debug, Default, Deserialize)]
+#[serde(deny_unknown_fields)]
+struct RoleConfig {
+    #[serde(default)]
+    primary: Vec<String>,
+    #[serde(default)]
+    test: Vec<String>,
+    #[serde(default)]
+    example: Vec<String>,
+    #[serde(default)]
+    benchmark: Vec<String>,
+    #[serde(default)]
+    fixture: Vec<String>,
+    #[serde(default)]
+    generated: Vec<String>,
 }
 
 #[derive(Debug, Deserialize)]
@@ -59,6 +117,23 @@ pub(crate) fn load(selected: &Path) -> Result<ProjectConfig, String> {
 }
 
 impl ProjectConfig {
+    pub(crate) fn role_rules(&self) -> Vec<SourceRoleRule> {
+        let mut rules = Vec::new();
+        for (make_rule, patterns) in [
+            (
+                SourceRoleRule::primary as fn(String) -> SourceRoleRule,
+                &self.source_roles.primary,
+            ),
+            (SourceRoleRule::test, &self.source_roles.test),
+            (SourceRoleRule::example, &self.source_roles.example),
+            (SourceRoleRule::benchmark, &self.source_roles.benchmark),
+            (SourceRoleRule::fixture, &self.source_roles.fixture),
+            (SourceRoleRule::generated, &self.source_roles.generated),
+        ] {
+            rules.extend(patterns.iter().cloned().map(make_rule));
+        }
+        rules
+    }
     pub(crate) fn thresholds(&self) -> ((u32, u32), (u32, u32), (u32, u32)) {
         let pair = |value: Option<LimitConfig>, fallback| {
             value.map_or(fallback, |limit| (limit.watch, limit.high))
@@ -88,6 +163,21 @@ impl ProjectConfig {
                         "thresholds.{name} requires watch greater than zero and high greater than watch"
                     ));
                 }
+            }
+        }
+        let mut assigned = std::collections::BTreeMap::new();
+        for rule in self.role_rules() {
+            if rule.pattern().trim().is_empty() {
+                return Err("source_roles contains an empty pattern".to_owned());
+            }
+            if let Some(previous) = assigned.insert(rule.pattern().to_owned(), rule.role_name())
+                && previous != rule.role_name()
+            {
+                return Err(format!(
+                    "source_roles assigns pattern {:?} to both {previous} and {}",
+                    rule.pattern(),
+                    rule.role_name()
+                ));
             }
         }
         Ok(())

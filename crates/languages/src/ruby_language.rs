@@ -18,6 +18,15 @@ impl Language for Ruby {
         "[(method) (singleton_method) (lambda) (block) (do_block)] @unit"
     }
 
+    fn generated_marker(source: &[u8]) -> bool {
+        std::str::from_utf8(source).is_ok_and(|text| {
+            text.lines().take(5).any(|line| {
+                let line = line.to_ascii_lowercase();
+                line.contains("generated") && line.contains("do not edit")
+            })
+        })
+    }
+
     fn unit_kind(node: Node<'_>) -> Option<UnitKind> {
         match node.kind() {
             "method" | "singleton_method" => Some(UnitKind::Method),

@@ -18,6 +18,10 @@ impl Language for Java {
         "[(method_declaration) (constructor_declaration) (lambda_expression)] @unit"
     }
 
+    fn generated_marker(source: &[u8]) -> bool {
+        marker(source)
+    }
+
     fn unit_kind(node: Node<'_>) -> Option<UnitKind> {
         match node.kind() {
             "method_declaration" | "constructor_declaration" => Some(UnitKind::Method),
@@ -89,6 +93,15 @@ impl Language for Java {
     fn dependency(node: Node<'_>, source: &[u8]) -> Option<DependencySyntax> {
         crate::dependency::java(node, source)
     }
+}
+
+fn marker(source: &[u8]) -> bool {
+    std::str::from_utf8(source).is_ok_and(|text| {
+        text.lines().take(5).any(|line| {
+            let line = line.to_ascii_lowercase();
+            line.contains("generated") && (line.contains("do not edit") || line.contains("auto"))
+        })
+    })
 }
 
 fn is_else_if(node: Node<'_>) -> bool {
