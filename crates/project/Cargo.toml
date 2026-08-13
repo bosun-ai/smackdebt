@@ -8,6 +8,7 @@ publish.workspace = true
 
 [dependencies]
 rayon.workspace = true
+serde_json.workspace = true
 thiserror.workspace = true
 smackdebt-analysis = { path = "../analysis" }
 smackdebt-discovery = { path = "../discovery" }

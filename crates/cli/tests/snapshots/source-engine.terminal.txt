@@ -9,4 +9,8 @@ QUALITY  0% need attention
   ↓ src
   ↓ src/work.rb
 
+ARCHITECTURE
+0 internal · 0 external · 0 unresolved · 0 ambiguous
+▲ 0 high · ● 0 watch · 0 internal edges
+
 No watch or high findings.

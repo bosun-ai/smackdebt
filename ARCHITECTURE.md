@@ -26,12 +26,12 @@ flowchart TD
 
 | Crate | Responsibility |
 | --- | --- |
-| `smackdebt-analysis` | Measurements, health policy, aggregation, comparisons, and report values |
-| `smackdebt-languages` | File detection and compiled parser dispatch |
+| `smackdebt-analysis` | Measurements, health policy, static graph algorithms, aggregation, comparisons, and report values |
+| `smackdebt-languages` | File detection, compiled parser dispatch, and grammar-specific dependency syntax |
 | `smackdebt-discovery` | One ignore-aware inventory and package assignment |
 | `smackdebt-git` | Repository facts, history, status, refs, and object reads |
-| `smackdebt-project` | Codebase and diff use cases plus the Rayon pool |
-| `smackdebt-output` | Terminal and JSON writers over a borrowed report |
+| `smackdebt-project` | Codebase and diff use cases, dependency resolution, and the Rayon pool |
+| `smackdebt-output` | Terminal and JSON writers over borrowed source and graph facts |
 | `smackdebt` | Arguments, dependency construction, streams, and exit codes |
 
 Infrastructure crates do not depend on each other. Languages and discovery use
@@ -161,6 +161,58 @@ unit and metric fixtures, recovery and original-span fixtures, nested-unit
 proof, serial/parallel proof, and performance evidence. Shared algorithms
 change only when the measurement rule itself changes.
 
+## Static dependency analysis
+
+Each language implementation translates its import forms during the existing
+tree traversal. A dependency syntax value contains its kind, raw target, source
+span, and ordered path candidates, or an explicit external or unresolved state.
+This grammar-owned step performs no filesystem or Git access. Vue combines
+dependencies from its JavaScript or TypeScript script regions while preserving
+document line numbers.
+
+Project orchestration builds one read-only file index from discovery paths and
+package identities. It joins relative candidates to the source directory and
+root candidates to the repository. A reference becomes an internal edge only
+when exactly one file matches. No match is external when the language supplied
+a fixed package target; a dynamic or malformed target stays unresolved. Several
+matches are ambiguous. Supported project configuration is read as data and is
+never executed.
+
+Analysis owns one flat file edge per directed file pair. Repeated references
+increment its reference count and retain representative locations. Package
+edges are derived from unique cross-package file pairs and record both file-pair
+and reference counts. External dependencies and resolution diagnostics remain
+outside the internal graph.
+
+Separate pure modules calculate strongly connected components, stable concise
+cycle witnesses, unique fan-in and fan-out, exact instability fractions, and
+before/after graph comparisons. They consume integer-indexed edges and have no
+parser, path, filesystem, Git, Rayon, serialization, or terminal access. Nodes
+and neighbors use stable path order, so worker completion order cannot change a
+witness or report byte.
+
+A package cycle is a High architecture finding. A file cycle inside one package
+is Watch. Fan-in, fan-out, instability, reference counts, and coverage are
+descriptive facts. Architecture findings and source findings use separate flat
+tables and separate summary counts.
+
+Diff analysis inventories the current repository once. Changed files provide
+both current and base dependency syntax, while unchanged current analyses supply
+the return paths needed by each graph. Rename aliases are entered before
+resolution. The comparison therefore detects a changed edge that closes or
+opens a path through unchanged files. Introduced package cycles are Worse,
+removed package cycles are Better, and other edge changes are Changed.
+
+Terminal output filters graph detail to edges and findings involving the
+selected scope, including incoming edges from outside it. The retained report
+and JSON keep the complete root graph. Output borrows those facts and does not
+run resolution or graph algorithms.
+
+This graph is intentionally static. It does not execute build files, expand
+macros, trace runtime loading, or provide compiler-grade call or type graphs.
+Unclear identity stays visible in dependency coverage instead of producing a
+guessed edge.
+
 ## Execution and memory ownership
 
 Project orchestration creates one private Rayon pool. `--jobs N` fixes its
@@ -182,6 +234,10 @@ Health policy runs on analysis workers. Healthy details are reduced before
 results return to aggregation. Terminal and JSON output write directly to an
 `io::Write` destination from borrowed report data; the output crate does not
 build a second owned report.
+
+Dependency syntax is collected during the same parse and root traversal as
+source measurements. Project resolution uses the existing source result and
+does not add a filesystem walk, source read, or parse.
 
 ## Git process shape
 
@@ -239,6 +295,11 @@ derived direction. The output crate streams this model from borrowed report
 facts, and `schemas/report-v2.schema.json` plus black-box snapshots check it.
 There is no version-1 serializer or command-line version selector.
 
+Static architecture adds dependency coverage, file edges, package edges,
+external summaries, resolution diagnostics, package measurements, architecture
+findings, and architecture comparisons. These are flat indexed tables; source
+and architecture health remain independent.
+
 The source-engine baseline workflow is `scripts/performance/baseline.sh` with
 the `one-file`, `hundred-file`, or `small-diff` profile. It regenerates the
 declared workload, checks its identity, then records parser time, wall time,
@@ -271,6 +332,14 @@ toolchain.
 The first trustworthy run sets checked latency and memory limits with ten
 percent regression room. Changing a workload creates an explicit new baseline.
 A regression is investigated before a limit changes.
+
+Static graph workloads cover a sparse 1,000-file graph, a dense 500-file graph,
+1,000 packages, and a 200-file dependency diff over a 1,000-file repository.
+Their generated identities and edge shapes are checked before timing. Storage
+follows files and observed relationships rather than every possible file pair.
+The recorded runs include graph correctness and serial/parallel equality checks,
+wall time, parser time, peak resident memory, allocations, source reads,
+inventory work, and Git process counts.
 
 ## Security and privacy
 

@@ -2,14 +2,14 @@
 set -eu
 
 if [ "$#" -ne 1 ]; then
-    echo "usage: $0 one-file|hundred-file|small-diff" >&2
+    echo "usage: $0 one-file|hundred-file|small-diff|graph-sparse|graph-dense|many-package|large-dependency-diff" >&2
     exit 2
 fi
 
 profile=$1
 case "$profile" in
-    one-file|hundred-file) command="scripts/performance/smackdebt-codebase.sh" ;;
-    small-diff) command="scripts/performance/smackdebt-diff.sh" ;;
+    one-file|hundred-file|graph-sparse|graph-dense|many-package) command="scripts/performance/smackdebt-codebase.sh" ;;
+    small-diff|large-dependency-diff) command="scripts/performance/smackdebt-diff.sh" ;;
     *) echo "unknown profile: $profile" >&2; exit 2 ;;
 esac
 
@@ -25,3 +25,7 @@ scripts/performance/run.sh \
 mkdir -p benchmarks/evidence
 cp "$output/metadata.json" "benchmarks/evidence/$profile.metadata.json"
 cp "$output/runs.jsonl" "benchmarks/evidence/$profile.runs.jsonl"
+python3 scripts/performance/record-baseline.py \
+    --profile "$profile" \
+    --input "$output" \
+    --output "benchmarks/baselines/$profile.json"

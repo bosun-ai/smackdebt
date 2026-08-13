@@ -1,0 +1,24 @@
+smackdebt · codebase
+.
+3 packages · 7 files · 35 lines
+
+QUALITY  0% need attention
+░░░░░░░░░░░░  0 / 7 code units
+▲ 0 high · ● 0 watch · 7 healthy
+✓ all 7 source files analyzed
+
+No child areas need attention.
+  … 3 quiet areas hidden (use --all)
+
+ARCHITECTURE
+5 internal · 1 external · 1 unresolved · 1 ambiguous
+▲ 1 high · ● 1 watch · 5 internal edges
+▲ HIGH  package dependency cycle
+        app/main.js → core/main.js
+● WATCH  file dependency cycle
+        app/choice.js → app/helper.js
+  app/choice.js → app/helper.js · 1 references
+  app/helper.js → app/choice.js · 1 references
+  app/main.js → core/main.js · 1 references
+
+No watch or high findings.

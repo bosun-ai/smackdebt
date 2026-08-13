@@ -47,6 +47,25 @@ class WorkloadHarnessTests(unittest.TestCase):
             result = subprocess.run(["python3", str(SCRIPT), "check", "--input", str(root)], capture_output=True, text=True)
             self.assertNotEqual(result.returncode, 0)
 
+    def test_graph_profiles_have_declared_package_and_edge_shapes(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory) / "workload"
+            self.run_tool("generate", "--output", str(root), "--profile", "graph-dense", "--files", "40")
+            manifest = json.loads((root / "manifest.json").read_text())
+            self.assertEqual(manifest["language_files"], {"javascript": 40})
+            self.assertEqual(len(list(root.glob("package-*/package.json"))), 4)
+            source = (root / "package-0000/unit-000000.js").read_text()
+            self.assertGreaterEqual(source.count("import dependency_"), 3)
+
+    def test_large_dependency_diff_changes_declared_files_against_a_real_base(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory) / "workload"
+            self.run_tool("generate", "--output", str(root), "--profile", "large-dependency-diff", "--files", "300")
+            manifest = json.loads((root / "manifest.json").read_text())
+            self.assertEqual(manifest["diff_files"], 200)
+            status = subprocess.run(["git", "status", "--porcelain"], cwd=root, check=True, capture_output=True, text=True)
+            self.assertEqual(len(status.stdout.splitlines()), 200)
+
     def test_runner_checks_before_each_measured_command(self):
         with tempfile.TemporaryDirectory() as directory:
             root = Path(directory) / "workload"

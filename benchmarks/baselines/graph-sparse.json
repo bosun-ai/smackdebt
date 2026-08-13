@@ -1,0 +1,41 @@
+{
+  "schema_version": 1,
+  "profile": "graph-sparse",
+  "source_engine": "owned-tree-sitter-static-graph",
+  "workspace_revision": "0f35ba293da4f4da7fedf6bd8c041a46539dd0e4",
+  "workspace_dirty": true,
+  "host": "macOS-26.3.1-arm64-arm-64bit",
+  "rustc": "rustc 1.97.0 (2d8144b78 2026-07-07)",
+  "command": "scripts/performance/baseline.sh graph-sparse",
+  "seed": 1,
+  "content_digest": "62922ada7cd2cf577ad71260f1e2d192ca555174b5825273f5efe5410cf738c7",
+  "supported_files": 1000,
+  "source_bytes": 125100,
+  "source_reads": 1000,
+  "git_processes": 0,
+  "inventory_walks": 1,
+  "samples_parser_time_ns": [
+    19955148,
+    18952672,
+    19362788,
+    20054301,
+    19988140
+  ],
+  "p95_parser_time_ns": 20054301,
+  "samples_wall_time_ns": [
+    126256542,
+    118973916,
+    119160375,
+    127512375,
+    126975000
+  ],
+  "p95_wall_time_ns": 127512375,
+  "peak_resident_bytes": 34193408,
+  "wall_time_budget_ns": 140263613,
+  "peak_resident_budget_bytes": 37612749,
+  "budget_room_percent": 10,
+  "allocation_count": 128220,
+  "reallocation_count": 72236,
+  "allocated_bytes": 10566875,
+  "allocation_note": "Measured with the allocation-stats release feature."
+}

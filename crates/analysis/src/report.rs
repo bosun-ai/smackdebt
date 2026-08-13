@@ -1,6 +1,11 @@
 use crate::comparison::{Comparison, ComparisonDirection};
 use crate::health::{HealthAssessment, HealthCounts, Measurements};
 use crate::source::{Language, SourceSpan, UnitIdentity};
+use crate::{
+    ArchitectureComparison, ArchitectureComparisonId, ArchitectureFinding, ArchitectureFindingId,
+    ArchitectureReportFacts, DependencyCoverage, DependencyEdge, ExternalDependency, PackageEdge,
+    PackageGraphMeasurement, ResolutionDiagnostic,
+};
 #[cfg(test)]
 use crate::{HealthPolicy, LocalUnitId, Rating, Signal, Thresholds, compare_units};
 
@@ -132,6 +137,7 @@ pub struct FileRecord {
     health: HealthCounts,
     activity: Option<FileActivity>,
     path_id: Option<PathId>,
+    package: Option<PackageId>,
 }
 
 impl FileRecord {
@@ -151,6 +157,7 @@ impl FileRecord {
             health,
             activity: None,
             path_id: None,
+            package: None,
         }
     }
 
@@ -188,6 +195,13 @@ impl FileRecord {
     pub const fn path_id(&self) -> Option<PathId> {
         self.path_id
     }
+    pub const fn package(&self) -> Option<PackageId> {
+        self.package
+    }
+    pub fn with_package(mut self, package: PackageId) -> Self {
+        self.package = Some(package);
+        self
+    }
     fn set_path_id(&mut self, path: PathId) {
         self.path_id = Some(path);
     }
@@ -204,6 +218,8 @@ pub struct Scope {
     files: Vec<FileId>,
     findings: Vec<FindingId>,
     comparisons: Vec<ComparisonId>,
+    architecture_findings: Vec<ArchitectureFindingId>,
+    architecture_comparisons: Vec<ArchitectureComparisonId>,
     coverage: Coverage,
     health: HealthCounts,
     diff: DiffCounts,
@@ -226,6 +242,8 @@ impl Scope {
             files: Vec::new(),
             findings: Vec::new(),
             comparisons: Vec::new(),
+            architecture_findings: Vec::new(),
+            architecture_comparisons: Vec::new(),
             coverage: Coverage::default(),
             health: HealthCounts::default(),
             diff: DiffCounts::default(),
@@ -256,6 +274,12 @@ impl Scope {
     }
     pub fn comparisons(&self) -> &[ComparisonId] {
         &self.comparisons
+    }
+    pub fn architecture_findings(&self) -> &[ArchitectureFindingId] {
+        &self.architecture_findings
+    }
+    pub fn architecture_comparisons(&self) -> &[ArchitectureComparisonId] {
+        &self.architecture_comparisons
     }
     pub const fn diff(&self) -> DiffCounts {
         self.diff
@@ -288,6 +312,16 @@ impl Scope {
     pub fn add_comparison(&mut self, comparison: ComparisonId) {
         if !self.comparisons.contains(&comparison) {
             self.comparisons.push(comparison);
+        }
+    }
+    pub fn add_architecture_finding(&mut self, finding: ArchitectureFindingId) {
+        if !self.architecture_findings.contains(&finding) {
+            self.architecture_findings.push(finding);
+        }
+    }
+    pub fn add_architecture_comparison(&mut self, comparison: ArchitectureComparisonId) {
+        if !self.architecture_comparisons.contains(&comparison) {
+            self.architecture_comparisons.push(comparison);
         }
     }
     pub fn set_path(&mut self, path: PathId) {
@@ -459,6 +493,14 @@ pub struct Report {
     diagnostics: Vec<Diagnostic>,
     comparisons: Vec<Comparison>,
     paths: Vec<String>,
+    dependency_coverage: DependencyCoverage,
+    dependency_edges: Vec<DependencyEdge>,
+    package_edges: Vec<PackageEdge>,
+    external_dependencies: Vec<ExternalDependency>,
+    resolution_diagnostics: Vec<ResolutionDiagnostic>,
+    package_graph: Vec<PackageGraphMeasurement>,
+    architecture_findings: Vec<ArchitectureFinding>,
+    architecture_comparisons: Vec<ArchitectureComparison>,
 }
 
 /// The source operation represented by a report.
@@ -517,6 +559,29 @@ impl ReportBuilder {
         self.report.add_comparison(comparison)
     }
 
+    pub fn set_architecture(&mut self, facts: ArchitectureReportFacts) {
+        self.report.dependency_coverage = facts.graph.coverage;
+        self.report.dependency_edges = facts.graph.dependency_edges;
+        self.report.package_edges = facts.graph.package_edges;
+        self.report.external_dependencies = facts.graph.external_dependencies;
+        self.report.resolution_diagnostics = facts.graph.resolution_diagnostics;
+        self.report.package_graph = facts.graph.package_graph;
+        self.report.architecture_findings = facts.findings;
+        self.report.architecture_comparisons = facts.comparisons;
+    }
+
+    pub fn link_architecture_finding(&mut self, scope: ScopeId, finding: ArchitectureFindingId) {
+        self.report.scopes[scope.index()].add_architecture_finding(finding);
+    }
+
+    pub fn link_architecture_comparison(
+        &mut self,
+        scope: ScopeId,
+        comparison: ArchitectureComparisonId,
+    ) {
+        self.report.scopes[scope.index()].add_architecture_comparison(comparison);
+    }
+
     pub fn link_file(&mut self, scope: ScopeId, file: FileId) {
         self.report.scopes[scope.index()].add_file(file);
     }
@@ -531,6 +596,10 @@ impl ReportBuilder {
 
     pub fn diagnostic_count(&self) -> usize {
         self.report.diagnostics.len()
+    }
+
+    pub fn files(&self) -> &[FileRecord] {
+        &self.report.files
     }
 
     pub fn finish(mut self) -> Report {
@@ -558,6 +627,14 @@ impl Report {
             diagnostics: Vec::with_capacity(diagnostics),
             comparisons: Vec::with_capacity(comparisons),
             paths: Vec::new(),
+            dependency_coverage: DependencyCoverage::default(),
+            dependency_edges: Vec::new(),
+            package_edges: Vec::new(),
+            external_dependencies: Vec::new(),
+            resolution_diagnostics: Vec::new(),
+            package_graph: Vec::new(),
+            architecture_findings: Vec::new(),
+            architecture_comparisons: Vec::new(),
         }
     }
 
@@ -590,6 +667,30 @@ impl Report {
     }
     pub fn paths(&self) -> &[String] {
         &self.paths
+    }
+    pub const fn dependency_coverage(&self) -> DependencyCoverage {
+        self.dependency_coverage
+    }
+    pub fn dependency_edges(&self) -> &[DependencyEdge] {
+        &self.dependency_edges
+    }
+    pub fn package_edges(&self) -> &[PackageEdge] {
+        &self.package_edges
+    }
+    pub fn external_dependencies(&self) -> &[ExternalDependency] {
+        &self.external_dependencies
+    }
+    pub fn resolution_diagnostics(&self) -> &[ResolutionDiagnostic] {
+        &self.resolution_diagnostics
+    }
+    pub fn package_graph(&self) -> &[PackageGraphMeasurement] {
+        &self.package_graph
+    }
+    pub fn architecture_findings(&self) -> &[ArchitectureFinding] {
+        &self.architecture_findings
+    }
+    pub fn architecture_comparisons(&self) -> &[ArchitectureComparison] {
+        &self.architecture_comparisons
     }
     fn add_scope(&mut self, scope: Scope) -> ScopeId {
         let id = scope.id();
@@ -718,6 +819,17 @@ fn aggregate_scope(scopes: &mut [Scope], files: &[FileRecord], scope_id: ScopeId
         for finding_index in 0..finding_count {
             let finding_id = scopes[child_id.index()].findings[finding_index];
             scopes[index].add_finding(finding_id);
+        }
+    }
+    for child_index in 0..scopes[index].children.len() {
+        let child_id = scopes[index].children[child_index];
+        let finding_ids = scopes[child_id.index()].architecture_findings.clone();
+        for finding_id in finding_ids {
+            scopes[index].add_architecture_finding(finding_id);
+        }
+        let comparison_ids = scopes[child_id.index()].architecture_comparisons.clone();
+        for comparison_id in comparison_ids {
+            scopes[index].add_architecture_comparison(comparison_id);
         }
     }
     scopes[index].coverage = coverage;

@@ -1,6 +1,9 @@
 use std::path::Path;
 
-use smackdebt_analysis::{Language, ParseStatus, UnitKind};
+use smackdebt_analysis::{
+    DependencyIntent, DependencyKind, DependencySyntax, DependencySyntaxState, Language,
+    ParseStatus, SourceSpan, UnitKind,
+};
 use smackdebt_languages::Analyzer;
 
 struct ExpectedFile<'a> {
@@ -349,6 +352,307 @@ fn every_supported_language_has_a_complete_ordered_truth_fixture() {
             );
         }
     }
+}
+
+#[test]
+fn every_supported_language_translates_dependency_syntax_with_original_spans() {
+    let cases = [
+        (
+            "x.c",
+            "#include \"local.h\"",
+            DependencyKind::Include,
+            "local.h",
+            DependencyIntent::Internal,
+            vec!["./local.h"],
+            1,
+        ),
+        (
+            "x.cpp",
+            "#include \"local.hpp\"",
+            DependencyKind::Include,
+            "local.hpp",
+            DependencyIntent::Internal,
+            vec!["./local.hpp"],
+            1,
+        ),
+        (
+            "x.java",
+            "import app.Local;\nclass X { int x() { return 1; } }",
+            DependencyKind::Import,
+            "app.Local",
+            DependencyIntent::Package,
+            vec![
+                "app/Local.java",
+                "src/main/java/app/Local.java",
+                "src/test/java/app/Local.java",
+            ],
+            1,
+        ),
+        (
+            "x.js",
+            "import x from './local';\nfunction x() {}",
+            DependencyKind::Import,
+            "./local",
+            DependencyIntent::Internal,
+            vec![
+                "./local",
+                "./local.js",
+                "./local/index.js",
+                "./local.jsx",
+                "./local/index.jsx",
+                "./local.ts",
+                "./local/index.ts",
+                "./local.tsx",
+                "./local/index.tsx",
+            ],
+            1,
+        ),
+        (
+            "x.jsx",
+            "import X from './local';\nfunction x() { return <X/>; }",
+            DependencyKind::Import,
+            "./local",
+            DependencyIntent::Internal,
+            vec![
+                "./local",
+                "./local.js",
+                "./local/index.js",
+                "./local.jsx",
+                "./local/index.jsx",
+                "./local.ts",
+                "./local/index.ts",
+                "./local.tsx",
+                "./local/index.tsx",
+            ],
+            1,
+        ),
+        (
+            "x.py",
+            "from . import local\ndef x():\n  pass\n",
+            DependencyKind::Import,
+            ".local",
+            DependencyIntent::Internal,
+            vec!["./local.py", "./local/__init__.py"],
+            1,
+        ),
+        (
+            "x.rs",
+            "mod local;\nfn x() {}",
+            DependencyKind::Module,
+            "local",
+            DependencyIntent::Internal,
+            vec!["./local.rs", "./local/mod.rs"],
+            1,
+        ),
+        (
+            "x.ts",
+            "import x from './local';\nfunction x() {}",
+            DependencyKind::Import,
+            "./local",
+            DependencyIntent::Internal,
+            vec![
+                "./local",
+                "./local.js",
+                "./local/index.js",
+                "./local.jsx",
+                "./local/index.jsx",
+                "./local.ts",
+                "./local/index.ts",
+                "./local.tsx",
+                "./local/index.tsx",
+            ],
+            1,
+        ),
+        (
+            "x.tsx",
+            "import X from './local';\nfunction x() { return <X/>; }",
+            DependencyKind::Import,
+            "./local",
+            DependencyIntent::Internal,
+            vec![
+                "./local",
+                "./local.js",
+                "./local/index.js",
+                "./local.jsx",
+                "./local/index.jsx",
+                "./local.ts",
+                "./local/index.ts",
+                "./local.tsx",
+                "./local/index.tsx",
+            ],
+            1,
+        ),
+        (
+            "x.rb",
+            "require_relative 'local'\ndef x; end\n",
+            DependencyKind::Require,
+            "local",
+            DependencyIntent::Internal,
+            vec![
+                "./local",
+                "./local.rb",
+                "./local/index.rb",
+                "./local/init.rb",
+                "./local/index/init.rb",
+            ],
+            1,
+        ),
+        (
+            "x.vue",
+            "<script setup lang=\"ts\">\nimport x from './local'\n</script>\n<template><p /></template>",
+            DependencyKind::Import,
+            "./local",
+            DependencyIntent::Internal,
+            vec![
+                "./local",
+                "./local.js",
+                "./local/index.js",
+                "./local.jsx",
+                "./local/index.jsx",
+                "./local.ts",
+                "./local/index.ts",
+                "./local.tsx",
+                "./local/index.tsx",
+            ],
+            2,
+        ),
+    ];
+    let mut analyzer = Analyzer::default();
+    for (path, source, kind, target, intent, candidates, line) in cases {
+        let analysis = analyzer
+            .analyze(Path::new(path), source.as_bytes().to_vec())
+            .unwrap();
+        assert_eq!(analysis.dependencies().len(), 1, "{path}");
+        let dependency = &analysis.dependencies()[0];
+        assert_eq!(dependency.kind(), kind, "{path}");
+        assert_eq!(dependency.target(), target, "{path}");
+        assert_eq!(dependency.intent(), intent, "{path}");
+        assert_eq!(
+            (dependency.span().start_line(), dependency.span().end_line()),
+            (line, line),
+            "{path}"
+        );
+        assert_eq!(
+            dependency.state(),
+            &DependencySyntaxState::Candidates(candidates.into_iter().map(str::to_owned).collect()),
+            "{path}"
+        );
+    }
+}
+
+#[test]
+fn external_and_dynamic_references_remain_explicit() {
+    let mut analyzer = Analyzer::default();
+    let analysis = analyzer
+        .analyze(
+            Path::new("x.js"),
+            b"import pkg from 'pkg';\nconst x = require(name);".to_vec(),
+        )
+        .unwrap();
+    assert!(matches!(
+        analysis.dependencies()[0].state(),
+        DependencySyntaxState::Candidates(_)
+    ));
+    assert!(matches!(
+        analysis.dependencies()[1].state(),
+        DependencySyntaxState::Unresolved(_)
+    ));
+}
+
+#[test]
+fn root_package_malformed_and_unsupported_forms_do_not_guess() {
+    let mut analyzer = Analyzer::default();
+    let rust = analyzer
+        .analyze(
+            Path::new("x.rs"),
+            b"use crate::core::work;\nfn x() {}\n".to_vec(),
+        )
+        .unwrap();
+    assert_eq!(
+        rust.dependencies(),
+        &[DependencySyntax::new(
+            DependencyKind::Import,
+            "crate::core::work",
+            SourceSpan::new(1, 1),
+            DependencySyntaxState::Candidates(vec![
+                "core/work.rs".to_owned(),
+                "core/work/mod.rs".to_owned(),
+                "core.rs".to_owned(),
+                "core/mod.rs".to_owned(),
+            ]),
+        )
+        .with_internal_intent()]
+    );
+
+    let package = analyzer
+        .analyze(
+            Path::new("x.js"),
+            b"import value from 'package-name';\n".to_vec(),
+        )
+        .unwrap();
+    assert_eq!(
+        package.dependencies(),
+        &[DependencySyntax::new(
+            DependencyKind::Import,
+            "package-name",
+            SourceSpan::new(1, 1),
+            DependencySyntaxState::Candidates(vec![
+                "package-name".to_owned(),
+                "package-name.js".to_owned(),
+                "package-name/index.js".to_owned(),
+                "package-name.jsx".to_owned(),
+                "package-name/index.jsx".to_owned(),
+                "package-name.ts".to_owned(),
+                "package-name/index.ts".to_owned(),
+                "package-name.tsx".to_owned(),
+                "package-name/index.tsx".to_owned(),
+            ]),
+        )]
+    );
+
+    let malformed = analyzer
+        .analyze(Path::new("x.c"), b"#include value".to_vec())
+        .unwrap();
+    assert_eq!(
+        malformed.dependencies(),
+        &[DependencySyntax::new(
+            DependencyKind::Include,
+            "#include value",
+            SourceSpan::new(1, 1),
+            DependencySyntaxState::Unresolved("dependency target is dynamic".to_owned()),
+        )]
+    );
+
+    let unsupported = analyzer
+        .analyze(
+            Path::new("x.rs"),
+            b"include!(concat!(env!(\"OUT_DIR\"), \"/generated.rs\"));\nfn x() {}\n".to_vec(),
+        )
+        .unwrap();
+    assert_eq!(
+        unsupported.dependencies(),
+        &[DependencySyntax::new(
+            DependencyKind::Include,
+            "include!(concat!(env!(\"OUT_DIR\"), \"/generated.rs\"))",
+            SourceSpan::new(1, 1),
+            DependencySyntaxState::Unresolved("dependency target is dynamic".to_owned()),
+        )
+        .with_internal_intent()]
+    );
+
+    let fixed = analyzer
+        .analyze(Path::new("x.rs"), b"include!(\"generated.rs\");".to_vec())
+        .unwrap();
+    assert_eq!(
+        fixed.dependencies(),
+        &[DependencySyntax::new(
+            DependencyKind::Include,
+            "generated.rs",
+            SourceSpan::new(1, 1),
+            DependencySyntaxState::Candidates(vec!["./generated.rs".to_owned()]),
+        )
+        .with_internal_intent()]
+    );
 }
 
 #[test]

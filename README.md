@@ -46,6 +46,12 @@ TOP FINDINGS
         crates/api/src/checkout.rs:42
         cognitive 31 · lines 126 · 14 touches
 
+ARCHITECTURE
+142 internal · 86 external · 3 unresolved · 1 ambiguous
+▲ 1 high · ● 2 watch · 142 internal edges
+▲ HIGH  package dependency cycle
+        crates/api/src/routes.rs → crates/core/src/orders.rs → crates/api/src/routes.rs
+
 → Explore: smackdebt crates/api
 ```
 
@@ -117,6 +123,11 @@ TOP CHANGES
 ▼ BETTER  groupOrders
         packages/web/src/orders.ts
         cognitive 28 → 7 · cyclomatic 17 → 5 · lines 91 → 38
+
+ARCHITECTURE CHANGE
+▲ WORSE 1 · ▼ BETTER 0 · ● CHANGED 2
+▲ WORSE  package dependency cycle introduced
+        crates/api → crates/core → crates/api
 ```
 
 With no ref, Smackdebt tries `origin/HEAD`, `main`, then `master`. It compares
@@ -180,6 +191,44 @@ Recent activity comes from distinct non-merge commits that touched a file in
 the selected history window. Smackdebt uses activity to order code that already
 needs attention; activity does not change the code-health rating.
 
+## Read the architecture
+
+The same command also reports static dependency health. Smackdebt extracts
+imports, includes, modules, and requires during the source parse, then resolves
+them against discovered repository files:
+
+- `internal` references identify exactly one file in the repository;
+- `external` references name code outside the repository;
+- `unresolved` references are dynamic or malformed;
+- `ambiguous` references match several possible internal files.
+
+Smackdebt does not guess when identity is unclear. The unresolved and ambiguous
+counts stay visible in terminal output, and JSON retains their locations and
+reasons.
+
+A cycle crossing packages is High. A file cycle contained in one package is
+Watch. Fan-in is the number of packages that depend on a package; fan-out is the
+number it depends on. Instability is `fan-out / (fan-in + fan-out)` and is absent
+for an isolated package. Degree and instability describe graph shape and do not
+receive a health label.
+
+Code and architecture results remain separate. Lower source complexity does not
+cancel an introduced package cycle. In diff output an introduced cycle is
+Worse, a removed cycle is Better, and an ordinary edge change is Changed.
+
+Pass a package, directory, or file path to inspect its incoming and outgoing
+relationships. Incoming references remain visible even when their source is
+outside the selected path:
+
+```console
+smackdebt crates/core
+smackdebt --all crates/core
+```
+
+Static analysis does not provide compiler type resolution, runtime tracing, or
+executed build configuration. Macros, generated paths, runtime imports, and
+unsupported aliases can therefore remain unresolved.
+
 ## Discovery
 
 Smackdebt finds the repository root, supported source files, ignored paths, and
@@ -237,6 +286,11 @@ carry parent and child indexes, finding and comparison
 links, coverage, health, and Worse/Better/Changed counts. Files and comparisons
 carry indexed path and file ownership where available. Paths and root health
 have one owner; referencing records do not repeat their text or counts.
+Version 2 also includes dependency coverage, deduplicated file and package
+edges, external dependencies, resolution diagnostics, package graph
+measurements, architecture findings, and architecture comparisons. Finding
+witnesses link to their files and edges through indexes. Terminal limits never
+remove graph facts from JSON.
 It retains every `watch` and `high` finding while healthy units are represented
 by aggregate counts. The checked schema is
 [`schemas/report-v2.schema.json`](schemas/report-v2.schema.json). Version 1 is

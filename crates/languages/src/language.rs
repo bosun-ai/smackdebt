@@ -1,12 +1,13 @@
-use smackdebt_analysis::{Language as ReportLanguage, UnitKind};
+use smackdebt_analysis::{DependencySyntax, Language as ReportLanguage, UnitKind};
 use tree_sitter::{Language as Grammar, Node};
 
 use crate::semantic::Syntax;
 
-#[derive(Clone, Copy, Debug, Default, Eq, PartialEq)]
+#[derive(Clone, Debug, Default, Eq, PartialEq)]
 pub(super) struct Classification {
     pub(super) unit: Option<UnitKind>,
     pub(super) syntax: Syntax,
+    pub(super) dependency: Option<DependencySyntax>,
 }
 
 pub(super) trait Language {
@@ -18,13 +19,20 @@ pub(super) trait Language {
     fn is_container(node: Node<'_>) -> bool;
     fn syntax(node: Node<'_>, source: &[u8]) -> Syntax;
 
-    fn classify(node: Node<'_>, source: &[u8]) -> Classification {
+    fn dependency(_node: Node<'_>, _source: &[u8]) -> Option<DependencySyntax> {
+        None
+    }
+
+    fn classify(node: Node<'_>, source: &[u8], include_dependency: bool) -> Classification {
         if !node.is_named() {
             return Classification::default();
         }
         Classification {
             unit: Self::unit_kind(node),
             syntax: Self::syntax(node, source),
+            dependency: include_dependency
+                .then(|| Self::dependency(node, source))
+                .flatten(),
         }
     }
 

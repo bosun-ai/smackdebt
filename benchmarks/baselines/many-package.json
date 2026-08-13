@@ -1,0 +1,41 @@
+{
+  "schema_version": 1,
+  "profile": "many-package",
+  "source_engine": "owned-tree-sitter-static-graph",
+  "workspace_revision": "0f35ba293da4f4da7fedf6bd8c041a46539dd0e4",
+  "workspace_dirty": true,
+  "host": "macOS-26.3.1-arm64-arm-64bit",
+  "rustc": "rustc 1.97.0 (2d8144b78 2026-07-07)",
+  "command": "scripts/performance/baseline.sh many-package",
+  "seed": 1,
+  "content_digest": "15650b5b59c24fd5b4d8fb7a6ad5f13dd037b84401939cfe71b87a32b8b6b7f9",
+  "supported_files": 1000,
+  "source_bytes": 161190,
+  "source_reads": 1000,
+  "git_processes": 0,
+  "inventory_walks": 1,
+  "samples_parser_time_ns": [
+    15218646,
+    14427002,
+    14734126,
+    14700601,
+    14753609
+  ],
+  "p95_parser_time_ns": 15218646,
+  "samples_wall_time_ns": [
+    168282041,
+    172465125,
+    170143000,
+    170884750,
+    168997084
+  ],
+  "p95_wall_time_ns": 172465125,
+  "peak_resident_bytes": 34816000,
+  "wall_time_budget_ns": 189711638,
+  "peak_resident_budget_bytes": 38297600,
+  "budget_room_percent": 10,
+  "allocation_count": 180886,
+  "reallocation_count": 86094,
+  "allocated_bytes": 54804554,
+  "allocation_note": "Measured with the allocation-stats release feature."
+}

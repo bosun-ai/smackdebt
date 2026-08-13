@@ -16,7 +16,18 @@ from pathlib import Path
 
 
 SCHEMA_VERSION = 1
-PROFILES = {"one-file": 1, "hundred-file": 100, "small-diff": 100, "large-mixed": 100_000}
+PROFILES = {
+    "one-file": 1,
+    "hundred-file": 100,
+    "small-diff": 100,
+    "large-mixed": 100_000,
+    "graph-sparse": 1_000,
+    "graph-dense": 500,
+    "many-package": 1_000,
+    "large-dependency-diff": 1_000,
+}
+GRAPH_PROFILES = {"graph-sparse", "graph-dense", "many-package", "large-dependency-diff"}
+DIFF_PROFILES = {"small-diff", "large-dependency-diff"}
 LANGUAGES = ("rust", "python", "javascript", "typescript", "tsx", "java", "c", "cpp", "ruby", "vue")
 EXTENSIONS = {
     "rust": ".rs", "python": ".py", "javascript": ".js", "typescript": ".ts",
@@ -59,6 +70,30 @@ def _profile_count(profile: str, files: int | None) -> int:
     if count < 1 or count > 100_000:
         raise ValueError("files must be between 1 and 100000")
     return count
+
+
+def _graph_bytes(profile: str, index: int, count: int, changed: bool = False) -> bytes:
+    package_size = 1 if profile == "many-package" else 10
+    package = index // package_size
+    package_count = (count + package_size - 1) // package_size
+    targets = [(package + 1) % package_count]
+    if profile == "graph-dense":
+        targets = [(package + offset) % package_count for offset in range(1, 11)]
+    if changed and index < 200:
+        targets.append((package - 1) % package_count)
+    imports = []
+    for target in sorted(set(targets)):
+        target_file = min(target * package_size, count - 1)
+        imports.append(
+            f"import dependency_{target} from '../package-{target:04}/unit-{target_file:06}';"
+        )
+    rows = [
+        *imports,
+        f"export default function unit_{index}(value) {{",
+        f"  return value + {index % 17};",
+        "}",
+    ]
+    return ("\n".join(rows) + "\n").encode()
 
 
 def _inventory(root: Path) -> tuple[list[Path], int, str, dict[str, int]]:
@@ -117,22 +152,40 @@ def generate(root: Path, profile: str, seed: int, files: int | None, lines: int)
             path.unlink()
         elif path.is_dir() and path != root and ".git" not in path.parts:
             shutil.rmtree(path)
-    (root / "Cargo.toml").write_text("[package]\nname = \"generated-workload\"\nversion = \"0.1.0\"\n")
-    (root / "package.json").write_text('{"name":"generated-workload","private":true}\n')
-    for index in range(count):
-        language = LANGUAGES[index % len(LANGUAGES)]
-        folder = root / "src" / f"group-{index // 1000:03d}"
-        folder.mkdir(parents=True, exist_ok=True)
-        (folder / f"generated-{index:06d}{EXTENSIONS[language]}").write_bytes(_stable_bytes(profile, seed, language, index, lines))
-    if profile == "small-diff":
+    if profile in GRAPH_PROFILES:
+        package_size = 1 if profile == "many-package" else 10
+        for index in range(count):
+            package = index // package_size
+            folder = root / f"package-{package:04}"
+            folder.mkdir(parents=True, exist_ok=True)
+            manifest = folder / "package.json"
+            if not manifest.exists():
+                manifest.write_text(f'{{"name":"package-{package:04}","private":true}}\n')
+            (folder / f"unit-{index:06d}.js").write_bytes(_graph_bytes(profile, index, count))
+    else:
+        (root / "Cargo.toml").write_text("[package]\nname = \"generated-workload\"\nversion = \"0.1.0\"\n")
+        (root / "package.json").write_text('{"name":"generated-workload","private":true}\n')
+        for index in range(count):
+            language = LANGUAGES[index % len(LANGUAGES)]
+            folder = root / "src" / f"group-{index // 1000:03d}"
+            folder.mkdir(parents=True, exist_ok=True)
+            (folder / f"generated-{index:06d}{EXTENSIONS[language]}").write_bytes(_stable_bytes(profile, seed, language, index, lines))
+    if profile in DIFF_PROFILES:
         _git_commit(root)
         (root / ".git" / "info" / "exclude").write_text("manifest.json\nmetadata.json\ncheck.json\nruns.jsonl\n")
-        for index in (1, 17, 63, 88):
-            language = LANGUAGES[index % len(LANGUAGES)]
-            path = root / "src" / f"group-{index // 1000:03d}" / f"generated-{index:06d}{EXTENSIONS[language]}"
-            path.write_bytes(_stable_bytes(profile, seed + 1, language, index, lines))
-    _, source_bytes, digest, language_counts = _inventory(root)
-    document = {"schema_version": SCHEMA_VERSION, "profile": profile, "seed": seed, "files": count + 2, "source_bytes": source_bytes, "content_digest": digest, "language_files": language_counts, "lines_per_file": lines, "diff_files": 4 if profile == "small-diff" else 0}
+        if profile == "small-diff":
+            for index in (1, 17, 63, 88):
+                language = LANGUAGES[index % len(LANGUAGES)]
+                path = root / "src" / f"group-{index // 1000:03d}" / f"generated-{index:06d}{EXTENSIONS[language]}"
+                path.write_bytes(_stable_bytes(profile, seed + 1, language, index, lines))
+        else:
+            package_size = 10
+            for index in range(200):
+                package = index // package_size
+                path = root / f"package-{package:04}" / f"unit-{index:06d}.js"
+                path.write_bytes(_graph_bytes(profile, index, count, changed=True))
+    files_found, source_bytes, digest, language_counts = _inventory(root)
+    document = {"schema_version": SCHEMA_VERSION, "profile": profile, "seed": seed, "files": len(files_found), "source_bytes": source_bytes, "content_digest": digest, "language_files": language_counts, "lines_per_file": lines, "diff_files": 4 if profile == "small-diff" else 200 if profile == "large-dependency-diff" else 0}
     (root / "manifest.json").write_text(json.dumps(document, indent=2, sort_keys=True) + "\n")
     return document
 

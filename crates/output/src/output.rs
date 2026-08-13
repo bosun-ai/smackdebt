@@ -7,8 +7,9 @@ use std::path::{Path, PathBuf};
 
 use anstyle::{AnsiColor, Effects, Style};
 use smackdebt_analysis::{
-    Comparison, ComparisonDirection, ComparisonKind, Diagnostic, DiagnosticKind, Finding, Language,
-    Rating, Report, ReportMode, Scope, ScopeKind, Signal,
+    ArchitectureFindingKind, Comparison, ComparisonDirection, ComparisonKind, Diagnostic,
+    DiagnosticKind, FileId, FileRecord, Finding, Language, Rating, Report, ReportMode, Scope,
+    ScopeKind, Signal,
 };
 use unicode_width::{UnicodeWidthChar, UnicodeWidthStr};
 
@@ -202,6 +203,27 @@ struct Renderer<'a, W> {
     theme: Theme,
 }
 
+fn architecture_finding_name(kind: ArchitectureFindingKind) -> &'static str {
+    match kind {
+        ArchitectureFindingKind::PackageCycle => "package dependency cycle",
+        ArchitectureFindingKind::FileCycle => "file dependency cycle",
+    }
+}
+
+fn file_belongs_to_scope(report: &Report, file: FileId, selected: &Scope) -> bool {
+    let Some(record) = report.files().get(file.index()) else {
+        return false;
+    };
+    let mut scope = Some(record.scope());
+    while let Some(id) = scope {
+        if id == selected.id() {
+            return true;
+        }
+        scope = report.scopes().get(id.index()).and_then(Scope::parent);
+    }
+    false
+}
+
 impl<'a, W: Write> Renderer<'a, W> {
     fn new(writer: &'a mut W, options: TerminalOptions) -> Self {
         Self {
@@ -231,6 +253,7 @@ impl<'a, W: Write> Renderer<'a, W> {
             ReportMode::Codebase => self.write_codebase_areas(view)?,
             ReportMode::Diff => self.write_diff_areas(view)?,
         }
+        self.write_architecture(view)?;
         self.write_details(view)?;
         self.write_diagnostics(view.report.diagnostics())?;
         if let Some(path) = &view.drill {
@@ -238,6 +261,169 @@ impl<'a, W: Write> Renderer<'a, W> {
             self.theme
                 .write(self.writer, Role::Navigation, "→ Explore")?;
             writeln!(self.writer, ": smackdebt {}", path.display())?;
+        }
+        Ok(())
+    }
+
+    fn write_architecture(&mut self, view: &Presentation<'_>) -> io::Result<()> {
+        let Some(scope) = view.selected else {
+            return Ok(());
+        };
+        let report = view.report;
+        let finding_ids = scope.architecture_findings();
+        let high = finding_ids
+            .iter()
+            .filter(|id| report.architecture_findings()[id.index()].rating() == Rating::High)
+            .count();
+        let watch = finding_ids.len().saturating_sub(high);
+        let relevant_edges: Vec<_> = report
+            .dependency_edges()
+            .iter()
+            .filter(|edge| {
+                file_belongs_to_scope(report, edge.source(), scope)
+                    || file_belongs_to_scope(report, edge.target(), scope)
+            })
+            .collect();
+        writeln!(self.writer)?;
+        self.heading_line(if report.mode() == ReportMode::Codebase {
+            "ARCHITECTURE"
+        } else {
+            "ARCHITECTURE CHANGE"
+        })?;
+        let coverage = report.dependency_coverage();
+        writeln!(
+            self.writer,
+            "{} internal · {} external · {} unresolved · {} ambiguous",
+            Grouped(coverage.internal() as usize),
+            Grouped(coverage.external() as usize),
+            Grouped(coverage.unresolved() as usize),
+            Grouped(coverage.ambiguous() as usize)
+        )?;
+        match report.mode() {
+            ReportMode::Codebase => {
+                self.theme.write(self.writer, Role::Bad, "▲")?;
+                write!(self.writer, " {} high · ", Grouped(high))?;
+                self.theme.write(self.writer, Role::Watch, "●")?;
+                writeln!(
+                    self.writer,
+                    " {} watch · {} internal edges",
+                    Grouped(watch),
+                    Grouped(relevant_edges.len())
+                )?;
+                let limit = if self.options.all {
+                    finding_ids.len()
+                } else {
+                    finding_ids.len().min(3)
+                };
+                for id in finding_ids.iter().take(limit) {
+                    let finding = &report.architecture_findings()[id.index()];
+                    let marker = if finding.rating() == Rating::High {
+                        "▲ HIGH"
+                    } else {
+                        "● WATCH"
+                    };
+                    writeln!(
+                        self.writer,
+                        "{marker}  {}",
+                        architecture_finding_name(finding.kind())
+                    )?;
+                    if !finding.files().is_empty() {
+                        write!(self.writer, "        ")?;
+                        for (index, file) in finding
+                            .files()
+                            .iter()
+                            .filter_map(|id| report.files().get(id.index()))
+                            .enumerate()
+                        {
+                            if index > 0 {
+                                write!(self.writer, " → ")?;
+                            }
+                            write!(self.writer, "{}", file.path())?;
+                        }
+                        writeln!(self.writer)?;
+                    }
+                }
+                let edge_limit = if self.options.all {
+                    relevant_edges.len()
+                } else {
+                    relevant_edges.len().min(3)
+                };
+                for edge in relevant_edges.iter().take(edge_limit) {
+                    let source = report
+                        .files()
+                        .get(edge.source().index())
+                        .map_or("?", FileRecord::path);
+                    let target = report
+                        .files()
+                        .get(edge.target().index())
+                        .map_or("?", FileRecord::path);
+                    writeln!(
+                        self.writer,
+                        "  {source} → {target} · {} references",
+                        edge.references()
+                    )?;
+                }
+            }
+            ReportMode::Diff => {
+                let ids = scope.architecture_comparisons();
+                let mut worse = 0usize;
+                let mut better = 0usize;
+                let mut changed = 0usize;
+                for id in ids {
+                    match report.architecture_comparisons()[id.index()].direction() {
+                        ComparisonDirection::Worse => worse += 1,
+                        ComparisonDirection::Better => better += 1,
+                        ComparisonDirection::Changed => changed += 1,
+                    }
+                }
+                writeln!(
+                    self.writer,
+                    "▲ WORSE {} · ▼ BETTER {} · ● CHANGED {}",
+                    Grouped(worse),
+                    Grouped(better),
+                    Grouped(changed)
+                )?;
+                let limit = if self.options.all {
+                    ids.len()
+                } else {
+                    ids.len().min(3)
+                };
+                for id in ids.iter().take(limit) {
+                    let comparison = &report.architecture_comparisons()[id.index()];
+                    let label = match comparison.kind() {
+                        smackdebt_analysis::ArchitectureComparisonKind::EdgeAdded => "edge added",
+                        smackdebt_analysis::ArchitectureComparisonKind::EdgeRemoved => {
+                            "edge removed"
+                        }
+                        smackdebt_analysis::ArchitectureComparisonKind::CycleIntroduced => {
+                            "package cycle introduced"
+                        }
+                        smackdebt_analysis::ArchitectureComparisonKind::CycleRemoved => {
+                            "package cycle removed"
+                        }
+                    };
+                    let marker = match comparison.direction() {
+                        ComparisonDirection::Worse => "▲ WORSE",
+                        ComparisonDirection::Better => "▼ BETTER",
+                        ComparisonDirection::Changed => "● CHANGED",
+                    };
+                    write!(self.writer, "{marker}  {label}")?;
+                    for package in comparison.packages() {
+                        if let Some(name) = package_name(report, package.index()) {
+                            write!(self.writer, "  {name}")?;
+                        }
+                    }
+                    if !comparison.witness().is_empty() {
+                        write!(self.writer, "  witness")?;
+                        for package in comparison.witness() {
+                            if let Some(name) = package_name(report, package.index()) {
+                                write!(self.writer, "  {name}")?;
+                            }
+                        }
+                    }
+                    writeln!(self.writer)?;
+                }
+            }
         }
         Ok(())
     }
@@ -794,6 +980,15 @@ impl<'a, W: Write> Renderer<'a, W> {
         self.heading(heading)?;
         writeln!(self.writer)
     }
+}
+
+fn package_name(report: &Report, package_index: usize) -> Option<&str> {
+    report
+        .scopes()
+        .iter()
+        .filter(|scope| scope.kind() == ScopeKind::Package)
+        .nth(package_index)
+        .map(Scope::name)
 }
 
 #[derive(Clone, Copy, Eq, PartialEq)]

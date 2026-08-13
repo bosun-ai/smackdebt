@@ -1,4 +1,4 @@
-use smackdebt_analysis::{Language as ReportLanguage, UnitKind};
+use smackdebt_analysis::{DependencySyntax, Language as ReportLanguage, UnitKind};
 use tree_sitter::{Language as Grammar, Node};
 
 use crate::language::{Language, node_name};
@@ -69,5 +69,9 @@ impl Language for Python {
                 ],
             ),
         }
+    }
+
+    fn dependency(node: Node<'_>, source: &[u8]) -> Option<DependencySyntax> {
+        crate::dependency::python(node, source)
     }
 }

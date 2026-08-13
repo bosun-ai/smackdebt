@@ -25,6 +25,81 @@ pub struct SourceSpan {
     end_line: u32,
 }
 
+/// The syntax-level kind of a dependency reference.
+#[derive(Clone, Copy, Debug, Eq, Hash, Ord, PartialEq, PartialOrd)]
+pub enum DependencyKind {
+    Import,
+    Include,
+    Module,
+    Require,
+}
+
+#[derive(Clone, Copy, Debug, Eq, Hash, Ord, PartialEq, PartialOrd)]
+pub enum DependencyIntent {
+    Internal,
+    Package,
+}
+
+/// Why a dependency cannot safely produce path candidates.
+#[derive(Clone, Debug, Eq, Hash, Ord, PartialEq, PartialOrd)]
+pub enum DependencySyntaxState {
+    Candidates(Vec<String>),
+    External,
+    Unresolved(String),
+}
+
+/// A grammar-owned dependency reference before repository resolution.
+#[derive(Clone, Debug, Eq, Hash, Ord, PartialEq, PartialOrd)]
+pub struct DependencySyntax {
+    kind: DependencyKind,
+    target: String,
+    span: SourceSpan,
+    state: DependencySyntaxState,
+    intent: DependencyIntent,
+}
+
+impl DependencySyntax {
+    pub fn new(
+        kind: DependencyKind,
+        target: impl Into<String>,
+        span: SourceSpan,
+        state: DependencySyntaxState,
+    ) -> Self {
+        Self {
+            kind,
+            target: target.into(),
+            span,
+            state,
+            intent: DependencyIntent::Package,
+        }
+    }
+
+    pub const fn kind(&self) -> DependencyKind {
+        self.kind
+    }
+
+    pub fn target(&self) -> &str {
+        &self.target
+    }
+
+    pub const fn span(&self) -> SourceSpan {
+        self.span
+    }
+
+    pub const fn state(&self) -> &DependencySyntaxState {
+        &self.state
+    }
+
+    pub const fn intent(&self) -> DependencyIntent {
+        self.intent
+    }
+
+    pub fn with_internal_intent(mut self) -> Self {
+        self.intent = DependencyIntent::Internal;
+        self
+    }
+}
+
 impl SourceSpan {
     pub const fn new(start_line: u32, end_line: u32) -> Self {
         Self {
@@ -169,6 +244,7 @@ pub struct FileAnalysis {
     source_lines: u32,
     parse_status: ParseStatus,
     units: Vec<UnitFact>,
+    dependencies: Vec<DependencySyntax>,
 }
 
 impl FileAnalysis {
@@ -178,11 +254,22 @@ impl FileAnalysis {
         parse_status: ParseStatus,
         units: Vec<UnitFact>,
     ) -> Self {
+        Self::with_dependencies(language, source_lines, parse_status, units, Vec::new())
+    }
+
+    pub fn with_dependencies(
+        language: Language,
+        source_lines: u32,
+        parse_status: ParseStatus,
+        units: Vec<UnitFact>,
+        dependencies: Vec<DependencySyntax>,
+    ) -> Self {
         Self {
             language,
             source_lines,
             parse_status,
             units,
+            dependencies,
         }
     }
 
@@ -200,5 +287,9 @@ impl FileAnalysis {
 
     pub fn units(&self) -> &[UnitFact] {
         &self.units
+    }
+
+    pub fn dependencies(&self) -> &[DependencySyntax] {
+        &self.dependencies
     }
 }

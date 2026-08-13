@@ -1,5 +1,6 @@
 use smackdebt_analysis::{
-    FileAnalysis, LocalUnitId, Measurements, ParseStatus, SourceSpan, UnitFact, UnitIdentity,
+    DependencySyntax, FileAnalysis, LocalUnitId, Measurements, ParseStatus, SourceSpan, UnitFact,
+    UnitIdentity,
 };
 use tree_sitter::{Node, Parser, Query, QueryCursor, StreamingIterator};
 
@@ -21,6 +22,7 @@ pub(super) struct Scratch {
     unit_by_depth: Vec<Option<usize>>,
     expression_nesting: Vec<u32>,
     unit_drafts: Vec<UnitDraft>,
+    dependencies: Vec<DependencySyntax>,
     queries: [Option<QueryState>; 11],
 }
 
@@ -32,6 +34,7 @@ impl Default for Scratch {
             unit_by_depth: Vec::new(),
             expression_nesting: Vec::new(),
             unit_drafts: Vec::new(),
+            dependencies: Vec::new(),
             queries: std::array::from_fn(|_| None),
         }
     }
@@ -71,7 +74,7 @@ pub(super) fn append_expression<L: Language>(
             .last()
             .copied()
             .unwrap_or(base_nesting);
-        let mut syntax = L::classify(node, source).syntax;
+        let mut syntax = L::classify(node, source, false).syntax;
         syntax.logical_statement = false;
         scratch.observations.push(Observation { syntax, nesting });
         scratch
@@ -102,12 +105,13 @@ pub(super) fn analyze<L: Language>(
         ParseStatus::Parsed
     };
     reserve_unit_capacity::<L>(root, source, scratch)?;
-    let units = collect_units::<L>(root, source, 0, 0, scratch);
-    Ok(FileAnalysis::new(
+    let (units, dependencies) = collect_units::<L>(root, source, 0, 0, scratch);
+    Ok(FileAnalysis::with_dependencies(
         L::REPORT_LANGUAGE,
         line_count(source),
         parse_status,
         units,
+        dependencies,
     ))
 }
 
@@ -117,7 +121,7 @@ pub(super) fn analyze_included<L: Language>(
     line_offset: u32,
     id_offset: usize,
     scratch: &mut Scratch,
-) -> Result<(ParseStatus, Vec<UnitFact>), String> {
+) -> Result<(ParseStatus, Vec<UnitFact>, Vec<DependencySyntax>), String> {
     parser
         .set_language(&L::grammar())
         .map_err(|error| format!("language setup failed: {error}"))?;
@@ -133,10 +137,8 @@ pub(super) fn analyze_included<L: Language>(
         ParseStatus::Parsed
     };
     reserve_unit_capacity::<L>(root, source, scratch)?;
-    Ok((
-        status,
-        collect_units::<L>(root, source, line_offset, id_offset, scratch),
-    ))
+    let (units, dependencies) = collect_units::<L>(root, source, line_offset, id_offset, scratch);
+    Ok((status, units, dependencies))
 }
 
 pub(super) fn reserve_unit_capacity<L: Language>(
@@ -186,13 +188,19 @@ fn collect_units<L: Language>(
     line_offset: u32,
     id_offset: usize,
     scratch: &mut Scratch,
-) -> Vec<UnitFact> {
+) -> (Vec<UnitFact>, Vec<DependencySyntax>) {
     scratch.unit_drafts.clear();
+    scratch.dependencies.clear();
     scratch.unit_by_depth.clear();
     walk(root, |node, depth| {
         scratch.unit_by_depth.truncate(depth);
         let parent = scratch.unit_by_depth.last().copied().flatten();
-        let classification = L::classify(node, source);
+        let classification = L::classify(node, source, true);
+        if let Some(dependency) = classification.dependency {
+            scratch
+                .dependencies
+                .push(offset_dependency(dependency, line_offset));
+        }
         let mut child_parent = parent;
         if let Some(kind) = classification.unit {
             let name = L::name(node, source);
@@ -236,7 +244,31 @@ fn collect_units<L: Language>(
                 )
             }),
     );
-    units
+    let mut dependencies = Vec::with_capacity(scratch.dependencies.len());
+    dependencies.append(&mut scratch.dependencies);
+    (units, dependencies)
+}
+
+fn offset_dependency(dependency: DependencySyntax, line_offset: u32) -> DependencySyntax {
+    if line_offset == 0 {
+        return dependency;
+    }
+    let span = dependency.span();
+    let internal = dependency.intent() == smackdebt_analysis::DependencyIntent::Internal;
+    let dependency = DependencySyntax::new(
+        dependency.kind(),
+        dependency.target(),
+        SourceSpan::new(
+            span.start_line() + line_offset,
+            span.end_line() + line_offset,
+        ),
+        dependency.state().clone(),
+    );
+    if internal {
+        dependency.with_internal_intent()
+    } else {
+        dependency
+    }
 }
 
 fn measure<L: Language>(root: Node<'_>, source: &[u8], scratch: &mut Scratch) -> Measurements {
@@ -245,7 +277,7 @@ fn measure<L: Language>(root: Node<'_>, source: &[u8], scratch: &mut Scratch) ->
     walk(root, |node, depth| {
         scratch.nesting_by_depth.truncate(depth);
         let nesting = scratch.nesting_by_depth.last().copied().unwrap_or(0);
-        let classification = L::classify(node, source);
+        let classification = L::classify(node, source, false);
         if node.id() != root.id() && classification.unit.is_some() {
             return false;
         }

@@ -1,4 +1,4 @@
-use smackdebt_analysis::{Language as ReportLanguage, UnitKind};
+use smackdebt_analysis::{DependencyKind, DependencySyntax, Language as ReportLanguage, UnitKind};
 use tree_sitter::{Language as Grammar, Node};
 
 use crate::language::{Language, node_name};
@@ -48,8 +48,52 @@ macro_rules! javascript_language {
             fn syntax(node: Node<'_>, source: &[u8]) -> Syntax {
                 javascript_syntax(node, source)
             }
+
+            fn dependency(node: Node<'_>, source: &[u8]) -> Option<DependencySyntax> {
+                javascript_dependency(node, source)
+            }
         }
     };
+}
+
+fn javascript_dependency(node: Node<'_>, source: &[u8]) -> Option<DependencySyntax> {
+    match node.kind() {
+        "import_statement" => crate::dependency::quoted(
+            node,
+            source,
+            DependencyKind::Import,
+            &[".js", ".jsx", ".ts", ".tsx"],
+            false,
+        ),
+        "export_statement"
+            if node
+                .utf8_text(source)
+                .is_ok_and(|text| text.contains(" from ")) =>
+        {
+            crate::dependency::quoted(
+                node,
+                source,
+                DependencyKind::Import,
+                &[".js", ".jsx", ".ts", ".tsx"],
+                false,
+            )
+        }
+        "call_expression" => {
+            let text = node.utf8_text(source).ok()?.trim();
+            if text.starts_with("require(") || text.starts_with("import(") {
+                crate::dependency::quoted(
+                    node,
+                    source,
+                    DependencyKind::Require,
+                    &[".js", ".jsx", ".ts", ".tsx"],
+                    false,
+                )
+            } else {
+                None
+            }
+        }
+        _ => None,
+    }
 }
 
 javascript_language!(

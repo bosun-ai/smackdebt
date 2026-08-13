@@ -1,0 +1,20 @@
+smackdebt · diff
+.
+1 source file changed · 1 analyzed
+
+CHANGE  0 retained units
+▲ WORSE 0 · ▼ BETTER 0 · ● CHANGED 0
+
+CHANGE BY AREA
+  area          worse  better  changed  share              
+  app               –       –        –  ░░░░░░░░░░░░  0%
+  core              –       –        –  ░░░░░░░░░░░░  0%
+  native            –       –        –  ░░░░░░░░░░░░  0%
+
+ARCHITECTURE CHANGE
+5 internal · 1 external · 1 unresolved · 1 ambiguous
+▲ WORSE 1 · ▼ BETTER 0 · ● CHANGED 1
+▲ WORSE  package cycle introduced  app  core  witness  app  core  app
+● CHANGED  edge added  core  app
+
+No changed units.

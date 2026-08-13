@@ -74,6 +74,7 @@ pub(super) fn analyze_vue(
         ParseStatus::Parsed
     };
     let mut units = Vec::new();
+    let mut dependencies = Vec::new();
     let mut template_added = false;
     let typescript_document = std::str::from_utf8(source)
         .is_ok_and(|text| text.contains("lang=\"ts") || text.contains("lang='ts"));
@@ -118,6 +119,7 @@ pub(super) fn analyze_vue(
                         status = ParseStatus::Recovered;
                     }
                     units.extend(result.1);
+                    dependencies.extend(result.2);
                 }
                 false
             }
@@ -156,11 +158,12 @@ pub(super) fn analyze_vue(
     if let Some(message) = error {
         return Err(message);
     }
-    Ok(FileAnalysis::new(
+    Ok(FileAnalysis::with_dependencies(
         Language::Vue,
         line_count(source),
         status,
         units,
+        dependencies,
     ))
 }
 

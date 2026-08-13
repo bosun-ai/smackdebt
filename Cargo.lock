@@ -1058,6 +1058,7 @@ name = "smackdebt-project"
 version = "0.1.0"
 dependencies = [
  "rayon",
+ "serde_json",
  "smackdebt-analysis",
  "smackdebt-discovery",
  "smackdebt-git",

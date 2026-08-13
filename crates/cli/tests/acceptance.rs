@@ -6,6 +6,10 @@ use assert_cmd::cargo::cargo_bin_cmd;
 
 const SOURCE_ENGINE_FIXTURE: &str =
     concat!(env!("CARGO_MANIFEST_DIR"), "/tests/fixtures/source-engine");
+const STATIC_ARCHITECTURE_FIXTURE: &str = concat!(
+    env!("CARGO_MANIFEST_DIR"),
+    "/tests/fixtures/static-architecture"
+);
 
 #[test]
 fn serial_and_parallel_codebase_output_match() {
@@ -142,6 +146,131 @@ fn source_engine_json_snapshot_is_reviewed_and_matches_schema() {
     validate_schema(&report);
 }
 
+#[test]
+fn static_architecture_codebase_snapshots_are_reviewed() {
+    let project = static_architecture_fixture();
+    let terminal = run_in(project.path(), ["--jobs", "1", "--color", "never"]);
+    assert_snapshot(
+        "static-architecture.terminal.txt",
+        &terminal,
+        include_bytes!("snapshots/static-architecture.terminal.txt"),
+    );
+    let json = run_in(project.path(), ["--json", "--jobs", "1"]);
+    assert_snapshot(
+        "static-architecture.json",
+        &json,
+        include_bytes!("snapshots/static-architecture.json"),
+    );
+    let report: serde_json::Value = serde_json::from_slice(&json).unwrap();
+    validate_schema(&report);
+    assert_index_integrity(&report);
+    assert_eq!(report["architecture_findings"].as_array().unwrap().len(), 2);
+    assert_eq!(report["dependency_coverage"]["external"], 1);
+    assert_eq!(report["dependency_coverage"]["unresolved"], 1);
+    assert_eq!(report["dependency_coverage"]["ambiguous"], 1);
+    assert!(
+        report["package_graph"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .any(|package| package["fan_in"] == 1 && package["fan_out"] == 1)
+    );
+}
+
+#[test]
+fn architecture_path_drill_keeps_incoming_edges_and_omits_unrelated_regions() {
+    let project = static_architecture_fixture();
+    git(project.path(), ["init", "-b", "main"]);
+    let output = run_in(project.path(), ["app", "--all", "--color", "never"]);
+    let text = String::from_utf8(output).unwrap();
+    assert!(text.contains("core/main.js → app/main.js"));
+    assert!(!text.contains("native/src/helper.rs"));
+}
+
+#[test]
+fn static_architecture_diff_snapshot_uses_unchanged_return_edges() {
+    let project = static_architecture_fixture();
+    fs::write(
+        project.path().join("core/main.js"),
+        "export default function core(value) {\n  return value;\n}\n",
+    )
+    .unwrap();
+    git(project.path(), ["init", "-b", "main"]);
+    git(project.path(), ["config", "user.name", "Smackdebt Test"]);
+    git(
+        project.path(),
+        ["config", "user.email", "smackdebt@example.invalid"],
+    );
+    git(project.path(), ["add", "."]);
+    git(project.path(), ["commit", "-m", "test: acyclic base"]);
+    fs::write(
+        project.path().join("core/main.js"),
+        "import app from '../app/main';\n\nexport default function core(value) {\n  return app(value);\n}\n",
+    )
+    .unwrap();
+
+    let json = run_in(project.path(), ["diff", "main", "--json", "--jobs", "1"]);
+    let terminal = run_in(
+        project.path(),
+        ["diff", "main", "--jobs", "1", "--color", "never"],
+    );
+    assert_snapshot(
+        "static-architecture-diff.terminal.txt",
+        &terminal,
+        include_bytes!("snapshots/static-architecture-diff.terminal.txt"),
+    );
+    assert_snapshot(
+        "static-architecture-diff.json",
+        &json,
+        include_bytes!("snapshots/static-architecture-diff.json"),
+    );
+    let report: serde_json::Value = serde_json::from_slice(&json).unwrap();
+    validate_schema(&report);
+    assert!(
+        report["architecture_comparisons"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .any(|comparison| comparison["kind"] == "cycle_introduced"
+                && comparison["direction"] == "worse")
+    );
+}
+
+#[test]
+fn static_architecture_removed_cycle_snapshot_is_reviewed() {
+    let project = static_architecture_fixture();
+    git(project.path(), ["init", "-b", "main"]);
+    git(project.path(), ["config", "user.name", "Smackdebt Test"]);
+    git(
+        project.path(),
+        ["config", "user.email", "smackdebt@example.invalid"],
+    );
+    git(project.path(), ["add", "."]);
+    git(project.path(), ["commit", "-m", "test: cyclic base"]);
+    fs::write(
+        project.path().join("core/main.js"),
+        "export default function core(value) {\n  return value;\n}\n",
+    )
+    .unwrap();
+
+    let json = run_in(project.path(), ["diff", "main", "--json", "--jobs", "1"]);
+    assert_snapshot(
+        "static-architecture-removed-cycle.json",
+        &json,
+        include_bytes!("snapshots/static-architecture-removed-cycle.json"),
+    );
+    let report: serde_json::Value = serde_json::from_slice(&json).unwrap();
+    validate_schema(&report);
+    assert!(
+        report["architecture_comparisons"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .any(|comparison| comparison["kind"] == "cycle_removed"
+                && comparison["direction"] == "better")
+    );
+}
+
 fn assert_snapshot(name: &str, actual: &[u8], expected: &[u8]) {
     if std::env::var_os("SMACKDEBT_UPDATE_SNAPSHOTS").is_some() {
         fs::write(
@@ -173,6 +302,13 @@ fn assert_index_integrity(report: &serde_json::Value) {
     let comparisons = report["comparisons"].as_array().unwrap();
     let health = report["health"].as_array().unwrap();
     let activity = report["activity"].as_array().unwrap();
+    let dependency_edges = report["dependency_edges"].as_array().unwrap();
+    let package_edges = report["package_edges"].as_array().unwrap();
+    let architecture_findings = report["architecture_findings"].as_array().unwrap();
+    let architecture_comparisons = report["architecture_comparisons"].as_array().unwrap();
+    let package_graph = report["package_graph"].as_array().unwrap();
+    let external_dependencies = report["external_dependencies"].as_array().unwrap();
+    let resolution_diagnostics = report["resolution_diagnostics"].as_array().unwrap();
 
     assert!(report.get("summary").is_none());
     for field in ["root", "selected_scope"] {
@@ -214,6 +350,12 @@ fn assert_index_integrity(report: &serde_json::Value) {
         for comparison in scope["comparisons"].as_array().unwrap() {
             assert!((comparison.as_u64().unwrap() as usize) < comparisons.len());
         }
+        for finding in scope["architecture_findings"].as_array().unwrap() {
+            assert!((finding.as_u64().unwrap() as usize) < architecture_findings.len());
+        }
+        for comparison in scope["architecture_comparisons"].as_array().unwrap() {
+            assert!((comparison.as_u64().unwrap() as usize) < architecture_comparisons.len());
+        }
     }
     for (index, file) in files.iter().enumerate() {
         assert_eq!(file["id"], index);
@@ -224,6 +366,9 @@ fn assert_index_integrity(report: &serde_json::Value) {
         assert!((file["scope"].as_u64().unwrap() as usize) < scopes.len());
         assert!((file["health"].as_u64().unwrap() as usize) < health.len());
         assert!((file["activity"].as_u64().unwrap() as usize) < activity.len());
+        if let Some(package) = file["package"].as_u64() {
+            assert!((package as usize) < package_graph.len());
+        }
     }
     for (index, finding) in findings.iter().enumerate() {
         assert_eq!(finding["id"], index);
@@ -244,6 +389,72 @@ fn assert_index_integrity(report: &serde_json::Value) {
         assert_eq!(record["id"], index);
         assert!((record["file"].as_u64().unwrap() as usize) < files.len());
     }
+    for (index, edge) in dependency_edges.iter().enumerate() {
+        assert_eq!(edge["id"], index);
+        assert!((edge["source"].as_u64().unwrap() as usize) < files.len());
+        assert!((edge["target"].as_u64().unwrap() as usize) < files.len());
+    }
+    for (index, edge) in package_edges.iter().enumerate() {
+        assert_eq!(edge["id"], index);
+        assert!((edge["source"].as_u64().unwrap() as usize) < package_graph.len());
+        assert!((edge["target"].as_u64().unwrap() as usize) < package_graph.len());
+        for file_edge in edge["file_edges"].as_array().unwrap() {
+            assert!((file_edge.as_u64().unwrap() as usize) < dependency_edges.len());
+        }
+    }
+    for (index, finding) in architecture_findings.iter().enumerate() {
+        assert_eq!(finding["id"], index);
+        for file in finding["files"].as_array().unwrap() {
+            assert!((file.as_u64().unwrap() as usize) < files.len());
+        }
+        for package in finding["packages"].as_array().unwrap() {
+            assert!((package.as_u64().unwrap() as usize) < package_graph.len());
+        }
+        for edge in finding["witness_edges"].as_array().unwrap() {
+            assert!((edge.as_u64().unwrap() as usize) < dependency_edges.len());
+        }
+    }
+    for (index, comparison) in architecture_comparisons.iter().enumerate() {
+        assert_eq!(comparison["id"], index);
+        for field in ["packages", "witness"] {
+            for package in comparison[field].as_array().unwrap() {
+                assert!((package.as_u64().unwrap() as usize) < package_graph.len());
+            }
+        }
+        for file in comparison["files"].as_array().unwrap() {
+            assert!((file.as_u64().unwrap() as usize) < files.len());
+        }
+    }
+    for (index, measurement) in package_graph.iter().enumerate() {
+        assert_eq!(measurement["package"], index);
+    }
+    for dependency in external_dependencies {
+        assert!((dependency["file"].as_u64().unwrap() as usize) < files.len());
+    }
+    for diagnostic in resolution_diagnostics {
+        assert!((diagnostic["file"].as_u64().unwrap() as usize) < files.len());
+    }
+}
+
+#[test]
+fn index_audit_rejects_a_nested_architecture_reference() {
+    let project = static_architecture_fixture();
+    let bytes = run(["--json", project.path().to_str().unwrap()]);
+    let mut report: serde_json::Value = serde_json::from_slice(&bytes).unwrap();
+    assert!(
+        !report["architecture_findings"]
+            .as_array()
+            .unwrap()
+            .is_empty()
+    );
+    assert!(
+        !report["architecture_findings"][0]["witness_edges"]
+            .as_array()
+            .unwrap()
+            .is_empty()
+    );
+    report["architecture_findings"][0]["witness_edges"][0] = 999_999.into();
+    assert!(std::panic::catch_unwind(|| assert_index_integrity(&report)).is_err());
 }
 
 #[test]
@@ -310,6 +521,28 @@ fn source_engine_fixture() -> tempfile::TempDir {
         project.path().join("src/work.rb"),
     )
     .unwrap();
+    project
+}
+
+fn static_architecture_fixture() -> tempfile::TempDir {
+    let project = tempfile::tempdir().unwrap();
+    for path in [
+        "app/package.json",
+        "app/main.js",
+        "app/choice.js",
+        "app/choice.ts",
+        "app/helper.js",
+        "core/package.json",
+        "core/main.js",
+        "native/Cargo.toml",
+        "native/src/lib.rs",
+        "native/src/helper.rs",
+    ] {
+        let source = Path::new(STATIC_ARCHITECTURE_FIXTURE).join(path);
+        let target = project.path().join(path);
+        fs::create_dir_all(target.parent().unwrap()).unwrap();
+        fs::copy(source, target).unwrap();
+    }
     project
 }
 

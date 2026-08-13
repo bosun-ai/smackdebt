@@ -150,13 +150,27 @@ impl DiffRequest {
 }
 
 /// Observable work counts used by acceptance and performance checks.
-#[cfg(test)]
 #[derive(Clone, Copy, Debug, Default, Eq, PartialEq)]
-pub(super) struct WorkStats {
+pub struct WorkStats {
     pub(super) inventory_walks: usize,
     pub(super) inventory_visits: usize,
     pub(super) source_reads: usize,
     pub(super) git_processes: usize,
+}
+
+impl WorkStats {
+    pub const fn inventory_walks(self) -> usize {
+        self.inventory_walks
+    }
+    pub const fn inventory_visits(self) -> usize {
+        self.inventory_visits
+    }
+    pub const fn source_reads(self) -> usize {
+        self.source_reads
+    }
+    pub const fn git_processes(self) -> usize {
+        self.git_processes
+    }
 }
 
 /// A completed report and the structural work used to produce it.
@@ -164,7 +178,6 @@ pub(super) struct WorkStats {
 pub struct ProjectReport {
     pub(super) report: Report,
     pub(super) selected_scope: Option<ScopeId>,
-    #[cfg(test)]
     pub(super) stats: WorkStats,
 }
 
@@ -177,8 +190,8 @@ impl ProjectReport {
         self.selected_scope
     }
 
-    #[cfg(test)]
-    pub(super) const fn stats(&self) -> WorkStats {
+    #[doc(hidden)]
+    pub const fn stats(&self) -> WorkStats {
         self.stats
     }
 }

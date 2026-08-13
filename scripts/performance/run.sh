@@ -54,6 +54,8 @@ stderr = pathlib.Path(stderr_file).read_text()
 match = re.search(r'smackdebt parser stats: \{"parser_time_ns":(\d+)\}', stderr)
 allocations = re.search(r'allocations: (\d+).*?reallocations: (\d+).*?bytes_allocated: (\d+)', stderr)
 resident = re.search(r'smackdebt runner stats: \{"peak_resident_bytes":(\d+)\}', stderr)
+project = re.search(r'smackdebt project stats: (\{[^\n]+\})', stderr)
+project_stats = json.loads(project.group(1)) if project else {}
 record = {
     "run": int(run),
     "wall_time_ns": int(finished) - int(started),
@@ -62,6 +64,10 @@ record = {
     "reallocation_count": int(allocations.group(2)) if allocations else None,
     "allocated_bytes": int(allocations.group(3)) if allocations else None,
     "peak_resident_bytes": int(resident.group(1)) if resident else None,
+    "inventory_walks": project_stats.get("inventory_walks"),
+    "inventory_visits": project_stats.get("inventory_visits"),
+    "source_reads": project_stats.get("source_reads"),
+    "git_processes": project_stats.get("git_processes"),
 }
 with path.open("a") as stream:
     stream.write(json.dumps(record, sort_keys=True) + "\n")

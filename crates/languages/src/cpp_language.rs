@@ -1,4 +1,4 @@
-use smackdebt_analysis::{Language as ReportLanguage, UnitKind};
+use smackdebt_analysis::{DependencySyntax, Language as ReportLanguage, UnitKind};
 use tree_sitter::{Language as Grammar, Node};
 
 use crate::c_language::{c_syntax, declarator_name};
@@ -49,6 +49,10 @@ impl Language for Cpp {
 
     fn syntax(node: Node<'_>, source: &[u8]) -> Syntax {
         c_syntax(node, source)
+    }
+
+    fn dependency(node: Node<'_>, source: &[u8]) -> Option<DependencySyntax> {
+        crate::dependency::include(node, source)
     }
 }
 

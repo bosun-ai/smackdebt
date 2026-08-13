@@ -86,6 +86,14 @@ fn run(arguments: impl IntoIterator<Item = OsString>) -> ExitCode {
 
     match result {
         Ok(result) => {
+            #[cfg(feature = "allocation-stats")]
+            eprintln!(
+                "smackdebt project stats: {{\"inventory_walks\":{},\"inventory_visits\":{},\"source_reads\":{},\"git_processes\":{}}}",
+                result.stats().inventory_walks(),
+                result.stats().inventory_visits(),
+                result.stats().source_reads(),
+                result.stats().git_processes(),
+            );
             let stdout_is_terminal = io::stdout().is_terminal();
             let mut stdout = io::BufWriter::new(io::stdout().lock());
             let rendered = if common.json {

@@ -9,16 +9,20 @@ use std::sync::{Arc, Mutex, mpsc};
 
 use rayon::prelude::*;
 use smackdebt_analysis::{
-    Comparison, ComparisonId, Coverage, Diagnostic, DiagnosticId, DiagnosticKind, FileActivity,
-    FileAnalysis, FileId, FileRecord, Finding, FindingId, HealthAssessment, HealthCounts,
-    HealthPolicy, Language, ParseStatus, Rating, Report, ReportBuilder as AnalysisReportBuilder,
-    ReportMode, Scope, ScopeId, ScopeKind, compare_units,
+    ArchitectureFinding, ArchitectureFindingId, ArchitectureFindingKind, ArchitectureGraph,
+    ArchitectureReportFacts, Comparison, ComparisonId, Coverage, DependencyCoverage,
+    DependencyEdge, DependencyEdgeId, DependencySyntax, DependencySyntaxState, Diagnostic,
+    DiagnosticId, DiagnosticKind, ExternalDependency, FileActivity, FileAnalysis, FileId,
+    FileRecord, Finding, FindingId, HealthAssessment, HealthCounts, HealthPolicy, Language,
+    PackageEdge, PackageEdgeId, PackageGraphMeasurement, PackageId, ParseStatus, Rating, Report,
+    ReportBuilder as AnalysisReportBuilder, ReportMode, ResolutionDiagnostic, ResolutionIssueKind,
+    Scope, ScopeId, ScopeKind, compare_architecture, compare_units, cycle_witness,
+    dependency_degree, strongly_connected_components,
 };
 use smackdebt_discovery::{DiscoveredFile, Inventory};
 use smackdebt_git::{Change, GitRepository};
 use smackdebt_languages::{AnalysisError as LanguageError, Analyzer};
 
-#[cfg(test)]
 use crate::requests::WorkStats;
 use crate::requests::{CodebaseRequest, DiffRequest, ExecutionWidth, ProjectError, ProjectReport};
 
@@ -34,10 +38,8 @@ pub(super) fn analyze_codebase(request: &CodebaseRequest) -> Result<ProjectRepor
                 source,
             },
         )?;
-    let candidates: Vec<&DiscoveredFile> = inventory
-        .source_files()
-        .filter(|file| selection.includes(file.path().as_path()))
-        .collect();
+    let aliases = load_resolution_aliases(&selection.inventory_root);
+    let candidates: Vec<&DiscoveredFile> = inventory.source_files().collect();
     let source_reads = AtomicUsize::new(0);
     let analyses = analyze_current_files(
         &inventory,
@@ -55,6 +57,7 @@ pub(super) fn analyze_codebase(request: &CodebaseRequest) -> Result<ProjectRepor
         &inventory,
         &candidates,
         &activity,
+        aliases,
     );
     if let Some(message) = history_error {
         builder.add_general_diagnostic(
@@ -87,7 +90,6 @@ pub(super) fn analyze_codebase(request: &CodebaseRequest) -> Result<ProjectRepor
     Ok(ProjectReport {
         report,
         selected_scope,
-        #[cfg(test)]
         stats: WorkStats {
             inventory_walks: 1,
             inventory_visits: _inventory_visits,
@@ -108,20 +110,52 @@ pub(super) fn analyze_diff(request: &DiffRequest) -> Result<ProjectReport, Proje
     };
     let base = repository.merge_base(&reference, "HEAD")?;
     let mut changed = repository.changes_from(&base)?;
+    let inventory =
+        Inventory::discover_sources(repository.root(), Vec::new()).map_err(|source| {
+            ProjectError::Inspect {
+                path: repository.root().to_path_buf(),
+                source,
+            }
+        })?;
+    let aliases = load_resolution_aliases(repository.root());
 
     let path_filter = (!request.automatic_scope)
         .then(|| diff_filter(repository.root(), &request.path))
         .flatten();
-    changed.retain(|entry| {
-        path_filter
-            .as_ref()
-            .is_none_or(|path| entry.current_path().starts_with(path))
-    });
     let all_changed = changed.clone();
     changed.retain(|entry| Analyzer::language(entry.current_path()) != Language::Unknown);
-    let selected_count = changed.len();
-    let package_roots = diff_package_roots(repository.root(), &all_changed);
+    let selected_paths: std::collections::BTreeSet<_> = changed
+        .iter()
+        .filter(|entry| {
+            path_filter
+                .as_ref()
+                .is_none_or(|path| entry.current_path().starts_with(path))
+        })
+        .map(|entry| entry.current_path().to_path_buf())
+        .collect();
+    let selected_count = selected_paths.len();
+    let changed_count = changed.len();
+    let current_package_roots: Vec<_> = inventory
+        .packages()
+        .iter()
+        .map(|package| package.root().as_path().to_path_buf())
+        .collect();
+    let source_reads = Arc::new(AtomicUsize::new(0));
+    let width = request.width.threads().min(changed_count.max(1));
+    let mut batch = repository.object_reader(width * 2)?;
+    let before_aliases = load_base_resolution_aliases(&mut batch, &base);
+    let before_package_roots =
+        base_package_roots(&current_package_roots, &all_changed, &mut batch, &base);
+    let mut package_roots = current_package_roots.clone();
+    package_roots.extend(before_package_roots.iter().cloned());
+    package_roots.extend(diff_package_roots(repository.root(), &all_changed));
+    package_roots.sort();
+    package_roots.dedup();
     let mut hierarchy = HierarchyBuilder::new(".".to_owned(), &package_roots);
+    let changed_paths_for_hierarchy: std::collections::BTreeSet<_> = changed
+        .iter()
+        .map(|entry| entry.current_path().to_path_buf())
+        .collect();
     for entry in &changed {
         let package_root = nearest_package_root(entry.current_path(), &package_roots);
         let package_index = package_roots
@@ -130,10 +164,21 @@ pub(super) fn analyze_diff(request: &DiffRequest) -> Result<ProjectReport, Proje
             .unwrap_or(0);
         hierarchy.add_file(entry.current_path(), package_index);
     }
+    for file in inventory
+        .source_files()
+        .filter(|file| Analyzer::language(file.path().as_path()) != Language::Unknown)
+    {
+        if changed_paths_for_hierarchy.contains(file.path().as_path()) {
+            continue;
+        }
+        let package_root = nearest_package_root(file.path().as_path(), &package_roots);
+        let package_index = package_roots
+            .iter()
+            .position(|root| root == &package_root)
+            .unwrap_or(0);
+        hierarchy.add_file(file.path().as_path(), package_index);
+    }
     let file_scopes = hierarchy.file_scopes.clone();
-    let source_reads = Arc::new(AtomicUsize::new(0));
-    let width = request.width.threads().min(selected_count.max(1));
-    let batch = repository.object_reader(width * 2)?;
     let results = analyze_diff_inputs(
         changed,
         repository.root().to_path_buf(),
@@ -142,6 +187,25 @@ pub(super) fn analyze_diff(request: &DiffRequest) -> Result<ProjectReport, Proje
         request.policy,
         width,
         source_reads.clone(),
+    )?;
+    let changed_paths: std::collections::BTreeSet<_> = results
+        .iter()
+        .filter(|result| result.change.current_exists())
+        .map(|result| result.change.current_path().to_path_buf())
+        .collect();
+    let unchanged_candidates: Vec<_> = inventory
+        .source_files()
+        .filter(|file| {
+            !changed_paths.contains(file.path().as_path())
+                && Analyzer::language(file.path().as_path()) != Language::Unknown
+        })
+        .collect();
+    let unchanged = analyze_current_files(
+        &inventory,
+        &unchanged_candidates,
+        request.width,
+        request.policy,
+        &source_reads,
     )?;
     let root = ScopeId::from_index(0);
     let mut builder = AnalysisReportBuilder::with_capacity(
@@ -157,21 +221,216 @@ pub(super) fn analyze_diff(request: &DiffRequest) -> Result<ProjectReport, Proje
     }
     builder.set_root(root);
     let mut comparison_index = 0usize;
+    let mut current_dependencies = Vec::new();
+    let mut before_dependencies = Vec::new();
     for result in results {
+        let file_id = FileId::from_index(result.index);
+        if let DiffSide::Analyzed { analysis, .. } = &result.current {
+            current_dependencies.push((
+                file_id,
+                result.change.current_path().to_path_buf(),
+                analysis.dependencies().to_vec(),
+            ));
+        }
+        if let DiffSide::Analyzed { analysis, .. } = &result.before {
+            before_dependencies.push((
+                file_id,
+                result.change.base_path().to_path_buf(),
+                analysis.dependencies().to_vec(),
+            ));
+        }
+        let is_selected = selected_paths.contains(result.change.current_path());
         let scope_id = file_scopes
             .get(result.change.current_path())
             .copied()
             .expect("diff hierarchy contains every changed file");
-        add_diff_result(&mut builder, result, &mut comparison_index, scope_id);
+        let package_root = nearest_package_root(result.change.current_path(), &package_roots);
+        let package = PackageId::from_index(
+            package_roots
+                .iter()
+                .position(|root| root == &package_root)
+                .unwrap_or(0),
+        );
+        add_diff_result(
+            &mut builder,
+            result,
+            &mut comparison_index,
+            scope_id,
+            package,
+            is_selected,
+        );
+    }
+    for (offset, (file, result)) in unchanged_candidates.iter().zip(unchanged).enumerate() {
+        let file_id = FileId::from_index(changed_count + offset);
+        let package_root = nearest_package_root(file.path().as_path(), &package_roots);
+        let package_index = package_roots
+            .iter()
+            .position(|root| root == &package_root)
+            .unwrap_or(0);
+        let package = PackageId::from_index(package_index);
+        let package_scope = file_scopes[file.path().as_path()];
+        let mut record = FileRecord::new(
+            file_id,
+            package_scope,
+            file.path().to_string(),
+            Coverage::default(),
+            HealthCounts::default(),
+        )
+        .with_package(package);
+        match result {
+            FileResult::Analyzed(rated) => {
+                record = record.with_language(rated.analysis.language());
+                let dependencies = rated.analysis.dependencies().to_vec();
+                current_dependencies.push((
+                    file_id,
+                    file.path().as_path().to_path_buf(),
+                    dependencies.clone(),
+                ));
+                before_dependencies.push((
+                    file_id,
+                    file.path().as_path().to_path_buf(),
+                    dependencies,
+                ));
+            }
+            FileResult::Unsupported(language) => record = record.with_language(language),
+            FileResult::Failed(_) => {}
+        }
+        builder.add_file(record);
+    }
+    let current_architecture = build_architecture(
+        builder.files(),
+        &current_dependencies,
+        &aliases,
+        &current_package_roots,
+        &package_roots,
+    );
+    let before_architecture = build_architecture(
+        builder.files(),
+        &before_dependencies,
+        &before_aliases,
+        &before_package_roots,
+        &package_roots,
+    );
+    let before_edges: Vec<_> = before_architecture
+        .package_edges
+        .iter()
+        .map(|edge| (edge.source(), edge.target()))
+        .collect();
+    let current_edges: Vec<_> = current_architecture
+        .package_edges
+        .iter()
+        .map(|edge| (edge.source(), edge.target()))
+        .collect();
+    let mut architecture_comparisons = compare_architecture(
+        &before_edges,
+        &current_edges,
+        &before_architecture.cycles,
+        &current_architecture.cycles,
+    );
+    for comparison in &mut architecture_comparisons {
+        let source = if comparison.kind()
+            == smackdebt_analysis::ArchitectureComparisonKind::CycleRemoved
+            || comparison.kind() == smackdebt_analysis::ArchitectureComparisonKind::EdgeRemoved
+        {
+            &before_architecture
+        } else {
+            &current_architecture
+        };
+        let files: std::collections::BTreeSet<_> = match comparison.kind() {
+            smackdebt_analysis::ArchitectureComparisonKind::EdgeAdded
+            | smackdebt_analysis::ArchitectureComparisonKind::EdgeRemoved => source
+                .package_edges
+                .iter()
+                .filter(|edge| comparison.packages() == [edge.source(), edge.target()])
+                .flat_map(|edge| {
+                    edge.file_edges().iter().flat_map(|id| {
+                        let edge = &source.file_edges[id.index()];
+                        [edge.source(), edge.target()]
+                    })
+                })
+                .collect(),
+            _ => source
+                .findings
+                .iter()
+                .filter(|finding| {
+                    finding.kind() == ArchitectureFindingKind::PackageCycle
+                        && finding
+                            .packages()
+                            .iter()
+                            .any(|package| comparison.packages().contains(package))
+                })
+                .flat_map(|finding| finding.files().iter().copied())
+                .collect(),
+        };
+        *comparison = comparison.clone().with_files(files.into_iter().collect());
+    }
+    let architecture_comparison_ids: Vec<_> = architecture_comparisons
+        .iter()
+        .map(|comparison| comparison.id())
+        .collect();
+    let architecture_comparisons_for_links = architecture_comparisons.clone();
+    let architecture_finding_ids: Vec<_> = current_architecture
+        .findings
+        .iter()
+        .map(|finding| finding.id())
+        .collect();
+    let architecture_findings_for_links = current_architecture.findings.clone();
+    builder.set_architecture(ArchitectureReportFacts::new(
+        ArchitectureGraph::new(
+            current_architecture.coverage,
+            current_architecture.file_edges,
+            current_architecture.package_edges,
+            current_architecture.external,
+            current_architecture.diagnostics,
+            current_architecture.measurements,
+        ),
+        current_architecture.findings,
+        architecture_comparisons,
+    ));
+    for id in architecture_comparison_ids {
+        builder.link_architecture_comparison(root, id);
+        let comparison = &architecture_comparisons_for_links[id.index()];
+        for package in comparison.packages() {
+            builder.link_architecture_comparison(ScopeId::from_index(1 + package.index()), id);
+        }
+        for file in comparison.files() {
+            let scope = builder.files()[file.index()].scope();
+            builder.link_architecture_comparison(scope, id);
+        }
+    }
+    for id in architecture_finding_ids {
+        builder.link_architecture_finding(root, id);
+        let finding = &architecture_findings_for_links[id.index()];
+        for package in finding.packages() {
+            builder.link_architecture_finding(ScopeId::from_index(1 + package.index()), id);
+        }
+        for file in finding.files() {
+            let scope = builder.files()[file.index()].scope();
+            builder.link_architecture_finding(scope, id);
+        }
     }
     let report = builder.finish();
+    let selected_scope = path_filter
+        .as_ref()
+        .and_then(|path| {
+            let name = if path.as_os_str().is_empty() {
+                ".".to_owned()
+            } else {
+                path.display().to_string()
+            };
+            report
+                .scopes()
+                .iter()
+                .find(|scope| scope.name() == name)
+                .map(Scope::id)
+        })
+        .or(Some(root));
     Ok(ProjectReport {
         report,
-        selected_scope: Some(root),
-        #[cfg(test)]
+        selected_scope,
         stats: WorkStats {
-            inventory_walks: 0,
-            inventory_visits: 0,
+            inventory_walks: 1,
+            inventory_visits: inventory.visited_entries(),
             source_reads: source_reads.load(Ordering::Relaxed),
             git_processes: repository.git_processes(),
         },
@@ -402,10 +661,12 @@ fn add_diff_result(
     result: DiffResult,
     comparison_index: &mut usize,
     scope_id: ScopeId,
+    package: PackageId,
+    included_in_code_diff: bool,
 ) {
     let file_id = FileId::from_index(result.index);
 
-    for comparison in &result.comparisons {
+    for comparison in result.comparisons.iter().filter(|_| included_in_code_diff) {
         let comparison_id = ComparisonId::from_index(*comparison_index);
         report.add_comparison(
             Comparison::new(
@@ -427,14 +688,20 @@ fn add_diff_result(
         DiffSide::Missing => &result.before,
         current => current,
     };
-    let (coverage, health, language) = diff_side_summary(selected);
+    let (coverage, health, language) = if included_in_code_diff {
+        diff_side_summary(selected)
+    } else {
+        let (_, _, language) = diff_side_summary(selected);
+        (Coverage::default(), HealthCounts::default(), language)
+    };
     let mut file = FileRecord::new(
         file_id,
         scope_id,
         result.change.current_path().to_string_lossy(),
         coverage,
         health,
-    );
+    )
+    .with_package(package);
     if let Some(language) = language {
         file = file.with_language(language);
     }
@@ -717,15 +984,6 @@ impl Selection {
             label: path.display().to_string(),
         })
     }
-
-    fn includes(&self, path: &Path) -> bool {
-        if let Some(exact) = &self.exact_file {
-            return exact == path;
-        }
-        self.prefix
-            .as_ref()
-            .is_none_or(|prefix| path.starts_with(prefix))
-    }
 }
 
 struct CodebaseReportBuilder<'a> {
@@ -736,6 +994,10 @@ struct CodebaseReportBuilder<'a> {
     diagnostics: Vec<Diagnostic>,
     file_scopes: Vec<ScopeId>,
     activity: &'a HashMap<PathBuf, u32>,
+    package_ids: Vec<PackageId>,
+    dependencies: Vec<(FileId, PathBuf, Vec<DependencySyntax>)>,
+    aliases: Vec<ResolutionAlias>,
+    package_roots: Vec<PathBuf>,
 }
 
 impl<'a> CodebaseReportBuilder<'a> {
@@ -745,6 +1007,7 @@ impl<'a> CodebaseReportBuilder<'a> {
         inventory: &Inventory,
         candidates: &[&DiscoveredFile],
         activity: &'a HashMap<PathBuf, u32>,
+        aliases: Vec<ResolutionAlias>,
     ) -> Self {
         let package_roots: Vec<PathBuf> = inventory
             .packages()
@@ -784,6 +1047,10 @@ impl<'a> CodebaseReportBuilder<'a> {
             diagnostics: Vec::with_capacity(candidates.len()),
             file_scopes,
             activity,
+            package_ids: candidates.iter().map(|file| file.package()).collect(),
+            dependencies: Vec::with_capacity(candidates.len()),
+            aliases,
+            package_roots: included_roots,
         }
     }
 
@@ -810,6 +1077,11 @@ impl<'a> CodebaseReportBuilder<'a> {
                     ));
                 }
                 let analysis = rated.analysis;
+                self.dependencies.push((
+                    file_id,
+                    PathBuf::from(&path),
+                    analysis.dependencies().to_vec(),
+                ));
                 let failed = matches!(analysis.parse_status(), ParseStatus::Failed);
                 if failed {
                     self.add_diagnostic(
@@ -851,6 +1123,7 @@ impl<'a> CodebaseReportBuilder<'a> {
             }
         };
         let mut file = FileRecord::new(file_id, scope_id, path, coverage, health);
+        file = file.with_package(self.package_ids[index]);
         if let Some(language) = language {
             file = file.with_language(language);
         }
@@ -885,6 +1158,14 @@ impl<'a> CodebaseReportBuilder<'a> {
     }
 
     fn finish(self) -> Report {
+        let architecture = build_architecture(
+            &self.files,
+            &self.dependencies,
+            &self.aliases,
+            &self.package_roots,
+            &self.package_roots,
+        );
+        let architecture_findings_for_links = architecture.findings.clone();
         let root = ScopeId::from_index(0);
         let mut builder = AnalysisReportBuilder::with_capacity(
             self.mode,
@@ -907,12 +1188,454 @@ impl<'a> CodebaseReportBuilder<'a> {
         for diagnostic in self.diagnostics {
             builder.add_diagnostic(diagnostic);
         }
+        builder.set_architecture(ArchitectureReportFacts::new(
+            ArchitectureGraph::new(
+                architecture.coverage,
+                architecture.file_edges,
+                architecture.package_edges,
+                architecture.external,
+                architecture.diagnostics,
+                architecture.measurements,
+            ),
+            architecture.findings,
+            Vec::new(),
+        ));
+        for (index, finding) in architecture.finding_links {
+            builder.link_architecture_finding(index, finding);
+        }
+        for finding in &architecture_findings_for_links {
+            for package in finding.packages() {
+                builder.link_architecture_finding(
+                    ScopeId::from_index(1 + package.index()),
+                    finding.id(),
+                );
+            }
+            for file in finding.files() {
+                builder
+                    .link_architecture_finding(builder.files()[file.index()].scope(), finding.id());
+            }
+        }
         builder.finish()
     }
 }
 
+struct ArchitectureBuild {
+    coverage: DependencyCoverage,
+    file_edges: Vec<DependencyEdge>,
+    package_edges: Vec<PackageEdge>,
+    external: Vec<ExternalDependency>,
+    diagnostics: Vec<ResolutionDiagnostic>,
+    measurements: Vec<PackageGraphMeasurement>,
+    findings: Vec<ArchitectureFinding>,
+    finding_links: Vec<(ScopeId, ArchitectureFindingId)>,
+    cycles: Vec<smackdebt_analysis::PackageCycle>,
+}
+
+#[derive(Clone)]
+struct ResolutionAlias {
+    prefix: String,
+    suffix: String,
+    replacement: String,
+}
+
+impl ResolutionAlias {
+    fn expand(&self, candidate: &str) -> Option<String> {
+        let middle = candidate
+            .strip_prefix(&self.prefix)?
+            .strip_suffix(&self.suffix)?;
+        Some(self.replacement.replace('*', middle))
+    }
+}
+
+fn load_resolution_aliases(root: &Path) -> Vec<ResolutionAlias> {
+    for name in ["tsconfig.json", "jsconfig.json"] {
+        let Ok(source) = fs::read(root.join(name)) else {
+            continue;
+        };
+        let Some(aliases) = parse_resolution_aliases(&source) else {
+            continue;
+        };
+        return aliases;
+    }
+    Vec::new()
+}
+
+fn load_base_resolution_aliases(
+    reader: &mut smackdebt_git::ObjectReader,
+    base: &str,
+) -> Vec<ResolutionAlias> {
+    for name in ["tsconfig.json", "jsconfig.json"] {
+        if let Ok(source) = reader.read_path(base, Path::new(name))
+            && let Some(aliases) = parse_resolution_aliases(&source)
+        {
+            return aliases;
+        }
+    }
+    Vec::new()
+}
+
+fn parse_resolution_aliases(source: &[u8]) -> Option<Vec<ResolutionAlias>> {
+    let value = serde_json::from_slice::<serde_json::Value>(source).ok()?;
+    let base = value["compilerOptions"]["baseUrl"]
+        .as_str()
+        .unwrap_or("")
+        .trim_matches('/');
+    let base = if base == "." { "" } else { base };
+    let Some(paths) = value["compilerOptions"]["paths"].as_object() else {
+        return Some(Vec::new());
+    };
+    let mut aliases = Vec::new();
+    for (pattern, replacements) in paths {
+        let (prefix, suffix) = pattern
+            .split_once('*')
+            .map_or((pattern.as_str(), ""), |parts| parts);
+        for replacement in replacements.as_array().into_iter().flatten() {
+            let Some(replacement) = replacement.as_str() else {
+                continue;
+            };
+            let replacement = if base.is_empty() {
+                replacement.to_owned()
+            } else {
+                format!("{base}/{replacement}")
+            };
+            aliases.push(ResolutionAlias {
+                prefix: prefix.to_owned(),
+                suffix: suffix.to_owned(),
+                replacement,
+            });
+        }
+    }
+    aliases.sort_by(|left, right| {
+        (&left.prefix, &left.suffix, &left.replacement).cmp(&(
+            &right.prefix,
+            &right.suffix,
+            &right.replacement,
+        ))
+    });
+    Some(aliases)
+}
+
+fn build_architecture(
+    files: &[FileRecord],
+    dependencies: &[(FileId, PathBuf, Vec<DependencySyntax>)],
+    aliases: &[ResolutionAlias],
+    side_package_roots: &[PathBuf],
+    package_roots: &[PathBuf],
+) -> ArchitectureBuild {
+    let mut index = BTreeMap::new();
+    for (file, path, _) in dependencies {
+        index.insert(path.clone(), *file);
+    }
+    let mut internal = 0u32;
+    let mut external_count = 0u32;
+    let mut unresolved = 0u32;
+    let mut ambiguous = 0u32;
+    let mut edge_values: BTreeMap<(FileId, FileId), (u32, Vec<smackdebt_analysis::SourceSpan>)> =
+        BTreeMap::new();
+    let mut external_values: BTreeMap<(FileId, String), u32> = BTreeMap::new();
+    let mut diagnostics = Vec::new();
+
+    for (source, source_path, references) in dependencies {
+        for reference in references {
+            match reference.state() {
+                DependencySyntaxState::External => {
+                    external_count += 1;
+                    *external_values
+                        .entry((*source, reference.target().to_owned()))
+                        .or_default() += 1;
+                }
+                DependencySyntaxState::Unresolved(reason) => {
+                    unresolved += 1;
+                    diagnostics.push(ResolutionDiagnostic::new(
+                        *source,
+                        reference.span(),
+                        reference.target(),
+                        ResolutionIssueKind::Unresolved,
+                        reason,
+                    ));
+                }
+                DependencySyntaxState::Candidates(candidates) => {
+                    let matches = resolve_candidates(source_path, candidates, &index, aliases);
+                    match matches.as_slice() {
+                        [] if reference.intent()
+                            == smackdebt_analysis::DependencyIntent::Internal =>
+                        {
+                            unresolved += 1;
+                            diagnostics.push(ResolutionDiagnostic::new(
+                                *source,
+                                reference.span(),
+                                reference.target(),
+                                ResolutionIssueKind::Unresolved,
+                                "no repository file matches",
+                            ));
+                        }
+                        [] => {
+                            external_count += 1;
+                            *external_values
+                                .entry((*source, reference.target().to_owned()))
+                                .or_default() += 1;
+                        }
+                        [target] => {
+                            internal += 1;
+                            if source != target {
+                                let entry = edge_values.entry((*source, *target)).or_default();
+                                entry.0 += 1;
+                                if entry.1.len() < 3 {
+                                    entry.1.push(reference.span());
+                                }
+                            }
+                        }
+                        _ => {
+                            ambiguous += 1;
+                            diagnostics.push(ResolutionDiagnostic::new(
+                                *source,
+                                reference.span(),
+                                reference.target(),
+                                ResolutionIssueKind::Ambiguous,
+                                "several repository files match",
+                            ));
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+    let file_edges: Vec<_> = edge_values
+        .into_iter()
+        .enumerate()
+        .map(
+            |(edge_index, ((source, target), (references, locations)))| {
+                DependencyEdge::new(
+                    DependencyEdgeId::from_index(edge_index),
+                    source,
+                    target,
+                    references,
+                    locations,
+                )
+            },
+        )
+        .collect();
+    let external: Vec<_> = external_values
+        .into_iter()
+        .map(|((file, target), references)| ExternalDependency::new(file, target, references))
+        .collect();
+
+    let mut package_values: BTreeMap<(PackageId, PackageId), (u32, u32, Vec<DependencyEdgeId>)> =
+        BTreeMap::new();
+    for edge in &file_edges {
+        let source_path = dependencies
+            .iter()
+            .find(|(id, _, _)| *id == edge.source())
+            .map(|(_, path, _)| path.as_path())
+            .unwrap_or_else(|| Path::new(files[edge.source().index()].path()));
+        let target_path = dependencies
+            .iter()
+            .find(|(id, _, _)| *id == edge.target())
+            .map(|(_, path, _)| path.as_path())
+            .unwrap_or_else(|| Path::new(files[edge.target().index()].path()));
+        let source_root = nearest_package_root(source_path, side_package_roots);
+        let target_root = nearest_package_root(target_path, side_package_roots);
+        let source = PackageId::from_index(
+            package_roots
+                .iter()
+                .position(|root| root == &source_root)
+                .unwrap_or(0),
+        );
+        let target = PackageId::from_index(
+            package_roots
+                .iter()
+                .position(|root| root == &target_root)
+                .unwrap_or(0),
+        );
+        if source != target {
+            let value = package_values.entry((source, target)).or_default();
+            value.0 += 1;
+            value.1 += edge.references();
+            value.2.push(edge.id());
+        }
+    }
+    let package_edges: Vec<_> = package_values
+        .into_iter()
+        .enumerate()
+        .map(|(index, ((source, target), (pairs, references, edges)))| {
+            PackageEdge::new(
+                PackageEdgeId::from_index(index),
+                source,
+                target,
+                pairs,
+                references,
+                edges,
+            )
+        })
+        .collect();
+    let package_count = package_roots.len();
+    let package_pairs: Vec<_> = package_edges
+        .iter()
+        .map(|edge| (edge.source().index(), edge.target().index()))
+        .collect();
+    let degrees = dependency_degree(package_count, &package_pairs);
+    let measurements = degrees
+        .into_iter()
+        .enumerate()
+        .map(|(index, (incoming, outgoing))| {
+            PackageGraphMeasurement::new(PackageId::from_index(index), incoming, outgoing)
+        })
+        .collect();
+
+    let mut findings = Vec::new();
+    let mut finding_links = Vec::new();
+    let mut cycles = Vec::new();
+    for component in strongly_connected_components(package_count, &package_pairs)
+        .into_iter()
+        .filter(|component| component.len() > 1)
+    {
+        let witness = cycle_witness(&component, &package_pairs).unwrap_or_default();
+        let witness_edges: Vec<_> = witness
+            .iter()
+            .filter_map(|&(source, target)| {
+                package_edges
+                    .iter()
+                    .find(|edge| edge.source().index() == source && edge.target().index() == target)
+            })
+            .flat_map(|edge| edge.file_edges().iter().copied().take(1))
+            .collect();
+        let involved_files: Vec<_> = witness_edges
+            .iter()
+            .flat_map(|id| {
+                let edge = &file_edges[id.index()];
+                [edge.source(), edge.target()]
+            })
+            .collect::<std::collections::BTreeSet<_>>()
+            .into_iter()
+            .collect();
+        let packages: Vec<_> = component.into_iter().map(PackageId::from_index).collect();
+        let mut package_witness: Vec<_> = witness
+            .iter()
+            .map(|(source, _)| PackageId::from_index(*source))
+            .collect();
+        if let Some((_, target)) = witness.last() {
+            package_witness.push(PackageId::from_index(*target));
+        }
+        cycles.push((packages.clone(), package_witness));
+        let id = ArchitectureFindingId::from_index(findings.len());
+        for package in &packages {
+            if let Some(scope) = files
+                .iter()
+                .find(|file| file.package() == Some(*package))
+                .map(FileRecord::scope)
+            {
+                finding_links.push((scope, id));
+            }
+        }
+        findings.push(ArchitectureFinding::new(
+            id,
+            ArchitectureFindingKind::PackageCycle,
+            packages,
+            involved_files,
+            witness_edges,
+        ));
+    }
+    let file_pairs: Vec<_> = file_edges
+        .iter()
+        .map(|edge| (edge.source().index(), edge.target().index()))
+        .collect();
+    for component in strongly_connected_components(files.len(), &file_pairs)
+        .into_iter()
+        .filter(|component| component.len() > 1)
+    {
+        let packages: std::collections::BTreeSet<_> = component
+            .iter()
+            .filter_map(|file| files[*file].package())
+            .collect();
+        if packages.len() != 1 {
+            continue;
+        }
+        let witness = cycle_witness(&component, &file_pairs).unwrap_or_default();
+        let witness_edges: Vec<_> = witness
+            .iter()
+            .filter_map(|&(source, target)| {
+                file_edges
+                    .iter()
+                    .find(|edge| edge.source().index() == source && edge.target().index() == target)
+                    .map(DependencyEdge::id)
+            })
+            .collect();
+        let id = ArchitectureFindingId::from_index(findings.len());
+        for file in &component {
+            finding_links.push((files[*file].scope(), id));
+        }
+        findings.push(ArchitectureFinding::new(
+            id,
+            ArchitectureFindingKind::FileCycle,
+            packages.into_iter().collect(),
+            component.into_iter().map(FileId::from_index).collect(),
+            witness_edges,
+        ));
+    }
+
+    ArchitectureBuild {
+        coverage: DependencyCoverage::new(internal, external_count, unresolved, ambiguous),
+        file_edges,
+        package_edges,
+        external,
+        diagnostics,
+        measurements,
+        findings,
+        finding_links,
+        cycles,
+    }
+}
+
+fn resolve_candidates(
+    source: &Path,
+    candidates: &[String],
+    index: &BTreeMap<PathBuf, FileId>,
+    aliases: &[ResolutionAlias],
+) -> Vec<FileId> {
+    let parent = source.parent().unwrap_or(Path::new(""));
+    let mut matches = std::collections::BTreeSet::new();
+    for candidate in candidates {
+        let mut expanded = vec![candidate.clone()];
+        expanded.extend(aliases.iter().filter_map(|alias| alias.expand(candidate)));
+        for candidate in expanded {
+            let path = Path::new(&candidate);
+            let joined = if candidate.starts_with("./") || candidate.starts_with("../") {
+                parent.join(path)
+            } else {
+                path.to_path_buf()
+            };
+            if let Some(clean) = clean_relative(&joined)
+                && let Some(file) = index.get(&clean)
+            {
+                matches.insert(*file);
+            }
+        }
+    }
+    matches.into_iter().collect()
+}
+
+fn clean_relative(path: &Path) -> Option<PathBuf> {
+    let mut result = PathBuf::new();
+    for component in path.components() {
+        match component {
+            std::path::Component::CurDir => {}
+            std::path::Component::Normal(value) => result.push(value),
+            std::path::Component::ParentDir => {
+                if !result.pop() {
+                    return None;
+                }
+            }
+            std::path::Component::RootDir | std::path::Component::Prefix(_) => return None,
+        }
+    }
+    Some(result)
+}
+
 fn diff_filter(root: &Path, selected: &Path) -> Option<PathBuf> {
     let absolute = std::path::absolute(selected).ok()?;
+    let absolute = absolute.canonicalize().unwrap_or(absolute);
+    let root = root.canonicalize().unwrap_or_else(|_| root.to_path_buf());
     absolute.strip_prefix(root).ok().map(Path::to_path_buf)
 }
 
@@ -931,6 +1654,42 @@ const DIFF_MANIFEST_NAMES: &[&str] = &[
     "Gemfile",
     "gems.rb",
 ];
+
+fn base_package_roots(
+    current: &[PathBuf],
+    changed: &[Change],
+    reader: &mut smackdebt_git::ObjectReader,
+    base: &str,
+) -> Vec<PathBuf> {
+    let mut roots: std::collections::BTreeSet<_> = current.iter().cloned().collect();
+    for change in changed {
+        let is_manifest = change
+            .base_path()
+            .file_name()
+            .and_then(|name| name.to_str())
+            .is_some_and(|name| DIFF_MANIFEST_NAMES.contains(&name));
+        if !is_manifest {
+            continue;
+        }
+        let root = change
+            .base_path()
+            .parent()
+            .unwrap_or(Path::new(""))
+            .to_path_buf();
+        let base_has_manifest = DIFF_MANIFEST_NAMES
+            .iter()
+            .any(|name| reader.read_path(base, &root.join(name)).is_ok());
+        if base_has_manifest {
+            roots.insert(root);
+        } else {
+            roots.remove(&root);
+        }
+    }
+    if roots.is_empty() {
+        roots.insert(PathBuf::new());
+    }
+    roots.into_iter().collect()
+}
 
 fn diff_package_roots(repository_root: &Path, changed: &[Change]) -> Vec<PathBuf> {
     let mut roots = std::collections::BTreeSet::new();
@@ -1107,6 +1866,185 @@ mod tests {
     }
 
     #[test]
+    fn codebase_builds_package_cycles_and_exact_dependency_coverage() {
+        let root = tempfile::tempdir().unwrap();
+        for package in ["app", "core"] {
+            fs::create_dir_all(root.path().join(package)).unwrap();
+            fs::write(root.path().join(package).join("package.json"), "{}").unwrap();
+        }
+        fs::write(
+            root.path().join("app/a.js"),
+            "import core from '../core/b';\nimport ext from 'external';\nconst late = require(name);\nfunction app() {}\n",
+        ).unwrap();
+        fs::write(
+            root.path().join("core/b.js"),
+            "import app from '../app/a';\nfunction core() {}\n",
+        )
+        .unwrap();
+
+        let result = analyze_codebase(&CodebaseRequest::new(root.path())).unwrap();
+        let report = result.report();
+        assert_eq!(report.dependency_edges().len(), 2);
+        assert_eq!(report.package_edges().len(), 2);
+        assert_eq!(
+            report.dependency_coverage(),
+            DependencyCoverage::new(2, 1, 1, 0)
+        );
+        assert_eq!(report.architecture_findings().len(), 1);
+        assert_eq!(
+            report.architecture_findings()[0].kind(),
+            ArchitectureFindingKind::PackageCycle
+        );
+        assert_eq!(report.architecture_findings()[0].rating(), Rating::High);
+    }
+
+    #[test]
+    fn repeated_references_share_file_and_package_edges_with_exact_counts() {
+        let root = tempfile::tempdir().unwrap();
+        for package in ["app", "core"] {
+            fs::create_dir_all(root.path().join(package)).unwrap();
+            fs::write(root.path().join(package).join("package.json"), "{}").unwrap();
+        }
+        fs::write(
+            root.path().join("app/a.js"),
+            "import first from '../core/b';\nimport second from '../core/b';\nfunction app() {}\n",
+        )
+        .unwrap();
+        fs::write(
+            root.path().join("app/other.js"),
+            "import core from '../core/b';\nfunction other() {}\n",
+        )
+        .unwrap();
+        fs::write(
+            root.path().join("core/b.js"),
+            "export default function core() {}\n",
+        )
+        .unwrap();
+
+        let result = analyze_codebase(&CodebaseRequest::new(root.path())).unwrap();
+        let report = result.report();
+        assert_eq!(report.dependency_edges().len(), 2);
+        assert_eq!(report.package_edges().len(), 1);
+        assert_eq!(report.package_edges()[0].file_pairs(), 2);
+        assert_eq!(report.package_edges()[0].references(), 3);
+    }
+
+    #[test]
+    fn project_configuration_aliases_resolve_as_data_without_execution() {
+        let root = tempfile::tempdir().unwrap();
+        fs::create_dir_all(root.path().join("src/core")).unwrap();
+        fs::write(root.path().join("package.json"), "{}").unwrap();
+        fs::write(
+            root.path().join("tsconfig.json"),
+            r#"{"compilerOptions":{"baseUrl":".","paths":{"@/*":["src/*"]}}}"#,
+        )
+        .unwrap();
+        fs::write(
+            root.path().join("src/main.ts"),
+            "import core from '@/core/index';\nfunction main() { return core(); }\n",
+        )
+        .unwrap();
+        fs::write(
+            root.path().join("src/core/index.ts"),
+            "export default function core() {}\n",
+        )
+        .unwrap();
+
+        let result = analyze_codebase(&CodebaseRequest::new(root.path())).unwrap();
+        assert_eq!(result.report().dependency_edges().len(), 1);
+        assert_eq!(result.report().dependency_coverage().internal(), 1);
+    }
+
+    #[test]
+    fn java_source_root_import_resolves_to_a_repository_file() {
+        let root = tempfile::tempdir().unwrap();
+        fs::create_dir_all(root.path().join("src/main/java/app")).unwrap();
+        fs::create_dir_all(root.path().join("src/main/java/usecase")).unwrap();
+        fs::write(root.path().join("pom.xml"), "<project />").unwrap();
+        fs::write(
+            root.path().join("src/main/java/app/Local.java"),
+            "package app; public class Local {}\n",
+        )
+        .unwrap();
+        fs::write(
+            root.path().join("src/main/java/usecase/Main.java"),
+            "package usecase; import app.Local; public class Main {}\n",
+        )
+        .unwrap();
+
+        let result = analyze_codebase(&CodebaseRequest::new(root.path())).unwrap();
+        assert_eq!(result.report().dependency_edges().len(), 1);
+        assert_eq!(result.report().dependency_coverage().internal(), 1);
+    }
+
+    #[test]
+    fn rust_root_use_resolves_leaf_or_parent_module_and_keeps_ambiguity_explicit() {
+        for (name, leaf, parent, expected_internal, expected_ambiguous) in [
+            ("leaf", true, false, 1, 0),
+            ("parent", false, true, 1, 0),
+            ("both", true, true, 0, 1),
+        ] {
+            let root = tempfile::tempdir().unwrap();
+            fs::write(
+                root.path().join("main.rs"),
+                "use crate::core::work;\nfn main() { work(); }\n",
+            )
+            .unwrap();
+            if leaf {
+                fs::create_dir_all(root.path().join("core")).unwrap();
+                fs::write(root.path().join("core/work.rs"), "pub fn work() {}\n").unwrap();
+            }
+            if parent {
+                fs::write(root.path().join("core.rs"), "pub fn work() {}\n").unwrap();
+            }
+
+            let result = analyze_codebase(&CodebaseRequest::new(root.path())).unwrap();
+            assert_eq!(
+                result.report().dependency_coverage().internal(),
+                expected_internal,
+                "{name}"
+            );
+            assert_eq!(
+                result.report().dependency_coverage().ambiguous(),
+                expected_ambiguous,
+                "{name}"
+            );
+            assert_eq!(
+                result.report().dependency_edges().len(),
+                expected_internal as usize,
+                "{name}"
+            );
+            assert_eq!(
+                result.report().resolution_diagnostics().len(),
+                expected_ambiguous as usize,
+                "{name}"
+            );
+        }
+    }
+
+    #[test]
+    fn package_selection_keeps_explanatory_incoming_edges_from_the_root_graph() {
+        let root = tempfile::tempdir().unwrap();
+        git(root.path(), ["init", "-q"]);
+        for package in ["app", "core"] {
+            fs::create_dir_all(root.path().join(package)).unwrap();
+            fs::write(root.path().join(package).join("package.json"), "{}").unwrap();
+        }
+        fs::write(
+            root.path().join("app/a.js"),
+            "import core from '../core/b';\nfunction app() {}\n",
+        )
+        .unwrap();
+        fs::write(root.path().join("core/b.js"), "function core() {}\n").unwrap();
+
+        let result = analyze_codebase(&CodebaseRequest::new(root.path().join("core"))).unwrap();
+        assert_eq!(result.report().files().len(), 2);
+        assert_eq!(result.report().dependency_edges().len(), 1);
+        let selected = result.selected_scope().unwrap();
+        assert_eq!(result.report().scopes()[selected.index()].name(), "core");
+    }
+
+    #[test]
     fn automatic_scope_uses_the_git_root_from_a_nested_directory() {
         let root = repository();
         let repository_path = root.path().join("repo");
@@ -1220,6 +2158,228 @@ mod tests {
                 .unwrap();
         assert_eq!(result.report().files().len(), 1);
         assert_eq!(result.report().files()[0].path(), "src/sample.rs");
+    }
+
+    #[test]
+    fn diff_uses_unchanged_edges_to_find_an_introduced_package_cycle() {
+        let root = tempfile::tempdir().unwrap();
+        let repository_path = root.path();
+        git(repository_path, ["init", "-q"]);
+        git(
+            repository_path,
+            ["config", "user.email", "test@example.invalid"],
+        );
+        git(repository_path, ["config", "user.name", "Smackdebt Test"]);
+        for package in ["app", "core"] {
+            fs::create_dir_all(repository_path.join(package)).unwrap();
+            fs::write(repository_path.join(package).join("package.json"), "{}").unwrap();
+        }
+        fs::create_dir_all(repository_path.join("app/src")).unwrap();
+        fs::write(
+            repository_path.join("app/src/a.js"),
+            "import core from '../../core/b';\nfunction app() {}\n",
+        )
+        .unwrap();
+        fs::write(repository_path.join("core/b.js"), "function core() {}\n").unwrap();
+        git(repository_path, ["add", "."]);
+        git(repository_path, ["commit", "-qm", "initial"]);
+        fs::write(
+            repository_path.join("core/b.js"),
+            "import app from '../app/src/a';\nfunction core() {}\n",
+        )
+        .unwrap();
+
+        let result =
+            analyze_diff(&DiffRequest::new(repository_path).with_reference("HEAD")).unwrap();
+        assert!(
+            result
+                .report()
+                .architecture_comparisons()
+                .iter()
+                .any(|comparison| {
+                    comparison.kind()
+                        == smackdebt_analysis::ArchitectureComparisonKind::CycleIntroduced
+                        && comparison.direction() == smackdebt_analysis::ComparisonDirection::Worse
+                })
+        );
+        assert_eq!(result.stats().inventory_walks, 1);
+        assert_eq!(result.stats().source_reads, 2);
+    }
+
+    #[test]
+    fn selected_package_diff_uses_an_outside_change_for_incoming_cycle_evidence() {
+        let root = tempfile::tempdir().unwrap();
+        let repository_path = root.path();
+        git(repository_path, ["init", "-q"]);
+        git(
+            repository_path,
+            ["config", "user.email", "test@example.invalid"],
+        );
+        git(repository_path, ["config", "user.name", "Smackdebt Test"]);
+        for package in ["app", "core"] {
+            fs::create_dir_all(repository_path.join(package)).unwrap();
+            fs::write(repository_path.join(package).join("package.json"), "{}").unwrap();
+        }
+        fs::create_dir_all(repository_path.join("app/src")).unwrap();
+        fs::write(
+            repository_path.join("app/src/a.js"),
+            "import core from '../../core/b';\nfunction app() {}\n",
+        )
+        .unwrap();
+        fs::write(repository_path.join("core/b.js"), "function core() {}\n").unwrap();
+        git(repository_path, ["add", "."]);
+        git(repository_path, ["commit", "-qm", "initial"]);
+        fs::write(
+            repository_path.join("core/b.js"),
+            "import app from '../app/src/a';\nfunction core() {}\n",
+        )
+        .unwrap();
+
+        for selected in ["app", "app/src", "app/src/a.js"] {
+            let result = analyze_diff(
+                &DiffRequest::new(repository_path.join(selected)).with_reference("HEAD"),
+            )
+            .unwrap();
+            let scope = result.selected_scope().unwrap();
+            assert_eq!(result.report().scopes()[scope.index()].name(), selected);
+            let comparisons: Vec<_> = result.report().scopes()[scope.index()]
+                .architecture_comparisons()
+                .iter()
+                .map(|id| &result.report().architecture_comparisons()[id.index()])
+                .collect();
+            assert!(comparisons.iter().any(|value| value.kind()
+                == smackdebt_analysis::ArchitectureComparisonKind::CycleIntroduced));
+            assert!(
+                comparisons.iter().any(|value| value.kind()
+                    == smackdebt_analysis::ArchitectureComparisonKind::EdgeAdded)
+            );
+        }
+    }
+
+    #[test]
+    fn diff_uses_each_sides_alias_configuration_without_extra_git_processes() {
+        let root = tempfile::tempdir().unwrap();
+        let repository_path = root.path();
+        git(repository_path, ["init", "-q"]);
+        git(
+            repository_path,
+            ["config", "user.email", "test@example.invalid"],
+        );
+        git(repository_path, ["config", "user.name", "Smackdebt Test"]);
+        for package in ["app", "core"] {
+            fs::create_dir_all(repository_path.join(package)).unwrap();
+            fs::write(repository_path.join(package).join("package.json"), "{}").unwrap();
+        }
+        fs::write(
+            repository_path.join("app/a.ts"),
+            "import core from '@core/value';\nfunction app() {}\n",
+        )
+        .unwrap();
+        fs::write(
+            repository_path.join("core/value.ts"),
+            "export default function core() {}\n",
+        )
+        .unwrap();
+        fs::write(
+            repository_path.join("tsconfig.json"),
+            r#"{"compilerOptions":{"paths":{"@core/*":["core/*"]}}}"#,
+        )
+        .unwrap();
+        git(repository_path, ["add", "."]);
+        git(repository_path, ["commit", "-qm", "initial"]);
+        fs::write(
+            repository_path.join("tsconfig.json"),
+            r#"{"compilerOptions":{"paths":{"@core/*":["app/*"]}}}"#,
+        )
+        .unwrap();
+        let result =
+            analyze_diff(&DiffRequest::new(repository_path).with_reference("HEAD")).unwrap();
+        assert!(result.report().architecture_comparisons().iter().any(
+            |value| value.kind() == smackdebt_analysis::ArchitectureComparisonKind::EdgeRemoved
+        ));
+        assert_eq!(result.stats().git_processes, 5);
+    }
+
+    #[test]
+    fn added_package_manifests_change_package_cycle_identity_between_sides() {
+        let root = tempfile::tempdir().unwrap();
+        let repository_path = root.path();
+        git(repository_path, ["init", "-q"]);
+        git(
+            repository_path,
+            ["config", "user.email", "test@example.invalid"],
+        );
+        git(repository_path, ["config", "user.name", "Smackdebt Test"]);
+        fs::write(repository_path.join("package.json"), "{}").unwrap();
+        for package in ["app", "core"] {
+            fs::create_dir_all(repository_path.join(package)).unwrap();
+        }
+        fs::write(
+            repository_path.join("app/a.js"),
+            "import core from '../core/b';\nfunction app() {}\n",
+        )
+        .unwrap();
+        fs::write(
+            repository_path.join("core/b.js"),
+            "import app from '../app/a';\nfunction core() {}\n",
+        )
+        .unwrap();
+        git(repository_path, ["add", "."]);
+        git(repository_path, ["commit", "-qm", "initial"]);
+        for package in ["app", "core"] {
+            fs::write(repository_path.join(package).join("package.json"), "{}").unwrap();
+        }
+        let result =
+            analyze_diff(&DiffRequest::new(repository_path).with_reference("HEAD")).unwrap();
+        let cycle = result
+            .report()
+            .architecture_comparisons()
+            .iter()
+            .find(|value| {
+                value.kind() == smackdebt_analysis::ArchitectureComparisonKind::CycleIntroduced
+            })
+            .unwrap();
+        assert_eq!(cycle.witness().first(), cycle.witness().last());
+    }
+
+    #[test]
+    fn diff_applies_rename_identity_before_architecture_comparison() {
+        let root = tempfile::tempdir().unwrap();
+        let repository_path = root.path();
+        git(repository_path, ["init", "-q"]);
+        git(
+            repository_path,
+            ["config", "user.email", "test@example.invalid"],
+        );
+        git(repository_path, ["config", "user.name", "Smackdebt Test"]);
+        fs::write(repository_path.join("package.json"), "{}").unwrap();
+        fs::write(
+            repository_path.join("main.js"),
+            "import value from './old';\nfunction main() { return value; }\n",
+        )
+        .unwrap();
+        fs::write(
+            repository_path.join("old.js"),
+            "export default function value() {}\n",
+        )
+        .unwrap();
+        git(repository_path, ["add", "."]);
+        git(repository_path, ["commit", "-qm", "initial"]);
+        fs::rename(
+            repository_path.join("old.js"),
+            repository_path.join("new.js"),
+        )
+        .unwrap();
+        fs::write(
+            repository_path.join("main.js"),
+            "import value from './new';\nfunction main() { return value; }\n",
+        )
+        .unwrap();
+
+        let result =
+            analyze_diff(&DiffRequest::new(repository_path).with_reference("HEAD")).unwrap();
+        assert!(result.report().architecture_comparisons().is_empty());
+        assert_eq!(result.report().dependency_edges().len(), 1);
     }
 
     #[test]

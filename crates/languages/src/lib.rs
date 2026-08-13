@@ -5,6 +5,7 @@ mod c_language;
 mod cognitive_complexity;
 mod cpp_language;
 mod cyclomatic_complexity;
+mod dependency;
 mod engine;
 mod java_language;
 mod javascript_language;
