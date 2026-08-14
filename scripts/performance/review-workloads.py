@@ -6,6 +6,7 @@ from __future__ import annotations
 import argparse
 import json
 import subprocess
+import unicodedata
 from pathlib import Path
 
 import jsonschema
@@ -112,6 +113,25 @@ def section_lines(terminal: str, heading: str) -> list[str] | None:
     return [line for line in lines if line]
 
 
+def terminal_line(value: str, width: int = 100) -> str:
+    def cell_width(character: str) -> int:
+        if unicodedata.combining(character):
+            return 0
+        return 2 if unicodedata.east_asian_width(character) in {"W", "F"} else 1
+
+    if sum(cell_width(character) for character in value) <= width:
+        return value
+    retained = []
+    used = 0
+    for character in value:
+        character_width = cell_width(character)
+        if used + character_width > width - 1:
+            break
+        retained.append(character)
+        used += character_width
+    return "".join(retained) + "…"
+
+
 def first_displayed_finding(report: dict, terminal: str) -> dict | None:
     lines = section_lines(terminal, "FINDINGS")
     if not lines:
@@ -202,29 +222,139 @@ def generated_rails_schema_is_outside_default_debt(report: dict, terminal: str) 
     return bool(findings) and all(finding_path(report, finding) not in terminal for finding in findings)
 
 
+def displayed_package_name(package: dict) -> str:
+    path = package["path"]
+    return "repository root" if path == "." else path
+
+
+def strongest_history_rows(report: dict, finding_ids: list[int]) -> list[str] | None:
+    packages = report["packages"]
+    findings = report["evolutionary_findings"]
+    selected = []
+    for finding_id in finding_ids:
+        if not isinstance(finding_id, int) or not 0 <= finding_id < len(findings):
+            return None
+        finding = findings[finding_id]
+        left = finding.get("left")
+        right = finding.get("right")
+        shared = finding.get("shared_commits")
+        union = finding.get("union_commits")
+        similarity = finding.get("similarity")
+        if (
+            not isinstance(left, int)
+            or not isinstance(right, int)
+            or not 0 <= left < len(packages)
+            or not 0 <= right < len(packages)
+            or not isinstance(shared, int)
+            or not isinstance(union, int)
+            or not isinstance(similarity, (int, float))
+            or shared < 3
+            or union < shared
+            or shared * 5 < union
+        ):
+            return None
+        selected.append(finding)
+
+    selected.sort(
+        key=lambda finding: (
+            -finding["shared_commits"],
+            -finding["similarity"],
+            displayed_package_name(packages[finding["left"]]),
+            displayed_package_name(packages[finding["right"]]),
+            finding["left"],
+            finding["right"],
+        )
+    )
+    rows = []
+    package_edges = report.get("package_edges", [])
+    for finding in selected[:3]:
+        left = finding["left"]
+        right = finding["right"]
+        dependency = any(
+            {edge.get("source"), edge.get("target")} == {left, right}
+            for edge in package_edges
+        )
+        percentage = int(finding["similarity"] * 100 + 0.5)
+        rows.append(
+            terminal_line(
+                f" {displayed_package_name(packages[left])} ↔ "
+                f"{displayed_package_name(packages[right])} "
+                f"changed together in {finding['shared_commits']} of "
+                f"{finding['union_commits']} commits · {percentage}% · "
+                f"{'code dependency exists' if dependency else 'no code dependency'}"
+            )
+        )
+    return rows
+
+
+def expected_architecture_rows(report: dict, finding_ids: list[int]) -> list[str] | None:
+    findings = report.get("architecture_findings", [])
+    edges = report.get("dependency_edges", [])
+    files = report.get("files", [])
+    paths = report.get("paths", [])
+    rows = []
+    labels = {
+        "package_cycle": ("", "package dependency cycle"),
+        "file_cycle": ("", "file dependency cycle"),
+    }
+    for finding_id in finding_ids[:3]:
+        if not isinstance(finding_id, int) or not 0 <= finding_id < len(findings):
+            return None
+        finding = findings[finding_id]
+        if finding.get("kind") not in labels:
+            return None
+        glyph, label = labels[finding["kind"]]
+        rows.append(terminal_line(f"{glyph} {label}"))
+        witness = finding.get("witness_edges", [])
+        if not witness:
+            continue
+        witness_edges = []
+        for edge_id in witness:
+            if not isinstance(edge_id, int) or not 0 <= edge_id < len(edges):
+                return None
+            edge = edges[edge_id]
+            source = edge.get("source")
+            target = edge.get("target")
+            if (
+                not isinstance(source, int)
+                or not isinstance(target, int)
+                or not 0 <= source < len(files)
+                or not 0 <= target < len(files)
+            ):
+                return None
+            witness_edges.append(edge)
+        first = witness_edges[0]
+        file_ids = [first["source"], first["target"]]
+        file_ids.extend(edge["target"] for edge in witness_edges[1:])
+        try:
+            witness_paths = [paths[files[file_id]["path"]] for file_id in file_ids]
+        except (IndexError, KeyError, TypeError):
+            return None
+        rows.append(terminal_line("        " + " → ".join(witness_paths)))
+    return rows
+
+
 def weak_history_and_graph_facts_are_absent(report: dict, terminal: str) -> bool:
     root = report["scopes"][report["root"]]
-    expected_history = len(root["evolutionary_findings"])
+    expected_history = strongest_history_rows(report, root["evolutionary_findings"])
+    if expected_history is None:
+        return False
     history = section_lines(terminal, "HISTORY")
-    if expected_history == 0:
-        if history is not None:
+    if expected_history:
+        if history != expected_history:
             return False
-    elif history is None or len(history) != expected_history or any(
-        not line.startswith(" ") for line in history
-    ):
+    elif history is not None:
         return False
 
-    expected_architecture = len(root["architecture_findings"])
-    architecture = section_lines(terminal, "ARCHITECTURE")
-    if expected_architecture == 0:
-        return architecture is None
-    if architecture is None:
-        return False
-    markers = [line for line in architecture if line.startswith((" ", " "))]
-    witnesses = [line for line in architecture if not line.startswith((" ", " "))]
-    return len(markers) == expected_architecture and all(
-        line.startswith("        ") for line in witnesses
+    expected_architecture = expected_architecture_rows(
+        report, root["architecture_findings"]
     )
+    if expected_architecture is None:
+        return False
+    architecture = section_lines(terminal, "ARCHITECTURE")
+    if expected_architecture:
+        return architecture == expected_architecture
+    return architecture is None
 
 
 def main() -> int:

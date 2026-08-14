@@ -79,6 +79,81 @@ def package_reference_report():
     }
 
 
+def history_review_report():
+    return {
+        "root": 0,
+        "paths": ["src/alpha.rs", "src/bravo.rs"],
+        "files": [{"path": 0}, {"path": 1}],
+        "packages": [
+            {"id": 0, "path": "alpha"},
+            {"id": 1, "path": "bravo"},
+            {"id": 2, "path": "charlie"},
+            {"id": 3, "path": "delta"},
+            {"id": 4, "path": "echo"},
+        ],
+        "scopes": [
+            {
+                "evolutionary_findings": [0, 1, 2, 3],
+                "architecture_findings": [],
+            }
+        ],
+        "evolutionary_findings": [
+            {
+                "id": 0,
+                "left": 0,
+                "right": 1,
+                "shared_commits": 3,
+                "union_commits": 4,
+                "similarity": 0.75,
+            },
+            {
+                "id": 1,
+                "left": 3,
+                "right": 4,
+                "shared_commits": 5,
+                "union_commits": 10,
+                "similarity": 0.5,
+            },
+            {
+                "id": 2,
+                "left": 0,
+                "right": 2,
+                "shared_commits": 5,
+                "union_commits": 8,
+                "similarity": 0.625,
+            },
+            {
+                "id": 3,
+                "left": 1,
+                "right": 3,
+                "shared_commits": 5,
+                "union_commits": 8,
+                "similarity": 0.625,
+            },
+            {
+                "id": 4,
+                "left": 2,
+                "right": 4,
+                "shared_commits": 2,
+                "union_commits": 2,
+                "similarity": 1.0,
+            },
+        ],
+        "package_edges": [],
+        "architecture_findings": [],
+        "dependency_edges": [],
+    }
+
+
+def strongest_history_terminal():
+    return (
+        "\nHISTORY\n"
+        " alpha ↔ charlie changed together in 5 of 8 commits · 63% · no code dependency\n"
+        " bravo ↔ delta changed together in 5 of 8 commits · 63% · no code dependency\n"
+        " delta ↔ echo changed together in 5 of 10 commits · 50% · no code dependency\n"
+    )
+
+
 class WorkloadHarnessTests(unittest.TestCase):
     def run_tool(self, *arguments):
         return subprocess.run(["python3", str(SCRIPT), *arguments], check=True, capture_output=True, text=True)
@@ -218,7 +293,19 @@ class WorkloadHarnessTests(unittest.TestCase):
                 {"health": 2},
             ],
             "packages": [{"path": "app"}, {"path": "support"}],
-            "evolutionary_findings": [{"left": 0, "right": 1}],
+            "evolutionary_findings": [
+                {
+                    "id": 0,
+                    "left": 0,
+                    "right": 1,
+                    "shared_commits": 3,
+                    "union_commits": 4,
+                    "similarity": 0.75,
+                }
+            ],
+            "package_edges": [],
+            "architecture_findings": [],
+            "dependency_edges": [],
         }
         terminal = (
             "\nFINDINGS\n"
@@ -273,11 +360,21 @@ class WorkloadHarnessTests(unittest.TestCase):
 
         graph_report = copy.deepcopy(report)
         graph_report["scopes"][0]["architecture_findings"] = [0]
+        graph_report["dependency_edges"] = [
+            {"source": 0, "target": 1},
+            {"source": 1, "target": 0},
+        ]
+        graph_report["architecture_findings"] = [
+            {
+                "kind": "package_cycle",
+                "witness_edges": [0, 1],
+            }
+        ]
         graph_terminal = terminal.replace(
             "\n\nHISTORY\n",
             "\n\nARCHITECTURE\n"
             " package dependency cycle\n"
-            "        app/main.rb → support/main.rb → app/main.rb\n\n"
+            "        app/main.rb → db/schema.rb → app/main.rb\n\n"
             "HISTORY\n",
         )
         self.assertTrue(
@@ -286,11 +383,121 @@ class WorkloadHarnessTests(unittest.TestCase):
             )
         )
         weak_graph = graph_terminal.replace(
-            "        app/main.rb → support/main.rb → app/main.rb",
+            "        app/main.rb → db/schema.rb → app/main.rb",
             "  app/main.rb → support/main.rb · uses",
         )
         self.assertFalse(
             reviewer.weak_history_and_graph_facts_are_absent(graph_report, weak_graph)
+        )
+
+    def test_default_history_requires_exact_strongest_rows_and_no_graph_detail(self):
+        reviewer = load_workload_reviewer()
+        report = history_review_report()
+        terminal = strongest_history_terminal()
+        self.assertTrue(
+            reviewer.weak_history_and_graph_facts_are_absent(report, terminal)
+        )
+
+        rows = terminal.splitlines()
+        wrong_order = "\n".join([rows[0], rows[1], rows[3], rows[2], rows[4]]) + "\n"
+        self.assertFalse(
+            reviewer.weak_history_and_graph_facts_are_absent(report, wrong_order)
+        )
+
+        weak_report = copy.deepcopy(report)
+        weak_report["scopes"][0]["evolutionary_findings"].append(4)
+        weak_included = terminal + (
+            " charlie ↔ echo changed together in 2 of 2 commits · 100% · "
+            "no code dependency\n"
+        )
+        self.assertFalse(
+            reviewer.weak_history_and_graph_facts_are_absent(
+                weak_report, weak_included
+            )
+        )
+
+        self.assertFalse(
+            reviewer.weak_history_and_graph_facts_are_absent(
+                report, terminal + "  extra history text\n"
+            )
+        )
+
+        graph_report = copy.deepcopy(report)
+        graph_report["scopes"][0]["architecture_findings"] = [0]
+        graph_report["dependency_edges"] = [
+            {"source": 0, "target": 1},
+            {"source": 1, "target": 0},
+        ]
+        graph_report["architecture_findings"] = [
+            {"kind": "file_cycle", "witness_edges": [0, 1]}
+        ]
+        graph = (
+            "\nARCHITECTURE\n"
+            " file dependency cycle\n"
+            "        src/alpha.rs → src/bravo.rs → src/alpha.rs\n"
+        )
+        self.assertTrue(
+            reviewer.weak_history_and_graph_facts_are_absent(
+                graph_report, graph + terminal
+            )
+        )
+        self.assertFalse(
+            reviewer.weak_history_and_graph_facts_are_absent(
+                graph_report,
+                graph + "  src/alpha.rs → src/bravo.rs · 1 import\n" + terminal,
+            )
+        )
+
+    def test_history_uses_displayed_root_name_for_tie_order(self):
+        reviewer = load_workload_reviewer()
+        report = history_review_report()
+        report["packages"][0]["path"] = "."
+        report["scopes"][0]["evolutionary_findings"] = [2, 3]
+        terminal = (
+            "\nHISTORY\n"
+            " bravo ↔ delta changed together in 5 of 8 commits · 63% · "
+            "no code dependency\n"
+            " repository root ↔ charlie changed together in 5 of 8 commits · "
+            "63% · no code dependency\n"
+        )
+        self.assertTrue(
+            reviewer.weak_history_and_graph_facts_are_absent(report, terminal)
+        )
+        self.assertFalse(
+            reviewer.weak_history_and_graph_facts_are_absent(
+                report,
+                terminal.replace(
+                    " bravo ↔ delta changed together in 5 of 8 commits · 63% · "
+                    "no code dependency\n"
+                    " repository root ↔ charlie",
+                    " repository root ↔ charlie changed together in 5 of 8 commits "
+                    "· 63% · no code dependency\n bravo ↔ delta",
+                ),
+            )
+        )
+
+    def test_empty_optional_headings_are_not_treated_as_absent(self):
+        reviewer = load_workload_reviewer()
+        report = history_review_report()
+        report["scopes"][0]["evolutionary_findings"] = []
+        terminal = "\nQUALITY\n1 rated unit\n"
+        self.assertTrue(
+            reviewer.weak_history_and_graph_facts_are_absent(report, terminal)
+        )
+        self.assertFalse(
+            reviewer.weak_history_and_graph_facts_are_absent(
+                report, terminal + "\nHISTORY\n"
+            )
+        )
+        self.assertFalse(
+            reviewer.weak_history_and_graph_facts_are_absent(
+                report, terminal + "\nARCHITECTURE\n"
+            )
+        )
+        self.assertFalse(
+            reviewer.weak_history_and_graph_facts_are_absent(
+                report, terminal + "\nHISTORY\n\nARCHITECTURE\n"
+            )
         )
 
     def test_package_reference_check_covers_every_package_bearing_table(self):
