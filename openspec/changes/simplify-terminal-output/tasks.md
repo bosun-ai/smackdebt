@@ -28,6 +28,6 @@
 - [x] 4.2 Review self read-only: important debt leads and empty optional sections are absent.
 - [x] 4.3 Review the private mixed application read-only: primary application findings lead and generated Rails schema stays outside default debt.
 - [x] 4.4 Review the private Rust workspace read-only: useful Rust findings lead and weak history and graph facts are absent.
-- [ ] 4.5 Commit only privacy-safe workload families and outcome categories; never raw private output, paths, source, identities, or history.
-- [ ] 4.6 After the reviewed implementation commit, record clean public and aggregate release evidence from one revision with `workspace_dirty` false.
+- [x] 4.5 Commit only privacy-safe workload families and outcome categories; never raw private output, paths, source, identities, or history.
+- [x] 4.6 After the reviewed implementation commit, record clean public and aggregate release evidence from one revision with `workspace_dirty` false.
 - [x] 4.7 Pass formatting, Clippy, workspace tests, architecture/API gates, licenses, strict OpenSpec validation, and final diff check.

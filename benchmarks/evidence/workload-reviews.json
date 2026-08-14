@@ -1,33 +1,27 @@
 {
   "schema_version": 1,
-  "workspace_revision": "038f2a8a2616f2d4f36f4c6cdeaa47f87b5921f4",
+  "workspace_revision": "3b540a8f03bd47563791fd4dfef05652a4d58f84",
   "workspace_dirty": false,
   "reviews": [
     {
       "family": "self",
       "outcomes": {
-        "fixture_cycles_absent": true,
-        "package_references_valid": true,
-        "root_label_readable": true,
-        "default_coupling_threshold_met": true
+        "important_debt_leads": true,
+        "empty_optional_sections_absent": true
       }
     },
     {
       "family": "private_mixed_application",
       "outcomes": {
-        "generated_schema_client_findings_excluded": true,
-        "weak_coupling_absent": true,
-        "ownership_cycles_absent": true,
-        "hand_written_high_findings_visible": true,
-        "default_coupling_threshold_met": true
+        "primary_application_findings_lead": true,
+        "generated_rails_schema_outside_default_debt": true
       }
     },
     {
       "family": "private_rust_workspace",
       "outcomes": {
-        "ownership_cycles_absent": true,
-        "high_complexity_findings_visible": true,
-        "default_coupling_threshold_met": true
+        "useful_rust_findings_lead": true,
+        "weak_history_and_graph_facts_absent": true
       }
     }
   ]
