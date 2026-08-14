@@ -9,7 +9,7 @@ FINDINGS
   ExtremelyLongContainerN…tMustRemainRecognizable
         method · test
         very-long-source-pa…-source-file-name.js:6
-        lines 56
+        statements 56
         2 commits
 
 ARCHITECTURE

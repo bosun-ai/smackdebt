@@ -1307,7 +1307,7 @@ impl<'a, W: Write> Renderer<'a, W> {
                 before.cyclomatic_complexity(),
                 after.cyclomatic_complexity(),
             ),
-            ("lines", before.logical_lines(), after.logical_lines()),
+            ("statements", before.logical_lines(), after.logical_lines()),
         ];
         let mut changed = false;
         for (name, before, after) in values
@@ -1342,7 +1342,7 @@ impl<'a, W: Write> Renderer<'a, W> {
                 before.cyclomatic_complexity(),
                 after.cyclomatic_complexity(),
             ),
-            ("lines", before.logical_lines(), after.logical_lines()),
+            ("statements", before.logical_lines(), after.logical_lines()),
         ];
         let mut first = true;
         for (name, before, after) in values
@@ -1723,7 +1723,7 @@ fn signal_name(signal: Signal) -> &'static str {
     match signal {
         Signal::CognitiveComplexity => "cognitive",
         Signal::CyclomaticComplexity => "cyclomatic",
-        Signal::LogicalLines => "lines",
+        Signal::LogicalLines => "statements",
     }
 }
 

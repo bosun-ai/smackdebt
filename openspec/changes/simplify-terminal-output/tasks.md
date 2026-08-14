@@ -13,6 +13,7 @@
 - [x] 2.3 Group repeated parser and file warnings by default and retain affected-file detail in `--all` and path views.
 - [x] 2.4 Use the accepted simple history, rename, unresolved-import, and ambiguous-import sentences with correct plural forms.
 - [x] 2.5 Simplify CLI help and errors while preserving statuses and stdout/stderr behavior.
+- [x] 2.6 Call logical lines `statements` in human output while preserving the analysis value and JSON field.
 
 ## 3. Documentation and public proof
 

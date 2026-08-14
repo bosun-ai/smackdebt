@@ -55,12 +55,14 @@ Human terminal output SHALL omit repeated bars, summary percentages and ratios, 
 counts, severity words, arbitrary architecture edge totals, weak history pairs,
 and history processing totals. It SHALL NOT use the phrases `complete local
 stream`, `eligible mapping`, `retained units`, or `retained package pairs`.
-Cognitive and cyclomatic values SHALL remain on applicable source findings.
+Cognitive, cyclomatic, and statement values SHALL remain on applicable source
+findings. The human terminal SHALL call the logical-line measurement
+`statements` so its meaning is clear without reading documentation.
 The actionable history evidence ratio is not a summary ratio and SHALL remain.
 
 #### Scenario: A report contains source, graph, and history detail
 - **WHEN** default output is rendered
-- **THEN** each actionable fact appears once without the removed labels or processing facts and source findings retain cognitive and cyclomatic values
+- **THEN** each actionable fact appears once without the removed labels or processing facts and source findings retain cognitive, cyclomatic, and statement values
 
 ### Requirement: Detailed and path views remain useful
 `--all` SHALL show all useful findings and relevant resolved, unresolved,

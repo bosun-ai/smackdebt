@@ -23,7 +23,7 @@ FINDINGS
         b/main.js
         cognitive 1 → 6
         cyclomatic 2 → 4
-        lines 1 → 2
+        statements 1 → 2
   renamed
         e/new.js
         added
@@ -31,10 +31,10 @@ FINDINGS
         a/main.js
         cognitive 3 → 0
         cyclomatic 3 → 1
-        lines 2 → 1
+        statements 2 → 1
   c
         c/main.js
-        lines 2 → 3
+        statements 2 → 3
   removed
         f/deleted.js
         removed

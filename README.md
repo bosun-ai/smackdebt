@@ -40,7 +40,7 @@ crates/core    1   6
 FINDINGS
   process_checkout · function
         crates/api/src/checkout.rs:42
-        cognitive 31 · cyclomatic 14 · lines 126
+        cognitive 31 · cyclomatic 14 · statements 126
 
 ARCHITECTURE
  package dependency cycle
@@ -77,7 +77,7 @@ QUALITY
 FINDINGS
   process_checkout · function
         crates/api/src/checkout.rs:42
-        cognitive 31 · cyclomatic 14 · lines 126
+        cognitive 31 · cyclomatic 14 · statements 126
 ```
 
 The default terminal view shows up to five affected areas and three findings.
@@ -112,10 +112,10 @@ packages/web   1   –   1
 FINDINGS
   process_checkout
         crates/api/src/checkout.rs
-        cognitive 14 → 19 · cyclomatic 9 → 12 · lines 42 → 57
+        cognitive 14 → 19 · cyclomatic 9 → 12 · statements 42 → 57
   groupOrders
         packages/web/src/orders.ts
-        cognitive 28 → 7 · cyclomatic 17 → 5 · lines 91 → 38
+        cognitive 28 → 7 · cyclomatic 17 → 5 · statements 91 → 38
 
 ARCHITECTURE
  package dependency cycle introduced
@@ -145,7 +145,7 @@ Smackdebt reports separate signals instead of hiding them in one score.
 | --- | ---: | ---: |
 | Cognitive complexity | 15 | 25 |
 | Cyclomatic complexity | 11 | 21 |
-| Logical lines in a function | 50 | 100 |
+| Statements in a function | 50 | 100 |
 
 A function takes its highest signal rating. Terminal views focus on functions
 that need attention. JSON retains healthy, watch, and high counts for every
@@ -158,8 +158,8 @@ rated closure or nested function does not increase its parent's value.
 Recursion is not inferred from syntax alone.
 
 Cyclomatic complexity starts at one and adds one for each independent decision.
-Logical lines count statements, not physical lines: `a(); b();` counts as two,
-while one statement spread over several lines counts as one. Blank lines,
+Statements are counted by syntax, not physical lines: `a(); b();` counts as
+two, while one statement spread over several lines counts as one. Blank lines,
 comments, wrappers, markup, and nested rated units do not count.
 
 These equivalent functions each have cognitive complexity 1, cyclomatic
@@ -362,7 +362,7 @@ Terminal limits never remove JSON facts. The checked schema is
 schema is emitted.
 
 Source findings are ordered by rating, count of signals at that rating, total
-triggered signals, cognitive complexity, cyclomatic complexity, logical lines,
+triggered signals, cognitive complexity, cyclomatic complexity, statements,
 activity, path, and span. Findings show unit kind and any non-primary role.
 Default architecture output shows rated cycle witnesses rather than arbitrary
 edge samples. Use `--all` or a path drill to inspect relevant resolved,

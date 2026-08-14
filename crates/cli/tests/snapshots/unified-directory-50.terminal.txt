@@ -35,85 +35,85 @@ FINDINGS
         src/c.c:1
         cognitive 9
         cyclomatic 8
-        lines 6
+        statements 6
   Worker::run
         method
         src/rust.rs:6
         cognitive 7
         cyclomatic 4
-        lines 3
+        statements 3
   <template>
         template
         src/vue.vue:1
         cognitive 5
         cyclomatic 6
-        lines 3
+        statements 3
   outer::inner
         function
         src/python.py:2
         cognitive 4
         cyclomatic 5
-        lines 4
+        statements 4
   Worker::run
         method
         src/java.java:3
         cognitive 4
         cyclomatic 4
-        lines 5
+        statements 5
   Worker::<lambda 4>
         lambda
         src/ruby.rb:4
         cognitive 3
         cyclomatic 4
-        lines 2
+        statements 2
   Worker::run
         method
         src/javascript.js:3
         cognitive 2
         cyclomatic 3
-        lines 3
+        statements 3
   Worker::<lambda 5>
         lambda
         src/cpp.cpp:5
         cognitive 2
         cyclomatic 3
-        lines 1
+        statements 1
   Worker::run
         method
         src/cpp.cpp:4
         cognitive 1
         cyclomatic 2
-        lines 3
+        statements 3
   View::render
         method
         src/jsx.jsx:2
         cognitive 1
         cyclomatic 2
-        lines 2
+        statements 2
   Worker::<closure 5>
         closure
         src/ruby.rb:5
         cognitive 1
         cyclomatic 2
-        lines 2
+        statements 2
   View::render
         method
         src/tsx.tsx:2
         cognitive 1
         cyclomatic 2
-        lines 2
+        statements 2
   Worker::run
         method
         src/typescript.ts:3
         cognitive 1
         cyclomatic 2
-        lines 2
+        statements 2
   save
         function
         src/vue.vue:9
         cognitive 1
         cyclomatic 2
-        lines 2
+        statements 2
   Worker::<closure 7>
         closure
         src/rust.rs:7
@@ -124,7 +124,7 @@ FINDINGS
         src/java.java:2
         cognitive 1
         cyclomatic 2
-        lines 1
+        statements 1
   Worker::<lambda 4>
         lambda
         src/java.java:4
@@ -164,12 +164,12 @@ FINDINGS
         function
         src/python.py:1
         cyclomatic 1
-        lines 2
+        statements 2
   Worker::run
         method
         src/ruby.rb:3
         cyclomatic 1
-        lines 2
+        statements 2
   Worker::self.empty
         method
         src/ruby.rb:11
