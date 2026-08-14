@@ -2,7 +2,7 @@
   "schema_version": 1,
   "profile": "graph-dense",
   "source_engine": "owned-tree-sitter-static-and-evolutionary-analysis",
-  "workspace_revision": "3b540a8f03bd47563791fd4dfef05652a4d58f84",
+  "workspace_revision": "85536133647890f6e8db74dfdf19afc9b0f30b87",
   "workspace_dirty": false,
   "host": "macOS-26.3.1-arm64-arm-64bit",
   "rustc": "rustc 1.97.0 (2d8144b78 2026-07-07)",
@@ -20,27 +20,27 @@
   "parser_visits": 500,
   "algorithm_passes": 502,
   "samples_parser_time_ns": [
-    26366163,
-    25920855,
-    27171909,
-    23586668,
-    26610379
+    25376653,
+    23232950,
+    25387620,
+    25204344,
+    25046590
   ],
-  "p95_parser_time_ns": 27171909,
+  "p95_parser_time_ns": 25387620,
   "samples_wall_time_ns": [
-    158991500,
-    163121958,
-    157619583,
-    161181875,
-    165865625
+    159573708,
+    157128916,
+    154950083,
+    158804333,
+    159272208
   ],
-  "p95_wall_time_ns": 165865625,
+  "p95_wall_time_ns": 159573708,
   "peak_resident_bytes": 36749312,
-  "wall_time_budget_ns": 182452188,
+  "wall_time_budget_ns": 175531079,
   "peak_resident_budget_bytes": 40424244,
   "budget_room_percent": 10,
-  "allocation_count": 390434,
-  "reallocation_count": 223455,
-  "allocated_bytes": 20603419,
+  "allocation_count": 390216,
+  "reallocation_count": 223329,
+  "allocated_bytes": 20564137,
   "allocation_note": "Measured with the allocation-stats release feature."
 }
