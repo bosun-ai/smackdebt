@@ -207,8 +207,8 @@ def empty_optional_sections_are_absent(report: dict, terminal: str) -> bool:
     ]
     return (
         (len(affected_children) >= 2 or "\nAREAS\n" not in terminal)
-        and (root["architecture_findings"] or "\nARCHITECTURE\n" not in terminal)
-        and (root["evolutionary_findings"] or "\nHISTORY\n" not in terminal)
+        and (bool(root["architecture_findings"]) or "\nARCHITECTURE\n" not in terminal)
+        and (bool(root["evolutionary_findings"]) or "\nHISTORY\n" not in terminal)
     )
 
 
@@ -357,23 +357,15 @@ def weak_history_and_graph_facts_are_absent(report: dict, terminal: str) -> bool
     return architecture is None
 
 
-def main() -> int:
-    parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("--binary", type=Path, required=True)
-    parser.add_argument("--revision", required=True)
-    parser.add_argument("--self", dest="self_repository", type=Path, required=True)
-    parser.add_argument("--mixed", type=Path, required=True)
-    parser.add_argument("--rust", type=Path, required=True)
-    parser.add_argument("--output", type=Path, required=True)
-    args = parser.parse_args()
-
-    binary = args.binary.resolve()
-    schema = json.loads((ROOT / "schemas" / "report-v3.schema.json").read_text())
-    self_report, self_terminal = reviewed_report(binary, args.self_repository, schema)
-    mixed_report, mixed_terminal = reviewed_report(binary, args.mixed, schema)
-    rust_report, rust_terminal = reviewed_report(binary, args.rust, schema)
-
-    outcomes = {
+def review_outcomes(
+    self_report: dict,
+    self_terminal: str,
+    mixed_report: dict,
+    mixed_terminal: str,
+    rust_report: dict,
+    rust_terminal: str,
+) -> dict[str, dict[str, bool]]:
+    return {
         "self": {
             "important_debt_leads": important_debt_leads(self_report, self_terminal),
             "empty_optional_sections_absent": empty_optional_sections_are_absent(
@@ -397,7 +389,47 @@ def main() -> int:
             ),
         },
     }
+
+
+def non_boolean_outcomes(outcomes: dict) -> list[str]:
+    return [
+        f"{family}.{category}"
+        for family, result in outcomes.items()
+        for category, value in result.items()
+        if type(value) is not bool
+    ]
+
+
+def main() -> int:
+    parser = argparse.ArgumentParser(description=__doc__)
+    parser.add_argument("--binary", type=Path, required=True)
+    parser.add_argument("--revision", required=True)
+    parser.add_argument("--self", dest="self_repository", type=Path, required=True)
+    parser.add_argument("--mixed", type=Path, required=True)
+    parser.add_argument("--rust", type=Path, required=True)
+    parser.add_argument("--output", type=Path, required=True)
+    args = parser.parse_args()
+
+    binary = args.binary.resolve()
+    schema = json.loads((ROOT / "schemas" / "report-v3.schema.json").read_text())
+    self_report, self_terminal = reviewed_report(binary, args.self_repository, schema)
+    mixed_report, mixed_terminal = reviewed_report(binary, args.mixed, schema)
+    rust_report, rust_terminal = reviewed_report(binary, args.rust, schema)
+
+    outcomes = review_outcomes(
+        self_report,
+        self_terminal,
+        mixed_report,
+        mixed_terminal,
+        rust_report,
+        rust_terminal,
+    )
     require(tuple(outcomes) == FAMILIES, "workload families changed")
+    invalid_types = non_boolean_outcomes(outcomes)
+    require(
+        not invalid_types,
+        f"outcomes must be JSON booleans: {', '.join(invalid_types)}",
+    )
     failed = [
         f"{family}.{category}"
         for family, result in outcomes.items()

@@ -315,9 +315,32 @@ class WorkloadHarnessTests(unittest.TestCase):
             " app ↔ support changed together in 3 of 4 commits · 75% · no code dependency\n"
         )
         self.assertTrue(reviewer.important_debt_leads(report, terminal))
-        self.assertTrue(reviewer.empty_optional_sections_are_absent(report, terminal))
-        self.assertFalse(
-            reviewer.empty_optional_sections_are_absent(report, terminal + "\nAREAS\n")
+        self.assertIs(
+            reviewer.empty_optional_sections_are_absent(report, terminal), True
+        )
+        self.assertIs(
+            reviewer.empty_optional_sections_are_absent(
+                report, terminal + "\nAREAS\n"
+            ),
+            False,
+        )
+        retained_optional = copy.deepcopy(report)
+        retained_optional["scopes"][0]["architecture_findings"] = [0]
+        self.assertIs(
+            reviewer.empty_optional_sections_are_absent(retained_optional, terminal),
+            True,
+        )
+        no_history_facts = copy.deepcopy(report)
+        no_history_facts["scopes"][0]["evolutionary_findings"] = []
+        self.assertIs(
+            reviewer.empty_optional_sections_are_absent(no_history_facts, terminal),
+            False,
+        )
+        self.assertIs(
+            reviewer.empty_optional_sections_are_absent(
+                report, terminal + "\nARCHITECTURE\n"
+            ),
+            False,
         )
         self.assertTrue(
             reviewer.generated_rails_schema_is_outside_default_debt(report, terminal)
@@ -388,6 +411,35 @@ class WorkloadHarnessTests(unittest.TestCase):
         )
         self.assertFalse(
             reviewer.weak_history_and_graph_facts_are_absent(graph_report, weak_graph)
+        )
+
+        outcomes = reviewer.review_outcomes(
+            report,
+            terminal,
+            report,
+            terminal,
+            rust_first,
+            rust_terminal,
+        )
+        self.assertEqual(reviewer.non_boolean_outcomes(outcomes), [])
+        self.assertTrue(
+            all(
+                type(result) is bool
+                for family in outcomes.values()
+                for result in family.values()
+            )
+        )
+        serialized = json.loads(json.dumps(outcomes))
+        self.assertTrue(
+            all(
+                type(result) is bool
+                for family in serialized.values()
+                for result in family.values()
+            )
+        )
+        self.assertEqual(
+            reviewer.non_boolean_outcomes({"self": {"invalid": [True]}}),
+            ["self.invalid"],
         )
 
     def test_default_history_requires_exact_strongest_rows_and_no_graph_detail(self):
