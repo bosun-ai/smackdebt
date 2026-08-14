@@ -33,7 +33,7 @@ macro_rules! javascript_language {
                 "[(function_declaration) (generator_function_declaration) (function_expression) (generator_function) (method_definition) (arrow_function)] @unit"
             }
 
-            fn generated_marker(source: &[u8]) -> bool {
+            fn generated_marker(_path: &std::path::Path, source: &[u8]) -> bool {
                 std::str::from_utf8(source).is_ok_and(|text| text.lines().take(5).any(|line| {
                     let line = line.to_ascii_lowercase();
                     line.contains("@generated")

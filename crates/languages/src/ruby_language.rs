@@ -18,13 +18,19 @@ impl Language for Ruby {
         "[(method) (singleton_method) (lambda) (block) (do_block)] @unit"
     }
 
-    fn generated_marker(source: &[u8]) -> bool {
-        std::str::from_utf8(source).is_ok_and(|text| {
-            text.lines().take(5).any(|line| {
-                let line = line.to_ascii_lowercase();
-                line.contains("generated") && line.contains("do not edit")
+    fn generated_marker(path: &std::path::Path, source: &[u8]) -> bool {
+        let rails_schema = path.file_name().is_some_and(|name| name == "schema.rb")
+            && path
+                .parent()
+                .and_then(std::path::Path::file_name)
+                .is_some_and(|name| name == "db");
+        rails_schema
+            || std::str::from_utf8(source).is_ok_and(|text| {
+                text.lines().take(5).any(|line| {
+                    let line = line.to_ascii_lowercase();
+                    line.contains("generated") && line.contains("do not edit")
+                })
             })
-        })
     }
 
     fn unit_kind(node: Node<'_>) -> Option<UnitKind> {

@@ -124,16 +124,16 @@ impl Analyzer {
     pub fn has_generated_marker(path: &Path, source: &[u8]) -> bool {
         use crate::language::Language as _;
         match detect(path) {
-            Language::C => C::generated_marker(source),
-            Language::Cpp => Cpp::generated_marker(source),
-            Language::Java => Java::generated_marker(source),
-            Language::JavaScript => JavaScript::generated_marker(source),
-            Language::Jsx => Jsx::generated_marker(source),
-            Language::Python => Python::generated_marker(source),
-            Language::Rust => Rust::generated_marker(source),
-            Language::TypeScript => TypeScript::generated_marker(source),
-            Language::Tsx => Tsx::generated_marker(source),
-            Language::Ruby => Ruby::generated_marker(source),
+            Language::C => C::generated_marker(path, source),
+            Language::Cpp => Cpp::generated_marker(path, source),
+            Language::Java => Java::generated_marker(path, source),
+            Language::JavaScript => JavaScript::generated_marker(path, source),
+            Language::Jsx => Jsx::generated_marker(path, source),
+            Language::Python => Python::generated_marker(path, source),
+            Language::Rust => Rust::generated_marker(path, source),
+            Language::TypeScript => TypeScript::generated_marker(path, source),
+            Language::Tsx => Tsx::generated_marker(path, source),
+            Language::Ruby => Ruby::generated_marker(path, source),
             Language::Vue => crate::vue::has_generated_marker(source),
             Language::Kotlin | Language::Unknown => false,
         }
@@ -285,6 +285,32 @@ mod tests {
                 !Analyzer::has_generated_marker(
                     Path::new(path),
                     b"// do not edit this hand-written section\n"
+                ),
+                "{path}"
+            );
+        }
+    }
+
+    #[test]
+    fn ruby_owns_the_rails_schema_path_rule_without_claiming_similar_user_files() {
+        assert!(Analyzer::has_generated_marker(
+            Path::new("db/schema.rb"),
+            b"def complex_schema; if one; if two; end; end; end\n"
+        ));
+        assert!(Analyzer::has_generated_marker(
+            Path::new("app/db/schema.rb"),
+            b"def complex_schema; if one; if two; end; end; end\n"
+        ));
+        for path in [
+            "schema.rb",
+            "db/schema_helper.rb",
+            "database/schema.rb",
+            "app/models/schema.rb",
+        ] {
+            assert!(
+                !Analyzer::has_generated_marker(
+                    Path::new(path),
+                    b"def user_schema; if one; if two; end; end; end\n"
                 ),
                 "{path}"
             );

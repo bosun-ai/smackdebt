@@ -18,7 +18,7 @@ impl Language for Java {
         "[(method_declaration) (constructor_declaration) (lambda_expression)] @unit"
     }
 
-    fn generated_marker(source: &[u8]) -> bool {
+    fn generated_marker(_path: &std::path::Path, source: &[u8]) -> bool {
         marker(source)
     }
 

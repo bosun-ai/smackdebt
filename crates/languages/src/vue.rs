@@ -21,7 +21,7 @@ impl LanguageContract for Vue {
         "(template_element) @unit"
     }
 
-    fn generated_marker(source: &[u8]) -> bool {
+    fn generated_marker(_path: &std::path::Path, source: &[u8]) -> bool {
         has_generated_marker(source)
     }
 

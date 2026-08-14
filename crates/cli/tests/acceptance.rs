@@ -150,6 +150,97 @@ fn configured_source_role_overrides_the_generic_path_role() {
 }
 
 #[test]
+fn rails_schema_findings_stay_visible_without_entering_default_verdicts() {
+    let project = tempfile::tempdir().unwrap();
+    fs::create_dir_all(project.path().join("db")).unwrap();
+    fs::create_dir_all(project.path().join("app/models")).unwrap();
+    fs::write(
+        project.path().join("Gemfile"),
+        "source 'https://example.invalid'\n",
+    )
+    .unwrap();
+    fs::write(
+        project.path().join(".smackdebt.toml"),
+        "[thresholds.cognitive]\nwatch = 1\nhigh = 2\n[thresholds.cyclomatic]\nwatch = 1\nhigh = 2\n[thresholds.function_lines]\nwatch = 1\nhigh = 2\n",
+    )
+    .unwrap();
+    let schema = "def generated_schema(one, two)\n  if one\n    if two\n      create_table(:items)\n    end\n  end\nend\n";
+    fs::write(project.path().join("db/schema.rb"), schema).unwrap();
+    fs::write(
+        project.path().join("app/models/schema.rb"),
+        "def user_schema; :kept; end\n",
+    )
+    .unwrap();
+
+    let json = run_in(project.path(), ["--json", "--jobs", "1"]);
+    let report: serde_json::Value = serde_json::from_slice(&json).unwrap();
+    let paths = report["paths"].as_array().unwrap();
+    let file_for = |path: &str| {
+        report["files"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .find(|file| paths[file["path"].as_u64().unwrap() as usize] == path)
+            .unwrap()
+    };
+    let generated = file_for("db/schema.rb");
+    let user = file_for("app/models/schema.rb");
+    assert_eq!(generated["role"], "generated");
+    let generated_health = &report["health"][generated["health"].as_u64().unwrap() as usize];
+    assert_eq!(generated_health["watch"], 0);
+    assert_eq!(generated_health["high"], 0);
+    assert_eq!(generated["coverage"]["context_files"], 1);
+    assert_eq!(user["role"], "primary");
+    let user_health = &report["health"][user["health"].as_u64().unwrap() as usize];
+    assert!(
+        report["findings"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .any(|finding| {
+                finding["name"] == "generated_schema"
+                    && finding["rating"] == "high"
+                    && finding["role"] == "generated"
+            })
+    );
+    let root_health = &report["health"][report["scopes"][0]["health"].as_u64().unwrap() as usize];
+    for field in ["healthy", "watch", "high"] {
+        assert_eq!(root_health[field], user_health[field], "{field}");
+    }
+
+    let default = String::from_utf8(run_in(project.path(), ["--color", "never"])).unwrap();
+    assert!(!default.contains("db/schema.rb"));
+    let detailed =
+        String::from_utf8(run_in(project.path(), ["--all", "--color", "never"])).unwrap();
+    assert!(detailed.contains("db/schema.rb"));
+    assert!(detailed.contains("generated"));
+
+    git(project.path(), ["init", "-b", "main"]);
+    git(project.path(), ["config", "user.name", "Smackdebt Test"]);
+    git(
+        project.path(),
+        ["config", "user.email", "smackdebt@example.invalid"],
+    );
+    git(project.path(), ["add", "."]);
+    git(project.path(), ["commit", "-m", "test: schema base"]);
+    fs::write(
+        project.path().join("db/schema.rb"),
+        schema.replace("create_table(:items)", "create_table(:orders)"),
+    )
+    .unwrap();
+    let diff: serde_json::Value = serde_json::from_slice(&run_in(
+        project.path(),
+        ["diff", "main", "--json", "--jobs", "1"],
+    ))
+    .unwrap();
+    assert!(diff["comparisons"].as_array().unwrap().is_empty());
+    assert_eq!(diff["scopes"][0]["diff"]["total"], 0);
+    assert!(diff["findings"].as_array().unwrap().iter().any(|finding| {
+        finding["name"] == "generated_schema" && finding["role"] == "generated"
+    }));
+}
+
+#[test]
 fn terminal_color_can_be_forced_or_disabled_through_a_pipe() {
     let project = fixture();
     let path = project.path().to_str().unwrap();

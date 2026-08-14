@@ -18,7 +18,7 @@ impl Language for Rust {
         "[(function_item) (function_signature_item) (closure_expression)] @unit"
     }
 
-    fn generated_marker(source: &[u8]) -> bool {
+    fn generated_marker(_path: &std::path::Path, source: &[u8]) -> bool {
         std::str::from_utf8(source).is_ok_and(|text| {
             text.lines().take(5).any(|line| {
                 let line = line.to_ascii_lowercase();

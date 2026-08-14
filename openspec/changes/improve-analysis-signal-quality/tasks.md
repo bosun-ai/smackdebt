@@ -48,7 +48,7 @@
 
 ## 8. Three reviews and post-commit release evidence
 
-- [ ] 8.1 Pass public semantic, schema, byte, privacy, allocation, performance, API, architecture, license, and workspace gates before real-workload review.
+- [x] 8.1 Pass public semantic, schema, byte, privacy, allocation, performance, API, architecture, license, and workspace gates before real-workload review.
 - [ ] 8.2 Review self: fixture cycles gone, package references valid, root labels readable, and every default coupling above threshold.
 - [ ] 8.3 Review the private mixed application: generated schema and client findings excluded, weak coupling and ownership cycles gone, substantial hand-written functions prominent, and every default coupling above threshold.
 - [ ] 8.4 Review the private Rust workspace: ownership cycles gone, real high-complexity functions visible, and every default coupling above threshold.

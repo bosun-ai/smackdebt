@@ -43,11 +43,19 @@ performance-tests:
     python3 -m unittest scripts/performance/test_workload.py
     python3 scripts/performance/check-baselines.py
 
+release-workflow-tests:
+    python3 -m unittest scripts/performance/test_workload.py
+
+release-evidence-check:
+    python3 scripts/performance/check-baselines.py --release-head
+    python3 scripts/performance/check-workload-reviews.py --release-head
+
 check: fmt lint test architecture performance-tests acceptance-evidence
     openspec validate --all --strict
     git diff --check
 
-release-baselines:
-    scripts/performance/release-baselines.sh
+release-baselines self mixed rust accept="":
+    scripts/performance/release-baselines.sh {{self}} {{mixed}} {{rust}} {{accept}}
+    just release-evidence-check
 
-release-evidence: check licenses acceptance-install release-baselines
+release-evidence self mixed rust accept="": check licenses acceptance-install (release-baselines self mixed rust accept)

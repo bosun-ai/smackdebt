@@ -18,7 +18,7 @@ impl Language for C {
         "(function_definition) @unit"
     }
 
-    fn generated_marker(source: &[u8]) -> bool {
+    fn generated_marker(_path: &std::path::Path, source: &[u8]) -> bool {
         generated_comment(source)
     }
 
