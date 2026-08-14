@@ -783,6 +783,20 @@ fn executable_readme_examples_match_named_public_fixtures() {
 
 #[cfg(feature = "evidence-stats")]
 #[test]
+fn selected_binary_contains_the_requested_evidence_feature() {
+    let repository = GeneratedRepository::new("main");
+    repository.write("main.js", b"export function small() { return 1; }\n");
+    let result = Invocation::new(["--json"])
+        .evidence()
+        .run(repository.path());
+    assert_eq!(result.status.code(), Some(0), "{}", result.stderr_text());
+    checked_json(&result.stdout);
+    let stats = evidence_stats(&result);
+    assert_eq!(stats["renderer_entries"], 1);
+}
+
+#[cfg(feature = "evidence-stats")]
+#[test]
 fn composition_work_counts_are_visible_without_changing_report_bytes() {
     let repository = worktree_change_repository();
     for (name, arguments, expected) in [

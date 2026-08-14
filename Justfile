@@ -23,6 +23,8 @@ acceptance:
     cargo test -p smackdebt --test unified_acceptance
 
 acceptance-evidence:
+    cargo build -p smackdebt --bin smackdebt --features evidence-stats
+    cargo test -p smackdebt --features evidence-stats --test unified_acceptance selected_binary_contains_the_requested_evidence_feature -- --exact
     cargo test -p smackdebt --features evidence-stats --test unified_acceptance composition_work_counts
 
 acceptance-install:
