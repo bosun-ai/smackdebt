@@ -47,8 +47,8 @@ pub use health::{
 };
 pub use report::{
     ComparisonId, Coverage, Diagnostic, DiagnosticId, DiagnosticKind, DiffCounts, FileActivity,
-    FileId, FileRecord, Finding, FindingId, PackageId, PackagePresence, PackageRecord, PathId,
-    Report, ReportBuilder, ReportMode, Scope, ScopeId, ScopeKind, SourceCoverageOutcome,
+    FileId, FileRecord, Finding, FindingId, FindingRank, PackageId, PackagePresence, PackageRecord,
+    PathId, Report, ReportBuilder, ReportMode, Scope, ScopeId, ScopeKind, SourceCoverageOutcome,
     aggregate_comparisons, aggregate_scopes,
 };
 pub use source::{

@@ -39,10 +39,37 @@ fi
 
 if [ "$check_report" = true ]; then
     # Prove the measured public flow before entering the measured interval.
-    SMACKDEBT_PERF_JOBS=1 "$@" "$output" > "$output/correctness.serial.json"
-    SMACKDEBT_PERF_JOBS=auto "$@" "$output" > "$output/correctness.parallel.json"
+    : > "$output/correctness.serial.json"
+    : > "$output/correctness.parallel.json"
+    : > "$output/correctness.sha256"
+    : > "$output/runs.jsonl"
+    serial_stderr=$(mktemp "${TMPDIR:-/tmp}/smackdebt-correctness-serial.XXXXXX")
+    parallel_stderr=$(mktemp "${TMPDIR:-/tmp}/smackdebt-correctness-parallel.XXXXXX")
+    work_evidence=$(mktemp "${TMPDIR:-/tmp}/smackdebt-correctness-work.XXXXXX")
+    trap 'rm -f "$serial_stderr" "$parallel_stderr" "$work_evidence"' EXIT
+    SMACKDEBT_PERF_JOBS=1 "$@" "$output" > "$output/correctness.serial.json" 2> "$serial_stderr"
+    SMACKDEBT_PERF_JOBS=auto "$@" "$output" > "$output/correctness.parallel.json" 2> "$parallel_stderr"
     cmp "$output/correctness.serial.json" "$output/correctness.parallel.json"
-    schema="$script_dir/../../schemas/report-v2.schema.json"
+    python3 - "$serial_stderr" "$parallel_stderr" "$work_evidence" <<'PY'
+import json
+import pathlib
+import re
+import sys
+
+def project_stats(path):
+    value = pathlib.Path(path).read_text()
+    match = re.search(r'smackdebt project stats: (\{[^\n]+\})', value)
+    if match is None:
+        raise SystemExit(f"performance correctness: missing live work totals in {path}")
+    return json.loads(match.group(1))
+
+serial = project_stats(sys.argv[1])
+parallel = project_stats(sys.argv[2])
+if serial != parallel:
+    raise SystemExit("performance correctness: serial and automatic work totals differ")
+pathlib.Path(sys.argv[3]).write_text(json.dumps(serial, sort_keys=True) + "\n")
+PY
+    schema="$script_dir/../../schemas/report-v3.schema.json"
     digest_arguments=
     if [ -n "$expected_digest" ]; then
         digest_arguments="--expected-digest $expected_digest"
@@ -53,6 +80,7 @@ if [ "$check_report" = true ]; then
         --workload "$output/manifest.json" \
         --report "$output/correctness.serial.json" \
         --schema "$schema" \
+        --work-evidence "$work_evidence" \
         --digest-output "$output/correctness.sha256" \
         $digest_arguments
 fi

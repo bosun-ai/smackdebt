@@ -1,0 +1,11 @@
+{
+  "files": [
+    { "path": "src/main.js", "role": "primary" },
+    { "path": "tests/work.js", "role": "test" },
+    { "path": "examples/work.js", "role": "example" },
+    { "path": "benches/work.js", "role": "benchmark" },
+    { "path": "fixtures/work.js", "role": "fixture" },
+    { "path": "tests/generated.js", "role": "generated" }
+  ],
+  "verdict_findings": 4
+}

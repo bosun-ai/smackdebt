@@ -1,15 +1,16 @@
 {
   "$schema": "https://json-schema.org/draft/2020-12/schema",
-  "$id": "https://smackdebt.dev/schema/report-v2.json",
-  "title": "Smackdebt report version 2",
+  "$id": "https://smackdebt.dev/schema/report-v3.json",
+  "title": "Smackdebt report version 3",
   "type": "object",
-  "required": ["schema_version", "mode", "root", "selected_scope", "paths", "scopes", "files", "findings", "diagnostics", "comparisons", "health", "activity", "dependency_coverage", "dependency_edges", "package_edges", "external_dependencies", "resolution_diagnostics", "package_graph", "architecture_findings", "architecture_comparisons", "history_coverage", "file_history", "package_history", "change_coupling", "contributor_concentration", "evolutionary_findings", "evolutionary_comparisons"],
+  "required": ["schema_version", "mode", "root", "selected_scope", "paths", "packages", "scopes", "files", "findings", "diagnostics", "comparisons", "health", "activity", "dependency_coverage", "dependency_edges", "package_edges", "external_dependencies", "resolution_diagnostics", "package_graph", "architecture_findings", "architecture_comparisons", "history_coverage", "file_history", "package_history", "change_coupling", "contributor_concentration", "evolutionary_findings", "evolutionary_comparisons"],
   "properties": {
-    "schema_version": { "const": 2 },
+    "schema_version": { "const": 3 },
     "mode": { "enum": ["codebase", "diff"] },
     "root": { "$ref": "#/$defs/nullable_index" },
     "selected_scope": { "$ref": "#/$defs/nullable_index" },
     "paths": { "type": "array", "items": { "type": "string" } },
+    "packages": { "type": "array", "items": { "$ref": "#/$defs/package" } },
     "scopes": { "type": "array", "items": { "$ref": "#/$defs/scope" } },
     "files": { "type": "array", "items": { "$ref": "#/$defs/file" } },
     "findings": { "type": "array", "items": { "$ref": "#/$defs/finding" } },
@@ -40,6 +41,17 @@
     "rating": { "enum": ["healthy", "watch", "high"] },
     "nullable_rating": { "type": ["string", "null"], "enum": ["healthy", "watch", "high", null] },
     "unit_kind": { "enum": ["function", "method", "closure", "lambda", "synthetic_top_level", "template"] },
+    "package": {
+      "type": "object",
+      "required": ["id", "scope", "path", "presence"],
+      "properties": {
+        "id": { "$ref": "#/$defs/index" },
+        "scope": { "$ref": "#/$defs/index" },
+        "path": { "type": "string" },
+        "presence": { "enum": ["current", "base_only"] }
+      },
+      "additionalProperties": false
+    },
     "coverage": {
       "type": "object",
       "required": ["selected_files", "analyzed_files", "clean_files", "recovered_files", "unsupported_files", "failed_files", "context_files", "source_lines", "excluded_lines"],
@@ -100,7 +112,7 @@
     },
     "file": {
       "type": "object",
-      "required": ["id", "scope", "path", "language", "coverage", "health", "activity", "package", "role", "trust"],
+      "required": ["id", "scope", "path", "language", "coverage", "health", "activity", "package", "role", "parse_outcome", "trust"],
       "properties": {
         "id": { "$ref": "#/$defs/index" },
         "scope": { "$ref": "#/$defs/index" },
@@ -109,8 +121,9 @@
         "coverage": { "$ref": "#/$defs/coverage" },
         "health": { "$ref": "#/$defs/index" },
         "activity": { "$ref": "#/$defs/index" }
-        ,"package": { "$ref": "#/$defs/nullable_index" },
+        ,"package": { "$ref": "#/$defs/index" },
         "role": { "enum": ["primary", "test", "example", "benchmark", "fixture", "generated"] },
+        "parse_outcome": { "type": ["string", "null"], "enum": ["parsed", "recovered", "failed", null] },
         "trust": { "enum": ["trusted", "advisory", "failed"] }
       },
       "additionalProperties": false
@@ -246,11 +259,11 @@
     },
     "evolutionary_finding": {
       "type":"object", "required":["id","rating","left","right","shared_commits","union_commits","similarity"],
-      "properties":{"id":{"$ref":"#/$defs/index"},"rating":{"const":"watch"},"left":{"$ref":"#/$defs/index"},"right":{"$ref":"#/$defs/index"},"shared_commits":{"type":"integer","minimum":2},"union_commits":{"type":"integer","minimum":2},"similarity":{"type":"number","minimum":0,"maximum":1}}, "additionalProperties":false
+      "properties":{"id":{"$ref":"#/$defs/index"},"rating":{"const":"watch"},"left":{"$ref":"#/$defs/index"},"right":{"$ref":"#/$defs/index"},"shared_commits":{"type":"integer","minimum":3},"union_commits":{"type":"integer","minimum":3},"similarity":{"type":"number","minimum":0.2,"maximum":1}}, "additionalProperties":false
     },
     "evolutionary_comparison": {
       "type":"object", "required":["id","kind","direction","left","right","shared_commits","union_commits","similarity"],
-      "properties":{"id":{"$ref":"#/$defs/index"},"kind":{"enum":["finding_introduced","finding_removed"]},"direction":{"enum":["worse","better"]},"left":{"$ref":"#/$defs/index"},"right":{"$ref":"#/$defs/index"},"shared_commits":{"type":"integer","minimum":2},"union_commits":{"type":"integer","minimum":2},"similarity":{"type":"number","minimum":0,"maximum":1}}, "additionalProperties":false
+      "properties":{"id":{"$ref":"#/$defs/index"},"kind":{"enum":["finding_introduced","finding_removed"]},"direction":{"enum":["worse","better"]},"left":{"$ref":"#/$defs/index"},"right":{"$ref":"#/$defs/index"},"shared_commits":{"type":"integer","minimum":3},"union_commits":{"type":"integer","minimum":3},"similarity":{"type":"number","minimum":0.2,"maximum":1}}, "additionalProperties":false
     }
   }
 }

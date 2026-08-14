@@ -6,7 +6,7 @@ Smackdebt answers two questions:
 2. Did this worktree improve or worsen that debt compared with a Git ref?
 
 The implementation favors small crates, inward dependencies, stable output,
-and predictable memory use. Command behavior and JSON schema version 2 are the
+and predictable memory use. Command behavior and JSON schema version 3 are the
 product interfaces. Rust crate APIs remain private implementation seams.
 
 ## Crates and dependency direction
@@ -104,8 +104,17 @@ debt into a project score.
 ## Package discovery
 
 Discovery performs one filesystem walk without reading source contents. It
-applies ignore files, explicit exclusions, and generated-directory rules while
-recording stable relative paths and file metadata.
+applies ignore files and explicit exclusions while recording stable relative
+paths and file metadata. Source-role classification handles generated files
+instead of excluding a whole directory by name.
+
+Role classification has one fixed order: explicit configuration,
+language-owned generated markers, generic filename and path rules, then the
+primary fallback. Conflicting matches at one level stop configuration with
+status 2. Primary, test, example, and benchmark source participate in default
+verdicts; fixture and generated source remain context. Each language owns its
+generated marker syntax, while discovery owns only generic path and filename
+rules.
 
 A directory containing one or more recognized manifests is one package root.
 Cargo, npm, Python, Maven, Gradle, CMake, Bundler, and gemspec manifests in the
@@ -256,9 +265,10 @@ temporary integer before calling analysis.
 Analysis owns separate churn, change-coupling, contributor-concentration, and
 evolutionary-comparison modules. Package touches and contributor touches count
 once per commit. Change coupling counts each unordered package pair once per
-commit and retains pairs after two shared commits. A recurrent pair without a
-static package edge in either direction creates a Watch finding. All ratios
-retain their numerator and denominator. Output only reads the completed
+commit. Default findings require at least three shared commits and 20% Jaccard
+similarity; weaker observations remain available through JSON and `--all`. A
+recurrent pair without a static package edge in either direction creates a
+Watch finding. All ratios retain their numerator and denominator. Output only reads the completed
 aggregate tables; contributor names, addresses, raw fields, and temporary
 identifiers cannot enter a report value.
 
@@ -288,7 +298,10 @@ file-level comparison diagnostic instead of a guessed match.
 
 ## Output and failure behavior
 
-Terminal output first builds private borrowed presentation rows for the
+Analysis owns the exact source finding rank: rating, count of signals at that
+rating, total triggered signals, cognitive complexity, cyclomatic complexity,
+logical lines, activity, path, then span. Terminal output builds private
+borrowed presentation rows for the
 selected summary, ranked areas, leading details, coverage notes, and drill
 command. Ranking, omission, and navigation happen once. Full, compact, and
 stacked writers then consume those rows without scanning the report or running
@@ -312,18 +325,25 @@ whole. Finding detail names only signals that reached Watch or High, while diff
 detail names only changed measurements. Terminal-only `--all` restores every
 area and retained detail.
 
-JSON starts with `schema_version: 2` and retains all `watch` and `high`
-findings, aggregate healthy counts, coverage, activity, diagnostics, and diff
-facts when present. It also exposes the selected scope, indexed paths, scope
-finding/comparison links, three-way diff counts, comparison ownership, and
-derived direction. The output crate streams this model from borrowed report
-facts, and `schemas/report-v2.schema.json` plus black-box snapshots check it.
-There is no version-1 serializer or command-line version selector.
+JSON starts with `schema_version: 3`. One package table owns stable package IDs,
+repository-relative paths, scope links, and current or base-only presence.
+Files expose SourceRole, parse outcome, and trust. Findings retain unit kind,
+role, trust, measurements, and spans, including recovered advisory facts that
+do not enter health or diff verdicts. Static relations expose `uses` or
+`module_ownership` separately from role, trust, resolution, and locations.
+History keeps eligible and context mappings separate and exposes exact churn,
+coupling, and concentration operands. The output crate streams this model from
+borrowed report facts, and `schemas/report-v3.schema.json` plus black-box
+snapshots check it. There is no older serializer or command-line version
+selector.
 
-Static architecture adds dependency coverage, file edges, package edges,
+Static architecture adds dependency coverage, file relations, package edges,
 external summaries, resolution diagnostics, package measurements, architecture
 findings, and architecture comparisons. These are flat indexed tables; source
-and architecture health remain independent.
+and architecture health remain independent. Default terminal output shows
+rated cycle witnesses without arbitrary edge samples. `--all` and path drill
+show relevant uses, module ownership, advisory, unresolved, and ambiguous
+evidence without changing the retained JSON tables.
 
 The release baseline workflow is `scripts/performance/release-baselines.sh`.
 It requires a clean tree, captures one revision/toolchain/host state, and then

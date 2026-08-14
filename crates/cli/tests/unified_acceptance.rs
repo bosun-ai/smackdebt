@@ -12,7 +12,8 @@ use serde_json::Value;
 use support::coverage_failure_repository;
 use support::{
     GeneratedRepository, Invocation, copy_language_truth_files, evolution_repository,
-    ref_diff_repository, shallow_clone, static_architecture_repository, worktree_change_repository,
+    ref_diff_repository, shallow_clone, source_role_repository, static_architecture_repository,
+    worktree_change_repository,
 };
 
 #[derive(Debug, Deserialize)]
@@ -25,6 +26,31 @@ struct LanguageFileFacts {
     path: String,
     units: Vec<(String, u64, u64, u64)>,
 }
+
+const PRIVATE_JSON_KEYS: &[&str] = &[
+    "source_text",
+    "commit_message",
+    "author",
+    "authors",
+    "author_name",
+    "author_address",
+    "author_email",
+    "author_identity",
+    "raw_author",
+    "raw_author_name",
+    "raw_author_address",
+    "raw_author_email",
+    "address",
+    "email",
+    "email_address",
+    "contributor_id",
+    "contributor_ids",
+    "contributor_identity",
+    "contributor_identities",
+    "contributor_name",
+    "contributor_address",
+    "contributor_email",
+];
 
 #[test]
 fn every_supported_language_matches_the_public_fact_manifest() {
@@ -65,6 +91,36 @@ fn every_supported_language_matches_the_public_fact_manifest() {
             .collect();
         assert_eq!(actual, expected_file.units, "{}", expected_file.path);
     }
+}
+
+#[test]
+fn every_source_role_matches_the_public_fact_manifest() {
+    let repository = source_role_repository();
+    let facts: Value = repository.facts("source-roles.json");
+    let result = Invocation::new(["--json"]).run(repository.path());
+    result.success();
+    let automatic = Invocation::new(["--json"])
+        .automatic_workers()
+        .run(repository.path());
+    assert_eq!(result, automatic);
+    let report = checked_json(&result.stdout);
+    for expected in facts["files"].as_array().unwrap() {
+        let file = report["files"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .find(|file| {
+                let path = file["path"].as_u64().unwrap() as usize;
+                report["paths"][path] == expected["path"]
+            })
+            .unwrap_or_else(|| panic!("missing role fixture {}", expected["path"]));
+        assert_eq!(file["role"], expected["role"]);
+    }
+    let root = report["root"].as_u64().unwrap() as usize;
+    let health = report["scopes"][root]["health"].as_u64().unwrap() as usize;
+    assert_eq!(report["health"][health]["high"], facts["verdict_findings"]);
+    assert_eq!(report["findings"].as_array().unwrap().len(), 6);
+    assert_golden("unified-source-roles.json", &result.stdout);
 }
 
 #[test]
@@ -166,6 +222,13 @@ fn worktree_diff_reports_the_declared_mixed_change_outcomes_once() {
     let report = checked_json(&json.stdout);
     assert_golden("unified-worktree-diff.json", &json.stdout);
     assert!(
+        report["packages"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .any(|package| package["path"] == "gone" && package["presence"] == "base_only")
+    );
+    assert!(
         report["evolutionary_findings"]
             .as_array()
             .unwrap()
@@ -252,6 +315,13 @@ fn committed_ref_diff_has_exact_terminal_and_json_with_a_clean_worktree() {
             .unwrap()
             .is_empty()
     );
+    assert!(
+        report["packages"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .any(|package| package["path"] == "gone" && package["presence"] == "base_only")
+    );
     assert_golden("unified-ref-diff.json", &json.stdout);
 }
 
@@ -280,15 +350,44 @@ fn terminal_width_color_and_path_drills_have_exact_public_bytes() {
         (vec!["a", "--all"], "unified-package.terminal.txt"),
         (vec!["a/main.js", "--all"], "unified-file.terminal.txt"),
     ] {
-        let result = Invocation::new(arguments).run(repository.path());
+        let result = Invocation::new(arguments.clone()).run(repository.path());
         result.success();
+        let automatic = Invocation::new(arguments)
+            .automatic_workers()
+            .run(repository.path());
+        assert_eq!(result, automatic);
+        assert_golden(golden, &result.stdout);
+    }
+    for (arguments, golden) in [
+        (vec!["a", "--json"], "unified-package.json"),
+        (vec!["a/main.js", "--json"], "unified-file.json"),
+    ] {
+        let result = Invocation::new(arguments.clone()).run(repository.path());
+        result.success();
+        let automatic = Invocation::new(arguments)
+            .automatic_workers()
+            .run(repository.path());
+        assert_eq!(result, automatic);
+        checked_json(&result.stdout);
         assert_golden(golden, &result.stdout);
     }
     let languages = GeneratedRepository::new("main");
     copy_language_truth_files(&languages);
     let directory = Invocation::new(["src", "--all"]).run(languages.path());
     directory.success();
+    let automatic_directory = Invocation::new(["src", "--all"])
+        .automatic_workers()
+        .run(languages.path());
+    assert_eq!(directory, automatic_directory);
     assert_golden("unified-directory.terminal.txt", &directory.stdout);
+    let directory_json = Invocation::new(["src", "--json"]).run(languages.path());
+    directory_json.success();
+    let automatic_directory_json = Invocation::new(["src", "--json"])
+        .automatic_workers()
+        .run(languages.path());
+    assert_eq!(directory_json, automatic_directory_json);
+    checked_json(&directory_json.stdout);
+    assert_golden("unified-directory.json", &directory_json.stdout);
 }
 
 #[cfg(unix)]
@@ -298,6 +397,10 @@ fn failures_and_recoverable_coverage_obey_status_and_stream_contracts() {
     let facts: Value = repository.facts("coverage-failures.json");
     let success = Invocation::new(["--json"]).run(repository.path());
     success.success();
+    let automatic_success = Invocation::new(["--json"])
+        .automatic_workers()
+        .run(repository.path());
+    assert_eq!(success, automatic_success);
     let report = checked_json(&success.stdout);
     assert_golden("unified-coverage-failures.json", &success.stdout);
     let root = report["root"].as_u64().unwrap() as usize;
@@ -322,6 +425,10 @@ fn failures_and_recoverable_coverage_obey_status_and_stream_contracts() {
     let shallow = shallow_clone(&complete_history);
     let incomplete = Invocation::new(["--json", "--history", "36500d"]).run(shallow.path());
     incomplete.success();
+    let automatic_incomplete = Invocation::new(["--json", "--history", "36500d"])
+        .automatic_workers()
+        .run(shallow.path());
+    assert_eq!(incomplete, automatic_incomplete);
     let incomplete_report = checked_json(&incomplete.stdout);
     assert_golden("unified-incomplete-history.json", &incomplete.stdout);
     assert_eq!(
@@ -481,66 +588,138 @@ fn executable_readme_examples_match_named_public_fixtures() {
 fn composition_work_counts_are_visible_without_changing_report_bytes() {
     let repository = worktree_change_repository();
     for (name, arguments, expected) in [
-        ("codebase terminal", vec!["--all"], [1, 28, 8, 0, 3, 8, 10]),
-        ("codebase JSON", vec!["--json"], [1, 28, 8, 0, 3, 8, 10]),
+        ("codebase terminal", vec!["--all"], [1, 29, 8, 0, 3, 8, 10]),
+        ("codebase JSON", vec!["--json"], [1, 29, 8, 0, 3, 8, 10]),
         (
             "worktree diff terminal",
             vec!["diff", "main", "--all", "--history", "36500d"],
-            [1, 28, 8, 22, 7, 15, 28],
+            [1, 29, 8, 24, 7, 15, 28],
         ),
         (
             "worktree diff JSON",
             vec!["diff", "main", "--json", "--history", "36500d"],
-            [1, 28, 8, 22, 7, 15, 28],
+            [1, 29, 8, 24, 7, 15, 28],
+        ),
+        (
+            "package terminal",
+            vec!["a", "--all"],
+            [1, 29, 8, 0, 3, 8, 10],
+        ),
+        ("package JSON", vec!["a", "--json"], [1, 29, 8, 0, 3, 8, 10]),
+        (
+            "file terminal",
+            vec!["a/main.js", "--all"],
+            [1, 29, 8, 0, 3, 8, 10],
+        ),
+        (
+            "file JSON",
+            vec!["a/main.js", "--json"],
+            [1, 29, 8, 0, 3, 8, 10],
         ),
     ] {
-        let normal = Invocation::new(arguments.clone()).run(repository.path());
-        normal.success();
-        let measured = Invocation::new(arguments).evidence().run(repository.path());
-        assert_eq!(
-            measured.status.code(),
-            Some(0),
-            "{}",
-            measured.stderr_text()
-        );
-        assert_eq!(measured.stdout, normal.stdout);
-        let stderr = measured.stderr_text();
-        let line = stderr
-            .lines()
-            .find_map(|line| line.strip_prefix("smackdebt evidence stats: "))
-            .expect("evidence stats line");
-        let stats: Value = serde_json::from_str(line).unwrap();
-        for (field, expected) in [
-            "inventory_walks",
-            "inventory_visits",
-            "source_reads",
-            "object_reads",
-            "git_processes",
-            "parser_visits",
-            "algorithm_passes",
-        ]
-        .into_iter()
-        .zip(expected)
-        {
-            assert_eq!(stats[field], expected, "{name}: {field}");
-        }
-        assert_eq!(stats["renderer_entries"], 1);
-        assert_eq!(stats["render_renderer_entries"], 1);
-        for field in [
-            "render_inventory_walks",
-            "render_inventory_visits",
-            "render_source_reads",
-            "render_object_reads",
-            "render_git_processes",
-            "render_parser_visits",
-            "render_algorithm_passes",
-        ] {
-            assert_eq!(stats[field], 0, "{field}");
-        }
-        if measured.stdout.starts_with(b"{") {
-            checked_json(&measured.stdout);
+        assert_evidence_flow(name, arguments, repository.path(), expected);
+    }
+
+    let reference = ref_diff_repository();
+    for (name, arguments) in [
+        (
+            "clean ref diff terminal",
+            vec!["diff", "main~1", "--all", "--history", "36500d"],
+        ),
+        (
+            "clean ref diff JSON",
+            vec!["diff", "main~1", "--json", "--history", "36500d"],
+        ),
+    ] {
+        assert_evidence_flow(name, arguments, reference.path(), [1, 29, 8, 24, 7, 15, 28]);
+    }
+
+    let languages = GeneratedRepository::new("main");
+    copy_language_truth_files(&languages);
+    for (name, arguments) in [
+        ("directory terminal", vec!["src", "--all"]),
+        ("directory JSON", vec!["src", "--json"]),
+    ] {
+        assert_evidence_flow(name, arguments, languages.path(), [1, 15, 11, 0, 3, 11, 13]);
+    }
+
+    let roles = source_role_repository();
+    assert_evidence_flow(
+        "source roles JSON",
+        vec!["--json"],
+        roles.path(),
+        [1, 14, 6, 0, 3, 6, 8],
+    );
+}
+
+#[cfg(feature = "evidence-stats")]
+fn assert_evidence_flow(name: &str, arguments: Vec<&str>, repository: &Path, expected: [usize; 7]) {
+    let normal = Invocation::new(arguments.clone()).run(repository);
+    normal.success();
+    let automatic = Invocation::new(arguments.clone())
+        .automatic_workers()
+        .run(repository);
+    assert_eq!(normal, automatic, "{name}: normal worker policies");
+
+    let measured = Invocation::new(arguments.clone())
+        .evidence()
+        .run(repository);
+    let automatic_measured = Invocation::new(arguments)
+        .automatic_workers()
+        .evidence()
+        .run(repository);
+    for result in [&measured, &automatic_measured] {
+        assert_eq!(result.status.code(), Some(0), "{}", result.stderr_text());
+        assert_eq!(result.stdout, normal.stdout, "{name}: report bytes");
+        if result.stdout.starts_with(b"{") {
+            checked_json(&result.stdout);
         }
     }
+    let measured_stats = evidence_stats(&measured);
+    let automatic_stats = evidence_stats(&automatic_measured);
+    assert_eq!(measured_stats, automatic_stats, "{name}: work totals");
+    for (field, expected) in [
+        "inventory_walks",
+        "inventory_visits",
+        "source_reads",
+        "object_reads",
+        "git_processes",
+        "parser_visits",
+        "algorithm_passes",
+    ]
+    .into_iter()
+    .zip(expected)
+    {
+        assert_eq!(measured_stats[field], expected, "{name}: {field}");
+    }
+    assert_eq!(measured_stats["renderer_entries"], 1, "{name}");
+    assert_eq!(measured_stats["render_renderer_entries"], 1, "{name}");
+    for field in [
+        "render_inventory_walks",
+        "render_inventory_visits",
+        "render_source_reads",
+        "render_object_reads",
+        "render_git_processes",
+        "render_parser_visits",
+        "render_algorithm_passes",
+    ] {
+        assert_eq!(measured_stats[field], 0, "{name}: {field}");
+    }
+}
+
+#[cfg(feature = "evidence-stats")]
+fn evidence_stats(result: &support::ProcessResult) -> Value {
+    let stderr = result.stderr_text();
+    let mut lines = stderr.lines();
+    let line = lines
+        .next()
+        .and_then(|line| line.strip_prefix("smackdebt evidence stats: "))
+        .expect("one evidence stats line");
+    assert!(
+        lines.next().is_none(),
+        "unexpected evidence stderr: {stderr}"
+    );
+    serde_json::from_str(line).unwrap()
 }
 
 #[test]
@@ -598,13 +777,40 @@ fn installed_command_runs_outside_the_workspace() {
 fn checked_json(bytes: &[u8]) -> Value {
     let report: Value = serde_json::from_slice(bytes).unwrap();
     let schema: Value =
-        serde_json::from_str(include_str!("../../../schemas/report-v2.schema.json")).unwrap();
+        serde_json::from_str(include_str!("../../../schemas/report-v3.schema.json")).unwrap();
     jsonschema::validator_for(&schema)
         .unwrap()
         .validate(&report)
         .unwrap();
     assert_index_integrity(&report);
+    assert_recursive_privacy(&report);
     report
+}
+
+fn assert_recursive_privacy(value: &Value) {
+    match value {
+        Value::Object(fields) => {
+            for (name, value) in fields {
+                assert!(
+                    !PRIVATE_JSON_KEYS.contains(&name.as_str()),
+                    "private field {name} entered JSON"
+                );
+                assert_recursive_privacy(value);
+            }
+        }
+        Value::Array(values) => values.iter().for_each(assert_recursive_privacy),
+        Value::String(value) => assert!(
+            !std::path::Path::new(value).is_absolute(),
+            "absolute path entered JSON: {value}"
+        ),
+        _ => {}
+    }
+}
+
+#[test]
+fn recursive_runtime_privacy_rejects_a_nested_identity_field() {
+    let value = serde_json::json!({"outer": [{"contributor_email": "private@example.invalid"}]});
+    assert!(std::panic::catch_unwind(|| assert_recursive_privacy(&value)).is_err());
 }
 
 fn assert_unified_facts(report: &Value) {
@@ -622,43 +828,243 @@ fn assert_unified_facts(report: &Value) {
             .unwrap()
             .is_empty()
     );
+    let empty = report["packages"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .find(|package| package["path"] == "f")
+        .expect("empty current package");
+    assert_eq!(empty["presence"], "current");
+    let scope = empty["scope"].as_u64().unwrap() as usize;
+    assert!(
+        report["scopes"][scope]["children"]
+            .as_array()
+            .unwrap()
+            .is_empty()
+    );
 }
 
 fn assert_index_integrity(report: &Value) {
     let paths = report["paths"].as_array().unwrap().len();
     let scopes = report["scopes"].as_array().unwrap().len();
     let files = report["files"].as_array().unwrap().len();
-    let packages = report["package_graph"].as_array().unwrap().len();
+    let packages = report["packages"].as_array().unwrap().len();
     let file_edges = report["dependency_edges"].as_array().unwrap().len();
+    let findings = report["findings"].as_array().unwrap().len();
+    let diagnostics = report["diagnostics"].as_array().unwrap().len();
+    let comparisons = report["comparisons"].as_array().unwrap().len();
+    let health = report["health"].as_array().unwrap().len();
+    let activity = report["activity"].as_array().unwrap().len();
+    let architecture_findings = report["architecture_findings"].as_array().unwrap().len();
+    let architecture_comparisons = report["architecture_comparisons"].as_array().unwrap().len();
+    let evolutionary_findings = report["evolutionary_findings"].as_array().unwrap().len();
+    let evolutionary_comparisons = report["evolutionary_comparisons"].as_array().unwrap().len();
+    for field in ["root", "selected_scope"] {
+        if let Some(scope) = report[field].as_u64() {
+            assert!((scope as usize) < scopes, "{field} points outside scopes");
+        }
+    }
+    for table in [
+        "packages",
+        "scopes",
+        "files",
+        "findings",
+        "diagnostics",
+        "comparisons",
+        "health",
+        "activity",
+        "dependency_edges",
+        "package_edges",
+        "architecture_findings",
+        "architecture_comparisons",
+        "evolutionary_findings",
+        "evolutionary_comparisons",
+    ] {
+        for (id, row) in report[table].as_array().unwrap().iter().enumerate() {
+            assert_eq!(row["id"].as_u64(), Some(id as u64), "{table} id {id}");
+        }
+    }
+    for (id, package) in report["packages"].as_array().unwrap().iter().enumerate() {
+        assert_eq!(package["id"].as_u64(), Some(id as u64));
+        let scope = package["scope"].as_u64().unwrap() as usize;
+        assert!(scope < scopes);
+        let path = package["path"].as_str().unwrap();
+        assert!(path == "." || !std::path::Path::new(path).is_absolute());
+        let scope_row = &report["scopes"][scope];
+        assert_eq!(scope_row["kind"], "package");
+        let scope_path = scope_row["path"].as_u64().unwrap() as usize;
+        assert_eq!(report["paths"][scope_path], path);
+    }
     for scope in report["scopes"].as_array().unwrap() {
-        assert!((scope["path"].as_u64().unwrap() as usize) < paths);
+        if let Some(path) = scope["path"].as_u64() {
+            assert!((path as usize) < paths);
+        }
+        if let Some(parent) = scope["parent"].as_u64() {
+            assert!((parent as usize) < scopes);
+        }
         for child in scope["children"].as_array().unwrap() {
             assert!((child.as_u64().unwrap() as usize) < scopes);
         }
+        for (field, limit) in [
+            ("findings", findings),
+            ("comparisons", comparisons),
+            ("architecture_findings", architecture_findings),
+            ("architecture_comparisons", architecture_comparisons),
+            ("evolutionary_findings", evolutionary_findings),
+            ("evolutionary_comparisons", evolutionary_comparisons),
+        ] {
+            for id in scope[field].as_array().unwrap() {
+                assert!((id.as_u64().unwrap() as usize) < limit, "scope {field}");
+            }
+        }
+        assert!((scope["health"].as_u64().unwrap() as usize) < health);
     }
     for file in report["files"].as_array().unwrap() {
         assert!((file["path"].as_u64().unwrap() as usize) < paths);
         assert!((file["scope"].as_u64().unwrap() as usize) < scopes);
-        if let Some(package) = file["package"].as_u64() {
-            assert!(
-                (package as usize) < packages,
-                "file {} points to package {package}, but there are {packages} package rows",
-                file["id"]
-            );
+        let package = file["package"]
+            .as_u64()
+            .expect("file has one package owner");
+        assert!(
+            (package as usize) < packages,
+            "file {} points to package {package}, but there are {packages} package rows",
+            file["id"]
+        );
+        assert!((file["health"].as_u64().unwrap() as usize) < health);
+        assert!((file["activity"].as_u64().unwrap() as usize) < activity);
+        match file["parse_outcome"].as_str() {
+            Some("parsed") => assert_eq!(file["trust"], "trusted"),
+            Some("recovered") => assert_eq!(file["trust"], "advisory"),
+            Some("failed") => assert_eq!(file["trust"], "failed"),
+            None => {}
+            Some(value) => panic!("unknown parse outcome {value}"),
         }
+    }
+    for finding in report["findings"].as_array().unwrap() {
+        let file = finding["file"].as_u64().unwrap() as usize;
+        assert!(file < files);
+        assert_eq!(finding["role"], report["files"][file]["role"]);
+        assert_eq!(finding["trust"], report["files"][file]["trust"]);
+    }
+    for diagnostic in report["diagnostics"].as_array().unwrap() {
+        if let Some(file) = diagnostic["file"].as_u64() {
+            assert!((file as usize) < files);
+        }
+    }
+    assert_eq!(diagnostics, report["diagnostics"].as_array().unwrap().len());
+    for comparison in report["comparisons"].as_array().unwrap() {
+        if let Some(file) = comparison["file"].as_u64() {
+            assert!((file as usize) < files);
+        }
+    }
+    for row in report["activity"].as_array().unwrap() {
+        assert!((row["file"].as_u64().unwrap() as usize) < files);
     }
     for edge in report["dependency_edges"].as_array().unwrap() {
-        assert!((edge["source"].as_u64().unwrap() as usize) < files);
+        let source = edge["source"].as_u64().unwrap() as usize;
+        assert!(source < files);
         assert!((edge["target"].as_u64().unwrap() as usize) < files);
+        assert_eq!(edge["role"], report["files"][source]["role"]);
+        assert_eq!(edge["trust"], report["files"][source]["trust"]);
+    }
+    for dependency in report["external_dependencies"].as_array().unwrap() {
+        let file = dependency["file"].as_u64().unwrap() as usize;
+        assert!(file < files);
+        assert_eq!(dependency["role"], report["files"][file]["role"]);
+        assert_eq!(dependency["trust"], report["files"][file]["trust"]);
+    }
+    for diagnostic in report["resolution_diagnostics"].as_array().unwrap() {
+        let file = diagnostic["file"].as_u64().unwrap() as usize;
+        assert!(file < files);
+        assert_eq!(diagnostic["role"], report["files"][file]["role"]);
+        assert_eq!(diagnostic["trust"], report["files"][file]["trust"]);
     }
     for finding in report["architecture_findings"].as_array().unwrap() {
+        for package in finding["packages"].as_array().unwrap() {
+            assert!((package.as_u64().unwrap() as usize) < packages);
+        }
+        for file in finding["files"].as_array().unwrap() {
+            assert!((file.as_u64().unwrap() as usize) < files);
+        }
         for edge in finding["witness_edges"].as_array().unwrap() {
-            assert!((edge.as_u64().unwrap() as usize) < file_edges);
+            let edge = edge.as_u64().unwrap() as usize;
+            assert!(edge < file_edges);
+            assert_eq!(report["dependency_edges"][edge]["relation"], "uses");
+            assert_eq!(report["dependency_edges"][edge]["trust"], "trusted");
         }
     }
+    for edge in report["package_edges"].as_array().unwrap() {
+        assert!((edge["source"].as_u64().unwrap() as usize) < packages);
+        assert!((edge["target"].as_u64().unwrap() as usize) < packages);
+        for file_edge in edge["file_edges"].as_array().unwrap() {
+            let file_edge = file_edge.as_u64().unwrap() as usize;
+            assert!(file_edge < file_edges);
+            assert_eq!(report["dependency_edges"][file_edge]["relation"], "uses");
+            assert_eq!(report["dependency_edges"][file_edge]["trust"], "trusted");
+        }
+    }
+    for comparison in report["architecture_comparisons"].as_array().unwrap() {
+        for package in comparison["packages"].as_array().unwrap() {
+            assert!((package.as_u64().unwrap() as usize) < packages);
+        }
+        for package in comparison["witness"].as_array().unwrap() {
+            assert!((package.as_u64().unwrap() as usize) < packages);
+        }
+        for file in comparison["files"].as_array().unwrap() {
+            assert!((file.as_u64().unwrap() as usize) < files);
+        }
+    }
+    for row in report["package_graph"].as_array().unwrap() {
+        assert!((row["package"].as_u64().unwrap() as usize) < packages);
+    }
+    for row in report["package_history"].as_array().unwrap() {
+        assert!((row["package"].as_u64().unwrap() as usize) < packages);
+    }
+    for row in report["file_history"].as_array().unwrap() {
+        let file = row["file"].as_u64().unwrap() as usize;
+        assert!(file < files);
+        assert_eq!(row["role"], report["files"][file]["role"]);
+        assert_eq!(row["trust"], report["files"][file]["trust"]);
+    }
+    for row in report["contributor_concentration"].as_array().unwrap() {
+        assert!((row["package"].as_u64().unwrap() as usize) < packages);
+    }
     for coupling in report["change_coupling"].as_array().unwrap() {
-        assert!((coupling["left"].as_u64().unwrap() as usize) < packages);
-        assert!((coupling["right"].as_u64().unwrap() as usize) < packages);
+        let left = coupling["left"].as_u64().unwrap();
+        let right = coupling["right"].as_u64().unwrap();
+        assert!((left as usize) < packages);
+        assert!((right as usize) < packages);
+        assert!(left < right);
+        assert!(
+            coupling["shared_commits"].as_u64().unwrap()
+                <= coupling["union_commits"].as_u64().unwrap()
+        );
+    }
+    for finding in report["evolutionary_findings"].as_array().unwrap() {
+        let left = finding["left"].as_u64().unwrap();
+        let right = finding["right"].as_u64().unwrap();
+        assert!((left as usize) < packages);
+        assert!((right as usize) < packages);
+        assert!(left < right);
+        assert!(finding["shared_commits"].as_u64().unwrap() >= 3);
+        assert!(finding["similarity"].as_f64().unwrap() >= 0.2);
+        assert!(
+            finding["shared_commits"].as_u64().unwrap()
+                <= finding["union_commits"].as_u64().unwrap()
+        );
+    }
+    for comparison in report["evolutionary_comparisons"].as_array().unwrap() {
+        let left = comparison["left"].as_u64().unwrap();
+        let right = comparison["right"].as_u64().unwrap();
+        assert!((left as usize) < packages);
+        assert!((right as usize) < packages);
+        assert!(left < right);
+        assert!(comparison["shared_commits"].as_u64().unwrap() >= 3);
+        assert!(comparison["similarity"].as_f64().unwrap() >= 0.2);
+        assert!(
+            comparison["shared_commits"].as_u64().unwrap()
+                <= comparison["union_commits"].as_u64().unwrap()
+        );
     }
 }
 

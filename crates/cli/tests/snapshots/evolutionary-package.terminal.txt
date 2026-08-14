@@ -11,7 +11,7 @@ QUALITY  0% need attention
 ARCHITECTURE
 1 internal · 0 external · 0 unresolved · 0 ambiguous
 ▲ 0 high · ● 0 watch · 1 internal edges
-  b/main.js → a/main.js · 1 references
+  b/main.js → a/main.js · uses · primary/trusted · 1 references
 
 EVOLUTION
 complete local stream · 6 commits

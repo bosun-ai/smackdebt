@@ -80,7 +80,7 @@ pub enum Rating {
 }
 
 impl Rating {
-    const fn rank(self) -> u8 {
+    pub(crate) const fn rank(self) -> u8 {
         match self {
             Self::Healthy => 0,
             Self::Watch => 1,
@@ -133,6 +133,20 @@ impl HealthAssessment {
             Signal::CyclomaticComplexity => self.signals[1],
             Signal::LogicalLines => self.signals[2],
         }
+    }
+
+    pub(crate) fn signals_at_rating(self) -> u8 {
+        self.signals
+            .iter()
+            .filter(|signal| signal.rating == self.rating)
+            .count() as u8
+    }
+
+    pub(crate) fn triggered_signals(self) -> u8 {
+        self.signals
+            .iter()
+            .filter(|signal| signal.rating != Rating::Healthy)
+            .count() as u8
     }
 }
 

@@ -28,23 +28,23 @@
 
 ## 5. JSON version 3
 
-- [ ] 5.1 Replace version 2 with flat version-3 tables for packages, roles, trust, advisory source facts, relations, exact history, findings, comparisons, coverage, and diagnostics.
-- [ ] 5.2 Add the checked version-3 schema and semantic index validation for empty and base-only packages, machine root `.`, advisory links, and every fact type.
-- [ ] 5.3 Prove codebase, clean ref-diff, and mixed worktree-diff JSON against schema, semantics, indexes, privacy, and exact reviewed bytes from each measured invocation.
+- [x] 5.1 Replace version 2 with flat version-3 tables for packages, roles, trust, advisory source facts, relations, exact history, findings, comparisons, coverage, and diagnostics.
+- [x] 5.2 Add the checked version-3 schema and semantic index validation for empty and base-only packages, machine root `.`, advisory links, and every fact type.
+- [x] 5.3 Prove codebase, clean ref-diff, and mixed worktree-diff JSON against schema, semantics, indexes, privacy, and exact reviewed bytes from each measured invocation.
 
 ## 6. Rank, terminal output, and documentation
 
-- [ ] 6.1 Implement the exact rank: rating, signals at that rating, total triggered signals, cognitive, cyclomatic, lines, activity, path, and span.
-- [ ] 6.2 Show unit kind and non-primary role, keep recovered findings advisory in `--all`, and remove arbitrary edge rows from default architecture while retaining witnesses.
-- [ ] 6.3 Make `--all` and path drill show relevant ordinary, ownership, advisory, unresolved, and ambiguous relations without duplicate rows.
-- [ ] 6.4 Update README executable examples and architecture documentation for roles, precedence, conflicts, recovery, relation meaning, history fields, coupling, rank, root labels, JSON version 3, privacy, and limits.
+- [x] 6.1 Implement the exact rank: rating, signals at that rating, total triggered signals, cognitive, cyclomatic, lines, activity, path, and span.
+- [x] 6.2 Show unit kind and non-primary role, keep recovered findings advisory in `--all`, and remove arbitrary edge rows from default architecture while retaining witnesses.
+- [x] 6.3 Make `--all` and path drill show relevant ordinary, ownership, advisory, unresolved, and ambiguous relations without duplicate rows.
+- [x] 6.4 Update README executable examples and architecture documentation for roles, precedence, conflicts, recovery, relation meaning, history fields, coupling, rank, root labels, JSON version 3, privacy, and limits.
 
 ## 7. Public end-to-end and resource proof
 
-- [ ] 7.1 Extend generated fixtures for all six roles, every precedence level, conflict exit 2, recovery, failure, packages, Rust relations, exact history, 20% boundaries, rank ties, root labels, witnesses, detailed edges, and de-duplication.
-- [ ] 7.2 Assert exact status, stdout, stderr, semantics, schema, indexes, privacy, and bytes for codebase, path, clean committed ref-diff, and mixed worktree-diff flows.
-- [ ] 7.3 Use feature-gated live seam counters and prove real post-snapshot work changes totals while normal builds expose no evidence-only cost or API.
-- [ ] 7.4 Run every named public flow serially and automatically, proving exact work totals and byte-for-byte equality.
+- [x] 7.1 Extend generated fixtures for all six roles, every precedence level, conflict exit 2, recovery, failure, packages, Rust relations, exact history, 20% boundaries, rank ties, root labels, witnesses, detailed edges, and de-duplication.
+- [x] 7.2 Assert exact status, stdout, stderr, semantics, schema, indexes, privacy, and bytes for codebase, path, clean committed ref-diff, and mixed worktree-diff flows.
+- [x] 7.3 Use feature-gated live seam counters and prove real post-snapshot work changes totals while normal builds expose no evidence-only cost or API.
+- [x] 7.4 Run every named public flow serially and automatically, proving exact work totals and byte-for-byte equality.
 
 ## 8. Three reviews and post-commit release evidence
 

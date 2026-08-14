@@ -10,12 +10,12 @@ QUALITY  0% need attention
 ARCHITECTURE
 4 internal · 0 external · 0 unresolved · 0 ambiguous
 ▲ 0 high · ● 0 watch · 1 internal edges
-  a/main.js → c/main.js · 1 references
+  a/main.js → c/main.js · uses · primary/trusted · 1 references
 
 EVOLUTION
 complete local stream · 4 commits
-eligible mapping 12/23 changes · 52% · 4 commits
-0 context · 11 excluded · 0 uncounted · 0 rename gaps
+eligible mapping 12/24 changes · 50% · 4 commits
+0 context · 12 excluded · 0 uncounted · 0 rename gaps
   a · 1 touches · +7 -0 · 1 contributors · 100% top share · primary/trusted
     file a/main.js · 1 touches · +7 -0
       evidence primary/trusted

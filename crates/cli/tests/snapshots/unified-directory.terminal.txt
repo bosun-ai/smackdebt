@@ -29,85 +29,85 @@ EVOLUTION
 history unavailable: repository has no commits
 
 TOP FINDINGS
-▲ HIGH  controls
+▲ HIGH  controls · function
         src/c.c:1
         cognitive 9 · cyclomatic 8 · lines 6
-▲ HIGH  Worker::run
+▲ HIGH  Worker::run · method
         src/rust.rs:6
         cognitive 7 · cyclomatic 4 · lines 3
-▲ HIGH  <template>
+▲ HIGH  <template> · template
         src/vue.vue:1
         cognitive 5 · cyclomatic 6 · lines 3
-▲ HIGH  outer::inner
+▲ HIGH  outer::inner · function
         src/python.py:2
         cognitive 4 · cyclomatic 5 · lines 4
-▲ HIGH  Worker::run
+▲ HIGH  Worker::run · method
         src/java.java:3
         cognitive 4 · cyclomatic 4 · lines 5
-▲ HIGH  Worker::<lambda 4>
+▲ HIGH  Worker::<lambda 4> · lambda
         src/ruby.rb:4
         cognitive 3 · cyclomatic 4 · lines 2
-▲ HIGH  Worker::run
+▲ HIGH  Worker::run · method
         src/javascript.js:3
         cognitive 2 · cyclomatic 3 · lines 3
-▲ HIGH  Worker::<lambda 5>
+▲ HIGH  Worker::<lambda 5> · lambda
         src/cpp.cpp:5
         cognitive 2 · cyclomatic 3 · lines 1
-▲ HIGH  Worker::<closure 7>
-        src/rust.rs:7
-        cognitive 2 · cyclomatic 2
-▲ HIGH  Worker::run
+▲ HIGH  Worker::run · method
         src/cpp.cpp:4
         cognitive 1 · cyclomatic 2 · lines 3
-▲ HIGH  View::render
+▲ HIGH  View::render · method
         src/jsx.jsx:2
         cognitive 1 · cyclomatic 2 · lines 2
-▲ HIGH  Worker::<closure 5>
+▲ HIGH  Worker::<closure 5> · closure
         src/ruby.rb:5
         cognitive 1 · cyclomatic 2 · lines 2
-▲ HIGH  View::render
+▲ HIGH  View::render · method
         src/tsx.tsx:2
         cognitive 1 · cyclomatic 2 · lines 2
-▲ HIGH  Worker::run
+▲ HIGH  Worker::run · method
         src/typescript.ts:3
         cognitive 1 · cyclomatic 2 · lines 2
-▲ HIGH  save
+▲ HIGH  save · function
         src/vue.vue:9
         cognitive 1 · cyclomatic 2 · lines 2
-▲ HIGH  Worker::Worker
+▲ HIGH  Worker::<closure 7> · closure
+        src/rust.rs:7
+        cognitive 2 · cyclomatic 2
+▲ HIGH  Worker::Worker · method
         src/java.java:2
         cognitive 1 · cyclomatic 2 · lines 1
-▲ HIGH  Worker::<lambda 4>
+▲ HIGH  Worker::<lambda 4> · lambda
         src/java.java:4
         cognitive 1 · cyclomatic 2
-▲ HIGH  Worker::handler
+▲ HIGH  Worker::handler · closure
         src/javascript.js:2
         cognitive 1 · cyclomatic 2
-▲ HIGH  View::select
+▲ HIGH  View::select · closure
         src/jsx.jsx:3
         cognitive 1 · cyclomatic 2
-▲ HIGH  outer::<lambda 11>
+▲ HIGH  outer::<lambda 11> · lambda
         src/python.py:11
         cognitive 1 · cyclomatic 2
-▲ HIGH  View::select
+▲ HIGH  View::select · closure
         src/tsx.tsx:3
         cognitive 1 · cyclomatic 2
-▲ HIGH  Worker::handler
+▲ HIGH  Worker::handler · closure
         src/typescript.ts:2
         cognitive 1 · cyclomatic 2
-▲ HIGH  helper
+▲ HIGH  helper · closure
         src/vue.vue:8
         cognitive 1 · cyclomatic 2
-▲ HIGH  outer
+▲ HIGH  outer · function
         src/python.py:1
         cyclomatic 1 · lines 2
-▲ HIGH  Worker::run
+▲ HIGH  Worker::run · method
         src/ruby.rb:3
         cyclomatic 1 · lines 2
-● WATCH  Worker::self.empty
+● WATCH  Worker::self.empty · method
         src/ruby.rb:11
         cyclomatic 1
-● WATCH  Work::run
+● WATCH  Work::run · method
         src/rust.rs:2
         cyclomatic 1
 

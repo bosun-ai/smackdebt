@@ -6,7 +6,8 @@ use smackdebt_analysis::{
     ArchitectureComparison, ArchitectureFinding, Comparison, DependencyEdge, Diagnostic,
     EvolutionaryComparison, EvolutionaryFinding, ExternalDependency, FileHistory, FileRecord,
     Finding, HealthCounts, Measurements, PackageEdge, PackageGraphMeasurement, PackageHistory,
-    Report, ResolutionDiagnostic, Scope, SourceRole, SourceTrust, UnitKind,
+    PackagePresence, PackageRecord, ParseStatus, Report, ResolutionDiagnostic, Scope, SourceRole,
+    SourceTrust, UnitKind,
 };
 
 use crate::output::{
@@ -14,7 +15,7 @@ use crate::output::{
     scope_kind,
 };
 
-/// Streams JSON schema version 2 without cloning report strings or arrays.
+/// Streams JSON schema version 3 without cloning report strings or arrays.
 pub fn write_json(
     writer: &mut impl Write,
     report: &Report,
@@ -34,12 +35,13 @@ impl Serialize for ReportView<'_> {
         S: Serializer,
     {
         let report = self.0;
-        let mut map = serializer.serialize_map(Some(27))?;
+        let mut map = serializer.serialize_map(Some(28))?;
         map.serialize_entry("schema_version", &report.schema_version())?;
         map.serialize_entry("mode", mode_name(report.mode()))?;
         map.serialize_entry("root", &report.root().map(|root| root.get()))?;
         map.serialize_entry("selected_scope", &self.1.map(|id| id.get()))?;
         map.serialize_entry("paths", &report.paths())?;
+        map.serialize_entry("packages", &Packages(report.packages()))?;
         map.serialize_entry("scopes", &Scopes(report.scopes()))?;
         map.serialize_entry("files", &Files(report.files(), report.scopes().len()))?;
         map.serialize_entry("findings", &Findings(report.findings()))?;
@@ -97,6 +99,35 @@ impl Serialize for ReportView<'_> {
         map.serialize_entry(
             "evolutionary_comparisons",
             &EvolutionaryComparisons(report.evolutionary_comparisons()),
+        )?;
+        map.end()
+    }
+}
+
+struct Packages<'a>(&'a [PackageRecord]);
+impl Serialize for Packages<'_> {
+    fn serialize<S: Serializer>(&self, serializer: S) -> Result<S::Ok, S::Error> {
+        let mut sequence = serializer.serialize_seq(Some(self.0.len()))?;
+        for package in self.0 {
+            sequence.serialize_element(&PackageView(package))?;
+        }
+        sequence.end()
+    }
+}
+
+struct PackageView<'a>(&'a PackageRecord);
+impl Serialize for PackageView<'_> {
+    fn serialize<S: Serializer>(&self, serializer: S) -> Result<S::Ok, S::Error> {
+        let mut map = serializer.serialize_map(Some(4))?;
+        map.serialize_entry("id", &self.0.id().get())?;
+        map.serialize_entry("scope", &self.0.scope().get())?;
+        map.serialize_entry("path", self.0.path())?;
+        map.serialize_entry(
+            "presence",
+            match self.0.presence() {
+                PackagePresence::Current => "current",
+                PackagePresence::BaseOnly => "base_only",
+            },
         )?;
         map.end()
     }
@@ -274,7 +305,7 @@ impl Serialize for FileView<'_> {
         S: Serializer,
     {
         let file = self.0;
-        let mut map = serializer.serialize_map(Some(13))?;
+        let mut map = serializer.serialize_map(Some(11))?;
         map.serialize_entry("id", &file.id().get())?;
         map.serialize_entry("scope", &file.scope().get())?;
         map.serialize_entry("path", &file.path_id().map(|id| id.get()))?;
@@ -284,6 +315,10 @@ impl Serialize for FileView<'_> {
         map.serialize_entry("activity", &file.id().get())?;
         map.serialize_entry("package", &file.package().map(|id| id.get()))?;
         map.serialize_entry("role", source_role_name(file.role()))?;
+        map.serialize_entry(
+            "parse_outcome",
+            &file.parse_status().map(parse_outcome_name),
+        )?;
         map.serialize_entry("trust", source_trust_name(file.trust()))?;
         map.end()
     }
@@ -858,6 +893,14 @@ fn source_role_name(role: SourceRole) -> &'static str {
         SourceRole::Benchmark => "benchmark",
         SourceRole::Fixture => "fixture",
         SourceRole::Generated => "generated",
+    }
+}
+
+fn parse_outcome_name(status: &ParseStatus) -> &'static str {
+    match status {
+        ParseStatus::Parsed => "parsed",
+        ParseStatus::Recovered => "recovered",
+        ParseStatus::Failed => "failed",
     }
 }
 

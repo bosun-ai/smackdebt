@@ -14,6 +14,7 @@ CHANGE BY AREA
   f                 –       –        1  █▊░░░░░░░░░░  14%
   new               –       –        1  █▊░░░░░░░░░░  14%
   d                 –       –        –  ░░░░░░░░░░░░  0%
+  gone              –       –        –  ░░░░░░░░░░░░  0%
   h                 –       –        –  ░░░░░░░░░░░░  0%
   i                 –       –        –  ░░░░░░░░░░░░  0%
 
@@ -30,8 +31,8 @@ ARCHITECTURE CHANGE
 
 EVOLUTION CONTEXT
 complete local stream · 5 commits
-eligible mapping 23/33 changes · 70% · 5 commits
-0 context · 10 excluded · 0 uncounted · 0 rename gaps
+eligible mapping 23/35 changes · 66% · 5 commits
+0 context · 12 excluded · 0 uncounted · 0 rename gaps
   h · 5 touches · +6 -4 · 3 contributors · 40% top share · primary/trusted
   i · 4 touches · +4 -3 · 2 contributors · 50% top share · primary/trusted
   a · 2 touches · +9 -7 · 2 contributors · 50% top share · primary/trusted

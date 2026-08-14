@@ -251,11 +251,12 @@ the static dependency graph:
   all contributor touches for that package.
 
 Coupling uses Jaccard similarity: shared commits divided by commits touching
-either package. A pair is retained after two shared commits. Recurrent coupling
-without a static dependency in either direction is Watch because it can reveal
-a missing or unclear package relationship. Coupling that matches a static edge
-remains descriptive. Churn, contributor count, and contributor concentration
-do not receive health labels.
+either package. Default findings require at least three shared commits and 20%
+similarity. Weaker observations remain available in JSON and `--all` output.
+Recurrent coupling without a static dependency in either direction is Watch
+because it can reveal a missing or unclear package relationship. Coupling that
+matches a static edge remains descriptive. Churn, contributor count, and
+contributor concentration do not receive health labels.
 
 Smackdebt follows detected renames back from files that still exist and assigns
 their history to the files' current packages. It does not reconstruct removed
@@ -305,7 +306,16 @@ project packages. It recognizes packages from common manifests, including:
 Several recognized manifests in one directory describe one package with
 several ecosystem markers. Files belong to their nearest package. Repositories
 without a known manifest get one root package. Git ignore rules apply by
-default, along with common generated and dependency directories.
+default, along with explicit exclusions and dependency directories. A supported
+file is not ignored only because its directory looks generated.
+
+Every selected file has one source role: primary, test, example, benchmark,
+fixture, or generated. Classification checks explicit `source_roles`
+configuration first, then language-owned generated markers, generic filenames
+and paths, and finally primary. Different matches at the same level are an
+invalid configuration and exit with status 2. Primary, test, example, and
+benchmark source affect default verdicts. Fixture and generated source remain
+visible for inspection without affecting those verdicts.
 
 Files that cannot be parsed stay visible in the coverage summary. Smackdebt
 does not quietly count them as healthy.
@@ -338,23 +348,27 @@ smackdebt --json
 smackdebt diff main --json
 ```
 
-JSON contains the same report as the terminal view. The top-level object starts
-with `schema_version: 2` and includes mode, root, selected scope, a flat path
-table, flat scopes, files, findings, diagnostics, comparisons, and the health
-and activity tables. Root and selected scope are scope indexes. Scope entries
-carry parent and child indexes, finding and comparison
-links, coverage, health, and Worse/Better/Changed counts. Files and comparisons
-carry indexed path and file ownership where available. Paths and root health
-have one owner; referencing records do not repeat their text or counts.
-Version 2 also includes dependency coverage, deduplicated file and package
-edges, external dependencies, resolution diagnostics, package graph
-measurements, architecture findings, and architecture comparisons. Finding
-witnesses link to their files and edges through indexes. Terminal limits never
-remove graph facts from JSON.
-It retains every `watch` and `high` finding while healthy units are represented
-by aggregate counts. The checked schema is
-[`schemas/report-v2.schema.json`](schemas/report-v2.schema.json). Version 1 is
-not emitted.
+JSON contains the complete report behind the terminal view. The top-level
+object starts with `schema_version: 3`. One package table owns stable package
+IDs, repository-relative paths, and current or base-only presence; machine path
+`.` stays unchanged even though terminal output calls it `repository root`.
+Files expose SourceRole, parse outcome, and trust. Recovered Watch and High
+facts remain advisory in JSON and `--all` without entering health, default
+findings, architecture verdicts, coupling, or diff verdicts.
+
+Static relations identify `uses` or `module_ownership` independently from
+role, trust, resolution, and source spans. History rows expose role-aware churn,
+coupling operands, and contributor concentration without contributor identity.
+Terminal limits never remove JSON facts. The checked schema is
+[`schemas/report-v3.schema.json`](schemas/report-v3.schema.json); no earlier
+schema is emitted.
+
+Source findings are ordered by rating, count of signals at that rating, total
+triggered signals, cognitive complexity, cyclomatic complexity, logical lines,
+activity, path, and span. Findings show unit kind and any non-primary role.
+Default architecture output shows rated cycle witnesses rather than arbitrary
+edge samples. Use `--all` or a path drill to inspect relevant resolved,
+unresolved, ambiguous, ownership, and advisory relations.
 
 Finding debt does not fail the command. Exit codes describe whether Smackdebt
 could produce a report:
@@ -375,6 +389,13 @@ the defaults do not fit the project:
 ```toml
 history = "180d"
 exclude = ["vendor/**", "fixtures/generated/**"]
+
+[source_roles]
+test = ["spec/**"]
+example = ["examples/**"]
+benchmark = ["benches/**"]
+fixture = ["testdata/**"]
+generated = ["src/client/generated.rs"]
 
 [thresholds.cognitive]
 watch = 15

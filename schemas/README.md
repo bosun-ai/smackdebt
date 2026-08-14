@@ -1,6 +1,6 @@
 # Report schema evidence
 
-`report-v2.schema.json` describes the complete public JSON report. Every
+`report-v3.schema.json` describes the complete public JSON report. Every
 acceptance JSON result is validated against it before semantic assertions and
 exact byte comparison. Tests also audit index references between paths, scopes,
 files, findings, dependency edges, package rows, history rows, and comparisons.

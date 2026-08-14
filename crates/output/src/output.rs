@@ -351,25 +351,61 @@ impl<'a, W: Write> Renderer<'a, W> {
                         writeln!(self.writer)?;
                     }
                 }
-                let edge_limit = if self.options.all {
-                    relevant_edges.len()
-                } else {
-                    relevant_edges.len().min(3)
-                };
-                for edge in relevant_edges.iter().take(edge_limit) {
-                    let source = report
-                        .files()
-                        .get(edge.source().index())
-                        .map_or("?", FileRecord::path);
-                    let target = report
-                        .files()
-                        .get(edge.target().index())
-                        .map_or("?", FileRecord::path);
-                    writeln!(
-                        self.writer,
-                        "  {source} → {target} · {} references",
-                        edge.references()
-                    )?;
+                if self.options.all || scope.kind() != ScopeKind::Repository {
+                    for edge in &relevant_edges {
+                        let source = report
+                            .files()
+                            .get(edge.source().index())
+                            .map_or("?", FileRecord::path);
+                        let target = report
+                            .files()
+                            .get(edge.target().index())
+                            .map_or("?", FileRecord::path);
+                        writeln!(
+                            self.writer,
+                            "  {source} → {target} · {} · {}/{} · {} references",
+                            relation_label(edge.relation()),
+                            history_role_name(edge.role()),
+                            history_trust_name(edge.trust()),
+                            edge.references(),
+                        )?;
+                    }
+                    for dependency in report
+                        .external_dependencies()
+                        .iter()
+                        .filter(|value| file_belongs_to_scope(report, value.file(), scope))
+                    {
+                        writeln!(
+                            self.writer,
+                            "  {} → {} · external {} · {}/{} · {} references",
+                            report.files()[dependency.file().index()].path(),
+                            dependency.target(),
+                            relation_label(dependency.relation()),
+                            history_role_name(dependency.role()),
+                            history_trust_name(dependency.trust()),
+                            dependency.references(),
+                        )?;
+                    }
+                    for diagnostic in report
+                        .resolution_diagnostics()
+                        .iter()
+                        .filter(|value| file_belongs_to_scope(report, value.file(), scope))
+                    {
+                        writeln!(
+                            self.writer,
+                            "  {}:{} → {} · {} {} · {}/{}",
+                            report.files()[diagnostic.file().index()].path(),
+                            diagnostic.span().start_line(),
+                            diagnostic.target(),
+                            match diagnostic.kind() {
+                                smackdebt_analysis::ResolutionIssueKind::Unresolved => "unresolved",
+                                smackdebt_analysis::ResolutionIssueKind::Ambiguous => "ambiguous",
+                            },
+                            relation_label(diagnostic.relation()),
+                            history_role_name(diagnostic.role()),
+                            history_trust_name(diagnostic.trust()),
+                        )?;
+                    }
                 }
             }
             ReportMode::Diff => {
@@ -391,12 +427,15 @@ impl<'a, W: Write> Renderer<'a, W> {
                     Grouped(better),
                     Grouped(changed)
                 )?;
-                let limit = if self.options.all {
-                    ids.len()
-                } else {
-                    ids.len().min(3)
-                };
-                for id in ids.iter().take(limit) {
+                let show_details = self.options.all || scope.kind() != ScopeKind::Repository;
+                for id in ids.iter().filter(|id| {
+                    show_details
+                        || matches!(
+                            report.architecture_comparisons()[id.index()].kind(),
+                            smackdebt_analysis::ArchitectureComparisonKind::CycleIntroduced
+                                | smackdebt_analysis::ArchitectureComparisonKind::CycleRemoved
+                        )
+                }) {
                     let comparison = &report.architecture_comparisons()[id.index()];
                     let label = match (comparison.kind(), comparison.relation()) {
                         (
@@ -1086,7 +1125,19 @@ impl<'a, W: Write> Renderer<'a, W> {
             if let Some(container) = finding.identity().container() {
                 write!(self.writer, "{container}::")?;
             }
-            writeln!(self.writer, "{}", finding.identity().name())?;
+            write!(
+                self.writer,
+                "{} · {}",
+                finding.identity().name(),
+                unit_kind_label(finding.identity().kind())
+            )?;
+            if finding.role() != SourceRole::Primary {
+                write!(self.writer, " · {}", history_role_name(finding.role()))?;
+            }
+            if finding.trust() == SourceTrust::Advisory {
+                write!(self.writer, " · advisory")?;
+            }
+            writeln!(self.writer)?;
             let file = &view.report.files()[finding.file().index()];
             writeln!(
                 self.writer,
@@ -1269,6 +1320,24 @@ fn package_name(report: &Report, package_index: usize) -> Option<&str> {
 
 fn terminal_path(path: &str) -> &str {
     if path == "." { "repository root" } else { path }
+}
+
+fn relation_label(relation: smackdebt_analysis::StaticRelationKind) -> &'static str {
+    match relation {
+        smackdebt_analysis::StaticRelationKind::Uses => "uses",
+        smackdebt_analysis::StaticRelationKind::ModuleOwnership => "module ownership",
+    }
+}
+
+fn unit_kind_label(kind: smackdebt_analysis::UnitKind) -> &'static str {
+    match kind {
+        smackdebt_analysis::UnitKind::Function => "function",
+        smackdebt_analysis::UnitKind::Method => "method",
+        smackdebt_analysis::UnitKind::Closure => "closure",
+        smackdebt_analysis::UnitKind::Lambda => "lambda",
+        smackdebt_analysis::UnitKind::SyntheticTopLevel => "top level",
+        smackdebt_analysis::UnitKind::Template => "template",
+    }
 }
 
 #[derive(Clone, Copy, Eq, PartialEq)]
@@ -1579,32 +1648,20 @@ pub(super) fn direction_name(direction: ComparisonDirection) -> &'static str {
 fn finding_order(report: &Report, left: &Finding, right: &Finding) -> std::cmp::Ordering {
     let left_file = &report.files()[left.file().index()];
     let right_file = &report.files()[right.file().index()];
-    (
-        Reverse(rating_rank(left.assessment().rating())),
-        Reverse(
-            left_file
-                .activity()
-                .map_or(0, |activity| activity.touches()),
-        ),
-        Reverse(left.measurements().cognitive_complexity()),
-        Reverse(left.measurements().cyclomatic_complexity()),
-        Reverse(left.measurements().logical_lines()),
+    smackdebt_analysis::FindingRank::new(
+        left,
+        left_file
+            .activity()
+            .map_or(0, |activity| activity.touches()),
         left_file.path(),
-        left.span().start_line(),
     )
-        .cmp(&(
-            Reverse(rating_rank(right.assessment().rating())),
-            Reverse(
-                right_file
-                    .activity()
-                    .map_or(0, |activity| activity.touches()),
-            ),
-            Reverse(right.measurements().cognitive_complexity()),
-            Reverse(right.measurements().cyclomatic_complexity()),
-            Reverse(right.measurements().logical_lines()),
-            right_file.path(),
-            right.span().start_line(),
-        ))
+    .cmp(&smackdebt_analysis::FindingRank::new(
+        right,
+        right_file
+            .activity()
+            .map_or(0, |activity| activity.touches()),
+        right_file.path(),
+    ))
 }
 
 fn drill_path_from_visible(
@@ -1673,14 +1730,6 @@ fn middle_truncate(value: &str, width: usize) -> String {
         used += character_width;
     }
     format!("{left}…{right}")
-}
-
-fn rating_rank(rating: Rating) -> u8 {
-    match rating {
-        Rating::Healthy => 0,
-        Rating::Watch => 1,
-        Rating::High => 2,
-    }
 }
 
 pub(super) fn rating_name(rating: Rating) -> &'static str {
@@ -1755,8 +1804,8 @@ mod tests {
     use crate::json::write_json;
     use smackdebt_analysis::{
         Coverage, FileActivity, FileId, FileRecord, FindingId, HealthCounts, HealthPolicy,
-        Measurements, PackageId, PackageRecord, Report, ReportBuilder, ReportMode, Scope, ScopeId,
-        SourceRole, SourceSpan, SourceTrust, UnitIdentity,
+        Measurements, PackageId, PackageRecord, ParseStatus, Report, ReportBuilder, ReportMode,
+        Scope, ScopeId, SourceRole, SourceSpan, SourceTrust, UnitIdentity,
     };
 
     fn report_with_findings(activity: bool) -> Report {
@@ -1853,13 +1902,16 @@ mod tests {
         let finding = FindingId::from_index(0);
         builder.add_scope(Scope::new(root, ScopeKind::Repository, ".", None));
         builder.set_root(root);
-        builder.add_file(FileRecord::new(
-            file,
-            root,
-            "broken.py",
-            Coverage::new(1, 1, 0, 0, 4, 0),
-            HealthCounts::default(),
-        ));
+        builder.add_file(
+            FileRecord::new(
+                file,
+                root,
+                "broken.py",
+                Coverage::new(1, 1, 0, 0, 4, 0),
+                HealthCounts::default(),
+            )
+            .with_source_state(SourceRole::Benchmark, ParseStatus::Recovered),
+        );
         builder.add_finding(
             Finding::new(
                 finding,
@@ -1869,7 +1921,7 @@ mod tests {
                 Measurements::new(25, 3, 4),
                 HealthPolicy::default().assess(Measurements::new(25, 3, 4)),
             )
-            .with_evidence(SourceRole::Primary, SourceTrust::Advisory),
+            .with_evidence(SourceRole::Benchmark, SourceTrust::Advisory),
         );
         builder.link_finding(root, finding);
         let report = builder.finish();
@@ -1883,6 +1935,22 @@ mod tests {
                 .findings
                 .len(),
             1
+        );
+        let mut output = Vec::new();
+        write_terminal(
+            &mut output,
+            &report,
+            report.root(),
+            TerminalOptions {
+                all: true,
+                ..TerminalOptions::default()
+            },
+        )
+        .unwrap();
+        assert!(
+            String::from_utf8(output)
+                .unwrap()
+                .contains("broken · function · benchmark · advisory")
         );
     }
 
@@ -1911,7 +1979,7 @@ mod tests {
         let mut json = Vec::new();
         write_json(&mut json, &report, report.root()).unwrap();
         let value: serde_json::Value = serde_json::from_slice(&json).unwrap();
-        assert_eq!(value["schema_version"], 2);
+        assert_eq!(value["schema_version"], 3);
         assert_eq!(value["mode"], "codebase");
     }
 

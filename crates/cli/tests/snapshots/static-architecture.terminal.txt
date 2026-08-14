@@ -17,9 +17,6 @@ ARCHITECTURE
         app/main.js → core/main.js
 ● WATCH  file dependency cycle
         app/choice.js → app/helper.js
-  app/choice.js → app/helper.js · 1 references
-  app/helper.js → app/choice.js · 1 references
-  app/main.js → core/main.js · 1 references
 
 EVOLUTION
 history unavailable: not a Git repository

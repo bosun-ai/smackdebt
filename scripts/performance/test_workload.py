@@ -1,4 +1,5 @@
 import json
+import importlib.util
 import subprocess
 import tempfile
 import unittest
@@ -7,6 +8,14 @@ from pathlib import Path
 
 SCRIPT = Path(__file__).with_name("workload.py")
 RUNNER = Path(__file__).with_name("run.sh")
+REPORT_CHECKER = Path(__file__).with_name("check-report.py")
+
+
+def load_report_checker():
+    spec = importlib.util.spec_from_file_location("performance_check_report", REPORT_CHECKER)
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+    return module
 
 
 class WorkloadHarnessTests(unittest.TestCase):
@@ -83,6 +92,13 @@ class WorkloadHarnessTests(unittest.TestCase):
             self.assertEqual(len(records), 2)
             self.assertTrue(all(json.loads(record)["wall_time_ns"] > 0 for record in records))
             self.assertTrue(all("parser_time_ns" in json.loads(record) for record in records))
+
+    def test_report_privacy_rejects_a_nested_identity_field(self):
+        checker = load_report_checker()
+        with self.assertRaises(SystemExit):
+            checker.audit_private_values(
+                {"outer": [{"contributor_email": "private@example.invalid"}]}
+            )
 
 
 if __name__ == "__main__":

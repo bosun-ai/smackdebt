@@ -13,6 +13,7 @@ use crate::{
 };
 #[cfg(test)]
 use crate::{HealthPolicy, LocalUnitId, Rating, Signal, Thresholds, compare_units};
+use std::cmp::Reverse;
 
 macro_rules! index_type {
     ($name:ident) => {
@@ -596,6 +597,39 @@ impl Finding {
     }
 }
 
+/// The complete source-finding display order owned by analysis policy.
+#[derive(Clone, Copy, Debug, Eq, Ord, PartialEq, PartialOrd)]
+pub struct FindingRank<'a> {
+    rating: Reverse<u8>,
+    signals_at_rating: Reverse<u8>,
+    triggered_signals: Reverse<u8>,
+    cognitive_complexity: Reverse<u32>,
+    cyclomatic_complexity: Reverse<u32>,
+    logical_lines: Reverse<u32>,
+    activity: Reverse<u32>,
+    path: &'a str,
+    start_line: u32,
+    end_line: u32,
+}
+
+impl<'a> FindingRank<'a> {
+    pub fn new(finding: &Finding, activity: u32, path: &'a str) -> Self {
+        let measurements = finding.measurements();
+        Self {
+            rating: Reverse(finding.assessment().rating().rank()),
+            signals_at_rating: Reverse(finding.assessment().signals_at_rating()),
+            triggered_signals: Reverse(finding.assessment().triggered_signals()),
+            cognitive_complexity: Reverse(measurements.cognitive_complexity()),
+            cyclomatic_complexity: Reverse(measurements.cyclomatic_complexity()),
+            logical_lines: Reverse(measurements.logical_lines()),
+            activity: Reverse(activity),
+            path,
+            start_line: finding.span().start_line(),
+            end_line: finding.span().end_line(),
+        }
+    }
+}
+
 /// Why source coverage was excluded from debt analysis.
 #[derive(Clone, Copy, Debug, Eq, Hash, Ord, PartialEq, PartialOrd)]
 pub enum DiagnosticKind {
@@ -823,7 +857,7 @@ impl Report {
         comparisons: usize,
     ) -> Self {
         Self {
-            schema_version: 2,
+            schema_version: 3,
             mode,
             root: None,
             scopes: Vec::with_capacity(scopes),
@@ -1280,5 +1314,66 @@ mod tests {
         assert_eq!(scopes[root.index()].health(), HealthCounts::new(1, 0, 0));
         assert_eq!(scopes[child.index()].findings(), &[finding]);
         assert_eq!(scopes[root.index()].findings(), &[finding]);
+    }
+
+    #[test]
+    fn finding_rank_uses_every_accepted_key_in_order() {
+        fn finding(name: &str, measurements: Measurements, span: SourceSpan) -> Finding {
+            Finding::new(
+                FindingId::from_index(0),
+                FileId::from_index(0),
+                UnitIdentity::new(name, UnitKind::Function),
+                span,
+                measurements,
+                HealthPolicy::default().assess(measurements),
+            )
+        }
+
+        let high = finding("high", Measurements::new(25, 1, 1), SourceSpan::new(1, 1));
+        let watch = finding("watch", Measurements::new(15, 1, 1), SourceSpan::new(1, 1));
+        assert!(FindingRank::new(&high, 0, "z") < FindingRank::new(&watch, 99, "a"));
+
+        let two_high = finding("two", Measurements::new(25, 21, 1), SourceSpan::new(1, 1));
+        assert!(FindingRank::new(&two_high, 0, "z") < FindingRank::new(&high, 99, "a"));
+
+        let high_with_watch = finding(
+            "triggered",
+            Measurements::new(25, 11, 1),
+            SourceSpan::new(1, 1),
+        );
+        assert!(FindingRank::new(&high_with_watch, 0, "z") < FindingRank::new(&high, 99, "a"));
+
+        let more_cognitive = finding(
+            "cognitive",
+            Measurements::new(26, 1, 1),
+            SourceSpan::new(1, 1),
+        );
+        assert!(FindingRank::new(&more_cognitive, 0, "z") < FindingRank::new(&high, 99, "a"));
+
+        let more_cyclomatic = finding(
+            "cyclomatic",
+            Measurements::new(25, 2, 1),
+            SourceSpan::new(1, 1),
+        );
+        assert!(FindingRank::new(&more_cyclomatic, 0, "z") < FindingRank::new(&high, 99, "a"));
+
+        let more_lines = finding("lines", Measurements::new(25, 1, 2), SourceSpan::new(1, 1));
+        assert!(FindingRank::new(&more_lines, 0, "z") < FindingRank::new(&high, 99, "a"));
+        assert!(FindingRank::new(&high, 2, "z") < FindingRank::new(&high, 1, "a"));
+        assert!(FindingRank::new(&high, 1, "a") < FindingRank::new(&high, 1, "b"));
+
+        let earlier = finding(
+            "earlier",
+            Measurements::new(25, 1, 1),
+            SourceSpan::new(1, 2),
+        );
+        let later = finding("later", Measurements::new(25, 1, 1), SourceSpan::new(2, 3));
+        assert!(FindingRank::new(&earlier, 1, "a") < FindingRank::new(&later, 1, "a"));
+        let shorter = finding(
+            "shorter",
+            Measurements::new(25, 1, 1),
+            SourceSpan::new(1, 1),
+        );
+        assert!(FindingRank::new(&shorter, 1, "a") < FindingRank::new(&earlier, 1, "a"));
     }
 }

@@ -24,14 +24,14 @@ fn serial_and_parallel_codebase_output_match() {
 }
 
 #[test]
-fn serial_and_parallel_json_match_and_follow_schema_two() {
+fn serial_and_parallel_json_match_and_follow_schema_three() {
     let project = fixture();
     let path = project.path().to_str().unwrap();
     let serial = run(["--json", "--jobs", "1", path]);
     let parallel = run(["--json", "--jobs", "4", path]);
     assert_eq!(serial, parallel);
     let report: serde_json::Value = serde_json::from_slice(&serial).unwrap();
-    assert_eq!(report["schema_version"], 2);
+    assert_eq!(report["schema_version"], 3);
     assert_eq!(report["mode"], "codebase");
     assert!(report["findings"].is_array());
     validate_schema(&report);
@@ -204,6 +204,12 @@ fn static_architecture_codebase_snapshots_are_reviewed() {
         "static-architecture.terminal.txt",
         &terminal,
         include_bytes!("snapshots/static-architecture.terminal.txt"),
+    );
+    let detailed = run_in(project.path(), ["--all", "--jobs", "1", "--color", "never"]);
+    assert_snapshot(
+        "static-architecture-all.terminal.txt",
+        &detailed,
+        include_bytes!("snapshots/static-architecture-all.terminal.txt"),
     );
     let json = run_in(project.path(), ["--json", "--jobs", "1"]);
     assert_snapshot(
@@ -950,7 +956,7 @@ fn assert_snapshot(name: &str, actual: &[u8], expected: &[u8]) {
 
 fn validate_schema(report: &serde_json::Value) {
     let schema: serde_json::Value =
-        serde_json::from_str(include_str!("../../../schemas/report-v2.schema.json")).unwrap();
+        serde_json::from_str(include_str!("../../../schemas/report-v3.schema.json")).unwrap();
     jsonschema::validator_for(&schema)
         .unwrap()
         .validate(report)
@@ -1161,13 +1167,23 @@ fn assert_index_integrity(report: &serde_json::Value) {
 
     for (index, finding) in evolutionary_findings.iter().enumerate() {
         assert_eq!(finding["id"], index);
-        assert!((finding["left"].as_u64().unwrap() as usize) < package_graph.len());
-        assert!((finding["right"].as_u64().unwrap() as usize) < package_graph.len());
+        let left = finding["left"].as_u64().unwrap() as usize;
+        let right = finding["right"].as_u64().unwrap() as usize;
+        assert!(left < package_graph.len());
+        assert!(right < package_graph.len());
+        assert!(left < right);
+        assert!(finding["shared_commits"].as_u64().unwrap() >= 3);
+        assert!(finding["similarity"].as_f64().unwrap() >= 0.2);
     }
     for (index, comparison) in evolutionary_comparisons.iter().enumerate() {
         assert_eq!(comparison["id"], index);
-        assert!((comparison["left"].as_u64().unwrap() as usize) < package_graph.len());
-        assert!((comparison["right"].as_u64().unwrap() as usize) < package_graph.len());
+        let left = comparison["left"].as_u64().unwrap() as usize;
+        let right = comparison["right"].as_u64().unwrap() as usize;
+        assert!(left < package_graph.len());
+        assert!(right < package_graph.len());
+        assert!(left < right);
+        assert!(comparison["shared_commits"].as_u64().unwrap() >= 3);
+        assert!(comparison["similarity"].as_f64().unwrap() >= 0.2);
     }
     for dependency in external_dependencies {
         assert!((dependency["file"].as_u64().unwrap() as usize) < files.len());
@@ -1221,12 +1237,14 @@ fn index_audit_rejects_a_nested_evolution_reference() {
 #[test]
 fn report_schema_has_no_contributor_identity_fields_or_tables() {
     let schema: serde_json::Value =
-        serde_json::from_str(include_str!("../../../schemas/report-v2.schema.json")).unwrap();
+        serde_json::from_str(include_str!("../../../schemas/report-v3.schema.json")).unwrap();
     assert_schema_omits_identity_keys(&schema);
 }
 
 fn assert_schema_omits_identity_keys(value: &serde_json::Value) {
     const FORBIDDEN_KEYS: &[&str] = &[
+        "source_text",
+        "commit_message",
         "author",
         "authors",
         "author_name",
@@ -1235,7 +1253,9 @@ fn assert_schema_omits_identity_keys(value: &serde_json::Value) {
         "author_identity",
         "raw_author",
         "raw_author_name",
+        "raw_author_address",
         "raw_author_email",
+        "address",
         "email",
         "email_address",
         "contributor_id",
@@ -1272,13 +1292,59 @@ fn json_schema_rejects_nested_field_type_drift() {
     let mut report: serde_json::Value = serde_json::from_slice(&bytes).unwrap();
     report["scopes"][0]["coverage"]["selected_files"] = "one".into();
     let schema: serde_json::Value =
-        serde_json::from_str(include_str!("../../../schemas/report-v2.schema.json")).unwrap();
+        serde_json::from_str(include_str!("../../../schemas/report-v3.schema.json")).unwrap();
     assert!(
         jsonschema::validator_for(&schema)
             .unwrap()
             .validate(&report)
             .is_err()
     );
+}
+
+#[test]
+fn json_schema_rejects_weak_evolution_verdict_thresholds() {
+    let project = evolutionary_fixture();
+    let finding_report: serde_json::Value =
+        serde_json::from_slice(&run_in(project.path(), ["--json", "--history", "36500d"])).unwrap();
+    assert!(
+        !finding_report["evolutionary_findings"]
+            .as_array()
+            .unwrap()
+            .is_empty()
+    );
+
+    fs::write(
+        project.path().join("b/main.js"),
+        "import { a } from '../a/main';\nexport const b = a;\n",
+    )
+    .unwrap();
+    let comparison_report: serde_json::Value = serde_json::from_slice(&run_in(
+        project.path(),
+        ["diff", "main", "--json", "--history", "36500d"],
+    ))
+    .unwrap();
+    assert!(
+        !comparison_report["evolutionary_comparisons"]
+            .as_array()
+            .unwrap()
+            .is_empty()
+    );
+
+    let schema: serde_json::Value =
+        serde_json::from_str(include_str!("../../../schemas/report-v3.schema.json")).unwrap();
+    let validator = jsonschema::validator_for(&schema).unwrap();
+    for (table, report) in [
+        ("evolutionary_findings", finding_report),
+        ("evolutionary_comparisons", comparison_report),
+    ] {
+        let mut weak_commits = report.clone();
+        weak_commits[table][0]["shared_commits"] = 2.into();
+        assert!(validator.validate(&weak_commits).is_err(), "{table}");
+
+        let mut weak_similarity = report;
+        weak_similarity[table][0]["similarity"] = 0.19.into();
+        assert!(validator.validate(&weak_similarity).is_err(), "{table}");
+    }
 }
 
 fn strip_ansi(value: &[u8]) -> Vec<u8> {

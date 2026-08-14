@@ -227,6 +227,30 @@ pub(crate) fn copy_language_truth_files(repository: &GeneratedRepository) {
     );
 }
 
+pub(crate) fn source_role_repository() -> GeneratedRepository {
+    let repository = GeneratedRepository::new("main");
+    repository.write("package.json", b"{}\n");
+    repository.write(
+        ".smackdebt.toml",
+        b"[thresholds.cognitive]\nwatch=1\nhigh=2\n[thresholds.cyclomatic]\nwatch=1\nhigh=2\n[thresholds.function_lines]\nwatch=1\nhigh=2\n",
+    );
+    let source = b"export function work(a, b) { if (a) { if (b) { return 1; } } return 0; }\n";
+    for path in [
+        "src/main.js",
+        "tests/work.js",
+        "examples/work.js",
+        "benches/work.js",
+        "fixtures/work.js",
+    ] {
+        repository.write(path, source);
+    }
+    repository.write(
+        "tests/generated.js",
+        b"// @generated\nexport function work(a, b) { if (a) { if (b) { return 1; } } return 0; }\n",
+    );
+    repository
+}
+
 pub(crate) fn static_architecture_repository() -> GeneratedRepository {
     let repository = GeneratedRepository::new("main");
     let fixture_root =
@@ -332,7 +356,7 @@ pub(crate) fn evolution_repository() -> GeneratedRepository {
 
 pub(crate) fn worktree_change_repository() -> GeneratedRepository {
     let repository = GeneratedRepository::new("main");
-    for package in ["a", "b", "c", "d", "e", "f", "h", "i"] {
+    for package in ["a", "b", "c", "d", "e", "f", "gone", "h", "i"] {
         repository.write(
             &format!("{package}/package.json"),
             format!("{{\"name\":\"{package}\",\"private\":true}}\n").as_bytes(),
@@ -433,6 +457,7 @@ pub(crate) fn worktree_change_repository() -> GeneratedRepository {
             b"export function renamed(value) { if (value) { if (value > 1) return value; } return 0; }\n",
         ),
         WorktreeEdit::Delete("f/deleted.js"),
+        WorktreeEdit::Delete("gone/package.json"),
         WorktreeEdit::Write("new/package.json", b"{\"name\":\"new\",\"private\":true}\n"),
         WorktreeEdit::Write(
             "new/untracked.js",

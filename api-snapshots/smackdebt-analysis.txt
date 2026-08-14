@@ -402,6 +402,9 @@ impl smackdebt_analysis::FindingId
 pub const fn smackdebt_analysis::FindingId::from_index(usize) -> Self
 pub const fn smackdebt_analysis::FindingId::get(self) -> u32
 pub const fn smackdebt_analysis::FindingId::index(self) -> usize
+pub struct smackdebt_analysis::FindingRank<'a>
+impl<'a> smackdebt_analysis::FindingRank<'a>
+pub fn smackdebt_analysis::FindingRank<'a>::new(&smackdebt_analysis::Finding, u32, &'a str) -> Self
 pub struct smackdebt_analysis::HealthAssessment
 impl smackdebt_analysis::HealthAssessment
 pub const fn smackdebt_analysis::HealthAssessment::rating(self) -> smackdebt_analysis::Rating
