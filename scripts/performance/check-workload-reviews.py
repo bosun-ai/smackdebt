@@ -5,9 +5,10 @@ from __future__ import annotations
 
 import argparse
 import json
-import subprocess
 import sys
 from pathlib import Path
+
+from release_head import release_revision_problem
 
 
 ROOT = Path(__file__).parents[2]
@@ -67,7 +68,13 @@ def audit(value: object, location: str = "evidence") -> list[str]:
     return problems
 
 
-def validate(record: dict, baselines: list[dict], release_head: bool, head: str | None = None) -> list[str]:
+def validate(
+    record: dict,
+    baselines: list[dict],
+    release_head: bool,
+    head: str | None = None,
+    repository: Path = ROOT,
+) -> list[str]:
     problems = audit(record)
     if set(record) != {"schema_version", "workspace_revision", "workspace_dirty", "reviews"}:
         problems.append("top-level fields changed")
@@ -101,12 +108,9 @@ def validate(record: dict, baselines: list[dict], release_head: bool, head: str 
     if any(row.get("workspace_dirty") is not False for row in baselines):
         problems.append("public profiles must start from a clean workspace")
     if release_head:
-        if head is None:
-            head = subprocess.run(
-                ["git", "rev-parse", "HEAD"], check=True, capture_output=True, text=True
-            ).stdout.strip()
-        if revision != head:
-            problems.append("workload review revision must equal HEAD")
+        revision_problem = release_revision_problem(revision, repository, head)
+        if revision_problem:
+            problems.append(revision_problem)
     return problems
 
 

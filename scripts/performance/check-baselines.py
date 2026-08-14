@@ -3,11 +3,12 @@
 
 from __future__ import annotations
 
-import json
-import subprocess
-import sys
 import argparse
+import json
+import sys
 from pathlib import Path
+
+from release_head import release_revision_problem
 
 
 ROOT = Path(__file__).parents[2]
@@ -90,13 +91,12 @@ def main() -> int:
     if len(revisions) != 1:
         problems.append("performance baselines must share one workspace revision")
     if args.release_head:
-        head = subprocess.run(
-            ["git", "rev-parse", "HEAD"], check=True, capture_output=True, text=True
-        ).stdout.strip()
         if any(record.get("workspace_dirty") is not False for record in records):
             problems.append("release baselines must start from a clean workspace")
-        if revisions != {head}:
-            problems.append("release baseline revision must equal HEAD")
+        if len(revisions) == 1:
+            revision_problem = release_revision_problem(next(iter(revisions)), ROOT)
+            if revision_problem:
+                problems.append(revision_problem)
     if problems:
         for problem in problems:
             print(f"performance baseline: {problem}", file=sys.stderr)
