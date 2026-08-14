@@ -4,18 +4,18 @@
 TBD - created by archiving change prove-unified-analysis. Update Purpose after archive.
 ## Requirements
 ### Requirement: Unified analysis evidence precedes publication
-The workspace SHALL remain private until every revised signal decision, public
-fixture, three-workload aggregate review, JSON version-3 check, documentation
-example, resource gate, and installed behavior passes from the reviewed
-implementation commit.
+The workspace SHALL remain private until the exact short terminal interface,
+glyph and styling policy, simple human text, unchanged JSON and analysis
+behavior, public width matrix, resource gates, installed behavior, and three
+privacy-safe workload outcomes pass from the reviewed implementation commit.
 
 #### Scenario: Implementation is reviewed but not committed
-- **WHEN** local results look correct before the implementation commit exists
+- **WHEN** local terminal results look correct before the implementation commit exists
 - **THEN** clean release evidence is not recorded
 
 #### Scenario: Reviewed implementation commit is clean
-- **WHEN** every earlier implementation and expectation change is committed
-- **THEN** the release workflow may record evidence from that exact clean HEAD
+- **WHEN** every implementation and expectation change is committed
+- **THEN** the release workflow records exact public profiles and aggregate workload outcomes from that clean HEAD
 
 ### Requirement: Release evidence includes installed behavior
 

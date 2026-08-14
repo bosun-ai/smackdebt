@@ -11,15 +11,17 @@ The project SHALL provide a root `README.md` that explains codebase health and r
 - **THEN** the introduction states the two questions Smackdebt answers and explains progressive path discovery
 
 ### Requirement: README provides complete command examples
-The README SHALL document installation, codebase analysis, path drill-down, ref comparison, history configuration, and JSON output with realistic commands and sample reports.
+The README SHALL document installation, codebase analysis, path drill-down, ref
+comparison, history configuration, and JSON output with realistic commands and
+sample reports that use the exact short terminal sections and glyphs.
 
 #### Scenario: User follows the codebase example
 - **WHEN** a user reads the codebase analysis section
-- **THEN** the README shows a no-argument command, concise output, and the next command for deeper inspection
+- **THEN** the README shows a no-argument command, relevant output, and one glyph-plus-command line for deeper inspection
 
 #### Scenario: User follows the diff example
 - **WHEN** a user reads the ref comparison section
-- **THEN** the README shows default-ref discovery, worktree comparison, regressions, improvements, and path drill-down
+- **THEN** the README shows default-ref discovery, relevant Worse, Better, and Changed findings, and path drill-down without internal report terms
 
 ### Requirement: README explains ratings without false precision
 The README SHALL publish each default health threshold, explain how Git activity affects hotspot order, and state that Smackdebt does not calculate one repository score.
@@ -112,13 +114,14 @@ area's share of selected debt from its local attention rate.
 - **THEN** it explains how contribution and concentration support the next drill decision
 
 ### Requirement: README documents terminal presentation controls
-Product documentation SHALL explain `--color`, `NO_COLOR`, width behavior,
-Unicode redirected output, `--all`, and JSON as the complete machine-readable
-view.
+Product documentation SHALL explain the Nerd Font glyph requirement,
+`--color`, `NO_COLOR`, width behavior, Unicode redirected output, `--all`, and
+JSON as the complete machine-readable view. It SHALL state that there is no
+icon option, emoji mode, or ASCII fallback.
 
 #### Scenario: User runs Smackdebt in automation
 - **WHEN** the user reads output guidance
-- **THEN** the README explains how to force or disable ANSI styling and that JSON remains unstyled
+- **THEN** the README explains how to force or disable ANSI glyph styling and that JSON remains unstyled
 
 ### Requirement: Product documentation explains evolutionary signals
 
@@ -145,28 +148,21 @@ not reported, and unavailable or incomplete history is shown explicitly.
 - **AND** it explains which source and architecture results still remain usable
 
 ### Requirement: Documented command examples are checked
-
 The README SHALL mark runnable console examples and associate each with a named
-public generated fixture and expected status and output.
+public generated fixture, expected status, and exact relevant output fragments.
 
 #### Scenario: Documentation tests run
-
-- **WHEN** the documentation validation command reads runnable README examples
-- **THEN** it executes them through the built CLI against their named fixtures
-- **AND** observed status and output match the documentation
+- **WHEN** documentation validation reads runnable README examples
+- **THEN** it executes them through the built CLI and matches status, sections, glyphs, commands, stdout, and stderr in order
 
 ### Requirement: Documentation covers the unified result
+The README SHALL show how one command answers code and architecture questions
+through separate `QUALITY`, `FINDINGS`, `ARCHITECTURE`, and `HISTORY` sections,
+with empty optional sections omitted.
 
-The README SHALL show how one command answers both code-quality and
-architecture-quality questions using separate source, static architecture, and
-evolution evidence.
-
-#### Scenario: A user reads the main example
-
-- **WHEN** the user follows the documented default and diff examples
-- **THEN** the examples show separate findings and coverage for all three
-  analysis families
-- **AND** they do not present a combined debt score
+#### Scenario: A user reads the main examples
+- **WHEN** the user follows documented default, path, and diff examples
+- **THEN** the examples lead with relevant findings, omit empty sections and internal processing facts, and do not present a combined score
 
 ### Requirement: README explains role classification and conflicts
 The README SHALL name all six SourceRole values, which roles affect default

@@ -68,23 +68,22 @@ children. It SHALL show the passed repository-relative path as a breadcrumb.
 - **THEN** JSON still contains every original scope and parent-child link
 
 ### Requirement: Default terminal detail stays concise
-The default terminal view SHALL show at most ten debt-bearing child rows and the
-first three retained findings or comparisons within the selected scope. It
-SHALL state exact counts for omitted debt-bearing and healthy-only child areas.
-Zero-value optional facts SHALL be omitted when their absence does not change
-the meaning.
+The default terminal view SHALL show `AREAS` only when several affected child
+areas exist and SHALL show at most five such rows. It SHALL show the first three
+ranked findings or comparisons within the selected scope. Zero-value optional
+facts and empty optional sections SHALL be omitted.
 
-#### Scenario: Selected scope has more than ten debt-bearing children
+#### Scenario: Selected scope has more than five affected children
 - **WHEN** the default terminal report omits child rows
-- **THEN** it states the exact omitted debt-bearing count and does not imply that the visible rows are complete
+- **THEN** it shows the five most relevant rows without omitted-row bookkeeping
 
-#### Scenario: User requests complete terminal detail
+#### Scenario: User requests complete useful terminal detail
 - **WHEN** the user supplies `--all`
-- **THEN** terminal output shows every child row, including healthy-only children, and every retained finding or comparison in the selected scope
+- **THEN** terminal output shows all useful affected rows, findings, comparisons, and relevant relationships without healthy rows or internal processing facts
 
-#### Scenario: Optional count is zero
-- **WHEN** a finding has zero recent touches or every selected file was analyzed
-- **THEN** the terminal omits the zero activity or excluded-file phrase
+#### Scenario: Optional section has no finding
+- **WHEN** architecture or history has no actionable finding
+- **THEN** the terminal omits that section
 
 ### Requirement: Codebase detail follows existing hotspot priority
 Every displayed finding SHALL show unit kind and SHALL show SourceRole whenever
@@ -100,16 +99,17 @@ inside `--all` but SHALL remain absent from default detail.
 - **THEN** its unit kind, role when non-primary, and advisory trust are visible
 
 ### Requirement: Explore points to the next debt-bearing area
-The terminal `Explore` command SHALL target the first displayed debt-bearing
+The terminal discover command SHALL target the first displayed debt-bearing
 child after display filtering and sorting, using its repository-relative path.
+The line SHALL contain only U+F46B and `smackdebt <path>`.
 
 #### Scenario: A deeper debt-bearing child exists
 - **WHEN** the selected codebase scope has a displayed debt-bearing child
-- **THEN** the report prints one valid `smackdebt <path>` command for that first row
+- **THEN** the report prints one valid glyph-plus-command line for that first row
 
 #### Scenario: No deeper debt-bearing child exists
 - **WHEN** the selected scope is a file or all deeper children are healthy
-- **THEN** the report omits the `Explore` section
+- **THEN** the report omits the discover line
 
 ### Requirement: Diff comparisons have one displayed direction
 Every retained comparison SHALL belong to exactly one of Worse, Better, or
@@ -179,18 +179,18 @@ unchanged.
 - **THEN** JSON still serializes the complete retained report
 
 ### Requirement: Codebase summary states rated quality and coverage
-The terminal summary SHALL state the number of rated units, the count and rate
-needing attention, High, Watch, and Healthy counts, and selected source
-coverage. A neutral attention bar SHALL reinforce the exact attention ratio
-without presenting one repository score.
+The terminal `QUALITY` section SHALL state rated units and the count needing
+attention. It SHALL use exact High and Watch glyphs without severity words and
+SHALL omit healthy counts, repeated summary ratios, and decorative quality bars.
+Coverage gaps SHALL use a grouped Warning line only when a gap exists.
 
 #### Scenario: Selection is fully analyzed
 - **WHEN** every selected source file is analyzed
-- **THEN** the summary confirms all selected source files were analyzed and omits an excluded-file phrase
+- **THEN** `QUALITY` omits healthy and coverage-success text
 
 #### Scenario: Some selected source is excluded
 - **WHEN** unsupported or failed files exist
-- **THEN** the summary states the exact excluded file count without treating those files as healthy
+- **THEN** one grouped warning states the gap without treating those files as healthy
 
 ### Requirement: Coverage notes describe source-analysis gaps
 Coverage notes SHALL report selected source files that could not be analyzed.
@@ -202,35 +202,38 @@ coverage problem.
 - **THEN** the diff analyzes source changes without a coverage note for routine non-source changes
 
 ### Requirement: Terminal layout responds to available width
-Terminal rendering SHALL use a full aligned table at 100 columns or more, a
-compact aligned table from 70 through 99 columns, and stacked area cards below
-70 columns. Every tier SHALL preserve the same exact report facts.
+Terminal rendering SHALL use aligned layouts appropriate to widths 120, 80,
+and 50 while preserving the same relevant facts, exact glyphs, recognizable
+source locations, and drill commands. Every ANSI-stripped line SHALL have
+Unicode display width less than or equal to the requested width. Layout SHALL NOT add bars, summary ratios, healthy rows,
+or internal processing facts at any width.
 
-#### Scenario: Wide terminal renders an area table
+#### Scenario: Wide terminal renders relevant areas
 - **WHEN** the resolved width is 120 columns
-- **THEN** area rows use aligned full columns and twelve-cell bars
+- **THEN** area rows and findings align without repeated status labels
 
-#### Scenario: Medium terminal renders a compact table
+#### Scenario: Medium terminal renders relevant areas
 - **WHEN** the resolved width is 80 columns
-- **THEN** area rows use aligned compact columns and eight-cell bars
+- **THEN** the same facts remain aligned and readable
 
-#### Scenario: Narrow terminal renders stacked cards
+#### Scenario: Narrow terminal renders relevant areas
 - **WHEN** the resolved width is 50 columns
-- **THEN** each area uses a stacked card and a ten-cell bar without breaking source locations or drill commands
+- **THEN** changed metrics; relationship identities, counts, statuses, and evidence; closed cycle witnesses; finding identity, kind, role, location, and measurements; coupling identity, commit evidence, dependency state, and diff outcome; and activity identity, commit count, and churn use short indented lines
+- **AND** each long identity shortens in the middle while every fact remains visible, no line exceeds 50 display cells or breaks a glyph, and the reviewed flows record zero unexpected-line safety shortenings
 
 ### Requirement: Terminal styling is optional and semantic
 Terminal styling SHALL use ANSI sequences only when the CLI resolves color as
-enabled. Styling SHALL distinguish High or Worse, Watch or Changed, Better,
-coverage gaps, navigation, headings, and secondary text without backgrounds.
-Symbols and Unicode bars SHALL remain in plain redirected output.
+enabled. It SHALL color only status glyphs: High and Worse red, Watch and
+Warning ANSI-256 208 orange, Discover cyan, Better green, and Changed normal.
+Symbols SHALL remain in plain redirected output.
 
 #### Scenario: Styled and plain output are compared
 - **WHEN** the same report, width, and detail choice are rendered with color on and off
-- **THEN** removing ANSI sequences from styled output produces the plain output byte for byte
+- **THEN** removing ANSI sequences from styled output produces the plain output byte for byte and adjacent text is unstyled
 
 #### Scenario: JSON is requested
 - **WHEN** a user selects JSON output
-- **THEN** the JSON contains no ANSI styling and remains schema version 1
+- **THEN** JSON contains no ANSI styling and its version-3 bytes remain unchanged
 
 ### Requirement: Terminal counts and labels are easy to scan
 Terminal rendering SHALL group large integer digits, use correct singular or
@@ -287,34 +290,34 @@ removed, and unsafe-to-match units SHALL use direct explanatory text.
 - **THEN** its terminal card says that the identity could not be matched safely
 
 ### Requirement: Reports expose evolution as a separate concern
+The system SHALL retain history coverage, churn, coupling, and concentration in
+the report and JSON. Default terminal output SHALL show `HISTORY` only for
+actionable history findings and SHALL omit weak pairs and processing totals. It
+SHALL show at most three findings ordered by shared commits descending,
+similarity descending, then stable package names and IDs, each with shared
+commits, union commits, similarity, and the absent code dependency.
 
-The system SHALL present history coverage, churn, unexplained coupling, and
-contributor concentration separately from code health and static architecture.
-
-#### Scenario: Default codebase output has all analysis families
-
-- **WHEN** a repository contains source findings, a dependency cycle, and
-  retained history
-- **THEN** the default report has separate code, architecture, and evolution
-  summaries
-- **AND** no combined score hides the individual results
+#### Scenario: Default codebase output has actionable history
+- **WHEN** an unexplained coupling finding exists
+- **THEN** `HISTORY` shows that finding once with exact commit evidence and without a retained-pair or processing summary
 
 #### Scenario: A user selects an evolution detail target
-
-- **WHEN** a package is selected for detailed output
-- **THEN** its file and package churn, coupling relationships, concentration,
-  and history coverage are shown
-- **AND** unrelated history regions are omitted from terminal presentation
+- **WHEN** a package is selected or `--all` is supplied
+- **THEN** relevant actionable and contextual history facts are shown without healthy rows, weak default pairs, or internal processing facts
 
 ### Requirement: Architecture default shows witnesses rather than edge samples
-Default architecture output SHALL show architecture health and rated cycle
-witnesses only. It SHALL NOT select arbitrary ordinary edges as representative
-rows. `--all` and path drill SHALL expose relevant relation detail.
+Default `ARCHITECTURE` output SHALL appear only when an architecture finding
+exists and SHALL show rated cycle witnesses without severity words, arbitrary
+edge rows, or edge totals. `--all` and path drill SHALL expose relevant
+relationship detail.
 
 #### Scenario: An acyclic graph has many edges
 - **WHEN** default output is rendered
-- **THEN** no arbitrary edge list appears
-- **AND** detailed output can still inspect the edges
+- **THEN** `ARCHITECTURE` and arbitrary edge totals are absent while detailed path output can still inspect relevant relationships
+
+#### Scenario: A rated cycle exists
+- **WHEN** default output is rendered
+- **THEN** `ARCHITECTURE` shows the cycle witness once with its status glyph
 
 ### Requirement: Default terminal sections do not duplicate evidence
 A retained fact SHALL appear once in the nearest useful default terminal

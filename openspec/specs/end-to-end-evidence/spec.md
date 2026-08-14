@@ -60,21 +60,24 @@ partial-coverage, and fatal outcomes.
 - **AND** analysis is not rerun for rendering
 
 ### Requirement: Terminal evidence is exact and stable
-
-The system SHALL compare committed terminal bytes at widths 120, 80, and 50 and
-SHALL prove that forced color changes only ANSI styling, not visible text.
+The system SHALL compare committed exact terminal bytes for codebase, diff,
+package, directory, and file views at widths 120, 80, and 50. It SHALL prove
+exact glyph code points and one-cell width, rejection of U+EC3F, alignment and
+truncation, `--color always`, `--color never`, `NO_COLOR`, redirect behavior,
+glyph-only ANSI placement, and equality after ANSI stripping.
 
 #### Scenario: Terminal width changes
+- **WHEN** each named report view is rendered at each required width
+- **THEN** every result exactly matches reviewed bytes, preserves relevant facts, recognizable locations, glyphs, and commands, and every ANSI-stripped line fits the requested Unicode display width
+- **AND** direct writer instrumentation records zero unexpected-line safety shortenings for the reviewed 50-column reports and deliberate long-identity fixture, while a synthetic overflow records use of that safety path
 
-- **WHEN** the same detailed report is rendered at each required width
-- **THEN** every result exactly matches its committed expected bytes
-- **AND** no content is lost merely because the terminal is narrow
+#### Scenario: Styling policy changes
+- **WHEN** forced, disabled, automatic, `NO_COLOR`, and redirected modes are compared
+- **THEN** only the required glyphs receive the exact colors and stripping ANSI reproduces plain bytes
 
-#### Scenario: Color is forced
-
-- **WHEN** color-disabled and forced-color results are compared after removing
-  ANSI sequences
-- **THEN** their visible text is byte-for-byte equal
+#### Scenario: Glyph vocabulary is audited
+- **WHEN** public results are scanned by scalar value and display width
+- **THEN** every required glyph is exact and one cell, U+EC3F and redundant status words are absent, and Changed text stays normal
 
 ### Requirement: JSON evidence validates structure and meaning
 Every acceptance JSON result SHALL validate against the version-3 schema and
@@ -137,18 +140,24 @@ installed command from a generated repository outside the source workspace.
   semantic assertions
 
 ### Requirement: Public command evidence covers every revised decision
-Exact terminal and JSON acceptance SHALL cover codebase, path drill, clean
-committed ref-diff, and mixed worktree-diff flows for roles, recovery, packages,
-relations, history, ranking, root labels, witness-only defaults, detailed edges,
-weak coupling, coverage failures, and conflict exit 2.
+Exact acceptance SHALL cover codebase, diff, package, directory, and file flows
+for section relevance, five-area and three-finding limits, rank, architecture
+witnesses, actionable history, detailed and path relationships, grouped
+warnings, simple help and errors, commit singular/plural labels, direct
+relationship wording, closed diff cycle paths, readable edge changes, and the
+glyph-plus-command discover line. It SHALL also cover explained and weak
+coupling evidence in detailed and path views plus direct introduced and removed
+coupling outcomes in diff output.
+JSON, status, stderr, ranking, serial/automatic bytes, work totals, analysis,
+allocation, and performance evidence SHALL prove unchanged behavior.
 
-#### Scenario: A committed branch differs with a clean worktree
-- **WHEN** role, package presence, relation, or history facts change between refs
-- **THEN** exact status, stdout, and stderr contain no worktree-only facts
+#### Scenario: Human output is audited
+- **WHEN** snapshots, help, errors, warnings, and README examples are checked
+- **THEN** required sections and simple phrases appear while removed labels, severity words, processing facts, and forbidden phrases do not
 
-#### Scenario: A real source file fails analysis
-- **WHEN** the fixture causes failure rather than parser recovery
-- **THEN** exact coverage and diagnostics remain and no invented fact appears
+#### Scenario: Machine and analysis output is audited
+- **WHEN** revised terminal flows run through the complete public matrix
+- **THEN** JSON bytes, exit behavior, rank, work counts, analysis facts, allocations, and resource evidence remain unchanged
 
 ### Requirement: Serial and automatic flows preserve bytes and work
 Every named public flow SHALL run with one worker and automatic parallelism.
@@ -160,20 +169,20 @@ renderer totals SHALL equal the exact manifest values for that flow.
 - **THEN** terminal and JSON bytes and exact work totals agree
 
 ### Requirement: Three workload families have privacy-safe acceptance
-After public proof passes, aggregate review SHALL cover self, a private mixed
-application, and a private Rust workspace. Committed evidence SHALL name only
-the workload family and expected outcome categories and SHALL contain no private
-path, source, Git identity, or history.
+After public proof passes, aggregate read-only review SHALL cover self, a
+private mixed application, and a private Rust workspace. Committed evidence
+SHALL name only workload family and outcome categories and SHALL contain no
+private path, source, Git identity, history, or raw terminal output.
 
 #### Scenario: Self is reviewed
-- **WHEN** the current implementation analyzes self
-- **THEN** fixture cycles are gone, package references are valid, root labels are readable, and every default coupling meets the threshold
+- **WHEN** default output is inspected
+- **THEN** it leads with important debt and omits empty optional sections
 
 #### Scenario: Private mixed application is reviewed
-- **WHEN** aggregate outcomes are inspected
-- **THEN** generated schema and client findings are excluded, weak coupling is gone, Rust ownership cycles are gone, substantial hand-written functions remain prominent, and every default coupling meets the threshold
+- **WHEN** default output is inspected
+- **THEN** it leads with primary application findings and generated Rails schema remains outside default debt
 
 #### Scenario: Private Rust workspace is reviewed
-- **WHEN** aggregate outcomes are inspected
-- **THEN** ownership cycles are gone, real high-complexity functions remain visible, and every default coupling meets the threshold
+- **WHEN** default output is inspected
+- **THEN** it leads with useful Rust findings and weak history and graph facts are absent
 
