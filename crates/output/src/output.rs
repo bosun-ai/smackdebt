@@ -5,7 +5,7 @@ use std::fmt;
 use std::io::{self, Write};
 use std::path::{Path, PathBuf};
 
-use anstyle::{AnsiColor, Effects, Style};
+use anstyle::{Ansi256Color, AnsiColor, Style};
 use smackdebt_analysis::{
     ArchitectureFindingKind, Comparison, ComparisonDirection, ComparisonKind, Diagnostic,
     DiagnosticKind, FileId, FileRecord, Finding, Language, Rating, Report, ReportMode, Scope,
@@ -45,10 +45,85 @@ pub fn write_terminal(
     options: TerminalOptions,
 ) -> io::Result<()> {
     let presentation = Presentation::new(report, selected_scope, options.all);
-    Renderer::new(writer, options).write(&presentation)
+    let mut width_writer = WidthWriter::new(writer, options.width);
+    Renderer::new(&mut width_writer, options).write(&presentation)?;
+    width_writer.finish()?;
+    #[cfg(feature = "width-test-checks")]
+    assert_eq!(
+        width_writer.truncations(),
+        0,
+        "structured terminal layout reached the safety shortening"
+    );
+    Ok(())
 }
 
-#[derive(Clone, Copy)]
+struct WidthWriter<'a, W> {
+    writer: &'a mut W,
+    width: usize,
+    line: Vec<u8>,
+    truncations: usize,
+}
+
+impl<'a, W: Write> WidthWriter<'a, W> {
+    fn new(writer: &'a mut W, width: usize) -> Self {
+        Self {
+            writer,
+            width,
+            line: Vec::new(),
+            truncations: 0,
+        }
+    }
+
+    fn finish(&mut self) -> io::Result<()> {
+        if !self.line.is_empty() {
+            self.flush_line(false)?;
+        }
+        self.writer.flush()
+    }
+
+    fn flush_line(&mut self, newline: bool) -> io::Result<()> {
+        let line = std::str::from_utf8(&self.line)
+            .map_err(|error| io::Error::new(io::ErrorKind::InvalidData, error))?;
+        if ansi_display_width(line) <= self.width {
+            self.writer.write_all(&self.line)?;
+        } else {
+            self.truncations += 1;
+            self.writer
+                .write_all(truncate_ansi_end(line, self.width).as_bytes())?;
+        }
+        if newline {
+            self.writer.write_all(b"\n")?;
+        }
+        self.line.clear();
+        Ok(())
+    }
+
+    #[cfg(any(test, feature = "width-test-checks"))]
+    const fn truncations(&self) -> usize {
+        self.truncations
+    }
+}
+
+impl<W: Write> Write for WidthWriter<'_, W> {
+    fn write(&mut self, buffer: &[u8]) -> io::Result<usize> {
+        let mut start = 0;
+        for (index, byte) in buffer.iter().enumerate() {
+            if *byte == b'\n' {
+                self.line.extend_from_slice(&buffer[start..index]);
+                self.flush_line(true)?;
+                start = index + 1;
+            }
+        }
+        self.line.extend_from_slice(&buffer[start..]);
+        Ok(buffer.len())
+    }
+
+    fn flush(&mut self) -> io::Result<()> {
+        self.finish()
+    }
+}
+
+#[derive(Clone, Copy, Eq, PartialEq)]
 enum Layout {
     Full,
     Compact,
@@ -65,28 +140,15 @@ impl Layout {
             Self::Stacked
         }
     }
-
-    const fn bar_width(self) -> usize {
-        match self {
-            Self::Full => 12,
-            Self::Compact => 8,
-            Self::Stacked => 10,
-        }
-    }
 }
 
 struct Presentation<'a> {
     report: &'a Report,
     selected: Option<&'a Scope>,
-    displayed: Option<&'a Scope>,
     breadcrumbs: Vec<&'a str>,
     areas: Vec<&'a Scope>,
-    quiet_areas: usize,
-    omitted_areas: usize,
     findings: Vec<&'a Finding>,
-    omitted_findings: usize,
     comparisons: Vec<&'a Comparison>,
-    omitted_comparisons: usize,
     drill: Option<PathBuf>,
 }
 
@@ -113,33 +175,22 @@ impl<'a> Presentation<'a> {
         }
 
         let mut areas = displayed.map_or_else(Vec::new, |scope| display_children(report, scope));
-        let mut quiet_areas = 0;
         match report.mode() {
             ReportMode::Codebase => {
                 areas.sort_by(|left, right| codebase_child_order(left, right));
-                quiet_areas = areas
-                    .iter()
-                    .filter(|area| area.health().debt() == 0)
-                    .count();
-                if !all {
-                    areas.retain(|area| area.health().debt() > 0);
-                }
+                areas.retain(|area| area.health().debt() > 0);
             }
-            ReportMode::Diff => areas.sort_by(|left, right| diff_child_order(left, right)),
+            ReportMode::Diff => {
+                areas.sort_by(|left, right| diff_child_order(left, right));
+                areas.retain(|area| area.diff().total() > 0);
+            }
         }
-        let omitted_areas = if all {
-            0
-        } else {
-            areas.len().saturating_sub(10)
-        };
-        if omitted_areas > 0 {
-            areas.truncate(10);
+        if !all && areas.len() > 5 {
+            areas.truncate(5);
         }
 
         let mut findings = Vec::new();
         let mut comparisons = Vec::new();
-        let mut omitted_findings = 0;
-        let mut omitted_comparisons = 0;
         if let Some(scope) = displayed {
             findings = scope
                 .findings()
@@ -155,7 +206,6 @@ impl<'a> Presentation<'a> {
             } else {
                 findings.len().min(3)
             };
-            omitted_findings = findings.len() - finding_limit;
             findings.truncate(finding_limit);
 
             comparisons = scope
@@ -173,7 +223,6 @@ impl<'a> Presentation<'a> {
             } else {
                 comparisons.len().min(3)
             };
-            omitted_comparisons = comparisons.len() - comparison_limit;
             comparisons.truncate(comparison_limit);
         }
         let drill = if report.mode() == ReportMode::Codebase {
@@ -185,15 +234,10 @@ impl<'a> Presentation<'a> {
         Self {
             report,
             selected,
-            displayed,
             breadcrumbs,
             areas,
-            quiet_areas,
-            omitted_areas,
             findings,
-            omitted_findings,
             comparisons,
-            omitted_comparisons,
             drill,
         }
     }
@@ -248,27 +292,27 @@ impl<'a, W: Write> Renderer<'a, W> {
         for breadcrumb in &view.breadcrumbs {
             writeln!(
                 self.writer,
-                "{}  ↓ {breadcrumb}{}",
-                self.theme.dim.0, self.theme.dim.1
+                "  {}",
+                middle_truncate(breadcrumb, self.options.width.saturating_sub(2))
             )?;
         }
         match view.report.mode() {
             ReportMode::Codebase => self.write_codebase_areas(view)?,
             ReportMode::Diff => self.write_diff_areas(view)?,
         }
+        self.write_details(view)?;
         self.write_architecture(view)?;
         self.write_evolution(view)?;
-        self.write_details(view)?;
-        self.write_diagnostics(view.report.diagnostics())?;
+        self.write_diagnostics(view)?;
         if let Some(path) = &view.drill {
             writeln!(self.writer)?;
-            self.theme
-                .write(self.writer, Role::Navigation, "→ Explore")?;
-            if path == Path::new(".") {
-                writeln!(self.writer, " repository root: smackdebt .")?;
-            } else {
-                writeln!(self.writer, ": smackdebt {}", path.display())?;
-            }
+            self.theme.write_glyph(self.writer, Glyph::Discover)?;
+            let path = path.to_string_lossy();
+            writeln!(
+                self.writer,
+                " smackdebt {}",
+                middle_truncate(&path, self.options.width.saturating_sub(12))
+            )?;
         }
         Ok(())
     }
@@ -279,11 +323,6 @@ impl<'a, W: Write> Renderer<'a, W> {
         };
         let report = view.report;
         let finding_ids = scope.architecture_findings();
-        let high = finding_ids
-            .iter()
-            .filter(|id| report.architecture_findings()[id.index()].rating() == Rating::High)
-            .count();
-        let watch = finding_ids.len().saturating_sub(high);
         let relevant_edges: Vec<_> = report
             .dependency_edges()
             .iter()
@@ -292,32 +331,41 @@ impl<'a, W: Write> Renderer<'a, W> {
                     || file_belongs_to_scope(report, edge.target(), scope)
             })
             .collect();
+        let show_relationships = self.options.all || scope.kind() != ScopeKind::Repository;
+        let comparisons = scope
+            .architecture_comparisons()
+            .iter()
+            .map(|id| &report.architecture_comparisons()[id.index()])
+            .filter(|comparison| {
+                show_relationships
+                    || matches!(
+                        comparison.kind(),
+                        smackdebt_analysis::ArchitectureComparisonKind::CycleIntroduced
+                            | smackdebt_analysis::ArchitectureComparisonKind::CycleRemoved
+                    )
+            })
+            .collect::<Vec<_>>();
+        let has_relationships = show_relationships
+            && (!relevant_edges.is_empty()
+                || report
+                    .external_dependencies()
+                    .iter()
+                    .any(|value| file_belongs_to_scope(report, value.file(), scope))
+                || report
+                    .resolution_diagnostics()
+                    .iter()
+                    .any(|value| file_belongs_to_scope(report, value.file(), scope)));
+        let has_findings = match report.mode() {
+            ReportMode::Codebase => !finding_ids.is_empty(),
+            ReportMode::Diff => !comparisons.is_empty(),
+        };
+        if !has_findings && !has_relationships {
+            return Ok(());
+        }
         writeln!(self.writer)?;
-        self.heading_line(if report.mode() == ReportMode::Codebase {
-            "ARCHITECTURE"
-        } else {
-            "ARCHITECTURE CHANGE"
-        })?;
-        let coverage = report.dependency_coverage();
-        writeln!(
-            self.writer,
-            "{} internal · {} external · {} unresolved · {} ambiguous",
-            Grouped(coverage.internal() as usize),
-            Grouped(coverage.external() as usize),
-            Grouped(coverage.unresolved() as usize),
-            Grouped(coverage.ambiguous() as usize)
-        )?;
+        self.heading_line("ARCHITECTURE")?;
         match report.mode() {
             ReportMode::Codebase => {
-                self.theme.write(self.writer, Role::Bad, "▲")?;
-                write!(self.writer, " {} high · ", Grouped(high))?;
-                self.theme.write(self.writer, Role::Watch, "●")?;
-                writeln!(
-                    self.writer,
-                    " {} watch · {} internal edges",
-                    Grouped(watch),
-                    Grouped(relevant_edges.len())
-                )?;
                 let limit = if self.options.all {
                     finding_ids.len()
                 } else {
@@ -325,170 +373,310 @@ impl<'a, W: Write> Renderer<'a, W> {
                 };
                 for id in finding_ids.iter().take(limit) {
                     let finding = &report.architecture_findings()[id.index()];
-                    let marker = if finding.rating() == Rating::High {
-                        "▲ HIGH"
+                    let glyph = if finding.rating() == Rating::High {
+                        Glyph::High
                     } else {
-                        "● WATCH"
+                        Glyph::Watch
                     };
+                    self.theme.write_glyph(self.writer, glyph)?;
                     writeln!(
                         self.writer,
-                        "{marker}  {}",
+                        " {}",
                         architecture_finding_name(finding.kind())
                     )?;
-                    if !finding.files().is_empty() {
-                        write!(self.writer, "        ")?;
-                        for (index, file) in finding
-                            .files()
+                    if !finding.witness_edges().is_empty() {
+                        let mut edges = finding
+                            .witness_edges()
                             .iter()
-                            .filter_map(|id| report.files().get(id.index()))
-                            .enumerate()
-                        {
-                            if index > 0 {
-                                write!(self.writer, " → ")?;
+                            .filter_map(|id| report.dependency_edges().get(id.index()));
+                        if let Some(first) = edges.next() {
+                            if self.layout == Layout::Stacked {
+                                self.write_witness_path(
+                                    report.files()[first.source().index()].path(),
+                                    false,
+                                )?;
+                                self.write_witness_path(
+                                    report.files()[first.target().index()].path(),
+                                    true,
+                                )?;
+                                for edge in edges {
+                                    self.write_witness_path(
+                                        report.files()[edge.target().index()].path(),
+                                        true,
+                                    )?;
+                                }
+                            } else {
+                                write!(
+                                    self.writer,
+                                    "        {} → {}",
+                                    report.files()[first.source().index()].path(),
+                                    report.files()[first.target().index()].path()
+                                )?;
+                                for edge in edges {
+                                    write!(
+                                        self.writer,
+                                        " → {}",
+                                        report.files()[edge.target().index()].path()
+                                    )?;
+                                }
+                                writeln!(self.writer)?;
                             }
-                            write!(self.writer, "{}", file.path())?;
                         }
-                        writeln!(self.writer)?;
                     }
                 }
-                if self.options.all || scope.kind() != ScopeKind::Repository {
-                    for edge in &relevant_edges {
-                        let source = report
-                            .files()
-                            .get(edge.source().index())
-                            .map_or("?", FileRecord::path);
-                        let target = report
-                            .files()
-                            .get(edge.target().index())
-                            .map_or("?", FileRecord::path);
-                        writeln!(
-                            self.writer,
-                            "  {source} → {target} · {} · {}/{} · {} references",
-                            relation_label(edge.relation()),
-                            history_role_name(edge.role()),
-                            history_trust_name(edge.trust()),
-                            edge.references(),
-                        )?;
-                    }
-                    for dependency in report
-                        .external_dependencies()
-                        .iter()
-                        .filter(|value| file_belongs_to_scope(report, value.file(), scope))
-                    {
-                        writeln!(
-                            self.writer,
-                            "  {} → {} · external {} · {}/{} · {} references",
-                            report.files()[dependency.file().index()].path(),
-                            dependency.target(),
-                            relation_label(dependency.relation()),
-                            history_role_name(dependency.role()),
-                            history_trust_name(dependency.trust()),
-                            dependency.references(),
-                        )?;
-                    }
-                    for diagnostic in report
-                        .resolution_diagnostics()
-                        .iter()
-                        .filter(|value| file_belongs_to_scope(report, value.file(), scope))
-                    {
-                        writeln!(
-                            self.writer,
-                            "  {}:{} → {} · {} {} · {}/{}",
-                            report.files()[diagnostic.file().index()].path(),
-                            diagnostic.span().start_line(),
-                            diagnostic.target(),
-                            match diagnostic.kind() {
-                                smackdebt_analysis::ResolutionIssueKind::Unresolved => "unresolved",
-                                smackdebt_analysis::ResolutionIssueKind::Ambiguous => "ambiguous",
-                            },
-                            relation_label(diagnostic.relation()),
-                            history_role_name(diagnostic.role()),
-                            history_trust_name(diagnostic.trust()),
-                        )?;
-                    }
+                if show_relationships {
+                    self.write_resolved_edges(report, &relevant_edges)?;
+                    self.write_other_relations(report, scope)?;
                 }
             }
             ReportMode::Diff => {
-                let ids = scope.architecture_comparisons();
-                let mut worse = 0usize;
-                let mut better = 0usize;
-                let mut changed = 0usize;
-                for id in ids {
-                    match report.architecture_comparisons()[id.index()].direction() {
-                        ComparisonDirection::Worse => worse += 1,
-                        ComparisonDirection::Better => better += 1,
-                        ComparisonDirection::Changed => changed += 1,
-                    }
-                }
-                writeln!(
-                    self.writer,
-                    "▲ WORSE {} · ▼ BETTER {} · ● CHANGED {}",
-                    Grouped(worse),
-                    Grouped(better),
-                    Grouped(changed)
-                )?;
-                let show_details = self.options.all || scope.kind() != ScopeKind::Repository;
-                for id in ids.iter().filter(|id| {
-                    show_details
-                        || matches!(
-                            report.architecture_comparisons()[id.index()].kind(),
-                            smackdebt_analysis::ArchitectureComparisonKind::CycleIntroduced
-                                | smackdebt_analysis::ArchitectureComparisonKind::CycleRemoved
-                        )
-                }) {
-                    let comparison = &report.architecture_comparisons()[id.index()];
-                    let label = match (comparison.kind(), comparison.relation()) {
-                        (
-                            smackdebt_analysis::ArchitectureComparisonKind::EdgeAdded,
-                            Some(smackdebt_analysis::StaticRelationKind::ModuleOwnership),
-                        ) => "module ownership added",
-                        (
-                            smackdebt_analysis::ArchitectureComparisonKind::EdgeRemoved,
-                            Some(smackdebt_analysis::StaticRelationKind::ModuleOwnership),
-                        ) => "module ownership removed",
-                        (smackdebt_analysis::ArchitectureComparisonKind::EdgeAdded, _) => {
-                            "edge added"
-                        }
-                        (smackdebt_analysis::ArchitectureComparisonKind::EdgeRemoved, _) => {
-                            "edge removed"
-                        }
-                        (smackdebt_analysis::ArchitectureComparisonKind::CycleIntroduced, _) => {
-                            "package cycle introduced"
-                        }
-                        (smackdebt_analysis::ArchitectureComparisonKind::CycleRemoved, _) => {
-                            "package cycle removed"
-                        }
+                for comparison in comparisons {
+                    let glyph = match comparison.direction() {
+                        ComparisonDirection::Worse => Glyph::Worse,
+                        ComparisonDirection::Better => Glyph::Better,
+                        ComparisonDirection::Changed => Glyph::Changed,
                     };
-                    let marker = match comparison.direction() {
-                        ComparisonDirection::Worse => "▲ WORSE",
-                        ComparisonDirection::Better => "▼ BETTER",
-                        ComparisonDirection::Changed => "● CHANGED",
-                    };
-                    write!(self.writer, "{marker}  {label}")?;
-                    for package in comparison.packages() {
-                        if let Some(name) = package_name(report, package.index()) {
-                            write!(self.writer, "  {name}")?;
-                        }
-                    }
-                    if !comparison.witness().is_empty() {
-                        write!(self.writer, "  witness")?;
-                        for package in comparison.witness() {
-                            if let Some(name) = package_name(report, package.index()) {
-                                write!(self.writer, "  {name}")?;
+                    self.theme.write_glyph(self.writer, glyph)?;
+                    match comparison.kind() {
+                        smackdebt_analysis::ArchitectureComparisonKind::CycleIntroduced
+                        | smackdebt_analysis::ArchitectureComparisonKind::CycleRemoved => {
+                            writeln!(
+                                self.writer,
+                                " package cycle {}",
+                                if matches!(
+                                    comparison.kind(),
+                                    smackdebt_analysis::ArchitectureComparisonKind::CycleIntroduced
+                                ) {
+                                    "introduced"
+                                } else {
+                                    "removed"
+                                }
+                            )?;
+                            if !comparison.witness().is_empty() {
+                                for (index, package) in comparison.witness().iter().enumerate() {
+                                    let name = package_name(report, package.index()).unwrap_or("?");
+                                    if self.layout == Layout::Stacked {
+                                        self.write_witness_path(name, index > 0)?;
+                                    } else {
+                                        if index == 0 {
+                                            write!(self.writer, "        ")?;
+                                        } else {
+                                            write!(self.writer, " → ")?;
+                                        }
+                                        write!(self.writer, "{name}")?;
+                                    }
+                                }
+                                if self.layout != Layout::Stacked {
+                                    writeln!(self.writer)?;
+                                }
                             }
                         }
+                        smackdebt_analysis::ArchitectureComparisonKind::EdgeAdded
+                        | smackdebt_analysis::ArchitectureComparisonKind::EdgeRemoved => {
+                            let change = if matches!(
+                                comparison.kind(),
+                                smackdebt_analysis::ArchitectureComparisonKind::EdgeAdded
+                            ) {
+                                "added"
+                            } else {
+                                "removed"
+                            };
+                            let source = comparison
+                                .files()
+                                .first()
+                                .and_then(|id| report.files().get(id.index()))
+                                .map_or("?", FileRecord::path);
+                            let target = comparison
+                                .files()
+                                .get(1)
+                                .and_then(|id| report.files().get(id.index()))
+                                .map_or("?", FileRecord::path);
+                            if self.layout == Layout::Stacked {
+                                self.write_relation_identity(
+                                    source,
+                                    target,
+                                    comparison.relation(),
+                                )?;
+                                writeln!(self.writer, "        {change}")?;
+                                self.write_stacked_evidence(comparison.role(), comparison.trust())?;
+                                continue;
+                            }
+                            match comparison.relation() {
+                                Some(smackdebt_analysis::StaticRelationKind::ModuleOwnership) => {
+                                    write!(self.writer, " {source} owns {target} · {change}")?;
+                                }
+                                _ => {
+                                    write!(self.writer, " {source} → {target} · {change}")?;
+                                }
+                            }
+                            self.write_evidence_suffix(comparison.role(), comparison.trust())?;
+                            writeln!(self.writer)?;
+                        }
                     }
-                    if let (Some(before), Some(after)) = (
-                        comparison.before_references(),
-                        comparison.after_references(),
-                    ) {
-                        write!(self.writer, "  references {before} → {after}")?;
-                    }
-                    writeln!(self.writer)?;
+                }
+                if show_relationships {
+                    self.write_resolved_edges(report, &relevant_edges)?;
+                    self.write_other_relations(report, scope)?;
                 }
             }
         }
         Ok(())
+    }
+
+    fn write_witness_path(&mut self, path: &str, arrow: bool) -> io::Result<()> {
+        let prefix = if arrow { "        → " } else { "        " };
+        writeln!(
+            self.writer,
+            "{prefix}{}",
+            middle_truncate(path, self.options.width.saturating_sub(10))
+        )
+    }
+
+    fn write_relation_identity(
+        &mut self,
+        source: &str,
+        target: &str,
+        relation: Option<smackdebt_analysis::StaticRelationKind>,
+    ) -> io::Result<()> {
+        writeln!(
+            self.writer,
+            "  {}",
+            middle_truncate(source, self.options.width.saturating_sub(2))
+        )?;
+        let verb = if relation == Some(smackdebt_analysis::StaticRelationKind::ModuleOwnership) {
+            "owns"
+        } else {
+            "→"
+        };
+        writeln!(
+            self.writer,
+            "        {verb} {}",
+            middle_truncate(target, self.options.width.saturating_sub(9 + verb.len()))
+        )
+    }
+
+    fn write_resolved_edges(
+        &mut self,
+        report: &Report,
+        edges: &[&smackdebt_analysis::DependencyEdge],
+    ) -> io::Result<()> {
+        for edge in edges {
+            let source = report
+                .files()
+                .get(edge.source().index())
+                .map_or("?", FileRecord::path);
+            let target = report
+                .files()
+                .get(edge.target().index())
+                .map_or("?", FileRecord::path);
+            if self.layout == Layout::Stacked {
+                self.write_relation_identity(source, target, Some(edge.relation()))?;
+                if edge.relation() == smackdebt_analysis::StaticRelationKind::Uses {
+                    writeln!(
+                        self.writer,
+                        "        {}",
+                        Counted::new(edge.references() as usize, "import", "imports")
+                    )?;
+                }
+                self.write_stacked_evidence(Some(edge.role()), Some(edge.trust()))?;
+                continue;
+            }
+            match edge.relation() {
+                smackdebt_analysis::StaticRelationKind::Uses => write!(
+                    self.writer,
+                    "  {source} → {target} · {}",
+                    Counted::new(edge.references() as usize, "import", "imports")
+                )?,
+                smackdebt_analysis::StaticRelationKind::ModuleOwnership => {
+                    write!(self.writer, "  {source} owns {target}")?;
+                }
+            }
+            self.write_evidence_suffix(Some(edge.role()), Some(edge.trust()))?;
+            writeln!(self.writer)?;
+        }
+        Ok(())
+    }
+
+    fn write_other_relations(&mut self, report: &Report, scope: &Scope) -> io::Result<()> {
+        for dependency in report
+            .external_dependencies()
+            .iter()
+            .filter(|value| file_belongs_to_scope(report, value.file(), scope))
+        {
+            let source = report.files()[dependency.file().index()].path();
+            if self.layout == Layout::Stacked {
+                self.write_relation_identity(source, dependency.target(), None)?;
+                writeln!(self.writer, "        external")?;
+                self.write_stacked_evidence(Some(dependency.role()), Some(dependency.trust()))?;
+                continue;
+            }
+            write!(
+                self.writer,
+                "  {} → {} · external",
+                source,
+                dependency.target(),
+            )?;
+            self.write_evidence_suffix(Some(dependency.role()), Some(dependency.trust()))?;
+            writeln!(self.writer)?;
+        }
+        for diagnostic in report
+            .resolution_diagnostics()
+            .iter()
+            .filter(|value| file_belongs_to_scope(report, value.file(), scope))
+        {
+            let source = report.files()[diagnostic.file().index()].path();
+            let status = match diagnostic.kind() {
+                smackdebt_analysis::ResolutionIssueKind::Unresolved => "could not be matched",
+                smackdebt_analysis::ResolutionIssueKind::Ambiguous => "matched more than one file",
+            };
+            if self.layout == Layout::Stacked {
+                let location = format!("{source}:{}", diagnostic.span().start_line());
+                writeln!(
+                    self.writer,
+                    "  {}",
+                    middle_truncate(&location, self.options.width.saturating_sub(2))
+                )?;
+                writeln!(
+                    self.writer,
+                    "        → {}",
+                    middle_truncate(diagnostic.target(), self.options.width.saturating_sub(10))
+                )?;
+                writeln!(self.writer, "        {status}")?;
+                self.write_stacked_evidence(Some(diagnostic.role()), Some(diagnostic.trust()))?;
+                continue;
+            }
+            write!(
+                self.writer,
+                "  {}:{} → {} · {}",
+                source,
+                diagnostic.span().start_line(),
+                diagnostic.target(),
+                status,
+            )?;
+            self.write_evidence_suffix(Some(diagnostic.role()), Some(diagnostic.trust()))?;
+            writeln!(self.writer)?;
+        }
+        Ok(())
+    }
+
+    fn write_stacked_evidence(
+        &mut self,
+        role: Option<SourceRole>,
+        trust: Option<SourceTrust>,
+    ) -> io::Result<()> {
+        let suffix = evidence_suffix(role, trust);
+        if !suffix.is_empty() {
+            writeln!(self.writer, "        {}", suffix.trim_start_matches(" · "))?;
+        }
+        Ok(())
+    }
+
+    fn write_evidence_suffix(
+        &mut self,
+        role: Option<SourceRole>,
+        trust: Option<SourceTrust>,
+    ) -> io::Result<()> {
+        write!(self.writer, "{}", evidence_suffix(role, trust))
     }
 
     fn write_evolution(&mut self, view: &Presentation<'_>) -> io::Result<()> {
@@ -496,52 +684,6 @@ impl<'a, W: Write> Renderer<'a, W> {
             return Ok(());
         };
         let report = view.report;
-        writeln!(self.writer)?;
-        self.heading_line(if report.mode() == ReportMode::Codebase {
-            "EVOLUTION"
-        } else {
-            "EVOLUTION CONTEXT"
-        })?;
-        let coverage = report.history_coverage();
-        match coverage.availability() {
-            smackdebt_analysis::HistoryAvailability::Complete => writeln!(
-                self.writer,
-                "complete local stream · {} commits",
-                Grouped(coverage.commits() as usize)
-            )?,
-            smackdebt_analysis::HistoryAvailability::Incomplete => writeln!(
-                self.writer,
-                "incomplete local stream · {} commits",
-                Grouped(coverage.commits() as usize)
-            )?,
-            smackdebt_analysis::HistoryAvailability::Unavailable => {
-                writeln!(
-                    self.writer,
-                    "history unavailable{}",
-                    coverage
-                        .reason()
-                        .map_or(String::new(), |reason| format!(": {reason}"))
-                )?;
-                return Ok(());
-            }
-        }
-        let observed_changes = coverage.observed_changes();
-        writeln!(
-            self.writer,
-            "eligible mapping {}/{} changes · {}% · {} commits",
-            Grouped(coverage.mapped_eligible_changes() as usize),
-            Grouped(observed_changes as usize),
-            percent(coverage.mapped_eligible_changes(), observed_changes),
-            Grouped(coverage.eligible_commits() as usize),
-        )?;
-        writeln!(
-            self.writer,
-            "{} context · {} excluded · {} uncounted · {} rename gaps",
-            Grouped(coverage.context_changes() as usize),
-            Grouped(coverage.excluded_changes() as usize),
-            Grouped(coverage.uncounted_changes() as usize),
-            Grouped(coverage.rename_gaps() as usize)
-        )?;
         let relevant_packages = report
             .files()
             .iter()
@@ -550,62 +692,23 @@ impl<'a, W: Write> Renderer<'a, W> {
             .collect::<std::collections::BTreeSet<_>>();
         let relevant =
             |package: smackdebt_analysis::PackageId| relevant_packages.contains(&package);
+        let detail = self.options.all || scope.kind() != ScopeKind::Repository;
         let mut histories = report
             .package_history()
             .iter()
             .filter(|value| relevant(value.package()))
-            .filter(|value| self.options.all || value.affects_findings())
+            .filter(|value| detail && value.touches() > 0)
             .collect::<Vec<_>>();
         histories.sort_by_key(|value| (Reverse(value.touches()), value.package()));
-        if !self.options.all {
+        if !detail {
             let mut displayed_packages = std::collections::BTreeSet::new();
             histories.retain(|value| displayed_packages.insert(value.package()));
-        }
-        for value in histories
-            .iter()
-            .take(if self.options.all { histories.len() } else { 3 })
-        {
-            let name = package_name(report, value.package().index()).unwrap_or("?");
-            let concentration = report.contributor_concentration().iter().find(|item| {
-                item.package() == value.package()
-                    && item.role() == value.role()
-                    && item.trust() == value.trust()
-            });
-            write!(
-                self.writer,
-                "  {name} · {} touches · +{} -{}",
-                value.touches(),
-                Grouped(value.added_lines() as usize),
-                Grouped(value.deleted_lines() as usize)
-            )?;
-            if let Some(concentration) = concentration {
-                write!(
-                    self.writer,
-                    " · {} contributors · {}% top share",
-                    concentration.contributor_count(),
-                    percent(concentration.numerator(), concentration.denominator())
-                )?;
-            }
-            if self.options.all
-                || value.role() != smackdebt_analysis::SourceRole::Primary
-                || value.trust() != smackdebt_analysis::SourceTrust::Trusted
-            {
-                write!(
-                    self.writer,
-                    " · {}/{}",
-                    history_role_name(value.role()),
-                    history_trust_name(value.trust())
-                )?;
-            }
-            writeln!(self.writer)?;
         }
         let mut files = report
             .file_history()
             .iter()
             .filter(|value| {
-                value.touches() > 0
-                    && file_belongs_to_scope(report, value.file(), scope)
-                    && (self.options.all || value.affects_findings())
+                detail && value.touches() > 0 && file_belongs_to_scope(report, value.file(), scope)
             })
             .collect::<Vec<_>>();
         files.sort_by(|left, right| {
@@ -617,34 +720,30 @@ impl<'a, W: Write> Renderer<'a, W> {
                         .cmp(report.files()[right.file().index()].path())
                 })
         });
-        let file_limit = if self.options.all { files.len() } else { 3 };
-        for value in files.into_iter().take(file_limit) {
-            writeln!(
-                self.writer,
-                "    file {} · {} touches · +{} -{}",
-                report.files()[value.file().index()].path(),
-                value.touches(),
-                Grouped(value.added_lines() as usize),
-                Grouped(value.deleted_lines() as usize)
-            )?;
-            if self.options.all
-                || value.role() != smackdebt_analysis::SourceRole::Primary
-                || value.trust() != smackdebt_analysis::SourceTrust::Trusted
-            {
-                writeln!(
-                    self.writer,
-                    "      evidence {}/{}",
-                    history_role_name(value.role()),
-                    history_trust_name(value.trust())
-                )?;
-            }
-        }
-        let finding_couplings = scope
+        let mut finding_couplings = scope
             .evolutionary_findings()
             .iter()
             .map(|id| report.evolutionary_findings()[id.index()].coupling())
             .collect::<Vec<_>>();
-        let mut couplings = if self.options.all {
+        if !detail {
+            finding_couplings.sort_by(|left, right| {
+                Reverse(left.shared_commits())
+                    .cmp(&Reverse(right.shared_commits()))
+                    .then_with(|| right.similarity().total_cmp(&left.similarity()))
+                    .then_with(|| {
+                        package_name(report, left.left().index())
+                            .cmp(&package_name(report, right.left().index()))
+                    })
+                    .then_with(|| {
+                        package_name(report, left.right().index())
+                            .cmp(&package_name(report, right.right().index()))
+                    })
+                    .then_with(|| left.left().cmp(&right.left()))
+                    .then_with(|| left.right().cmp(&right.right()))
+            });
+            finding_couplings.truncate(3);
+        }
+        let mut couplings = if detail {
             report
                 .change_coupling()
                 .iter()
@@ -664,7 +763,7 @@ impl<'a, W: Write> Renderer<'a, W> {
                 .map(|pair| (pair, true))
                 .collect::<Vec<_>>()
         };
-        if self.options.all {
+        if detail {
             let missing_findings = finding_couplings
                 .iter()
                 .copied()
@@ -677,57 +776,165 @@ impl<'a, W: Write> Renderer<'a, W> {
                 .collect::<Vec<_>>();
             couplings.extend(missing_findings);
         }
-        for pair in couplings
-            .iter()
-            .take(if self.options.all { couplings.len() } else { 3 })
-        {
-            let (pair, finding) = pair;
-            let explained = report.package_edges().iter().any(|edge| {
-                (edge.source() == pair.left() && edge.target() == pair.right())
-                    || (edge.source() == pair.right() && edge.target() == pair.left())
-            });
+        let has_comparisons =
+            report.mode() == ReportMode::Diff && !scope.evolutionary_comparisons().is_empty();
+        if couplings.is_empty() && histories.is_empty() && files.is_empty() && !has_comparisons {
+            return Ok(());
+        }
+        writeln!(self.writer)?;
+        self.heading_line("HISTORY")?;
+        for (pair, finding) in &couplings {
+            let left = package_name(report, pair.left().index()).unwrap_or("?");
+            let right = package_name(report, pair.right().index()).unwrap_or("?");
+            if *finding {
+                self.theme.write_glyph(self.writer, Glyph::Watch)?;
+                write!(self.writer, " ")?;
+            } else {
+                write!(self.writer, "  ")?;
+            }
+            if self.layout == Layout::Stacked {
+                let identity_width = self.options.width.saturating_sub(4);
+                let identity = format!("{left} ↔ {right}");
+                writeln!(
+                    self.writer,
+                    "{}",
+                    middle_truncate(&identity, identity_width)
+                )?;
+                writeln!(
+                    self.writer,
+                    "        {} of {} commits · {}%",
+                    pair.shared_commits(),
+                    pair.union_commits(),
+                    (pair.similarity() * 100.0).round() as u32,
+                )?;
+                writeln!(
+                    self.writer,
+                    "        {}",
+                    if coupling_has_code_dependency(report, *pair) {
+                        "code dependency exists"
+                    } else {
+                        "no code dependency"
+                    }
+                )?;
+                continue;
+            }
             write!(
                 self.writer,
-                "{}coupling {} ↔ {} · {}/{} shared commits · {}% similarity · {}",
-                if *finding { "● WATCH  " } else { "  " },
-                package_name(report, pair.left().index()).unwrap_or("?"),
-                package_name(report, pair.right().index()).unwrap_or("?"),
+                "{} ↔ {} changed together in {} of {} commits · {}% · ",
+                left,
+                right,
                 pair.shared_commits(),
                 pair.union_commits(),
-                percent(pair.shared_commits(), pair.union_commits()),
-                if explained {
-                    "static use"
+                (pair.similarity() * 100.0).round() as u32,
+            )?;
+            writeln!(
+                self.writer,
+                "{}",
+                if coupling_has_code_dependency(report, *pair) {
+                    "code dependency exists"
                 } else {
-                    "no eligible static use"
+                    "no code dependency"
                 }
             )?;
-            if let Some(evidence) = pair.evidence() {
-                write!(
+        }
+        for value in &histories {
+            let name = package_name(report, value.package().index()).unwrap_or("?");
+            if self.layout == Layout::Stacked {
+                writeln!(
                     self.writer,
-                    " · {}/{} ↔ {}/{}",
-                    history_role_name(evidence.left_role()),
-                    history_trust_name(evidence.left_trust()),
-                    history_role_name(evidence.right_role()),
-                    history_trust_name(evidence.right_trust())
+                    "  {}",
+                    middle_truncate(name, self.options.width.saturating_sub(2))
                 )?;
+                writeln!(
+                    self.writer,
+                    "        {} · +{} -{}",
+                    Counted::new(value.touches() as usize, "commit", "commits"),
+                    Grouped(value.added_lines() as usize),
+                    Grouped(value.deleted_lines() as usize)
+                )?;
+                continue;
             }
-            writeln!(self.writer)?;
+            writeln!(
+                self.writer,
+                "  {} · {} · +{} -{}",
+                name,
+                Counted::new(value.touches() as usize, "commit", "commits"),
+                Grouped(value.added_lines() as usize),
+                Grouped(value.deleted_lines() as usize)
+            )?;
+        }
+        for value in files {
+            let path = report.files()[value.file().index()].path();
+            if self.layout == Layout::Stacked {
+                writeln!(
+                    self.writer,
+                    "  {}",
+                    middle_truncate(path, self.options.width.saturating_sub(2))
+                )?;
+                writeln!(
+                    self.writer,
+                    "        {} · +{} -{}",
+                    Counted::new(value.touches() as usize, "commit", "commits"),
+                    Grouped(value.added_lines() as usize),
+                    Grouped(value.deleted_lines() as usize)
+                )?;
+                continue;
+            }
+            writeln!(
+                self.writer,
+                "  {} · {} · +{} -{}",
+                path,
+                Counted::new(value.touches() as usize, "commit", "commits"),
+                Grouped(value.added_lines() as usize),
+                Grouped(value.deleted_lines() as usize)
+            )?;
         }
         if report.mode() == ReportMode::Diff {
             for id in scope.evolutionary_comparisons() {
                 let comparison = report.evolutionary_comparisons()[id.index()];
-                let label = match comparison.direction() {
-                    ComparisonDirection::Better => "▼ BETTER",
-                    ComparisonDirection::Worse => "▲ WORSE",
-                    ComparisonDirection::Changed => "● CHANGED",
+                let pair = comparison.coupling();
+                let glyph = match comparison.direction() {
+                    ComparisonDirection::Better => Glyph::Better,
+                    ComparisonDirection::Worse => Glyph::Worse,
+                    ComparisonDirection::Changed => Glyph::Changed,
                 };
+                self.theme.write_glyph(self.writer, glyph)?;
+                let left = package_name(report, pair.left().index()).unwrap_or("?");
+                let right = package_name(report, pair.right().index()).unwrap_or("?");
+                if self.layout == Layout::Stacked {
+                    let identity_width = self.options.width.saturating_sub(4);
+                    let identity = format!("{left} ↔ {right}");
+                    writeln!(
+                        self.writer,
+                        " {}",
+                        middle_truncate(&identity, identity_width)
+                    )?;
+                    writeln!(
+                        self.writer,
+                        "        {}",
+                        match comparison.kind() {
+                            smackdebt_analysis::EvolutionaryComparisonKind::FindingIntroduced => {
+                                "now change together"
+                            }
+                            smackdebt_analysis::EvolutionaryComparisonKind::FindingRemoved => {
+                                "no longer change together"
+                            }
+                        }
+                    )?;
+                    writeln!(self.writer, "        without a code dependency")?;
+                    continue;
+                }
                 writeln!(
                     self.writer,
-                    "{label}  coupling finding {}",
+                    " {} ↔ {} {}",
+                    left,
+                    right,
                     match comparison.kind() {
                         smackdebt_analysis::EvolutionaryComparisonKind::FindingIntroduced =>
-                            "introduced",
-                        smackdebt_analysis::EvolutionaryComparisonKind::FindingRemoved => "removed",
+                            "now change together without a code dependency",
+                        smackdebt_analysis::EvolutionaryComparisonKind::FindingRemoved => {
+                            "no longer change together without a code dependency"
+                        }
                     }
                 )?;
             }
@@ -736,94 +943,51 @@ impl<'a, W: Write> Renderer<'a, W> {
     }
 
     fn write_header(&mut self, view: &Presentation<'_>) -> io::Result<()> {
-        self.theme.write(self.writer, Role::Brand, "smackdebt")?;
-        write!(self.writer, " · {}", mode_name(view.report.mode()))?;
-        writeln!(self.writer)?;
+        writeln!(self.writer, "smackdebt {}", mode_name(view.report.mode()))?;
+        let selected = terminal_path(view.selected.map_or(".", Scope::name));
         writeln!(
             self.writer,
             "{}",
-            terminal_path(view.selected.map_or(".", Scope::name))
-        )?;
-        if let Some(scope) = view.selected {
-            let coverage = scope.coverage();
-            match view.report.mode() {
-                ReportMode::Codebase => writeln!(
-                    self.writer,
-                    "{} · {} · {}",
-                    Counted::new(package_count(view.report, scope), "package", "packages"),
-                    Counted::new(coverage.selected_files() as usize, "file", "files"),
-                    Counted::new(coverage.source_lines() as usize, "line", "lines")
-                ),
-                ReportMode::Diff => writeln!(
-                    self.writer,
-                    "{} · {} clean",
-                    Counted::new(
-                        coverage.selected_files() as usize,
-                        "source file changed",
-                        "source files changed"
-                    ),
-                    Grouped(coverage.clean_files() as usize)
-                ),
-            }?;
-        }
-        Ok(())
+            middle_truncate(selected, self.options.width)
+        )
     }
 
     fn write_quality(&mut self, _report: &Report, scope: &Scope) -> io::Result<()> {
         let health = scope.health();
         let coverage = scope.coverage();
         writeln!(self.writer)?;
-        self.heading("QUALITY")?;
+        self.heading_line("QUALITY")?;
         writeln!(
             self.writer,
-            "  {} need attention",
-            DisplayPercent::new(health.debt(), health.total())
-        )?;
-        self.theme.write(
-            self.writer,
-            Role::Navigation,
-            &Bar::new(health.debt(), health.total(), self.layout.bar_width()),
-        )?;
-        writeln!(
-            self.writer,
-            "  {} / {} code units",
+            "{} rated {} · {} need attention",
+            Grouped(health.total() as usize),
+            if health.total() == 1 { "unit" } else { "units" },
             Grouped(health.debt() as usize),
-            Grouped(health.total() as usize)
         )?;
-        self.theme.write(self.writer, Role::Bad, "▲")?;
-        write!(self.writer, " {} high · ", Grouped(health.high() as usize))?;
-        self.theme.write(self.writer, Role::Watch, "●")?;
-        writeln!(
-            self.writer,
-            " {} watch · {} healthy",
-            Grouped(health.watch() as usize),
-            Grouped(health.healthy() as usize)
-        )?;
-        let partial = coverage.recovered_files()
+        if health.high() > 0 || health.watch() > 0 {
+            if health.high() > 0 {
+                self.theme.write_glyph(self.writer, Glyph::High)?;
+                write!(self.writer, " {}", Grouped(health.high() as usize))?;
+            }
+            if health.watch() > 0 {
+                if health.high() > 0 {
+                    write!(self.writer, " · ")?;
+                }
+                self.theme.write_glyph(self.writer, Glyph::Watch)?;
+                write!(self.writer, " {}", Grouped(health.watch() as usize))?;
+            }
+            writeln!(self.writer)?;
+        }
+        let gaps = coverage.recovered_files()
             + coverage.unsupported_files()
             + coverage.failed_files()
             + coverage.context_files();
-        if partial == 0 {
-            self.theme.write(self.writer, Role::Good, "✓")?;
+        if gaps > 0 {
+            self.theme.write_glyph(self.writer, Glyph::Warning)?;
             writeln!(
                 self.writer,
-                " all {} analyzed cleanly",
-                Counted::new(
-                    coverage.clean_files() as usize,
-                    "source file",
-                    "source files"
-                )
-            )?;
-        } else {
-            self.theme.write(self.writer, Role::Warning, "!")?;
-            writeln!(
-                self.writer,
-                " {} clean · {} recovered · {} context · {} unsupported · {} failed",
-                Grouped(coverage.clean_files() as usize),
-                Grouped(coverage.recovered_files() as usize),
-                Grouped(coverage.context_files() as usize),
-                Grouped(coverage.unsupported_files() as usize),
-                Grouped(coverage.failed_files() as usize)
+                " {} were not included in quality.",
+                Counted::new(gaps as usize, "source file", "source files")
             )?;
         }
         Ok(())
@@ -832,50 +996,44 @@ impl<'a, W: Write> Renderer<'a, W> {
     fn write_change(&mut self, scope: &Scope) -> io::Result<()> {
         let diff = scope.diff();
         writeln!(self.writer)?;
-        self.heading("CHANGE")?;
-        writeln!(
-            self.writer,
-            "  {} retained units",
-            Grouped(diff.total() as usize)
-        )?;
-        self.theme.write(self.writer, Role::Bad, "▲ WORSE")?;
-        write!(self.writer, " {} · ", Grouped(diff.worse() as usize))?;
-        self.theme.write(self.writer, Role::Good, "▼ BETTER")?;
-        write!(self.writer, " {} · ", Grouped(diff.better() as usize))?;
-        self.theme.write(self.writer, Role::Watch, "● CHANGED")?;
-        writeln!(self.writer, " {}", Grouped(diff.changed() as usize))
+        self.heading_line("QUALITY")?;
+        let mut separator = false;
+        for (value, glyph) in [
+            (diff.worse(), Glyph::Worse),
+            (diff.better(), Glyph::Better),
+            (diff.changed(), Glyph::Changed),
+        ] {
+            if value == 0 {
+                continue;
+            }
+            if separator {
+                write!(self.writer, " · ")?;
+            }
+            self.theme.write_glyph(self.writer, glyph)?;
+            write!(self.writer, " {}", Grouped(value as usize))?;
+            separator = true;
+        }
+        if !separator {
+            write!(self.writer, "No changes")?;
+        }
+        writeln!(self.writer)
     }
 
     fn write_codebase_areas(&mut self, view: &Presentation<'_>) -> io::Result<()> {
-        let Some(scope) = view.displayed else {
+        if view.areas.len() < 2 {
             return Ok(());
-        };
-        if scope.children().is_empty() {
-            return Ok(());
-        }
-        if view.areas.is_empty() {
-            writeln!(self.writer, "\nNo child areas need attention.")?;
-            return self.write_area_omissions(view, true);
         }
         writeln!(self.writer)?;
-        self.heading_line("DEBT BY AREA")?;
+        self.heading_line("AREAS")?;
         match self.layout {
-            Layout::Stacked => self.write_codebase_cards(&view.areas, scope.health().debt())?,
-            Layout::Full | Layout::Compact => {
-                self.write_codebase_table(&view.areas, scope.health().debt())?
-            }
+            Layout::Stacked => self.write_codebase_cards(&view.areas)?,
+            Layout::Full | Layout::Compact => self.write_codebase_table(&view.areas)?,
         }
-        self.write_area_omissions(view, true)
+        Ok(())
     }
 
-    fn write_codebase_table(&mut self, areas: &[&Scope], denominator: u32) -> io::Result<()> {
-        let bar_width = self.layout.bar_width();
-        let fixed = match self.layout {
-            Layout::Full => 49,
-            Layout::Compact => 41,
-            Layout::Stacked => unreachable!(),
-        };
-        let available = self.options.width.saturating_sub(fixed).max(12);
+    fn write_codebase_table(&mut self, areas: &[&Scope]) -> io::Result<()> {
+        let available = self.options.width.saturating_sub(16).max(12);
         let label_width = areas
             .iter()
             .map(|area| UnicodeWidthStr::width(terminal_path(area.name())))
@@ -883,103 +1041,50 @@ impl<'a, W: Write> Renderer<'a, W> {
             .unwrap_or(12)
             .min(available)
             .max(12);
-        writeln!(
-            self.writer,
-            "  {:label_width$}  {:>5}  {:>5}  {:>6}  {:bar_width$}  {:>5}",
-            "area",
-            "high",
-            "watch",
-            "share",
-            "rate",
-            "",
-            label_width = label_width,
-            bar_width = bar_width
-        )?;
         for area in areas {
             let health = area.health();
             let label = middle_truncate(terminal_path(area.name()), label_width);
-            write!(self.writer, "  {}  ", Padded::new(&label, label_width))?;
-            self.table_count(health.high(), Role::Bad, 5)?;
+            write!(self.writer, "{}  ", Padded::new(&label, label_width))?;
+            self.write_status_count(Glyph::High, health.high())?;
             write!(self.writer, "  ")?;
-            self.table_count(health.watch(), Role::Watch, 5)?;
-            write!(
-                self.writer,
-                "  {:>6}  ",
-                DisplayPercent::new(health.debt(), denominator)
-            )?;
-            self.theme.write(
-                self.writer,
-                Role::Navigation,
-                &Bar::new(health.debt(), health.total(), bar_width),
-            )?;
-            writeln!(
-                self.writer,
-                "  {:>5}",
-                DisplayPercent::new(health.debt(), health.total())
-            )?;
+            self.write_status_count(Glyph::Watch, health.watch())?;
+            writeln!(self.writer)?;
         }
         Ok(())
     }
 
-    fn write_codebase_cards(&mut self, areas: &[&Scope], denominator: u32) -> io::Result<()> {
+    fn write_codebase_cards(&mut self, areas: &[&Scope]) -> io::Result<()> {
         for area in areas {
             let health = area.health();
-            let role = if health.high() > 0 {
-                Role::Bad
-            } else {
-                Role::Watch
-            };
-            let marker = if health.high() > 0 { "▲" } else { "●" };
-            self.theme.write(self.writer, role, marker)?;
-            writeln!(self.writer, " {}", terminal_path(area.name()))?;
             writeln!(
                 self.writer,
-                "  {} high · {} watch · {} share",
-                Grouped(health.high() as usize),
-                Grouped(health.watch() as usize),
-                DisplayPercent::new(health.debt(), denominator)
+                "{}",
+                middle_truncate(terminal_path(area.name()), self.options.width)
             )?;
-            write!(self.writer, "  rate ")?;
-            self.theme.write(
-                self.writer,
-                Role::Navigation,
-                &Bar::new(health.debt(), health.total(), self.layout.bar_width()),
-            )?;
-            writeln!(
-                self.writer,
-                " {}",
-                DisplayPercent::new(health.debt(), health.total())
-            )?;
+            write!(self.writer, "  ")?;
+            self.write_status_count(Glyph::High, health.high())?;
+            write!(self.writer, "  ")?;
+            self.write_status_count(Glyph::Watch, health.watch())?;
+            writeln!(self.writer)?;
         }
         Ok(())
     }
 
     fn write_diff_areas(&mut self, view: &Presentation<'_>) -> io::Result<()> {
-        let Some(scope) = view.displayed else {
-            return Ok(());
-        };
-        if scope.children().is_empty() {
+        if view.areas.len() < 2 {
             return Ok(());
         }
         writeln!(self.writer)?;
-        self.heading_line("CHANGE BY AREA")?;
+        self.heading_line("AREAS")?;
         match self.layout {
-            Layout::Stacked => self.write_diff_cards(&view.areas, scope.diff().total())?,
-            Layout::Full | Layout::Compact => {
-                self.write_diff_table(&view.areas, scope.diff().total())?
-            }
+            Layout::Stacked => self.write_diff_cards(&view.areas)?,
+            Layout::Full | Layout::Compact => self.write_diff_table(&view.areas)?,
         }
-        self.write_area_omissions(view, false)
+        Ok(())
     }
 
-    fn write_diff_table(&mut self, areas: &[&Scope], denominator: u32) -> io::Result<()> {
-        let bar_width = self.layout.bar_width();
-        let fixed = match self.layout {
-            Layout::Full => 55,
-            Layout::Compact => 47,
-            Layout::Stacked => unreachable!(),
-        };
-        let available = self.options.width.saturating_sub(fixed).max(12);
+    fn write_diff_table(&mut self, areas: &[&Scope]) -> io::Result<()> {
+        let available = self.options.width.saturating_sub(24).max(12);
         let label_width = areas
             .iter()
             .map(|area| UnicodeWidthStr::width(terminal_path(area.name())))
@@ -987,112 +1092,37 @@ impl<'a, W: Write> Renderer<'a, W> {
             .unwrap_or(12)
             .min(available)
             .max(12);
-        writeln!(
-            self.writer,
-            "  {:label_width$}  {:>5}  {:>6}  {:>7}  {:bar_width$}  {:>5}",
-            "area",
-            "worse",
-            "better",
-            "changed",
-            "share",
-            "",
-            label_width = label_width,
-            bar_width = bar_width
-        )?;
         for area in areas {
             let diff = area.diff();
             let label = middle_truncate(terminal_path(area.name()), label_width);
-            write!(self.writer, "  {}  ", Padded::new(&label, label_width))?;
-            self.table_count(diff.worse(), Role::Bad, 5)?;
+            write!(self.writer, "{}  ", Padded::new(&label, label_width))?;
+            self.write_status_count(Glyph::Worse, diff.worse())?;
             write!(self.writer, "  ")?;
-            self.table_count(diff.better(), Role::Good, 6)?;
+            self.write_status_count(Glyph::Better, diff.better())?;
             write!(self.writer, "  ")?;
-            self.table_count(diff.changed(), Role::Watch, 7)?;
-            write!(self.writer, "  ")?;
-            self.theme.write(
-                self.writer,
-                Role::Navigation,
-                &Bar::new(diff.total(), denominator, bar_width),
-            )?;
-            writeln!(
-                self.writer,
-                "  {:>5}",
-                DisplayPercent::new(diff.total(), denominator)
-            )?;
+            self.write_status_count(Glyph::Changed, diff.changed())?;
+            writeln!(self.writer)?;
         }
         Ok(())
     }
 
-    fn write_diff_cards(&mut self, areas: &[&Scope], denominator: u32) -> io::Result<()> {
+    fn write_diff_cards(&mut self, areas: &[&Scope]) -> io::Result<()> {
         for area in areas {
             let diff = area.diff();
-            let (marker, role) = if diff.worse() > 0 {
-                ("▲", Role::Bad)
-            } else if diff.better() > 0 {
-                ("▼", Role::Good)
-            } else {
-                ("●", Role::Watch)
-            };
-            self.theme.write(self.writer, role, marker)?;
-            writeln!(self.writer, " {}", terminal_path(area.name()))?;
             writeln!(
                 self.writer,
-                "  {} worse · {} better · {} changed",
-                Grouped(diff.worse() as usize),
-                Grouped(diff.better() as usize),
-                Grouped(diff.changed() as usize)
+                "{}",
+                middle_truncate(terminal_path(area.name()), self.options.width)
             )?;
-            write!(self.writer, "  share ")?;
-            self.theme.write(
-                self.writer,
-                Role::Navigation,
-                &Bar::new(diff.total(), denominator, self.layout.bar_width()),
-            )?;
-            writeln!(
-                self.writer,
-                " {}",
-                DisplayPercent::new(diff.total(), denominator)
-            )?;
+            write!(self.writer, "  ")?;
+            self.write_status_count(Glyph::Worse, diff.worse())?;
+            write!(self.writer, "  ")?;
+            self.write_status_count(Glyph::Better, diff.better())?;
+            write!(self.writer, "  ")?;
+            self.write_status_count(Glyph::Changed, diff.changed())?;
+            writeln!(self.writer)?;
         }
         Ok(())
-    }
-
-    fn write_area_omissions(&mut self, view: &Presentation<'_>, codebase: bool) -> io::Result<()> {
-        if view.omitted_areas == 0 && (!codebase || view.quiet_areas == 0 || self.options.all) {
-            return Ok(());
-        }
-        self.theme.start(self.writer, Role::Secondary)?;
-        if view.omitted_areas > 0 && codebase && view.quiet_areas > 0 {
-            writeln!(
-                self.writer,
-                "  … {} more debt-bearing {} · {} hidden (use --all)",
-                Grouped(view.omitted_areas),
-                if view.omitted_areas == 1 {
-                    "area"
-                } else {
-                    "areas"
-                },
-                Counted::new(view.quiet_areas, "quiet area", "quiet areas")
-            )?;
-        } else if view.omitted_areas > 0 {
-            writeln!(
-                self.writer,
-                "  … {} more {} hidden (use --all)",
-                Grouped(view.omitted_areas),
-                if view.omitted_areas == 1 {
-                    "area"
-                } else {
-                    "areas"
-                }
-            )?;
-        } else {
-            writeln!(
-                self.writer,
-                "  … {} hidden (use --all)",
-                Counted::new(view.quiet_areas, "quiet area", "quiet areas")
-            )?;
-        }
-        self.theme.end(self.writer, Role::Secondary)
     }
 
     fn write_details(&mut self, view: &Presentation<'_>) -> io::Result<()> {
@@ -1104,95 +1134,126 @@ impl<'a, W: Write> Renderer<'a, W> {
 
     fn write_findings(&mut self, view: &Presentation<'_>) -> io::Result<()> {
         if view.findings.is_empty() {
-            writeln!(self.writer, "\nNo watch or high findings.")?;
             return Ok(());
         }
         writeln!(self.writer)?;
-        self.heading_line("TOP FINDINGS")?;
+        self.heading_line("FINDINGS")?;
         for finding in &view.findings {
-            let role = if finding.assessment().rating() == Rating::High {
-                Role::Bad
+            let glyph = if finding.assessment().rating() == Rating::High {
+                Glyph::High
             } else {
-                Role::Watch
+                Glyph::Watch
             };
-            let label = if role == Role::Bad {
-                "▲ HIGH"
-            } else {
-                "● WATCH"
-            };
-            self.theme.write(self.writer, role, label)?;
+            self.theme.write_glyph(self.writer, glyph)?;
             write!(self.writer, "  ")?;
-            if let Some(container) = finding.identity().container() {
-                write!(self.writer, "{container}::")?;
+            let identity = if let Some(container) = finding.identity().container() {
+                format!("{container}::{}", finding.identity().name())
+            } else {
+                finding.identity().name().to_owned()
+            };
+            if self.layout == Layout::Stacked {
+                writeln!(
+                    self.writer,
+                    "{}",
+                    middle_truncate(&identity, self.options.width.saturating_sub(3))
+                )?;
+                write!(
+                    self.writer,
+                    "        {}",
+                    unit_kind_label(finding.identity().kind())
+                )?;
+                self.write_evidence_suffix(Some(finding.role()), Some(finding.trust()))?;
+                writeln!(self.writer)?;
+            } else {
+                write!(
+                    self.writer,
+                    "{identity} · {}",
+                    unit_kind_label(finding.identity().kind())
+                )?;
+                self.write_evidence_suffix(Some(finding.role()), Some(finding.trust()))?;
+                writeln!(self.writer)?;
             }
-            write!(
-                self.writer,
-                "{} · {}",
-                finding.identity().name(),
-                unit_kind_label(finding.identity().kind())
-            )?;
-            if finding.role() != SourceRole::Primary {
-                write!(self.writer, " · {}", history_role_name(finding.role()))?;
-            }
-            if finding.trust() == SourceTrust::Advisory {
-                write!(self.writer, " · advisory")?;
-            }
-            writeln!(self.writer)?;
             let file = &view.report.files()[finding.file().index()];
+            let line = finding.span().start_line().to_string();
             writeln!(
                 self.writer,
                 "        {}:{}",
-                file.path(),
-                finding.span().start_line()
+                middle_truncate(
+                    file.path(),
+                    self.options.width.saturating_sub(9 + line.len())
+                ),
+                line
             )?;
-            write!(self.writer, "        ")?;
-            let mut first = true;
-            for signal in finding
-                .assessment()
-                .signals()
-                .iter()
-                .filter(|signal| signal.rating() != Rating::Healthy)
-            {
-                if !first {
-                    write!(self.writer, " · ")?;
+            if self.layout == Layout::Stacked {
+                for signal in finding
+                    .assessment()
+                    .signals()
+                    .iter()
+                    .filter(|signal| signal.rating() != Rating::Healthy)
+                {
+                    writeln!(
+                        self.writer,
+                        "        {} {}",
+                        signal_name(signal.signal()),
+                        signal.value()
+                    )?;
                 }
-                write!(
-                    self.writer,
-                    "{} {}",
-                    signal_name(signal.signal()),
-                    signal.value()
-                )?;
-                first = false;
-            }
-            if let Some(activity) = file.activity().filter(|activity| activity.touches() > 0) {
-                if !first {
-                    write!(self.writer, " · ")?;
+                if let Some(activity) = file.activity().filter(|activity| activity.touches() > 0) {
+                    writeln!(
+                        self.writer,
+                        "        {}",
+                        Counted::new(activity.touches() as usize, "commit", "commits")
+                    )?;
                 }
-                write!(
-                    self.writer,
-                    "{}",
-                    Counted::new(activity.touches() as usize, "touch", "touches")
-                )?;
+            } else {
+                write!(self.writer, "        ")?;
+                let mut first = true;
+                for signal in finding
+                    .assessment()
+                    .signals()
+                    .iter()
+                    .filter(|signal| signal.rating() != Rating::Healthy)
+                {
+                    if !first {
+                        write!(self.writer, " · ")?;
+                    }
+                    write!(
+                        self.writer,
+                        "{} {}",
+                        signal_name(signal.signal()),
+                        signal.value()
+                    )?;
+                    first = false;
+                }
+                if let Some(activity) = file.activity().filter(|activity| activity.touches() > 0) {
+                    if !first {
+                        write!(self.writer, " · ")?;
+                    }
+                    write!(
+                        self.writer,
+                        "{}",
+                        Counted::new(activity.touches() as usize, "commit", "commits")
+                    )?;
+                }
+                writeln!(self.writer)?;
             }
-            writeln!(self.writer)?;
         }
-        self.write_omitted(view.omitted_findings, "findings")
+        Ok(())
     }
 
     fn write_comparisons(&mut self, view: &Presentation<'_>) -> io::Result<()> {
         if view.comparisons.is_empty() {
-            writeln!(self.writer, "\nNo changed units.")?;
             return Ok(());
         }
         writeln!(self.writer)?;
-        self.heading_line("TOP CHANGES")?;
+        self.heading_line("FINDINGS")?;
         for comparison in &view.comparisons {
-            let (label, role) = match comparison.direction() {
-                ComparisonDirection::Worse => ("▲ WORSE", Role::Bad),
-                ComparisonDirection::Better => ("▼ BETTER", Role::Good),
-                ComparisonDirection::Changed => ("● CHANGED", Role::Watch),
+            let glyph = match comparison.direction() {
+                ComparisonDirection::Worse => Glyph::Worse,
+                ComparisonDirection::Better => Glyph::Better,
+                ComparisonDirection::Changed => Glyph::Changed,
             };
-            self.theme.write(self.writer, role, label)?;
+            self.theme.write_glyph(self.writer, glyph)?;
             write!(self.writer, "  ")?;
             if let Some(container) = comparison.identity().container() {
                 write!(self.writer, "{container}::")?;
@@ -1202,29 +1263,68 @@ impl<'a, W: Write> Renderer<'a, W> {
                 writeln!(
                     self.writer,
                     "        {}",
-                    view.report.files()[file.index()].path()
+                    middle_truncate(
+                        view.report.files()[file.index()].path(),
+                        self.options.width.saturating_sub(8)
+                    )
                 )?;
             }
-            write!(self.writer, "        ")?;
             match comparison.kind() {
-                ComparisonKind::Added => write!(
-                    self.writer,
-                    "added as {}",
-                    comparison.after_rating().map_or("unrated", rating_name)
-                )?,
-                ComparisonKind::Removed => write!(
-                    self.writer,
-                    "removed from {}",
-                    comparison.before_rating().map_or("unrated", rating_name)
-                )?,
+                ComparisonKind::Added => writeln!(self.writer, "        added")?,
+                ComparisonKind::Removed => writeln!(self.writer, "        removed")?,
                 ComparisonKind::Ambiguous => {
-                    write!(self.writer, "identity could not be matched safely")?
+                    writeln!(self.writer, "        identity could not be matched safely")?
                 }
-                _ => self.write_changed_measurements(comparison)?,
+                _ if self.layout == Layout::Stacked => {
+                    self.write_changed_measurement_lines(comparison)?;
+                }
+                _ => {
+                    write!(self.writer, "        ")?;
+                    self.write_changed_measurements(comparison)?;
+                    writeln!(self.writer)?;
+                }
             }
-            writeln!(self.writer)?;
         }
-        self.write_omitted(view.omitted_comparisons, "comparisons")
+        Ok(())
+    }
+
+    fn write_changed_measurement_lines(&mut self, comparison: &Comparison) -> io::Result<()> {
+        let (Some(before), Some(after)) = (comparison.before(), comparison.after()) else {
+            return writeln!(
+                self.writer,
+                "        {}",
+                comparison_name(comparison.kind())
+            );
+        };
+        let values = [
+            (
+                "cognitive",
+                before.cognitive_complexity(),
+                after.cognitive_complexity(),
+            ),
+            (
+                "cyclomatic",
+                before.cyclomatic_complexity(),
+                after.cyclomatic_complexity(),
+            ),
+            ("lines", before.logical_lines(), after.logical_lines()),
+        ];
+        let mut changed = false;
+        for (name, before, after) in values
+            .into_iter()
+            .filter(|(_, before, after)| before != after)
+        {
+            writeln!(self.writer, "        {name} {before} → {after}")?;
+            changed = true;
+        }
+        if !changed {
+            writeln!(
+                self.writer,
+                "        {}",
+                comparison_name(comparison.kind())
+            )?;
+        }
+        Ok(())
     }
 
     fn write_changed_measurements(&mut self, comparison: &Comparison) -> io::Result<()> {
@@ -1261,53 +1361,143 @@ impl<'a, W: Write> Renderer<'a, W> {
         Ok(())
     }
 
-    fn write_diagnostics(&mut self, diagnostics: &[Diagnostic]) -> io::Result<()> {
-        if diagnostics.is_empty() {
+    fn write_diagnostics(&mut self, view: &Presentation<'_>) -> io::Result<()> {
+        let report = view.report;
+        let selected = view.selected;
+        let detail =
+            self.options.all || selected.is_some_and(|scope| scope.kind() != ScopeKind::Repository);
+        let relevant = |diagnostic: &Diagnostic| {
+            diagnostic.file().is_none_or(|file| {
+                selected.is_none_or(|scope| file_belongs_to_scope(report, file, scope))
+            })
+        };
+        let mut warnings = Vec::new();
+        let history = report.history_coverage();
+        if matches!(
+            history.availability(),
+            smackdebt_analysis::HistoryAvailability::Incomplete
+        ) {
+            warnings.push("History is incomplete.".to_owned());
+        } else if matches!(
+            history.availability(),
+            smackdebt_analysis::HistoryAvailability::Unavailable
+        ) {
+            warnings.push("History is unavailable.".to_owned());
+        }
+        if history.rename_gaps() > 0 {
+            warnings.push("Some renamed files could not be matched.".to_owned());
+        }
+        let unresolved = report
+            .resolution_diagnostics()
+            .iter()
+            .filter(|diagnostic| {
+                selected.is_none_or(|scope| file_belongs_to_scope(report, diagnostic.file(), scope))
+                    && matches!(
+                        diagnostic.kind(),
+                        smackdebt_analysis::ResolutionIssueKind::Unresolved
+                    )
+            })
+            .count();
+        if unresolved > 0 {
+            warnings.push(format!(
+                "{} could not be matched.",
+                Counted::new(unresolved, "import", "imports")
+            ));
+        }
+        let ambiguous = report
+            .resolution_diagnostics()
+            .iter()
+            .filter(|diagnostic| {
+                selected.is_none_or(|scope| file_belongs_to_scope(report, diagnostic.file(), scope))
+                    && matches!(
+                        diagnostic.kind(),
+                        smackdebt_analysis::ResolutionIssueKind::Ambiguous
+                    )
+            })
+            .count();
+        if ambiguous > 0 {
+            warnings.push(format!(
+                "{} matched more than one file.",
+                Counted::new(ambiguous, "import", "imports")
+            ));
+        }
+        for kind in [
+            DiagnosticKind::UnsupportedLanguage,
+            DiagnosticKind::UnreadableFile,
+            DiagnosticKind::OversizedFile,
+            DiagnosticKind::ParseFailure,
+            DiagnosticKind::AmbiguousIdentity,
+            DiagnosticKind::UnsafeReference,
+            DiagnosticKind::Other,
+        ] {
+            if !detail {
+                continue;
+            }
+            let count = report
+                .diagnostics()
+                .iter()
+                .filter(|diagnostic| relevant(diagnostic) && diagnostic.kind() == kind)
+                .filter(|diagnostic| !diagnostic.message().starts_with("Git history"))
+                .count();
+            if count > 0 {
+                warnings.push(diagnostic_summary(kind, count));
+            }
+        }
+        if warnings.is_empty() {
             return Ok(());
         }
         writeln!(self.writer)?;
-        self.heading_line("COVERAGE NOTES")?;
-        for diagnostic in diagnostics.iter().take(5) {
-            self.theme.write(self.writer, Role::Warning, "!")?;
-            writeln!(self.writer, " {}", diagnostic.message())?;
+        self.heading_line("WARNINGS")?;
+        for warning in warnings {
+            self.theme.write_glyph(self.writer, Glyph::Warning)?;
+            writeln!(self.writer, " {warning}")?;
         }
-        if diagnostics.len() > 5 {
-            self.write_omitted(diagnostics.len() - 5, "coverage notes")?;
+        if detail {
+            for diagnostic in report
+                .diagnostics()
+                .iter()
+                .filter(|diagnostic| relevant(diagnostic))
+                .filter(|diagnostic| !diagnostic.message().starts_with("Git history"))
+            {
+                if let Some(file) = diagnostic.file() {
+                    writeln!(
+                        self.writer,
+                        "  {}: {}",
+                        report.files()[file.index()].path(),
+                        diagnostic.message()
+                    )?;
+                }
+            }
         }
         Ok(())
     }
 
-    fn write_omitted(&mut self, count: usize, noun: &str) -> io::Result<()> {
-        if count == 0 {
-            return Ok(());
-        }
-        self.theme.start(self.writer, Role::Secondary)?;
-        writeln!(
-            self.writer,
-            "  … {} {noun} omitted (use --all)",
-            Grouped(count)
-        )?;
-        self.theme.end(self.writer, Role::Secondary)
-    }
-
-    fn table_count(&mut self, value: u32, role: Role, width: usize) -> io::Result<()> {
-        let shown = if value == 0 {
-            "–".to_owned()
+    fn write_status_count(&mut self, glyph: Glyph, value: u32) -> io::Result<()> {
+        self.theme.write_glyph(self.writer, glyph)?;
+        if value == 0 {
+            write!(self.writer, " –")
         } else {
-            Grouped(value as usize).to_string()
-        };
-        let padding = width.saturating_sub(UnicodeWidthStr::width(shown.as_str()));
-        write!(self.writer, "{}", " ".repeat(padding))?;
-        self.theme.write(self.writer, role, &shown)
-    }
-
-    fn heading(&mut self, heading: &str) -> io::Result<()> {
-        self.theme.write(self.writer, Role::Heading, heading)
+            write!(self.writer, " {}", Grouped(value as usize))
+        }
     }
 
     fn heading_line(&mut self, heading: &str) -> io::Result<()> {
-        self.heading(heading)?;
-        writeln!(self.writer)
+        writeln!(self.writer, "{heading}")
+    }
+}
+
+fn diagnostic_summary(kind: DiagnosticKind, count: usize) -> String {
+    let subject = Counted::new(count, "source file", "source files");
+    match kind {
+        DiagnosticKind::UnsupportedLanguage => format!("{subject} use unsupported languages."),
+        DiagnosticKind::UnreadableFile => format!("{subject} could not be read."),
+        DiagnosticKind::OversizedFile => format!("{subject} are too large to inspect."),
+        DiagnosticKind::ParseFailure => format!("{subject} could not be fully parsed."),
+        DiagnosticKind::AmbiguousIdentity => {
+            format!("{subject} contain code that could not be matched.")
+        }
+        DiagnosticKind::UnsafeReference => format!("{subject} contain unsafe references."),
+        DiagnosticKind::Other => format!("{subject} could not be analyzed."),
     }
 }
 
@@ -1322,13 +1512,6 @@ fn terminal_path(path: &str) -> &str {
     if path == "." { "repository root" } else { path }
 }
 
-fn relation_label(relation: smackdebt_analysis::StaticRelationKind) -> &'static str {
-    match relation {
-        smackdebt_analysis::StaticRelationKind::Uses => "uses",
-        smackdebt_analysis::StaticRelationKind::ModuleOwnership => "module ownership",
-    }
-}
-
 fn unit_kind_label(kind: smackdebt_analysis::UnitKind) -> &'static str {
     match kind {
         smackdebt_analysis::UnitKind::Function => "function",
@@ -1340,81 +1523,67 @@ fn unit_kind_label(kind: smackdebt_analysis::UnitKind) -> &'static str {
     }
 }
 
-#[derive(Clone, Copy, Eq, PartialEq)]
-enum Role {
-    Brand,
-    Heading,
-    Bad,
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+enum Glyph {
+    High,
     Watch,
-    Good,
+    Discover,
+    Worse,
+    Better,
+    Changed,
     Warning,
-    Navigation,
-    Secondary,
+}
+
+impl Glyph {
+    const fn value(self) -> char {
+        match self {
+            Self::High => '\u{f024}',
+            Self::Watch => '\u{f0eb}',
+            Self::Discover => '\u{f46b}',
+            Self::Worse => '\u{f062}',
+            Self::Better => '\u{f063}',
+            Self::Changed => '\u{f111}',
+            Self::Warning => '\u{f071}',
+        }
+    }
+
+    fn style(self) -> Option<Style> {
+        match self {
+            Self::High | Self::Worse => Some(Style::new().fg_color(Some(AnsiColor::Red.into()))),
+            Self::Watch | Self::Warning => {
+                Some(Style::new().fg_color(Some(Ansi256Color(208).into())))
+            }
+            Self::Discover => Some(Style::new().fg_color(Some(AnsiColor::Cyan.into()))),
+            Self::Better => Some(Style::new().fg_color(Some(AnsiColor::Green.into()))),
+            Self::Changed => None,
+        }
+    }
 }
 
 struct Theme {
     enabled: bool,
-    dim: (&'static str, &'static str),
 }
 
 impl Theme {
     fn new(enabled: bool) -> Self {
-        Self {
-            enabled,
-            dim: if enabled {
-                ("\x1b[2m", "\x1b[0m")
-            } else {
-                ("", "")
-            },
-        }
+        Self { enabled }
     }
 
-    fn style(role: Role) -> Style {
-        match role {
-            Role::Brand => Style::new().bold().fg_color(Some(AnsiColor::Cyan.into())),
-            Role::Heading => Style::new().effects(Effects::BOLD),
-            Role::Bad => Style::new().fg_color(Some(AnsiColor::Red.into())),
-            Role::Watch | Role::Warning => Style::new().fg_color(Some(AnsiColor::Yellow.into())),
-            Role::Good => Style::new().fg_color(Some(AnsiColor::Green.into())),
-            Role::Navigation => Style::new().fg_color(Some(AnsiColor::Cyan.into())),
-            Role::Secondary => Style::new().effects(Effects::DIMMED),
-        }
-    }
-
-    fn write(
-        &self,
-        writer: &mut impl Write,
-        role: Role,
-        value: &(impl fmt::Display + ?Sized),
-    ) -> io::Result<()> {
-        self.start(writer, role)?;
-        write!(writer, "{value}")?;
-        self.end(writer, role)
-    }
-
-    fn start(&self, writer: &mut impl Write, role: Role) -> io::Result<()> {
-        if self.enabled {
-            write!(writer, "{}", Self::style(role).render())
+    fn write_glyph(&self, writer: &mut impl Write, glyph: Glyph) -> io::Result<()> {
+        if self.enabled
+            && let Some(style) = glyph.style()
+        {
+            write!(
+                writer,
+                "{}{}{}",
+                style.render(),
+                glyph.value(),
+                style.render_reset()
+            )
         } else {
-            Ok(())
+            write!(writer, "{}", glyph.value())
         }
     }
-
-    fn end(&self, writer: &mut impl Write, role: Role) -> io::Result<()> {
-        if self.enabled {
-            write!(writer, "{}", Self::style(role).render_reset())
-        } else {
-            Ok(())
-        }
-    }
-}
-
-fn percent(value: u32, denominator: u32) -> u32 {
-    value
-        .saturating_mul(100)
-        .saturating_add(denominator / 2)
-        .checked_div(denominator)
-        .unwrap_or(0)
 }
 
 fn same_coupling_operands(
@@ -1425,6 +1594,16 @@ fn same_coupling_operands(
         && left.right() == right.right()
         && left.shared_commits() == right.shared_commits()
         && left.union_commits() == right.union_commits()
+}
+
+fn coupling_has_code_dependency(
+    report: &Report,
+    coupling: smackdebt_analysis::ChangeCoupling,
+) -> bool {
+    report.package_edges().iter().any(|edge| {
+        (edge.source() == coupling.left() && edge.target() == coupling.right())
+            || (edge.source() == coupling.right() && edge.target() == coupling.left())
+    })
 }
 
 fn history_role_name(role: SourceRole) -> &'static str {
@@ -1438,17 +1617,16 @@ fn history_role_name(role: SourceRole) -> &'static str {
     }
 }
 
-fn history_trust_name(trust: SourceTrust) -> &'static str {
-    match trust {
-        SourceTrust::Trusted => "trusted",
-        SourceTrust::Advisory => "advisory",
-        SourceTrust::Failed => "failed",
+fn evidence_suffix(role: Option<SourceRole>, trust: Option<SourceTrust>) -> String {
+    let mut suffix = String::new();
+    if let Some(role) = role.filter(|role| *role != SourceRole::Primary) {
+        suffix.push_str(" · ");
+        suffix.push_str(history_role_name(role));
     }
-}
-
-struct DisplayPercent {
-    value: u32,
-    denominator: u32,
+    if trust == Some(SourceTrust::Advisory) {
+        suffix.push_str(" · advisory");
+    }
+    suffix
 }
 
 struct Grouped(usize);
@@ -1501,47 +1679,6 @@ impl fmt::Display for Counted {
     }
 }
 
-struct Bar {
-    value: u32,
-    denominator: u32,
-    width: usize,
-}
-
-impl Bar {
-    const fn new(value: u32, denominator: u32, width: usize) -> Self {
-        Self {
-            value,
-            denominator,
-            width,
-        }
-    }
-}
-
-impl fmt::Display for Bar {
-    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
-        const FRACTIONS: [char; 8] = [' ', '▏', '▎', '▍', '▌', '▋', '▊', '▉'];
-        let eighths = if self.denominator == 0 {
-            0
-        } else {
-            (self.value as usize * self.width * 8 + self.denominator as usize / 2)
-                / self.denominator as usize
-        };
-        let eighths = if self.value > 0 { eighths.max(1) } else { 0 }.min(self.width * 8);
-        let full = eighths / 8;
-        let fraction = eighths % 8;
-        for _ in 0..full {
-            formatter.write_str("█")?;
-        }
-        if fraction > 0 {
-            write!(formatter, "{}", FRACTIONS[fraction])?;
-        }
-        for _ in (full + usize::from(fraction > 0))..self.width {
-            formatter.write_str("░")?;
-        }
-        Ok(())
-    }
-}
-
 struct Padded<'a> {
     value: &'a str,
     width: usize,
@@ -1558,23 +1695,6 @@ impl fmt::Display for Padded<'_> {
             formatter.write_str(" ")?;
         }
         Ok(())
-    }
-}
-
-impl DisplayPercent {
-    const fn new(value: u32, denominator: u32) -> Self {
-        Self { value, denominator }
-    }
-}
-
-impl std::fmt::Display for DisplayPercent {
-    fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        let rounded = percent(self.value, self.denominator);
-        if self.value > 0 && rounded == 0 {
-            formatter.write_str("<1%")
-        } else {
-            write!(formatter, "{rounded}%")
-        }
     }
 }
 
@@ -1597,29 +1717,6 @@ fn display_children<'a>(report: &'a Report, scope: &'a Scope) -> Vec<&'a Scope> 
         }
     }
     children
-}
-
-fn package_count(report: &Report, scope: &Scope) -> usize {
-    if scope.kind() == ScopeKind::Repository {
-        return count_package_descendants(report, scope);
-    }
-    let mut current = Some(scope);
-    while let Some(candidate) = current {
-        if candidate.kind() == ScopeKind::Package {
-            return 1;
-        }
-        current = candidate.parent().map(|id| &report.scopes()[id.index()]);
-    }
-    0
-}
-
-fn count_package_descendants(report: &Report, scope: &Scope) -> usize {
-    usize::from(scope.kind() == ScopeKind::Package)
-        + scope
-            .children()
-            .iter()
-            .map(|id| count_package_descendants(report, &report.scopes()[id.index()]))
-            .sum::<usize>()
 }
 
 fn signal_name(signal: Signal) -> &'static str {
@@ -1732,6 +1829,65 @@ fn middle_truncate(value: &str, width: usize) -> String {
     format!("{left}…{right}")
 }
 
+fn ansi_display_width(value: &str) -> usize {
+    let mut width = 0;
+    let mut index = 0;
+    while index < value.len() {
+        if let Some(end) = ansi_sequence_end(value, index) {
+            index = end;
+            continue;
+        }
+        let character = value[index..].chars().next().expect("valid character");
+        width += character.width().unwrap_or(0);
+        index += character.len_utf8();
+    }
+    width
+}
+
+fn truncate_ansi_end(value: &str, width: usize) -> String {
+    if width == 0 {
+        return String::new();
+    }
+    let target = width - 1;
+    let mut output = String::new();
+    let mut visible = 0;
+    let mut index = 0;
+    let mut styled = false;
+    while index < value.len() {
+        if let Some(end) = ansi_sequence_end(value, index) {
+            let sequence = &value[index..end];
+            output.push_str(sequence);
+            styled = sequence != "\u{1b}[0m";
+            index = end;
+            continue;
+        }
+        let character = value[index..].chars().next().expect("valid character");
+        let character_width = character.width().unwrap_or(0);
+        if visible + character_width > target {
+            break;
+        }
+        output.push(character);
+        visible += character_width;
+        index += character.len_utf8();
+    }
+    if styled {
+        output.push_str("\u{1b}[0m");
+    }
+    output.push('…');
+    output
+}
+
+fn ansi_sequence_end(value: &str, index: usize) -> Option<usize> {
+    let bytes = value.as_bytes();
+    if bytes.get(index) != Some(&0x1b) || bytes.get(index + 1) != Some(&b'[') {
+        return None;
+    }
+    bytes[index + 2..]
+        .iter()
+        .position(|byte| byte.is_ascii_alphabetic())
+        .map(|offset| index + 3 + offset)
+}
+
 pub(super) fn rating_name(rating: Rating) -> &'static str {
     match rating {
         Rating::Healthy => "healthy",
@@ -1803,7 +1959,10 @@ mod tests {
     use super::*;
     use crate::json::write_json;
     use smackdebt_analysis::{
-        Coverage, FileActivity, FileId, FileRecord, FindingId, HealthCounts, HealthPolicy,
+        ArchitectureFinding, ArchitectureFindingId, ArchitectureFindingKind, ArchitectureGraph,
+        ArchitectureReportFacts, ChangeCoupling, Coverage, DependencyCoverage, DependencyEdge,
+        DependencyEdgeId, EvolutionaryFinding, EvolutionaryFindingId, EvolutionaryReportFacts,
+        FileActivity, FileId, FileRecord, FindingId, HealthCounts, HealthPolicy, HistoryCoverage,
         Measurements, PackageId, PackageRecord, ParseStatus, Report, ReportBuilder, ReportMode,
         Scope, ScopeId, SourceRole, SourceSpan, SourceTrust, UnitIdentity,
     };
@@ -1890,7 +2049,7 @@ mod tests {
         )
         .unwrap();
         let output = String::from_utf8(output).unwrap();
-        assert!(output.starts_with("smackdebt · codebase\nrepository root\n"));
+        assert!(output.starts_with("smackdebt codebase\nrepository root\n"));
         assert_eq!(report.scopes()[0].name(), ".");
     }
 
@@ -1970,11 +2129,11 @@ mod tests {
             TerminalOptions::default(),
         )
         .unwrap();
-        assert!(
-            String::from_utf8(terminal)
-                .unwrap()
-                .contains("No watch or high findings")
-        );
+        let terminal = String::from_utf8(terminal).unwrap();
+        assert!(terminal.contains("QUALITY"));
+        assert!(!terminal.contains("FINDINGS"));
+        assert!(!terminal.contains("ARCHITECTURE"));
+        assert!(!terminal.contains("HISTORY"));
 
         let mut json = Vec::new();
         write_json(&mut json, &report, report.root()).unwrap();
@@ -1984,7 +2143,191 @@ mod tests {
     }
 
     #[test]
-    fn activity_changes_heading_and_selects_the_ten_most_active_findings() {
+    fn architecture_cycle_uses_the_ordered_closed_edge_witness() {
+        let mut builder = ReportBuilder::new(ReportMode::Codebase);
+        let root = ScopeId::from_index(0);
+        builder.add_scope(Scope::new(root, ScopeKind::Repository, ".", None));
+        builder.set_root(root);
+        for (index, path) in ["a.js", "b.js", "c.js"].into_iter().enumerate() {
+            builder.add_file(FileRecord::new(
+                FileId::from_index(index),
+                root,
+                path,
+                Coverage::new(1, 1, 0, 0, 1, 0),
+                HealthCounts::default(),
+            ));
+        }
+        let edges = [(1, 2), (2, 0), (0, 1)]
+            .into_iter()
+            .enumerate()
+            .map(|(index, (source, target))| {
+                let edge = DependencyEdge::new(
+                    DependencyEdgeId::from_index(index),
+                    FileId::from_index(source),
+                    FileId::from_index(target),
+                    1,
+                    vec![SourceSpan::new(1, 1)],
+                );
+                if index == 0 {
+                    edge.with_evidence(SourceRole::Test, SourceTrust::Advisory)
+                } else {
+                    edge
+                }
+            })
+            .collect();
+        let finding = ArchitectureFinding::new(
+            ArchitectureFindingId::from_index(0),
+            ArchitectureFindingKind::FileCycle,
+            Vec::new(),
+            vec![
+                FileId::from_index(2),
+                FileId::from_index(0),
+                FileId::from_index(1),
+            ],
+            vec![
+                DependencyEdgeId::from_index(0),
+                DependencyEdgeId::from_index(1),
+                DependencyEdgeId::from_index(2),
+            ],
+        );
+        builder.set_architecture(ArchitectureReportFacts::new(
+            ArchitectureGraph::new(
+                DependencyCoverage::new(3, 0, 0, 0, 0, 0, 0),
+                edges,
+                Vec::new(),
+                Vec::new(),
+                Vec::new(),
+                Vec::new(),
+            ),
+            vec![finding],
+            Vec::new(),
+        ));
+        builder.link_architecture_finding(root, ArchitectureFindingId::from_index(0));
+        let report = builder.finish();
+        let mut terminal = Vec::new();
+        write_terminal(
+            &mut terminal,
+            &report,
+            report.root(),
+            TerminalOptions::default(),
+        )
+        .unwrap();
+        let terminal = String::from_utf8(terminal).unwrap();
+        assert!(terminal.contains("        b.js → c.js → a.js → b.js\n"));
+        assert!(!terminal.contains("        c.js → a.js → b.js\n"));
+
+        let mut detail = Vec::new();
+        write_terminal(
+            &mut detail,
+            &report,
+            report.root(),
+            TerminalOptions {
+                all: true,
+                ..TerminalOptions::default()
+            },
+        )
+        .unwrap();
+        let detail = String::from_utf8(detail).unwrap();
+        assert!(detail.contains("b.js → c.js · 1 import · test · advisory"));
+        assert!(detail.contains("c.js → a.js · 1 import\n"));
+        assert!(!detail.contains("primary"));
+        assert!(!detail.contains("trusted"));
+    }
+
+    #[test]
+    fn default_history_orders_actionable_findings_by_strength_before_limiting() {
+        let mut builder = ReportBuilder::new(ReportMode::Codebase);
+        let root = ScopeId::from_index(0);
+        builder.add_scope(Scope::new(root, ScopeKind::Repository, ".", None));
+        builder.set_root(root);
+        let packages = ["a", "b", "c", "d", "e"]
+            .into_iter()
+            .enumerate()
+            .map(|(index, name)| {
+                let scope = ScopeId::from_index(index + 1);
+                builder.add_scope(Scope::new(scope, ScopeKind::Package, name, Some(root)));
+                PackageRecord::current(PackageId::from_index(index), scope, name)
+            })
+            .collect::<Vec<_>>();
+        builder.set_packages(packages);
+        let couplings = [(0, 1, 3, 5), (1, 2, 8, 10), (2, 3, 3, 4), (3, 4, 3, 5)]
+            .into_iter()
+            .map(|(left, right, shared, union)| {
+                ChangeCoupling::new(
+                    PackageId::from_index(left),
+                    PackageId::from_index(right),
+                    shared,
+                    union,
+                )
+            })
+            .collect::<Vec<_>>();
+        let findings = couplings
+            .iter()
+            .copied()
+            .enumerate()
+            .map(|(index, coupling)| {
+                EvolutionaryFinding::new(EvolutionaryFindingId::from_index(index), coupling)
+            })
+            .collect::<Vec<_>>();
+        builder.set_evolution(EvolutionaryReportFacts::new(
+            HistoryCoverage::unavailable("test"),
+            Vec::new(),
+            Vec::new(),
+            couplings,
+            Vec::new(),
+            findings,
+            Vec::new(),
+        ));
+        for index in 0..4 {
+            builder.link_evolutionary_finding(root, EvolutionaryFindingId::from_index(index));
+        }
+        let report = builder.finish();
+
+        let render = |all| {
+            let mut terminal = Vec::new();
+            write_terminal(
+                &mut terminal,
+                &report,
+                report.root(),
+                TerminalOptions {
+                    all,
+                    ..TerminalOptions::default()
+                },
+            )
+            .unwrap();
+            String::from_utf8(terminal).unwrap()
+        };
+        let default = render(false);
+        assert_eq!(default.matches('').count(), 3, "{default}");
+        assert!(
+            default
+                .contains("b ↔ c changed together in 8 of 10 commits · 80% · no code dependency")
+        );
+        assert!(
+            default.contains("c ↔ d changed together in 3 of 4 commits · 75% · no code dependency")
+        );
+        assert!(
+            default.contains("a ↔ b changed together in 3 of 5 commits · 60% · no code dependency")
+        );
+        assert!(!default.contains("d ↔ e"));
+        assert!(
+            default.find("b ↔ c").unwrap() < default.find("c ↔ d").unwrap(),
+            "{default}"
+        );
+        assert!(
+            default.find("c ↔ d").unwrap() < default.find("a ↔ b").unwrap(),
+            "{default}"
+        );
+        let detailed = render(true);
+        assert_eq!(detailed.matches('').count(), 4, "{detailed}");
+        assert!(
+            detailed
+                .contains("d ↔ e changed together in 3 of 5 commits · 60% · no code dependency")
+        );
+    }
+
+    #[test]
+    fn activity_changes_rank_and_keeps_three_findings() {
         let report = report_with_findings(true);
         let mut terminal = Vec::new();
         write_terminal(
@@ -1995,13 +2338,13 @@ mod tests {
         )
         .unwrap();
         let terminal = String::from_utf8(terminal).unwrap();
-        assert!(terminal.contains("TOP FINDINGS"));
+        assert!(terminal.contains("FINDINGS"));
         assert!(terminal.contains("file-10.rs"));
         assert!(!terminal.contains("file-1.rs"));
     }
 
     #[test]
-    fn absent_activity_does_not_call_findings_hotspots() {
+    fn absent_activity_keeps_the_findings_heading() {
         let report = report_with_findings(false);
         let mut terminal = Vec::new();
         write_terminal(
@@ -2012,7 +2355,7 @@ mod tests {
         )
         .unwrap();
         let terminal = String::from_utf8(terminal).unwrap();
-        assert!(terminal.contains("TOP FINDINGS"));
+        assert!(terminal.contains("FINDINGS"));
     }
 
     #[test]
@@ -2051,23 +2394,6 @@ mod tests {
     }
 
     #[test]
-    fn small_nonzero_percentages_are_not_shown_as_zero() {
-        assert_eq!(DisplayPercent::new(1, 201).to_string(), "<1%");
-        assert_eq!(DisplayPercent::new(0, 200).to_string(), "0%");
-        assert_eq!(DisplayPercent::new(3, 100).to_string(), "3%");
-    }
-
-    #[test]
-    fn fractional_bars_keep_small_nonzero_values_visible() {
-        assert_eq!(Bar::new(0, 1_000, 8).to_string(), "░░░░░░░░");
-        assert_eq!(Bar::new(1, 1_000, 8).to_string(), "▏░░░░░░░");
-        assert_eq!(
-            UnicodeWidthStr::width(Bar::new(1, 1_000, 8).to_string().as_str()),
-            8
-        );
-    }
-
-    #[test]
     fn grouped_counts_and_nouns_are_readable() {
         assert_eq!(Grouped(19_761).to_string(), "19,761");
         assert_eq!(Counted::new(1, "file", "files").to_string(), "1 file");
@@ -2075,35 +2401,18 @@ mod tests {
     }
 
     #[test]
-    fn package_count_uses_package_scopes_not_files_or_directories() {
-        let mut builder = ReportBuilder::new(ReportMode::Codebase);
-        let root = ScopeId::from_index(0);
-        let package = ScopeId::from_index(1);
-        let directory = ScopeId::from_index(2);
-        let file = ScopeId::from_index(3);
-        let mut root_scope = Scope::new(root, ScopeKind::Repository, ".", None);
-        root_scope.add_child(package);
-        builder.add_scope(root_scope);
-        let mut package_scope = Scope::new(package, ScopeKind::Package, ".", Some(root));
-        package_scope.add_child(directory);
-        builder.add_scope(package_scope);
-        let mut directory_scope = Scope::new(directory, ScopeKind::Directory, "src", Some(package));
-        directory_scope.add_child(file);
-        builder.add_scope(directory_scope);
-        builder.add_scope(Scope::new(
-            file,
-            ScopeKind::File,
-            "src/lib.rs",
-            Some(directory),
-        ));
-
-        let report = builder.finish();
-        assert_eq!(package_count(&report, &report.scopes()[root.index()]), 1);
-        assert_eq!(
-            package_count(&report, &report.scopes()[directory.index()]),
-            1
-        );
-        assert_eq!(package_count(&report, &report.scopes()[file.index()]), 1);
+    fn width_writer_limits_unicode_lines_without_corrupting_glyph_styling() {
+        let mut output = Vec::new();
+        {
+            let mut writer = WidthWriter::new(&mut output, 12);
+            writeln!(writer, "\u{1b}[31m\u{1b}[0m  very-long-visible-line").unwrap();
+            writer.finish().unwrap();
+            assert_eq!(writer.truncations(), 1);
+        }
+        let output = String::from_utf8(output).unwrap();
+        assert!(output.contains("\u{1b}[31m\u{1b}[0m"));
+        assert!(output.ends_with("…\n"));
+        assert!(output.lines().all(|line| ansi_display_width(line) <= 12));
     }
 
     #[test]
@@ -2135,7 +2444,7 @@ mod tests {
         builder.set_root(root);
         for (index, scope, health) in [
             (0, debt, HealthCounts::new(8, 2, 1)),
-            (1, quiet, HealthCounts::new(4, 0, 0)),
+            (1, quiet, HealthCounts::new(4, 1, 0)),
         ] {
             let file = FileRecord::new(
                 FileId::from_index(index),
@@ -2165,13 +2474,53 @@ mod tests {
         let stacked = render(50);
         for output in [&full, &compact, &stacked] {
             assert!(output.contains("src/very-long-feature-name"));
-            assert!(output.contains("1 high"));
-            assert!(output.contains("2 watch"));
-            assert!(output.contains("1 quiet area hidden"));
+            assert!(output.contains(Glyph::High.value()));
+            assert!(output.contains(Glyph::Watch.value()));
+            assert!(!output.contains('%'));
+            assert!(!output.contains("░"));
+            assert!(!output.contains("healthy"));
         }
-        assert!(full.contains("area"));
-        assert!(compact.contains("rate"));
-        assert!(stacked.contains("▲ src/very-long-feature-name\n"));
+        assert!(full.contains("AREAS"));
+        assert!(compact.contains("AREAS"));
+        assert!(stacked.contains("src/very-long-feature-name\n"));
+    }
+
+    #[test]
+    fn glyph_vocabulary_has_exact_one_cell_values() {
+        let expected = [
+            (Glyph::High, '\u{f024}'),
+            (Glyph::Watch, '\u{f0eb}'),
+            (Glyph::Discover, '\u{f46b}'),
+            (Glyph::Worse, '\u{f062}'),
+            (Glyph::Better, '\u{f063}'),
+            (Glyph::Changed, '\u{f111}'),
+            (Glyph::Warning, '\u{f071}'),
+        ];
+        for (glyph, value) in expected {
+            assert_eq!(glyph.value(), value);
+            assert_eq!(glyph.value().width(), Some(1));
+            assert_ne!(glyph.value(), '\u{ec3f}');
+        }
+    }
+
+    #[test]
+    fn glyph_styles_have_exact_colors_and_changed_is_unstyled() {
+        for (glyph, expected) in [
+            (Glyph::High, "\u{1b}[31m"),
+            (Glyph::Watch, "\u{1b}[38;5;208m"),
+            (Glyph::Discover, "\u{1b}[36m"),
+            (Glyph::Worse, "\u{1b}[31m"),
+            (Glyph::Better, "\u{1b}[32m"),
+            (Glyph::Warning, "\u{1b}[38;5;208m"),
+        ] {
+            assert_eq!(glyph.style().unwrap().render().to_string(), expected);
+        }
+        assert!(Glyph::Changed.style().is_none());
+        let mut changed = Vec::new();
+        Theme::new(true)
+            .write_glyph(&mut changed, Glyph::Changed)
+            .unwrap();
+        assert_eq!(changed, Glyph::Changed.value().to_string().as_bytes());
     }
 
     #[test]

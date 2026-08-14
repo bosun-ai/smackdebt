@@ -1,0 +1,123 @@
+smackdebt diff
+repository root
+
+QUALITY
+ 2 ·  1 ·  4
+
+AREAS
+e
+   1   –   1
+b
+   1   –   –
+a
+   –   1   –
+c
+   –   –   1
+f
+   –   –   1
+new
+   –   –   1
+
+FINDINGS
+  b
+        b/main.js
+        cognitive 1 → 6
+        cyclomatic 2 → 4
+        lines 1 → 2
+  renamed
+        e/new.js
+        added
+  a
+        a/main.js
+        cognitive 3 → 0
+        cyclomatic 3 → 1
+        lines 2 → 1
+  c
+        c/main.js
+        lines 2 → 3
+  removed
+        f/deleted.js
+        removed
+  renamed
+        e/old.js
+        removed
+  untracked
+        new/untracked.js
+        added
+
+ARCHITECTURE
+ package cycle introduced
+        c
+        → d
+        → c
+ package cycle removed
+        a
+        → b
+        → a
+  a/main.js
+        → b/main.js
+        removed
+  a/main.js
+        → c/main.js
+        added
+  b/main.js
+        → a/main.js
+        removed
+  d/main.js
+        → c/main.js
+        added
+  h/main.js
+        → i/main.js
+        added
+  a/main.js
+        → c/main.js
+        1 import
+  c/main.js
+        → d/main.js
+        1 import
+  d/main.js
+        → c/main.js
+        1 import
+  h/main.js
+        → i/main.js
+        1 import
+
+HISTORY
+  h ↔ i
+        4 of 4 commits · 100%
+        code dependency exists
+  h
+        4 commits · +4 -3
+  i
+        4 commits · +4 -3
+  a
+        1 commit · +7 -0
+  b
+        1 commit · +2 -0
+  c
+        1 commit · +2 -0
+  d
+        1 commit · +1 -0
+  e
+        1 commit · +1 -0
+  f
+        1 commit · +1 -0
+  h/main.js
+        4 commits · +4 -3
+  i/main.js
+        4 commits · +4 -3
+  a/main.js
+        1 commit · +7 -0
+  b/main.js
+        1 commit · +2 -0
+  c/main.js
+        1 commit · +2 -0
+  d/main.js
+        1 commit · +1 -0
+  e/old.js
+        1 commit · +1 -0
+  f/deleted.js
+        1 commit · +1 -0
+ h ↔ i
+        no longer change together
+        without a code dependency

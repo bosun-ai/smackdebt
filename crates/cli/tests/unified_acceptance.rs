@@ -7,6 +7,7 @@ use std::process::Command;
 
 use serde::Deserialize;
 use serde_json::Value;
+use unicode_width::UnicodeWidthStr;
 
 #[cfg(unix)]
 use support::coverage_failure_repository;
@@ -202,6 +203,12 @@ fn unified_codebase_terminal_and_json_are_exact_and_deterministic() {
 fn worktree_diff_reports_the_declared_mixed_change_outcomes_once() {
     let repository = worktree_change_repository();
     let facts: Value = repository.facts("worktree-change.json");
+    let concise = Invocation::new(["diff", "main", "--history", "36500d"]).run(repository.path());
+    concise.success();
+    assert_golden(
+        "unified-worktree-diff-concise.terminal.txt",
+        &concise.stdout,
+    );
     let terminal =
         Invocation::new(["diff", "main", "--all", "--history", "36500d"]).run(repository.path());
     terminal.success();
@@ -211,6 +218,16 @@ fn worktree_diff_reports_the_declared_mixed_change_outcomes_once() {
     parallel_terminal.success();
     assert_eq!(terminal, parallel_terminal);
     assert_golden("unified-worktree-diff.terminal.txt", &terminal.stdout);
+    for width in [80, 50] {
+        let result = Invocation::new(["diff", "main", "--all", "--history", "36500d"])
+            .columns(width)
+            .run(repository.path());
+        result.success();
+        assert_golden(
+            &format!("unified-worktree-diff-{width}.terminal.txt"),
+            &result.stdout,
+        );
+    }
     let json =
         Invocation::new(["diff", "main", "--json", "--history", "36500d"]).run(repository.path());
     json.success();
@@ -338,6 +355,18 @@ fn terminal_width_color_and_path_drills_have_exact_public_bytes() {
             &result.stdout,
         );
     }
+    let narrow_plain = Invocation::new(["--all"])
+        .columns(50)
+        .run(repository.path());
+    let narrow_colored = Invocation::new(["--all"])
+        .columns(50)
+        .color("always")
+        .run(repository.path());
+    narrow_plain.success();
+    narrow_colored.success();
+    assert_eq!(strip_ansi(&narrow_colored.stdout), narrow_plain.stdout);
+    assert_glyph_only_ansi(&narrow_colored.stdout);
+    assert_max_display_width(&narrow_colored.stdout, 50, "colored codebase");
     let plain = Invocation::new(["--all"]).run(repository.path());
     let colored = Invocation::new(["--all"])
         .color("always")
@@ -345,18 +374,66 @@ fn terminal_width_color_and_path_drills_have_exact_public_bytes() {
     plain.success();
     colored.success();
     assert_eq!(strip_ansi(&colored.stdout), plain.stdout);
+    assert_glyph_only_ansi(&colored.stdout);
+    let colored_diff = Invocation::new(["diff", "main", "--all"])
+        .color("always")
+        .run(repository.path());
+    colored_diff.success();
+    assert_glyph_only_ansi(&colored_diff.stdout);
+    let colored_text = String::from_utf8_lossy(&colored.stdout);
+    let colored_diff_text = String::from_utf8_lossy(&colored_diff.stdout);
+    for glyph in ['', '', ''] {
+        assert!(colored_text.contains(glyph));
+    }
+    for glyph in ['', '', ''] {
+        assert!(colored_diff_text.contains(glyph));
+    }
+    assert!(!colored_diff_text.contains("\u{1b}[31m"));
+    assert!(!colored_diff_text.contains("\u{1b}[32m"));
+    assert!(!colored_diff_text.contains("\u{1b}[38;5;208m"));
+    let redirected = Invocation::new(["--all"])
+        .automatic_color()
+        .without_no_color()
+        .run(repository.path());
+    let no_color = Invocation::new(["--all"])
+        .automatic_color()
+        .run(repository.path());
+    redirected.success();
+    no_color.success();
+    assert_eq!(redirected.stdout, plain.stdout);
+    assert_eq!(no_color.stdout, plain.stdout);
+    assert!(!redirected.stdout.windows(2).any(|bytes| bytes == b"\x1b["));
+    assert!(!no_color.stdout.windows(2).any(|bytes| bytes == b"\x1b["));
 
-    for (arguments, golden) in [
-        (vec!["a", "--all"], "unified-package.terminal.txt"),
-        (vec!["a/main.js", "--all"], "unified-file.terminal.txt"),
+    for (arguments, stem, wide_golden) in [
+        (
+            vec!["a", "--all"],
+            "unified-package",
+            "unified-package.terminal.txt",
+        ),
+        (
+            vec!["a/main.js", "--all"],
+            "unified-file",
+            "unified-file.terminal.txt",
+        ),
     ] {
-        let result = Invocation::new(arguments.clone()).run(repository.path());
-        result.success();
-        let automatic = Invocation::new(arguments)
-            .automatic_workers()
-            .run(repository.path());
-        assert_eq!(result, automatic);
-        assert_golden(golden, &result.stdout);
+        for width in [120, 80, 50] {
+            let result = Invocation::new(arguments.clone())
+                .columns(width)
+                .run(repository.path());
+            result.success();
+            let automatic = Invocation::new(arguments.clone())
+                .columns(width)
+                .automatic_workers()
+                .run(repository.path());
+            assert_eq!(result, automatic);
+            let golden = if width == 120 {
+                wide_golden.to_owned()
+            } else {
+                format!("{stem}-{width}.terminal.txt")
+            };
+            assert_golden(&golden, &result.stdout);
+        }
     }
     for (arguments, golden) in [
         (vec!["a", "--json"], "unified-package.json"),
@@ -373,13 +450,23 @@ fn terminal_width_color_and_path_drills_have_exact_public_bytes() {
     }
     let languages = GeneratedRepository::new("main");
     copy_language_truth_files(&languages);
-    let directory = Invocation::new(["src", "--all"]).run(languages.path());
-    directory.success();
-    let automatic_directory = Invocation::new(["src", "--all"])
-        .automatic_workers()
-        .run(languages.path());
-    assert_eq!(directory, automatic_directory);
-    assert_golden("unified-directory.terminal.txt", &directory.stdout);
+    for width in [120, 80, 50] {
+        let directory = Invocation::new(["src", "--all"])
+            .columns(width)
+            .run(languages.path());
+        directory.success();
+        let automatic_directory = Invocation::new(["src", "--all"])
+            .columns(width)
+            .automatic_workers()
+            .run(languages.path());
+        assert_eq!(directory, automatic_directory);
+        let golden = if width == 120 {
+            "unified-directory.terminal.txt".to_owned()
+        } else {
+            format!("unified-directory-{width}.terminal.txt")
+        };
+        assert_golden(&golden, &directory.stdout);
+    }
     let directory_json = Invocation::new(["src", "--json"]).run(languages.path());
     directory_json.success();
     let automatic_directory_json = Invocation::new(["src", "--json"])
@@ -388,6 +475,39 @@ fn terminal_width_color_and_path_drills_have_exact_public_bytes() {
     assert_eq!(directory_json, automatic_directory_json);
     checked_json(&directory_json.stdout);
     assert_golden("unified-directory.json", &directory_json.stdout);
+}
+
+#[test]
+fn every_fifty_column_snapshot_respects_unicode_display_width() {
+    if std::env::var_os("SMACKDEBT_UPDATE_CASE").is_some() {
+        return;
+    }
+    let snapshots = Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/snapshots");
+    let mut checked = 0;
+    for entry in fs::read_dir(snapshots).unwrap() {
+        let entry = entry.unwrap();
+        let name = entry.file_name();
+        let name = name.to_string_lossy();
+        if !name.ends_with("-50.terminal.txt") {
+            continue;
+        }
+        assert_max_display_width(&fs::read(entry.path()).unwrap(), 50, &name);
+        checked += 1;
+    }
+    assert_eq!(checked, 6, "expected every reviewed 50-column view");
+}
+
+fn assert_max_display_width(bytes: &[u8], width: usize, name: &str) {
+    let plain = strip_ansi(bytes);
+    let plain = String::from_utf8(plain).unwrap();
+    for (index, line) in plain.lines().enumerate() {
+        assert!(
+            UnicodeWidthStr::width(line) <= width,
+            "{name}:{} is {} columns: {line}",
+            index + 1,
+            UnicodeWidthStr::width(line)
+        );
+    }
 }
 
 #[cfg(unix)]
@@ -453,6 +573,7 @@ fn failures_and_recoverable_coverage_obey_status_and_stream_contracts() {
     );
     assert!(bad_ref.stdout.is_empty());
     assert_eq!(bad_ref.stderr_text(), facts["expected_invalid_ref_stderr"]);
+    assert_short_terminal_text(&bad_ref.stderr);
 
     let bad_argument = Invocation::new(["--jobs", "0"]).run(repository.path());
     assert_eq!(
@@ -466,6 +587,7 @@ fn failures_and_recoverable_coverage_obey_status_and_stream_contracts() {
         bad_argument.stderr_text(),
         facts["expected_invalid_argument_stderr"]
     );
+    assert_short_terminal_text(&bad_argument.stderr);
 
     let outside_git = tempfile::tempdir().unwrap();
     fs::write(
@@ -495,6 +617,7 @@ fn failures_and_recoverable_coverage_obey_status_and_stream_contracts() {
         diff.stderr_text(),
         facts["expected_outside_git_diff_stderr"]
     );
+    assert_short_terminal_text(&diff.stderr);
 }
 
 #[test]
@@ -547,6 +670,80 @@ fn help_and_version_use_the_success_stream_contract() {
         let result = Invocation::new([argument]).run(repository.path());
         result.success();
         assert!(!result.stdout.is_empty());
+        assert_short_terminal_text(&result.stdout);
+        if argument == "--help" {
+            assert_eq!(
+                String::from_utf8_lossy(&result.stdout),
+                concat!(
+                    "Find costly code and see whether a change made it better\n",
+                    "\n",
+                    "Usage: smackdebt [OPTIONS] [PATH] [COMMAND]\n",
+                    "\n",
+                    "Commands:\n",
+                    "  diff  Compare your current work with a Git ref\n",
+                    "  help  Print this message or the help of the given subcommand(s)\n",
+                    "\n",
+                    "Arguments:\n",
+                    "  [PATH]  Show one path\n",
+                    "\n",
+                    "Options:\n",
+                    "      --json               Write the complete JSON report\n",
+                    "      --jobs <JOBS>        Number of workers to use\n",
+                    "      --history <HISTORY>  Recent activity window, such as 90d\n",
+                    "      --all                Show all useful terminal detail\n",
+                    "      --color <COLOR>      Glyph color: auto, always, or never [possible values: auto, always, never]\n",
+                    "  -h, --help               Print help\n",
+                    "  -V, --version            Print version\n",
+                )
+            );
+        }
+    }
+}
+
+#[test]
+fn readme_console_examples_use_the_simple_terminal_vocabulary() {
+    let readme =
+        fs::read_to_string(Path::new(env!("CARGO_MANIFEST_DIR")).join("../../README.md")).unwrap();
+    let mut console = String::new();
+    let mut inside = false;
+    for line in readme.lines() {
+        if line == "```console" {
+            inside = true;
+            continue;
+        }
+        if inside && line == "```" {
+            assert_short_terminal_text(console.as_bytes());
+            console.clear();
+            inside = false;
+            continue;
+        }
+        if inside {
+            console.push_str(line);
+            console.push('\n');
+        }
+    }
+    assert!(!inside, "README console block is not closed");
+    for required in [
+        "QUALITY",
+        "AREAS",
+        "FINDINGS",
+        "ARCHITECTURE",
+        "changed together in 8 of 10 commits · 80% · no code dependency",
+        "source → target · 1 import",
+        "source owns target",
+        "label activity as `commit` or `commits`",
+        " smackdebt",
+    ] {
+        assert!(readme.contains(required), "README is missing {required}");
+    }
+    for removed in [
+        "change together without a dependency",
+        "touches count distinct commits",
+        "external uses · primary/trusted",
+        "unresolved uses · primary/trusted",
+        "coupling finding",
+    ] {
+        assert!(!readme.contains(removed), "README contains {removed}");
     }
 }
 
@@ -571,6 +768,7 @@ fn executable_readme_examples_match_named_public_fixtures() {
         assert_eq!(result.status.code(), Some(example.status));
         assert_eq!(example.stderr, "empty");
         assert!(result.stderr.is_empty(), "{}", result.stderr_text());
+        assert_short_terminal_text(&result.stdout);
         let output = String::from_utf8(result.stdout).unwrap();
         let mut remainder = output.as_str();
         for fragment in example.stdout_fragments {
@@ -1085,6 +1283,9 @@ fn strings<'a>(values: &'a Value, field: &str) -> HashSet<&'a str> {
 }
 
 fn assert_golden(name: &str, actual: &[u8]) {
+    if name.ends_with(".terminal.txt") {
+        assert_short_terminal_text(actual);
+    }
     let path = golden_path(name);
     let selected = std::env::var("SMACKDEBT_UPDATE_CASE").ok();
     if selected.as_deref() == Some(name) || selected.as_deref() == Some("all") {
@@ -1100,6 +1301,45 @@ fn assert_golden(name: &str, actual: &[u8]) {
     let expected =
         fs::read(&path).unwrap_or_else(|error| panic!("read golden {}: {error}", path.display()));
     assert_eq!(actual, expected, "golden {name} changed");
+}
+
+fn assert_short_terminal_text(bytes: &[u8]) {
+    let text = String::from_utf8_lossy(bytes);
+    for removed in [
+        "▲",
+        "▼",
+        "●",
+        "→ Explore",
+        " HIGH",
+        " WATCH",
+        " WORSE",
+        " BETTER",
+        " CHANGED",
+        "healthy",
+        "complete local stream",
+        "eligible mapping",
+        "retained units",
+        "retained package pairs",
+        " touches",
+        " touch ",
+        "primary/trusted",
+        " · uses · ",
+        " references",
+        "  witness",
+        "unresolved uses",
+        "ambiguous uses",
+        "coupling finding",
+        "DEBT BY AREA",
+        "CHANGE BY AREA",
+        "TOP FINDINGS",
+        "TOP CHANGES",
+        "\u{ec3f}",
+    ] {
+        assert!(
+            !text.contains(removed),
+            "terminal contains removed text {removed}"
+        );
+    }
 }
 
 fn golden_path(name: &str) -> PathBuf {
@@ -1124,6 +1364,40 @@ fn strip_ansi(value: &[u8]) -> Vec<u8> {
         }
     }
     result
+}
+
+fn assert_glyph_only_ansi(value: &[u8]) {
+    let text = std::str::from_utf8(value).unwrap();
+    let mut remainder = text;
+    while let Some(start) = remainder.find("\x1b[") {
+        remainder = &remainder[start..];
+        let style_end = remainder.find('m').expect("ANSI style terminator") + 1;
+        let style = &remainder[..style_end];
+        remainder = &remainder[style_end..];
+        let glyph = remainder.chars().next().expect("styled glyph");
+        assert!(
+            [
+                '\u{f024}', '\u{f0eb}', '\u{f46b}', '\u{f062}', '\u{f063}', '\u{f071}'
+            ]
+            .contains(&glyph),
+            "styled non-status text {glyph:?}"
+        );
+        let expected_style = match glyph {
+            '' | '' => "\u{1b}[31m",
+            '' | '' => "\u{1b}[38;5;208m",
+            '' => "\u{1b}[36m",
+            '' => "\u{1b}[32m",
+            _ => unreachable!(),
+        };
+        assert_eq!(style, expected_style, "wrong style for {glyph:?}");
+        remainder = &remainder[glyph.len_utf8()..];
+        assert!(
+            remainder.starts_with("\x1b["),
+            "glyph style was not reset immediately"
+        );
+        let reset_end = remainder.find('m').expect("ANSI reset terminator") + 1;
+        remainder = &remainder[reset_end..];
+    }
 }
 
 #[derive(Debug)]

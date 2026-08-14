@@ -14,22 +14,16 @@ ROOT = Path(__file__).parents[2]
 EVIDENCE = ROOT / "benchmarks" / "evidence" / "workload-reviews.json"
 EXPECTED = {
     "self": {
-        "fixture_cycles_absent",
-        "package_references_valid",
-        "root_label_readable",
-        "default_coupling_threshold_met",
+        "important_debt_leads",
+        "empty_optional_sections_absent",
     },
     "private_mixed_application": {
-        "generated_schema_client_findings_excluded",
-        "weak_coupling_absent",
-        "ownership_cycles_absent",
-        "hand_written_high_findings_visible",
-        "default_coupling_threshold_met",
+        "primary_application_findings_lead",
+        "generated_rails_schema_outside_default_debt",
     },
     "private_rust_workspace": {
-        "ownership_cycles_absent",
-        "high_complexity_findings_visible",
-        "default_coupling_threshold_met",
+        "useful_rust_findings_lead",
+        "weak_history_and_graph_facts_absent",
     },
 }
 PRIVATE_KEYS = {

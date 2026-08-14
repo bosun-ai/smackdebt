@@ -1,0 +1,185 @@
+smackdebt codebase
+src
+
+QUALITY
+27 rated units · 27 need attention
+ 25 ·  2
+
+AREAS
+src/ruby.rb
+   3   1
+src/java.java
+   3   –
+src/python.py
+   3   –
+src/vue.vue
+   3   –
+src/rust.rs
+   2   1
+src/cpp.cpp
+   2   –
+src/javascript.js
+   2   –
+src/jsx.jsx
+   2   –
+src/tsx.tsx
+   2   –
+src/typescript.ts
+   2   –
+src/c.c
+   1   –
+
+FINDINGS
+  controls
+        function
+        src/c.c:1
+        cognitive 9
+        cyclomatic 8
+        lines 6
+  Worker::run
+        method
+        src/rust.rs:6
+        cognitive 7
+        cyclomatic 4
+        lines 3
+  <template>
+        template
+        src/vue.vue:1
+        cognitive 5
+        cyclomatic 6
+        lines 3
+  outer::inner
+        function
+        src/python.py:2
+        cognitive 4
+        cyclomatic 5
+        lines 4
+  Worker::run
+        method
+        src/java.java:3
+        cognitive 4
+        cyclomatic 4
+        lines 5
+  Worker::<lambda 4>
+        lambda
+        src/ruby.rb:4
+        cognitive 3
+        cyclomatic 4
+        lines 2
+  Worker::run
+        method
+        src/javascript.js:3
+        cognitive 2
+        cyclomatic 3
+        lines 3
+  Worker::<lambda 5>
+        lambda
+        src/cpp.cpp:5
+        cognitive 2
+        cyclomatic 3
+        lines 1
+  Worker::run
+        method
+        src/cpp.cpp:4
+        cognitive 1
+        cyclomatic 2
+        lines 3
+  View::render
+        method
+        src/jsx.jsx:2
+        cognitive 1
+        cyclomatic 2
+        lines 2
+  Worker::<closure 5>
+        closure
+        src/ruby.rb:5
+        cognitive 1
+        cyclomatic 2
+        lines 2
+  View::render
+        method
+        src/tsx.tsx:2
+        cognitive 1
+        cyclomatic 2
+        lines 2
+  Worker::run
+        method
+        src/typescript.ts:3
+        cognitive 1
+        cyclomatic 2
+        lines 2
+  save
+        function
+        src/vue.vue:9
+        cognitive 1
+        cyclomatic 2
+        lines 2
+  Worker::<closure 7>
+        closure
+        src/rust.rs:7
+        cognitive 2
+        cyclomatic 2
+  Worker::Worker
+        method
+        src/java.java:2
+        cognitive 1
+        cyclomatic 2
+        lines 1
+  Worker::<lambda 4>
+        lambda
+        src/java.java:4
+        cognitive 1
+        cyclomatic 2
+  Worker::handler
+        closure
+        src/javascript.js:2
+        cognitive 1
+        cyclomatic 2
+  View::select
+        closure
+        src/jsx.jsx:3
+        cognitive 1
+        cyclomatic 2
+  outer::<lambda 11>
+        lambda
+        src/python.py:11
+        cognitive 1
+        cyclomatic 2
+  View::select
+        closure
+        src/tsx.tsx:3
+        cognitive 1
+        cyclomatic 2
+  Worker::handler
+        closure
+        src/typescript.ts:2
+        cognitive 1
+        cyclomatic 2
+  helper
+        closure
+        src/vue.vue:8
+        cognitive 1
+        cyclomatic 2
+  outer
+        function
+        src/python.py:1
+        cyclomatic 1
+        lines 2
+  Worker::run
+        method
+        src/ruby.rb:3
+        cyclomatic 1
+        lines 2
+  Worker::self.empty
+        method
+        src/ruby.rb:11
+        cyclomatic 1
+  Work::run
+        method
+        src/rust.rs:2
+        cyclomatic 1
+
+WARNINGS
+ History is unavailable.
+
+ smackdebt src/ruby.rb

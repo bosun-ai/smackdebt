@@ -1,0 +1,17 @@
+smackdebt codebase
+a
+
+QUALITY
+1 rated unit · 0 need attention
+  a/main.js
+
+ARCHITECTURE
+  a/main.js
+        → c/main.js
+        1 import
+
+HISTORY
+  a
+        1 commit · +7 -0
+  a/main.js
+        1 commit · +7 -0

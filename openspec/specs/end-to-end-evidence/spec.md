@@ -25,25 +25,18 @@ worker policy and by asserting status, stdout, and stderr bytes.
 - **AND** stdout contains no partial report
 
 ### Requirement: Generated fixtures cover all analysis families
+Public generated repositories SHALL provide hand-calculated facts for six
+roles, every precedence level, same-level conflict, parsed, recovered and failed
+source, stable packages, both relation kinds, history fields, coupling threshold
+edges, exact ranking, root labels, architecture witnesses, and de-duplication.
 
-The system SHALL maintain public generated repositories with hand-calculated
-facts for every supported language, static architecture, evolutionary history,
-worktree comparison, and recoverable coverage failure.
+#### Scenario: Signal-quality fixture runs
+- **WHEN** the real CLI analyzes the fixture
+- **THEN** its fact manifest proves every expected role, trust, package, relation, history, finding, diagnostic, and coverage fact
 
-#### Scenario: All-language analysis runs
-
-- **WHEN** the all-language repository is analyzed
-- **THEN** every listed supported language has nested-unit evidence for
-  cognitive complexity, cyclomatic complexity, and exclusive logical lines
-- **AND** exact values match its fact manifest
-
-#### Scenario: Unified analysis runs
-
-- **WHEN** a fixture contains source debt, a static cycle, churn, and unexplained
-  change coupling
-- **THEN** one report presents separate code, architecture, and evolution facts
-- **AND** JSON links those facts through typed indexes without duplicate owned
-  findings
+#### Scenario: Role rules conflict
+- **WHEN** two same-level rules assign different roles
+- **THEN** exact acceptance proves exit 2, empty stdout, and the reviewed stderr
 
 ### Requirement: The public command matrix covers documented flows
 
@@ -84,17 +77,17 @@ SHALL prove that forced color changes only ANSI styling, not visible text.
 - **THEN** their visible text is byte-for-byte equal
 
 ### Requirement: JSON evidence validates structure and meaning
+Every acceptance JSON result SHALL validate against the version-3 schema and
+pass semantic, index, privacy, and exact-byte checks from the same invocation
+before its performance sample is accepted.
 
-The system SHALL validate every acceptance JSON result against the committed
-version-2 schema, assert hand-calculated values, and compare exact bytes.
+#### Scenario: A recovered High fact is emitted
+- **WHEN** JSON validation runs
+- **THEN** the advisory fact remains present and no health, graph-verdict, coupling-finding, or diff-verdict index refers to it
 
-#### Scenario: A JSON codebase report is produced
-
-- **WHEN** unified analysis completes in JSON mode
-- **THEN** schema validation passes before snapshot comparison
-- **AND** focused assertions prove metric, graph, history, finding, diagnostic,
-  and coverage values
-- **AND** the complete bytes match the committed result
+#### Scenario: A private value reaches output
+- **WHEN** output contains source, an absolute private path, Git identity, or private history detail
+- **THEN** privacy validation fails before evidence approval
 
 ### Requirement: Serial and parallel public output is identical
 
@@ -119,21 +112,17 @@ results only through a named developer command that reports every changed file.
 - **AND** CI does not rewrite the expected file
 
 ### Requirement: Composition work is observable in complete flows
+Feature-gated live evidence SHALL count inventory visits, reads, Git processes,
+parser visits, algorithm passes, and renderer entry at their actual seams with
+no evidence-only API or atomic cost in normal builds.
 
-The system SHALL expose test-only counts for inventory, reads, Git processes,
-parser visits, algorithm passes, and rendering without changing normal output.
+#### Scenario: Rendering starts from one completed report
+- **WHEN** live snapshots are captured immediately before and after output
+- **THEN** the delta has one renderer entry and zero inventory, read, Git, parser, and algorithm events
 
-#### Scenario: JSON renders an existing report
-
-- **WHEN** instrumented JSON output receives the completed borrowed report
-- **THEN** rendering starts no discovery, source read, Git process, parser visit,
-  or analysis pass
-
-#### Scenario: A worktree diff reads repository state
-
-- **WHEN** the generated mixed-change fixture runs
-- **THEN** measured source reads, object reads, and Git process counts match the
-  applicable performance contracts
+#### Scenario: Real work occurs after a snapshot
+- **WHEN** one counted seam runs after an earlier live snapshot
+- **THEN** a later snapshot changes and cannot be replaced by a frozen report value
 
 ### Requirement: Installation works outside the source workspace
 
@@ -146,4 +135,45 @@ installed command from a generated repository outside the source workspace.
 - **THEN** help and version succeed
 - **AND** one terminal and one JSON report pass status, stream, schema, and
   semantic assertions
+
+### Requirement: Public command evidence covers every revised decision
+Exact terminal and JSON acceptance SHALL cover codebase, path drill, clean
+committed ref-diff, and mixed worktree-diff flows for roles, recovery, packages,
+relations, history, ranking, root labels, witness-only defaults, detailed edges,
+weak coupling, coverage failures, and conflict exit 2.
+
+#### Scenario: A committed branch differs with a clean worktree
+- **WHEN** role, package presence, relation, or history facts change between refs
+- **THEN** exact status, stdout, and stderr contain no worktree-only facts
+
+#### Scenario: A real source file fails analysis
+- **WHEN** the fixture causes failure rather than parser recovery
+- **THEN** exact coverage and diagnostics remain and no invented fact appears
+
+### Requirement: Serial and automatic flows preserve bytes and work
+Every named public flow SHALL run with one worker and automatic parallelism.
+Status and bytes SHALL match, and inventory, read, Git, parser, algorithm, and
+renderer totals SHALL equal the exact manifest values for that flow.
+
+#### Scenario: Worker policy changes
+- **WHEN** the same fixture command runs under both policies
+- **THEN** terminal and JSON bytes and exact work totals agree
+
+### Requirement: Three workload families have privacy-safe acceptance
+After public proof passes, aggregate review SHALL cover self, a private mixed
+application, and a private Rust workspace. Committed evidence SHALL name only
+the workload family and expected outcome categories and SHALL contain no private
+path, source, Git identity, or history.
+
+#### Scenario: Self is reviewed
+- **WHEN** the current implementation analyzes self
+- **THEN** fixture cycles are gone, package references are valid, root labels are readable, and every default coupling meets the threshold
+
+#### Scenario: Private mixed application is reviewed
+- **WHEN** aggregate outcomes are inspected
+- **THEN** generated schema and client findings are excluded, weak coupling is gone, Rust ownership cycles are gone, substantial hand-written functions remain prominent, and every default coupling meets the threshold
+
+#### Scenario: Private Rust workspace is reviewed
+- **WHEN** aggregate outcomes are inspected
+- **THEN** ownership cycles are gone, real high-complexity functions remain visible, and every default coupling meets the threshold
 

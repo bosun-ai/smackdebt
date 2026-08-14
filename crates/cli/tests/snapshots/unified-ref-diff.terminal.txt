@@ -1,110 +1,95 @@
-smackdebt · diff
+smackdebt diff
 repository root
-9 source files changed · 9 clean
 
-CHANGE  7 retained units
-▲ WORSE 2 · ▼ BETTER 1 · ● CHANGED 4
+QUALITY
+ 2 ·  1 ·  4
 
-CHANGE BY AREA
-  area          worse  better  changed  share              
-  e                 1       –        1  ███▍░░░░░░░░  29%
-  b                 1       –        –  █▊░░░░░░░░░░  14%
-  a                 –       1        –  █▊░░░░░░░░░░  14%
-  c                 –       –        1  █▊░░░░░░░░░░  14%
-  f                 –       –        1  █▊░░░░░░░░░░  14%
-  new               –       –        1  █▊░░░░░░░░░░  14%
-  d                 –       –        –  ░░░░░░░░░░░░  0%
-  gone              –       –        –  ░░░░░░░░░░░░  0%
-  h                 –       –        –  ░░░░░░░░░░░░  0%
-  i                 –       –        –  ░░░░░░░░░░░░  0%
+AREAS
+e              1   –   1
+b              1   –   –
+a              –   1   –
+c              –   –   1
+f              –   –   1
+new            –   –   1
 
-ARCHITECTURE CHANGE
-4 internal · 0 external · 0 unresolved · 0 ambiguous
-▲ WORSE 1 · ▼ BETTER 1 · ● CHANGED 5
-▲ WORSE  package cycle introduced  c  d  witness  c  d  c
-▼ BETTER  package cycle removed  a  b  witness  a  b  a
-● CHANGED  edge removed  a  b  references 1 → 0
-● CHANGED  edge added  a  c  references 0 → 1
-● CHANGED  edge removed  b  a  references 1 → 0
-● CHANGED  edge added  d  c  references 0 → 1
-● CHANGED  edge added  h  i  references 0 → 1
-
-EVOLUTION CONTEXT
-complete local stream · 5 commits
-eligible mapping 23/35 changes · 66% · 5 commits
-0 context · 12 excluded · 0 uncounted · 0 rename gaps
-  h · 5 touches · +6 -4 · 3 contributors · 40% top share · primary/trusted
-  i · 4 touches · +4 -3 · 2 contributors · 50% top share · primary/trusted
-  a · 2 touches · +9 -7 · 2 contributors · 50% top share · primary/trusted
-  b · 2 touches · +10 -2 · 2 contributors · 50% top share · primary/trusted
-  c · 2 touches · +3 -1 · 2 contributors · 50% top share · primary/trusted
-  d · 2 touches · +3 -1 · 2 contributors · 50% top share · primary/trusted
-  e · 2 touches · +2 -1 · 2 contributors · 50% top share · primary/trusted
-  f · 2 touches · +1 -1 · 2 contributors · 50% top share · primary/trusted
-  new · 1 touches · +1 -0 · 1 contributors · 100% top share · primary/trusted
-    file h/main.js · 5 touches · +6 -4
-      evidence primary/trusted
-    file i/main.js · 4 touches · +4 -3
-      evidence primary/trusted
-    file a/main.js · 2 touches · +9 -7
-      evidence primary/trusted
-    file b/main.js · 2 touches · +10 -2
-      evidence primary/trusted
-    file c/main.js · 2 touches · +3 -1
-      evidence primary/trusted
-    file d/main.js · 2 touches · +3 -1
-      evidence primary/trusted
-    file e/old.js · 2 touches · +1 -1
-      evidence primary/trusted
-    file f/deleted.js · 2 touches · +1 -1
-      evidence primary/trusted
-    file e/new.js · 1 touches · +1 -0
-      evidence primary/trusted
-    file new/untracked.js · 1 touches · +1 -0
-      evidence primary/trusted
-  coupling a ↔ b · 2/2 shared commits · 100% similarity · no eligible static use · primary/trusted ↔ primary/trusted
-  coupling a ↔ c · 2/2 shared commits · 100% similarity · static use · primary/trusted ↔ primary/trusted
-  coupling a ↔ d · 2/2 shared commits · 100% similarity · no eligible static use · primary/trusted ↔ primary/trusted
-  coupling a ↔ e · 2/2 shared commits · 100% similarity · no eligible static use · primary/trusted ↔ primary/trusted
-  coupling a ↔ f · 2/2 shared commits · 100% similarity · no eligible static use · primary/trusted ↔ primary/trusted
-  coupling a ↔ h · 2/5 shared commits · 40% similarity · no eligible static use · primary/trusted ↔ primary/trusted
-  coupling b ↔ c · 2/2 shared commits · 100% similarity · no eligible static use · primary/trusted ↔ primary/trusted
-  coupling b ↔ d · 2/2 shared commits · 100% similarity · no eligible static use · primary/trusted ↔ primary/trusted
-  coupling b ↔ e · 2/2 shared commits · 100% similarity · no eligible static use · primary/trusted ↔ primary/trusted
-  coupling b ↔ f · 2/2 shared commits · 100% similarity · no eligible static use · primary/trusted ↔ primary/trusted
-  coupling b ↔ h · 2/5 shared commits · 40% similarity · no eligible static use · primary/trusted ↔ primary/trusted
-  coupling c ↔ d · 2/2 shared commits · 100% similarity · static use · primary/trusted ↔ primary/trusted
-  coupling c ↔ e · 2/2 shared commits · 100% similarity · no eligible static use · primary/trusted ↔ primary/trusted
-  coupling c ↔ f · 2/2 shared commits · 100% similarity · no eligible static use · primary/trusted ↔ primary/trusted
-  coupling c ↔ h · 2/5 shared commits · 40% similarity · no eligible static use · primary/trusted ↔ primary/trusted
-  coupling d ↔ e · 2/2 shared commits · 100% similarity · no eligible static use · primary/trusted ↔ primary/trusted
-  coupling d ↔ f · 2/2 shared commits · 100% similarity · no eligible static use · primary/trusted ↔ primary/trusted
-  coupling d ↔ h · 2/5 shared commits · 40% similarity · no eligible static use · primary/trusted ↔ primary/trusted
-  coupling e ↔ f · 2/2 shared commits · 100% similarity · no eligible static use · primary/trusted ↔ primary/trusted
-  coupling e ↔ h · 2/5 shared commits · 40% similarity · no eligible static use · primary/trusted ↔ primary/trusted
-  coupling f ↔ h · 2/5 shared commits · 40% similarity · no eligible static use · primary/trusted ↔ primary/trusted
-  coupling h ↔ i · 4/5 shared commits · 80% similarity · static use · primary/trusted ↔ primary/trusted
-▼ BETTER  coupling finding removed
-
-TOP CHANGES
-▲ WORSE  b
+FINDINGS
+  b
         b/main.js
         cognitive 1 → 6 · cyclomatic 2 → 4 · lines 1 → 2
-▲ WORSE  renamed
+  renamed
         e/new.js
-        added as watch
-▼ BETTER  a
+        added
+  a
         a/main.js
         cognitive 3 → 0 · cyclomatic 3 → 1 · lines 2 → 1
-● CHANGED  c
+  c
         c/main.js
         lines 2 → 3
-● CHANGED  removed
+  removed
         f/deleted.js
-        removed from healthy
-● CHANGED  renamed
+        removed
+  renamed
         e/old.js
-        removed from healthy
-● CHANGED  untracked
+        removed
+  untracked
         new/untracked.js
-        added as healthy
+        added
+
+ARCHITECTURE
+ package cycle introduced
+        c → d → c
+ package cycle removed
+        a → b → a
+ a/main.js → b/main.js · removed
+ a/main.js → c/main.js · added
+ b/main.js → a/main.js · removed
+ d/main.js → c/main.js · added
+ h/main.js → i/main.js · added
+  a/main.js → c/main.js · 1 import
+  c/main.js → d/main.js · 1 import
+  d/main.js → c/main.js · 1 import
+  h/main.js → i/main.js · 1 import
+
+HISTORY
+  a ↔ b changed together in 2 of 2 commits · 100% · no code dependency
+  a ↔ c changed together in 2 of 2 commits · 100% · code dependency exists
+  a ↔ d changed together in 2 of 2 commits · 100% · no code dependency
+  a ↔ e changed together in 2 of 2 commits · 100% · no code dependency
+  a ↔ f changed together in 2 of 2 commits · 100% · no code dependency
+  a ↔ h changed together in 2 of 5 commits · 40% · no code dependency
+  b ↔ c changed together in 2 of 2 commits · 100% · no code dependency
+  b ↔ d changed together in 2 of 2 commits · 100% · no code dependency
+  b ↔ e changed together in 2 of 2 commits · 100% · no code dependency
+  b ↔ f changed together in 2 of 2 commits · 100% · no code dependency
+  b ↔ h changed together in 2 of 5 commits · 40% · no code dependency
+  c ↔ d changed together in 2 of 2 commits · 100% · code dependency exists
+  c ↔ e changed together in 2 of 2 commits · 100% · no code dependency
+  c ↔ f changed together in 2 of 2 commits · 100% · no code dependency
+  c ↔ h changed together in 2 of 5 commits · 40% · no code dependency
+  d ↔ e changed together in 2 of 2 commits · 100% · no code dependency
+  d ↔ f changed together in 2 of 2 commits · 100% · no code dependency
+  d ↔ h changed together in 2 of 5 commits · 40% · no code dependency
+  e ↔ f changed together in 2 of 2 commits · 100% · no code dependency
+  e ↔ h changed together in 2 of 5 commits · 40% · no code dependency
+  f ↔ h changed together in 2 of 5 commits · 40% · no code dependency
+  h ↔ i changed together in 4 of 5 commits · 80% · code dependency exists
+  h · 5 commits · +6 -4
+  i · 4 commits · +4 -3
+  a · 2 commits · +9 -7
+  b · 2 commits · +10 -2
+  c · 2 commits · +3 -1
+  d · 2 commits · +3 -1
+  e · 2 commits · +2 -1
+  f · 2 commits · +1 -1
+  new · 1 commit · +1 -0
+  h/main.js · 5 commits · +6 -4
+  i/main.js · 4 commits · +4 -3
+  a/main.js · 2 commits · +9 -7
+  b/main.js · 2 commits · +10 -2
+  c/main.js · 2 commits · +3 -1
+  d/main.js · 2 commits · +3 -1
+  e/old.js · 2 commits · +1 -1
+  f/deleted.js · 2 commits · +1 -1
+  e/new.js · 1 commit · +1 -0
+  new/untracked.js · 1 commit · +1 -0
+ h ↔ i no longer change together without a code dependency

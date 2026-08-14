@@ -1,69 +1,47 @@
-smackdebt · codebase
+smackdebt codebase
 repository root
-9 packages · 8 files · 19 lines
 
-QUALITY  50% need attention
-██████░░░░░░  3 / 6 code units
-▲ 1 high · ● 2 watch · 3 healthy
-✓ all 8 source files analyzed cleanly
+QUALITY
+6 rated units · 3 need attention
+ 1 ·  2
 
-DEBT BY AREA
-  area           high  watch   share  rate               
-  b                 1      –  33%  ████████████  100%
-  c                 –      1  33%  ████████████  100%
-  e                 –      1  33%  ████████████  100%
-  a                 –      –  0%  ░░░░░░░░░░░░  0%
-  d                 –      –  0%  ░░░░░░░░░░░░  0%
-  f                 –      –  0%  ░░░░░░░░░░░░  0%
-  h                 –      –  0%  ░░░░░░░░░░░░  0%
-  i                 –      –  0%  ░░░░░░░░░░░░  0%
-  new               –      –  0%  ░░░░░░░░░░░░  0%
+AREAS
+b              1   –
+c              –   1
+e              –   1
 
-ARCHITECTURE
-4 internal · 0 external · 0 unresolved · 0 ambiguous
-▲ 1 high · ● 0 watch · 4 internal edges
-▲ HIGH  package dependency cycle
-        c/main.js → d/main.js
-  a/main.js → c/main.js · uses · primary/trusted · 1 references
-  c/main.js → d/main.js · uses · primary/trusted · 1 references
-  d/main.js → c/main.js · uses · primary/trusted · 1 references
-  h/main.js → i/main.js · uses · primary/trusted · 1 references
-
-EVOLUTION
-complete local stream · 4 commits
-eligible mapping 12/24 changes · 50% · 4 commits
-0 context · 12 excluded · 0 uncounted · 0 rename gaps
-  h · 4 touches · +4 -3 · 2 contributors · 50% top share · primary/trusted
-  i · 4 touches · +4 -3 · 2 contributors · 50% top share · primary/trusted
-  a · 1 touches · +7 -0 · 1 contributors · 100% top share · primary/trusted
-  b · 1 touches · +2 -0 · 1 contributors · 100% top share · primary/trusted
-  c · 1 touches · +2 -0 · 1 contributors · 100% top share · primary/trusted
-  d · 1 touches · +1 -0 · 1 contributors · 100% top share · primary/trusted
-  e · 0 touches · +0 -0 · primary/trusted
-  new · 0 touches · +0 -0 · primary/trusted
-    file h/main.js · 4 touches · +4 -3
-      evidence primary/trusted
-    file i/main.js · 4 touches · +4 -3
-      evidence primary/trusted
-    file a/main.js · 1 touches · +7 -0
-      evidence primary/trusted
-    file b/main.js · 1 touches · +2 -0
-      evidence primary/trusted
-    file c/main.js · 1 touches · +2 -0
-      evidence primary/trusted
-    file d/main.js · 1 touches · +1 -0
-      evidence primary/trusted
-  coupling h ↔ i · 4/4 shared commits · 100% similarity · static use · primary/trusted ↔ primary/trusted
-
-TOP FINDINGS
-▲ HIGH  b · function
+FINDINGS
+  b · function
         b/main.js:1
         cognitive 6 · cyclomatic 4 · lines 2
-● WATCH  renamed · function
+  renamed · function
         e/new.js:1
         cognitive 3 · cyclomatic 3 · lines 2
-● WATCH  c · function
+  c · function
         c/main.js:2
         lines 3
 
-→ Explore: smackdebt b
+ARCHITECTURE
+ package dependency cycle
+        c/main.js → d/main.js → c/main.js
+  a/main.js → c/main.js · 1 import
+  c/main.js → d/main.js · 1 import
+  d/main.js → c/main.js · 1 import
+  h/main.js → i/main.js · 1 import
+
+HISTORY
+  h ↔ i changed together in 4 of 4 commits · 100% · code dependency exists
+  h · 4 commits · +4 -3
+  i · 4 commits · +4 -3
+  a · 1 commit · +7 -0
+  b · 1 commit · +2 -0
+  c · 1 commit · +2 -0
+  d · 1 commit · +1 -0
+  h/main.js · 4 commits · +4 -3
+  i/main.js · 4 commits · +4 -3
+  a/main.js · 1 commit · +7 -0
+  b/main.js · 1 commit · +2 -0
+  c/main.js · 1 commit · +2 -0
+  d/main.js · 1 commit · +1 -0
+
+ smackdebt b

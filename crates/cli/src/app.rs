@@ -224,7 +224,23 @@ fn execution_width(jobs: Option<usize>) -> Option<ExecutionWidth> {
 }
 
 fn fail(error: &ProjectError) -> ExitCode {
-    let _ = writeln!(io::stderr().lock(), "smackdebt: {error}");
+    let message = match error {
+        ProjectError::Inspect { path, source } => {
+            format!("could not read {}: {source}", path.display())
+        }
+        ProjectError::WorkerPool(source) => format!("could not start analysis: {source}"),
+        ProjectError::Git(source) => format!("could not compare changes: {source}"),
+        ProjectError::MissingReference => {
+            "no comparison branch was found; pass one, for example `smackdebt diff main`".to_owned()
+        }
+        ProjectError::SourceRoleConflict { path, roles } => {
+            format!(
+                "source roles conflict for {}: {roles}; update .smackdebt.toml",
+                path.display()
+            )
+        }
+    };
+    let _ = writeln!(io::stderr().lock(), "smackdebt: {message}");
     if matches!(error, ProjectError::SourceRoleConflict { .. }) {
         ExitCode::from(2)
     } else {

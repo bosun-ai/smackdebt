@@ -91,64 +91,139 @@ def package_references_are_valid(report: dict) -> bool:
     )
 
 
-def default_coupling_meets_threshold(report: dict) -> bool:
-    return all(
-        row["left"] < row["right"]
-        and row["shared_commits"] >= 3
-        and row["similarity"] >= 0.2
-        for row in report["evolutionary_findings"]
-    )
-
-
-def cycles_exclude_role(report: dict, role: str) -> bool:
-    return all(
-        all(report["files"][file]["role"] != role for file in finding["files"])
-        for finding in report["architecture_findings"]
-    )
-
-
-def ownership_relations_do_not_form_cycles(report: dict) -> bool:
-    return all(
-        all(
-            report["dependency_edges"][edge]["relation"] != "module_ownership"
-            for edge in finding["witness_edges"]
-        )
-        for finding in report["architecture_findings"]
-    )
-
-
 def finding_path(report: dict, finding: dict) -> str:
     file = report["files"][finding["file"]]
     return report["paths"][file["path"]]
 
 
-def generated_schema_client_findings_are_excluded(report: dict, terminal: str) -> bool:
-    generated_schema = [
-        finding
-        for finding in report["findings"]
-        if finding["role"] == "generated"
-        and "schema" in finding_path(report, finding).lower()
-    ]
-    generated_client = [
-        finding
-        for finding in report["findings"]
-        if finding["role"] == "generated"
-        and "client" in finding_path(report, finding).lower()
-    ]
-    return bool(generated_schema) and bool(generated_client) and all(
-        finding_path(report, finding) not in terminal
-        for finding in generated_schema + generated_client
-    )
+def section_lines(terminal: str, heading: str) -> list[str] | None:
+    marker = f"\n{heading}\n"
+    if marker not in terminal:
+        return None
+    remainder = terminal.split(marker, 1)[1]
+    headings = {"QUALITY", "AREAS", "FINDINGS", "ARCHITECTURE", "HISTORY", "WARNINGS"}
+    lines = []
+    for line in remainder.splitlines():
+        if line in headings or line.startswith(" "):
+            break
+        if not line and lines:
+            continue
+        lines.append(line)
+    return [line for line in lines if line]
 
 
-def substantial_primary_finding_is_prominent(report: dict, terminal: str) -> bool:
-    return any(
-        finding["role"] == "primary"
+def first_displayed_finding(report: dict, terminal: str) -> dict | None:
+    lines = section_lines(terminal, "FINDINGS")
+    if not lines:
+        return None
+    for index, line in enumerate(lines):
+        if not line.startswith((" ", " ")):
+            continue
+        name = line[1:].strip().split(" · ", 1)[0]
+        path_line = lines[index + 1].strip() if index + 1 < len(lines) else ""
+        for finding in report["findings"]:
+            path = finding_path(report, finding)
+            container = finding.get("container")
+            identity = f"{container}::{finding['name']}" if container else finding["name"]
+            location = f"{path}:{finding['start_line']}"
+            if identity == name and path_line == location:
+                return finding
+        return None
+    return None
+
+
+def substantial_trusted_finding(finding: dict | None) -> bool:
+    return bool(
+        finding
         and finding["trust"] == "trusted"
         and finding["rating"] == "high"
         and finding["measurements"]["cognitive_complexity"] >= 25
-        and finding_path(report, finding) in terminal
+    )
+
+
+def finding_section_leads(terminal: str) -> bool:
+    finding = terminal.find("\nFINDINGS\n")
+    if finding < 0:
+        return False
+    later_sections = [
+        position
+        for heading in ("\nARCHITECTURE\n", "\nHISTORY\n", "\nWARNINGS\n")
+        if (position := terminal.find(heading)) >= 0
+    ]
+    return not later_sections or finding < min(later_sections)
+
+
+def important_debt_leads(report: dict, terminal: str) -> bool:
+    finding = first_displayed_finding(report, terminal)
+    return substantial_trusted_finding(finding) and finding_section_leads(terminal)
+
+
+def primary_application_finding_leads(report: dict, terminal: str) -> bool:
+    finding = first_displayed_finding(report, terminal)
+    return bool(
+        substantial_trusted_finding(finding)
+        and finding["role"] == "primary"
+        and finding_section_leads(terminal)
+    )
+
+
+def useful_rust_finding_leads(report: dict, terminal: str) -> bool:
+    finding = first_displayed_finding(report, terminal)
+    return bool(
+        substantial_trusted_finding(finding)
+        and finding_path(report, finding).endswith(".rs")
+        and finding_section_leads(terminal)
+    )
+
+
+def empty_optional_sections_are_absent(report: dict, terminal: str) -> bool:
+    root = report["scopes"][report["root"]]
+    affected_children = [
+        report["scopes"][child]
+        for child in root["children"]
+        if report["health"][report["scopes"][child]["health"]]["high"]
+        + report["health"][report["scopes"][child]["health"]]["watch"]
+        > 0
+    ]
+    return (
+        (len(affected_children) >= 2 or "\nAREAS\n" not in terminal)
+        and (root["architecture_findings"] or "\nARCHITECTURE\n" not in terminal)
+        and (root["evolutionary_findings"] or "\nHISTORY\n" not in terminal)
+    )
+
+
+def generated_rails_schema_is_outside_default_debt(report: dict, terminal: str) -> bool:
+    findings = [
+        finding
         for finding in report["findings"]
+        if finding["role"] == "generated"
+        and finding_path(report, finding).lower().endswith("db/schema.rb")
+    ]
+    return bool(findings) and all(finding_path(report, finding) not in terminal for finding in findings)
+
+
+def weak_history_and_graph_facts_are_absent(report: dict, terminal: str) -> bool:
+    root = report["scopes"][report["root"]]
+    expected_history = len(root["evolutionary_findings"])
+    history = section_lines(terminal, "HISTORY")
+    if expected_history == 0:
+        if history is not None:
+            return False
+    elif history is None or len(history) != expected_history or any(
+        not line.startswith(" ") for line in history
+    ):
+        return False
+
+    expected_architecture = len(root["architecture_findings"])
+    architecture = section_lines(terminal, "ARCHITECTURE")
+    if expected_architecture == 0:
+        return architecture is None
+    if architecture is None:
+        return False
+    markers = [line for line in architecture if line.startswith((" ", " "))]
+    witnesses = [line for line in architecture if not line.startswith((" ", " "))]
+    return len(markers) == expected_architecture and all(
+        line.startswith("        ") for line in witnesses
     )
 
 
@@ -170,28 +245,26 @@ def main() -> int:
 
     outcomes = {
         "self": {
-            "fixture_cycles_absent": cycles_exclude_role(self_report, "fixture"),
-            "package_references_valid": package_references_are_valid(self_report),
-            "root_label_readable": self_terminal.splitlines()[1:2] == ["repository root"],
-            "default_coupling_threshold_met": default_coupling_meets_threshold(self_report),
+            "important_debt_leads": important_debt_leads(self_report, self_terminal),
+            "empty_optional_sections_absent": empty_optional_sections_are_absent(
+                self_report, self_terminal
+            ),
         },
         "private_mixed_application": {
-            "generated_schema_client_findings_excluded": generated_schema_client_findings_are_excluded(
+            "primary_application_findings_lead": primary_application_finding_leads(
                 mixed_report, mixed_terminal
             ),
-            "weak_coupling_absent": default_coupling_meets_threshold(mixed_report),
-            "ownership_cycles_absent": ownership_relations_do_not_form_cycles(mixed_report),
-            "hand_written_high_findings_visible": substantial_primary_finding_is_prominent(
+            "generated_rails_schema_outside_default_debt": generated_rails_schema_is_outside_default_debt(
                 mixed_report, mixed_terminal
             ),
-            "default_coupling_threshold_met": default_coupling_meets_threshold(mixed_report),
         },
         "private_rust_workspace": {
-            "ownership_cycles_absent": ownership_relations_do_not_form_cycles(rust_report),
-            "high_complexity_findings_visible": substantial_primary_finding_is_prominent(
+            "useful_rust_findings_lead": useful_rust_finding_leads(
                 rust_report, rust_terminal
             ),
-            "default_coupling_threshold_met": default_coupling_meets_threshold(rust_report),
+            "weak_history_and_graph_facts_absent": weak_history_and_graph_facts_are_absent(
+                rust_report, rust_terminal
+            ),
         },
     }
     require(tuple(outcomes) == FAMILIES, "workload families changed")

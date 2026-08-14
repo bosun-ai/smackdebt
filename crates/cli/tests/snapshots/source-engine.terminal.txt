@@ -1,22 +1,10 @@
-smackdebt · codebase
+smackdebt codebase
 repository root
-1 package · 1 file · 7 lines
 
-QUALITY  0% need attention
-░░░░░░░░░░░░  0 / 2 code units
-▲ 0 high · ● 0 watch · 2 healthy
-✓ all 1 source file analyzed cleanly
-  ↓ src
-  ↓ src/work.rb
+QUALITY
+2 rated units · 0 need attention
+  src
+  src/work.rb
 
-ARCHITECTURE
-0 internal · 0 external · 0 unresolved · 0 ambiguous
-▲ 0 high · ● 0 watch · 0 internal edges
-
-EVOLUTION
-history unavailable: not a Git repository
-
-No watch or high findings.
-
-COVERAGE NOTES
-! Git history unavailable: not a Git repository
+WARNINGS
+ History is unavailable.

@@ -263,7 +263,7 @@ current file to its earlier names, and converts contributor identity to a
 temporary integer before calling analysis.
 
 Analysis owns separate churn, change-coupling, contributor-concentration, and
-evolutionary-comparison modules. Package touches and contributor touches count
+evolutionary-comparison modules. Package activity and contributor activity count
 once per commit. Change coupling counts each unordered package pair once per
 commit. Default findings require at least three shared commits and 20% Jaccard
 similarity; weaker observations remain available through JSON and `--all`. A
@@ -274,16 +274,18 @@ identifiers cannot enter a report value.
 
 History is anchored to files and package assignments in the current inventory.
 Deleted files and old package layouts are not reconstructed. Binary changes add
-a touch without line churn. Excluded paths and rename gaps are counted. Shallow
+a commit without line churn. Excluded paths and rename gaps are counted. Shallow
 or interrupted streams are marked incomplete, and unavailable history leaves
 source and static architecture analysis intact.
 
-Activity orders existing debt using visible inputs: health, touch count, the
+Activity orders existing debt using visible inputs: health, distinct commit count, the
 three measurements, path, and span. It never changes a health rating and does
 not hide a numeric score. Diff analysis attaches the same retained history to
 changed files and packages as context. Only a worktree static edge can add or
 remove an unexplained-coupling finding; history itself has no before and after
-direction.
+direction. Human diff output names the two packages and states whether they now
+or no longer change together without a code dependency. It does not expose the
+internal comparison type name.
 
 Diff mode resolves an explicit ref or tries `origin/HEAD`, `main`, then
 `master`. It compares from the merge base through committed, staged, unstaged,
@@ -301,29 +303,54 @@ file-level comparison diagnostic instead of a guessed match.
 Analysis owns the exact source finding rank: rating, count of signals at that
 rating, total triggered signals, cognitive complexity, cyclomatic complexity,
 logical lines, activity, path, then span. Terminal output builds private
-borrowed presentation rows for the
-selected summary, ranked areas, leading details, coverage notes, and drill
-command. Ranking, omission, and navigation happen once. Full, compact, and
-stacked writers then consume those rows without scanning the report or running
-analysis. This seam can support a later interactive renderer without putting
-terminal state in the report domain or promising a public Rust interface.
+borrowed presentation rows for the selected quality result, affected areas,
+ranked findings, relevant relationships, warnings, and next command. Selection
+and navigation happen once. Aligned and stacked writers consume those rows
+without scanning the report or running analysis. This seam can support a later
+interactive renderer without putting terminal state in the report domain or
+promising a public Rust interface.
+
+The narrow writer stacks changed measurements; relationship identities, counts,
+statuses, and evidence; closed cycle witnesses; finding identity, kind, role,
+location, and measurements; coupling identity, evidence, and outcome; and
+activity paths, commit counts, and churn on separate indented lines. Each long
+identity is shortened in the middle with Unicode display width, preserving both
+ends and every fact. A final line writer measures visible width without counting
+ANSI sequences and safely shortens an unexpected overflow without splitting a
+glyph or escape sequence. Tests count that safety path directly: every reviewed
+50-column flow has zero uses, while a synthetic overflow proves it still works.
 
 The CLI resolves width and color before calling output. `COLUMNS` takes
 priority, followed by terminal width or a 100-column redirected default.
 Automatic color requires a terminal and no `NO_COLOR`; explicit always and
 never modes override that choice. The output crate reads no environment or
-terminal state. Styling uses semantic 16-color roles with no backgrounds, and
-removing its ANSI sequences yields the plain output byte for byte.
+terminal state. Only status glyphs receive color, with an immediate reset, so
+removing ANSI sequences yields the plain output byte for byte.
 
-Every layout shows a summary, progressive debt or change distribution, concise
-detail, and one useful drill command. It passes through single-child structural
-scopes with visible breadcrumbs, limits area rows to ten debt-bearing areas and
-detail to three by default, and summarizes healthy-only areas as quiet.
-Codebase rows show debt share, local attention rate, and a fractional rate bar;
-diff rows show exact directions and a share bar. Locations and commands remain
-whole. Finding detail names only signals that reached Watch or High, while diff
-detail names only changed measurements. Terminal-only `--all` restores every
-area and retained detail.
+The private glyph vocabulary is High U+F024, Watch U+F0EB, Discover U+F46B,
+Worse U+F062, Better U+F063, Changed U+F111, and Warning U+F071. High and Worse
+are red, Watch and Warning use ANSI-256 color 208, Discover is cyan, Better is
+green, and Changed uses the normal text color. Each glyph occupies one display
+cell. Terminal output requires a Nerd Font and provides no alternate icon mode.
+
+`QUALITY` always appears. `AREAS` appears only for several affected children
+and shows at most five by default. `FINDINGS` shows at most three ranked source
+findings or changes. `ARCHITECTURE` appears for rated graph findings, while
+`HISTORY` appears for at most three actionable history findings, ordered by
+shared commits descending, similarity descending, then stable package names
+and IDs. Each default history row states the shared and total commit counts,
+similarity, and absent code dependency. Empty optional sections,
+healthy rows, bars, repeated summary percentages, processing totals, repeated
+status words, and omission bookkeeping stay out of human output. `--all` removes useful-detail
+limits without turning the terminal into a complete export. Path views retain
+incoming and outgoing relationships. JSON remains the complete view.
+Every coupling row in `--all` and path views retains shared commits, union
+commits, similarity, and whether a code dependency exists.
+
+Human warnings group file problems and use short sentences. History and rename
+gaps, unmatched imports, and imports with several possible files have stable
+wording. Detailed and path views may add affected-file context without
+repeating the same summary for each file.
 
 JSON starts with `schema_version: 3`. One package table owns stable package IDs,
 repository-relative paths, scope links, and current or base-only presence.
@@ -342,8 +369,12 @@ external summaries, resolution diagnostics, package measurements, architecture
 findings, and architecture comparisons. These are flat indexed tables; source
 and architecture health remain independent. Default terminal output shows
 rated cycle witnesses without arbitrary edge samples. `--all` and path drill
-show relevant uses, module ownership, advisory, unresolved, and ambiguous
-evidence without changing the retained JSON tables.
+show relevant imports, ownership, external, advisory, unmatched, and
+multiple-match evidence in direct human wording. Primary and trusted labels are
+omitted; non-primary roles and advisory trust appear only when useful. Diff
+cycles use a short change line followed by the closed arrow path, and edge
+changes use arrow or ownership rows with added or removed wording. Human
+activity rows say `commit` or `commits`; retained JSON names stay unchanged.
 
 The release baseline workflow is `scripts/performance/release-baselines.sh`.
 It requires a clean tree, captures one revision/toolchain/host state, and then

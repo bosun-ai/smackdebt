@@ -6,12 +6,12 @@ use clap::{Args, Parser, Subcommand, ValueEnum};
 #[command(
     name = "smackdebt",
     version,
-    about = "Find code debt and compare its change"
+    about = "Find costly code and see whether a change made it better"
 )]
 pub(crate) struct Cli {
     #[command(subcommand)]
     pub(crate) command: Option<Command>,
-    /// Path to inspect.
+    /// Show one path.
     pub(crate) path: Option<PathBuf>,
     #[command(flatten)]
     pub(crate) common: Common,
@@ -19,15 +19,15 @@ pub(crate) struct Cli {
 
 #[derive(Debug, Subcommand)]
 pub(crate) enum Command {
-    /// Compare the current worktree with a Git ref.
+    /// Compare your current work with a Git ref.
     Diff(DiffArgs),
 }
 
 #[derive(Debug, Args)]
 pub(crate) struct DiffArgs {
-    /// Git ref. Omit it to use origin/HEAD, main, or master.
+    /// Git ref. If omitted, uses origin/HEAD, main, or master.
     pub(crate) reference: Option<String>,
-    /// Limit comparison to this path.
+    /// Show one changed path.
     pub(crate) path: Option<PathBuf>,
     #[command(flatten)]
     pub(crate) common: Common,
@@ -35,19 +35,19 @@ pub(crate) struct DiffArgs {
 
 #[derive(Clone, Debug, Args)]
 pub(crate) struct Common {
-    /// Write JSON schema version 3.
+    /// Write the complete JSON report.
     #[arg(long)]
     pub(crate) json: bool,
-    /// Number of analysis workers. Must be greater than zero.
+    /// Number of workers to use.
     #[arg(long, value_parser = parse_jobs)]
     pub(crate) jobs: Option<usize>,
-    /// Recent activity window, for example 90d.
+    /// Recent activity window, such as 90d.
     #[arg(long, value_parser = parse_days)]
     pub(crate) history: Option<u32>,
-    /// Show every terminal row and retained detail.
+    /// Show all useful terminal detail.
     #[arg(long, conflicts_with = "json")]
     pub(crate) all: bool,
-    /// Terminal color: auto, always, or never. Defaults to auto.
+    /// Glyph color: auto, always, or never.
     #[arg(long, value_enum, conflicts_with = "json")]
     pub(crate) color: Option<ColorChoice>,
 }
@@ -62,11 +62,11 @@ pub(crate) enum ColorChoice {
 pub(crate) fn parse_days(value: &str) -> Result<u32, String> {
     let days = value
         .strip_suffix('d')
-        .ok_or_else(|| "history must end in d, for example 90d".to_owned())?
+        .ok_or_else(|| "use days, for example 90d".to_owned())?
         .parse::<u32>()
-        .map_err(|_| "history must contain a whole number of days".to_owned())?;
+        .map_err(|_| "use a whole number of days".to_owned())?;
     if days == 0 {
-        return Err("history must be greater than zero".to_owned());
+        return Err("use at least one day".to_owned());
     }
     Ok(days)
 }
@@ -74,9 +74,9 @@ pub(crate) fn parse_days(value: &str) -> Result<u32, String> {
 fn parse_jobs(value: &str) -> Result<usize, String> {
     let jobs = value
         .parse::<usize>()
-        .map_err(|_| "jobs must be a whole number".to_owned())?;
+        .map_err(|_| "use a whole number greater than zero".to_owned())?;
     if jobs == 0 {
-        return Err("jobs must be greater than zero".to_owned());
+        return Err("use a whole number greater than zero".to_owned());
     }
     Ok(jobs)
 }

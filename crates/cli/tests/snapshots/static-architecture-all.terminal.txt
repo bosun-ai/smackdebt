@@ -1,40 +1,24 @@
-smackdebt · codebase
+smackdebt codebase
 repository root
-3 packages · 7 files · 35 lines
 
-QUALITY  0% need attention
-░░░░░░░░░░░░  0 / 7 code units
-▲ 0 high · ● 0 watch · 7 healthy
-✓ all 7 source files analyzed cleanly
-
-DEBT BY AREA
-  area           high  watch   share  rate               
-  app               –      –  0%  ░░░░░░░░░░░░  0%
-  core              –      –  0%  ░░░░░░░░░░░░  0%
-  native            –      –  0%  ░░░░░░░░░░░░  0%
+QUALITY
+7 rated units · 0 need attention
 
 ARCHITECTURE
-5 internal · 1 external · 1 unresolved · 1 ambiguous
-▲ 1 high · ● 1 watch · 5 internal edges
-▲ HIGH  package dependency cycle
-        app/main.js → core/main.js
-● WATCH  file dependency cycle
-        app/choice.js → app/helper.js
-  app/choice.js → app/helper.js · uses · primary/trusted · 1 references
-  app/helper.js → app/choice.js · uses · primary/trusted · 1 references
-  app/main.js → core/main.js · uses · primary/trusted · 1 references
-  core/main.js → app/main.js · uses · primary/trusted · 1 references
-  native/src/lib.rs → native/src/helper.rs · module ownership · primary/trusted · 1 references
-  app/main.js → external-library · external uses · primary/trusted · 1 references
-  app/main.js:2 → ./choice · ambiguous uses · primary/trusted
-  app/main.js:5 → require(moduleName) · unresolved uses · primary/trusted
+ package dependency cycle
+        app/main.js → core/main.js → app/main.js
+ file dependency cycle
+        app/choice.js → app/helper.js → app/choice.js
+  app/choice.js → app/helper.js · 1 import
+  app/helper.js → app/choice.js · 1 import
+  app/main.js → core/main.js · 1 import
+  core/main.js → app/main.js · 1 import
+  native/src/lib.rs owns native/src/helper.rs
+  app/main.js → external-library · external
+  app/main.js:2 → ./choice · matched more than one file
+  app/main.js:5 → require(moduleName) · could not be matched
 
-EVOLUTION
-history unavailable: not a Git repository
-
-No watch or high findings.
-
-COVERAGE NOTES
-! Git history unavailable: not a Git repository
-
-→ Explore: smackdebt app
+WARNINGS
+ History is unavailable.
+ 1 import could not be matched.
+ 1 import matched more than one file.

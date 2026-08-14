@@ -1,0 +1,9 @@
+smackdebt diff
+repository root
+
+QUALITY
+No changes
+
+HISTORY
+ a ↔ b changed together in 3 of 7 commits · 43% · no code dependency
+ a ↔ b now change together without a code dependency

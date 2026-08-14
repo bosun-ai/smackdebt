@@ -174,25 +174,123 @@ class WorkloadHarnessTests(unittest.TestCase):
             ],
         )
 
-    def test_generated_schema_and_client_findings_must_both_exist_and_stay_out_of_default(self):
+    def test_terminal_review_categories_match_relevant_default_output(self):
         reviewer = load_workload_reviewer()
         report = {
-            "paths": ["generated/schema/model.ts", "generated/client/request.ts"],
+            "root": 0,
+            "paths": ["app/main.rb", "db/schema.rb"],
             "files": [{"path": 0}, {"path": 1}],
             "findings": [
-                {"file": 0, "role": "generated"},
-                {"file": 1, "role": "generated"},
+                {
+                    "file": 0,
+                    "name": "important",
+                    "container": "Suite",
+                    "start_line": 7,
+                    "role": "primary",
+                    "trust": "trusted",
+                    "rating": "high",
+                    "measurements": {"cognitive_complexity": 30},
+                },
+                {
+                    "file": 1,
+                    "name": "schema",
+                    "container": None,
+                    "start_line": 1,
+                    "role": "generated",
+                    "trust": "trusted",
+                    "rating": "watch",
+                    "measurements": {"cognitive_complexity": 15},
+                },
             ],
+            "health": [
+                {"high": 1, "watch": 0},
+                {"high": 1, "watch": 0},
+                {"high": 0, "watch": 0},
+            ],
+            "scopes": [
+                {
+                    "health": 0,
+                    "children": [1, 2],
+                    "architecture_findings": [],
+                    "evolutionary_findings": [0],
+                },
+                {"health": 1},
+                {"health": 2},
+            ],
+            "packages": [{"path": "app"}, {"path": "support"}],
+            "evolutionary_findings": [{"left": 0, "right": 1}],
         }
-        self.assertTrue(reviewer.generated_schema_client_findings_are_excluded(report, "default output"))
-        for missing in (0, 1):
-            changed = copy.deepcopy(report)
-            changed["findings"].pop(missing)
-            self.assertFalse(reviewer.generated_schema_client_findings_are_excluded(changed, "default output"))
+        terminal = (
+            "\nFINDINGS\n"
+            "  Suite::important · function\n"
+            "        app/main.rb:7\n\n"
+            "HISTORY\n"
+            " app ↔ support changed together in 3 of 4 commits · 75% · no code dependency\n"
+        )
+        self.assertTrue(reviewer.important_debt_leads(report, terminal))
+        self.assertTrue(reviewer.empty_optional_sections_are_absent(report, terminal))
         self.assertFalse(
-            reviewer.generated_schema_client_findings_are_excluded(
-                report, "generated/client/request.ts"
+            reviewer.empty_optional_sections_are_absent(report, terminal + "\nAREAS\n")
+        )
+        self.assertTrue(
+            reviewer.generated_rails_schema_is_outside_default_debt(report, terminal)
+        )
+        self.assertTrue(reviewer.weak_history_and_graph_facts_are_absent(report, terminal))
+
+        generated_first = terminal.replace(
+            "  Suite::important · function\n        app/main.rb:7",
+            "  schema · function\n        db/schema.rb:1\n"
+            "  Suite::important · function\n        app/main.rb:7",
+        )
+        self.assertFalse(reviewer.important_debt_leads(report, generated_first))
+
+        test_first = copy.deepcopy(report)
+        test_first["findings"][0]["role"] = "test"
+        self.assertTrue(reviewer.important_debt_leads(test_first, terminal))
+        self.assertFalse(
+            reviewer.primary_application_finding_leads(test_first, terminal)
+        )
+        self.assertTrue(reviewer.primary_application_finding_leads(report, terminal))
+
+        rust_first = copy.deepcopy(test_first)
+        rust_first["paths"][0] = "src/lib.rs"
+        rust_terminal = terminal.replace("app/main.rb:7", "src/lib.rs:7")
+        self.assertTrue(reviewer.useful_rust_finding_leads(rust_first, rust_terminal))
+        self.assertFalse(reviewer.useful_rust_finding_leads(test_first, terminal))
+        wrong_container = terminal.replace("Suite::important", "Other::important")
+        self.assertIsNone(reviewer.first_displayed_finding(report, wrong_container))
+
+        no_finding = copy.deepcopy(report)
+        no_finding["scopes"][0]["evolutionary_findings"] = []
+        no_finding["evolutionary_findings"] = []
+        self.assertFalse(
+            reviewer.weak_history_and_graph_facts_are_absent(no_finding, terminal)
+        )
+        weak_history = terminal.replace(
+            "\n\nHISTORY\n", "\n\nHISTORY\n  app · 3 commits\n"
+        )
+        self.assertFalse(reviewer.weak_history_and_graph_facts_are_absent(report, weak_history))
+
+        graph_report = copy.deepcopy(report)
+        graph_report["scopes"][0]["architecture_findings"] = [0]
+        graph_terminal = terminal.replace(
+            "\n\nHISTORY\n",
+            "\n\nARCHITECTURE\n"
+            " package dependency cycle\n"
+            "        app/main.rb → support/main.rb → app/main.rb\n\n"
+            "HISTORY\n",
+        )
+        self.assertTrue(
+            reviewer.weak_history_and_graph_facts_are_absent(
+                graph_report, graph_terminal
             )
+        )
+        weak_graph = graph_terminal.replace(
+            "        app/main.rb → support/main.rb → app/main.rb",
+            "  app/main.rb → support/main.rb · uses",
+        )
+        self.assertFalse(
+            reviewer.weak_history_and_graph_facts_are_absent(graph_report, weak_graph)
         )
 
     def test_package_reference_check_covers_every_package_bearing_table(self):
@@ -238,7 +336,9 @@ class WorkloadHarnessTests(unittest.TestCase):
             "revision": lambda value: value.update(workspace_revision="short"),
             "dirty": lambda value: value.update(workspace_dirty=True),
             "family": lambda value: value["reviews"][0].update(family="changed"),
-            "outcome": lambda value: value["reviews"][0]["outcomes"].pop("fixture_cycles_absent"),
+            "outcome": lambda value: value["reviews"][0]["outcomes"].pop(
+                "empty_optional_sections_absent"
+            ),
         }
         for name, mutate in mutations.items():
             with self.subTest(name=name):

@@ -1,25 +1,14 @@
-smackdebt · codebase
+smackdebt codebase
 a
-1 package · 1 file · 1 line
 
-QUALITY  0% need attention
-░░░░░░░░░░░░  0 / 0 code units
-▲ 0 high · ● 0 watch · 0 healthy
-✓ all 1 source file analyzed cleanly
-  ↓ a/main.js
+QUALITY
+0 rated units · 0 need attention
+  a/main.js
 
 ARCHITECTURE
-1 internal · 0 external · 0 unresolved · 0 ambiguous
-▲ 0 high · ● 0 watch · 1 internal edges
-  b/main.js → a/main.js · uses · primary/trusted · 1 references
+  b/main.js → a/main.js · 1 import
 
-EVOLUTION
-complete local stream · 6 commits
-eligible mapping 10/14 changes · 71% · 6 commits
-0 context · 4 excluded · 0 uncounted · 0 rename gaps
-  a · 5 touches · +4 -3 · 2 contributors · 80% top share · primary/trusted
-    file a/main.js · 5 touches · +4 -3
-      evidence primary/trusted
-  coupling a ↔ b · 3/6 shared commits · 50% similarity · static use · primary/trusted ↔ primary/trusted
-
-No watch or high findings.
+HISTORY
+  a ↔ b changed together in 3 of 6 commits · 50% · code dependency exists
+  a · 5 commits · +4 -3
+  a/main.js · 5 commits · +4 -3

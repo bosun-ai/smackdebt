@@ -1,0 +1,32 @@
+smackdebt diff
+repository root
+
+QUALITY
+ 2 ·  1 ·  4
+
+AREAS
+e              1   –   1
+b              1   –   –
+a              –   1   –
+c              –   –   1
+f              –   –   1
+
+FINDINGS
+  b
+        b/main.js
+        cognitive 1 → 6 · cyclomatic 2 → 4 · lines 1 → 2
+  renamed
+        e/new.js
+        added
+  a
+        a/main.js
+        cognitive 3 → 0 · cyclomatic 3 → 1 · lines 2 → 1
+
+ARCHITECTURE
+ package cycle introduced
+        c → d → c
+ package cycle removed
+        a → b → a
+
+HISTORY
+ h ↔ i no longer change together without a code dependency

@@ -1,27 +1,16 @@
-smackdebt · codebase
+smackdebt codebase
 repository root
-3 packages · 7 files · 35 lines
 
-QUALITY  0% need attention
-░░░░░░░░░░░░  0 / 7 code units
-▲ 0 high · ● 0 watch · 7 healthy
-✓ all 7 source files analyzed cleanly
-
-No child areas need attention.
-  … 3 quiet areas hidden (use --all)
+QUALITY
+7 rated units · 0 need attention
 
 ARCHITECTURE
-5 internal · 1 external · 1 unresolved · 1 ambiguous
-▲ 1 high · ● 1 watch · 5 internal edges
-▲ HIGH  package dependency cycle
-        app/main.js → core/main.js
-● WATCH  file dependency cycle
-        app/choice.js → app/helper.js
+ package dependency cycle
+        app/main.js → core/main.js → app/main.js
+ file dependency cycle
+        app/choice.js → app/helper.js → app/choice.js
 
-EVOLUTION
-history unavailable: not a Git repository
-
-No watch or high findings.
-
-COVERAGE NOTES
-! Git history unavailable: not a Git repository
+WARNINGS
+ History is unavailable.
+ 1 import could not be matched.
+ 1 import matched more than one file.

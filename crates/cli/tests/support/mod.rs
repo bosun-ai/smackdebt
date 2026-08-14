@@ -108,9 +108,10 @@ impl GeneratedRepository {
 pub(crate) struct Invocation {
     arguments: Vec<OsString>,
     columns: u16,
-    color: &'static str,
+    color: Option<&'static str>,
     jobs: Option<usize>,
     evidence: bool,
+    no_color: bool,
 }
 
 impl Invocation {
@@ -118,9 +119,10 @@ impl Invocation {
         Self {
             arguments: arguments.into_iter().map(Into::into).collect(),
             columns: 120,
-            color: "never",
+            color: Some("never"),
             jobs: Some(1),
             evidence: false,
+            no_color: true,
         }
     }
 
@@ -130,7 +132,17 @@ impl Invocation {
     }
 
     pub(crate) const fn color(mut self, color: &'static str) -> Self {
-        self.color = color;
+        self.color = Some(color);
+        self
+    }
+
+    pub(crate) const fn automatic_color(mut self) -> Self {
+        self.color = None;
+        self
+    }
+
+    pub(crate) const fn without_no_color(mut self) -> Self {
+        self.no_color = false;
         self
     }
 
@@ -151,15 +163,20 @@ impl Invocation {
             .current_dir(directory)
             .args(&self.arguments)
             .env("COLUMNS", self.columns.to_string())
-            .env("NO_COLOR", "1")
             .env("LC_ALL", "C")
             .env("LANG", "C")
             .env("GIT_CONFIG_NOSYSTEM", "1")
             .env("GIT_TERMINAL_PROMPT", "0");
+        if self.no_color {
+            command.env("NO_COLOR", "1");
+        } else {
+            command.env_remove("NO_COLOR");
+        }
         if !self.arguments.iter().any(|value| value == "--json")
             && !self.arguments.iter().any(|value| value == "--color")
+            && let Some(color) = self.color
         {
-            command.args(["--color", self.color]);
+            command.args(["--color", color]);
         }
         if let Some(jobs) = self.jobs
             && !self.arguments.iter().any(|value| value == "--jobs")

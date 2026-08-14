@@ -20,7 +20,8 @@ fn serial_and_parallel_codebase_output_match() {
     assert_eq!(serial, parallel);
     let text = String::from_utf8(serial).unwrap();
     assert!(text.contains("QUALITY"));
-    assert!(text.contains("No child areas need attention"));
+    assert!(!text.contains("AREAS"));
+    assert!(!text.contains("FINDINGS"));
 }
 
 #[test]
@@ -119,7 +120,9 @@ fn same_level_source_role_conflict_has_exact_argument_failure_streams() {
         .assert()
         .code(2)
         .stdout("")
-        .stderr("smackdebt: source role conflict for conflict.js: test, fixture\n");
+        .stderr(
+            "smackdebt: source roles conflict for conflict.js: test, fixture; update .smackdebt.toml\n",
+        );
 }
 
 #[test]
@@ -342,6 +345,63 @@ fn static_architecture_codebase_snapshots_are_reviewed() {
             .iter()
             .any(|package| package["fan_in"] == 1 && package["fan_out"] == 1)
     );
+    let detailed_text = String::from_utf8(detailed).unwrap();
+    assert!(
+        detailed_text.contains("app/main.js → core/main.js · 1 import"),
+        "{detailed_text}"
+    );
+    assert!(
+        detailed_text.contains("native/src/lib.rs owns native/src/helper.rs"),
+        "{detailed_text}"
+    );
+    assert!(!detailed_text.contains("primary/trusted"));
+}
+
+#[test]
+fn long_fact_families_keep_their_meaning_at_fifty_columns() {
+    let project = long_responsive_fixture();
+    let output = cargo_bin_cmd!("smackdebt")
+        .current_dir(project.path())
+        .env("COLUMNS", "50")
+        .args(["--all", "--color", "never", "--history", "36500d"])
+        .output()
+        .unwrap();
+    assert!(
+        output.status.success(),
+        "{}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    assert_snapshot(
+        "long-responsive-50.terminal.txt",
+        &output.stdout,
+        include_bytes!("snapshots/long-responsive-50.terminal.txt"),
+    );
+    let terminal = String::from_utf8(output.stdout).unwrap();
+    for line in terminal.lines() {
+        assert!(unicode_width::UnicodeWidthStr::width(line) <= 50, "{line}");
+        assert!(!line.ends_with('…'), "safety fallback clipped: {line}");
+    }
+    for fact in [
+        "method · test",
+        "1 import",
+        "owns",
+        "external",
+        "could not be matched",
+        "matched more than one file",
+        "2 commits ·",
+    ] {
+        assert!(terminal.contains(fact), "missing {fact}: {terminal}");
+    }
+    let lines = terminal.lines().collect::<Vec<_>>();
+    let cycle = lines
+        .iter()
+        .position(|line| line.contains("package dependency cycle"))
+        .unwrap();
+    assert_eq!(
+        lines[cycle + 1].trim(),
+        lines[cycle + 3].trim().trim_start_matches("→ "),
+        "{terminal}"
+    );
 }
 
 #[test]
@@ -352,6 +412,124 @@ fn architecture_path_drill_keeps_incoming_edges_and_omits_unrelated_regions() {
     let text = String::from_utf8(output).unwrap();
     assert!(text.contains("core/main.js → app/main.js"));
     assert!(!text.contains("native/src/helper.rs"));
+}
+
+#[test]
+fn selected_path_scopes_import_warning_counts() {
+    let project = static_architecture_fixture();
+    let app = String::from_utf8(run_in(project.path(), ["app", "--color", "never"])).unwrap();
+    assert!(app.contains("2 imports could not be matched."), "{app}");
+    assert!(
+        app.contains("1 import matched more than one file."),
+        "{app}"
+    );
+
+    let native = String::from_utf8(run_in(project.path(), ["native", "--color", "never"])).unwrap();
+    assert!(!native.contains("import could not be matched."), "{native}");
+    assert!(
+        !native.contains("import matched more than one file."),
+        "{native}"
+    );
+}
+
+#[test]
+fn diff_detail_and_path_views_show_current_edges_without_an_empty_heading() {
+    let project = static_architecture_fixture();
+    git(project.path(), ["init", "-b", "main"]);
+    git(project.path(), ["config", "user.name", "Smackdebt Test"]);
+    git(
+        project.path(),
+        ["config", "user.email", "smackdebt@example.invalid"],
+    );
+    git(project.path(), ["add", "."]);
+    git(project.path(), ["commit", "-m", "test: architecture base"]);
+    fs::write(
+        project.path().join("app/main.js"),
+        "import core from '../core/main';\nimport coreAgain from '../core/main';\n\nexport function app() { return core(coreAgain); }\n",
+    )
+    .unwrap();
+
+    let default =
+        String::from_utf8(run_in(project.path(), ["diff", "main", "--color", "never"])).unwrap();
+    assert!(!default.contains("ARCHITECTURE\n\n"));
+    assert!(!default.contains("\nARCHITECTURE\n"));
+
+    for arguments in [
+        ["diff", "main", "--all", "--color", "never"],
+        ["diff", "main", "app", "--color", "never"],
+        ["diff", "main", "core", "--color", "never"],
+    ] {
+        let terminal = String::from_utf8(run_in(project.path(), arguments)).unwrap();
+        assert_eq!(
+            terminal
+                .matches("app/main.js → core/main.js · 2 imports")
+                .count(),
+            1,
+            "{terminal}"
+        );
+    }
+}
+
+#[test]
+fn diff_detail_renders_external_unresolved_and_ambiguous_relations_once() {
+    let project = tempfile::tempdir().unwrap();
+    fs::create_dir(project.path().join("app")).unwrap();
+    fs::write(project.path().join("app/package.json"), "{}\n").unwrap();
+    fs::write(
+        project.path().join("app/main.js"),
+        "import local from './choice';\nimport library from 'external-library';\nconst late = require(moduleName);\nexport function value() { return local + library + late; }\n",
+    )
+    .unwrap();
+    fs::write(project.path().join("app/choice.js"), "export default 1;\n").unwrap();
+    fs::write(project.path().join("app/choice.ts"), "export default 2;\n").unwrap();
+    git(project.path(), ["init", "-b", "main"]);
+    git(project.path(), ["config", "user.name", "Smackdebt Test"]);
+    git(
+        project.path(),
+        ["config", "user.email", "smackdebt@example.invalid"],
+    );
+    git(project.path(), ["add", "."]);
+    git(project.path(), ["commit", "-m", "test: relation-only base"]);
+    fs::write(
+        project.path().join("app/main.js"),
+        "import local from './choice';\nimport library from 'external-library';\nconst late = require(moduleName);\nexport function value() { return local + library + late + 1; }\n",
+    )
+    .unwrap();
+
+    for (case, arguments) in [
+        ["diff", "main", "--all", "--color", "never"],
+        ["diff", "main", "app", "--color", "never"],
+    ]
+    .into_iter()
+    .enumerate()
+    {
+        let output = cargo_bin_cmd!("smackdebt")
+            .current_dir(project.path())
+            .args(arguments)
+            .output()
+            .unwrap();
+        assert!(
+            output.status.success(),
+            "case {case}: {}",
+            String::from_utf8_lossy(&output.stderr)
+        );
+        let terminal = String::from_utf8(output.stdout).unwrap();
+        assert!(
+            terminal.contains("\nARCHITECTURE\n"),
+            "case {case}: {terminal}"
+        );
+        for relation in [
+            "app/main.js → external-library · external",
+            "app/main.js:1 → ./choice · matched more than one file",
+            "app/main.js:3 → require(moduleName) · could not be matched",
+        ] {
+            assert_eq!(
+                terminal.matches(relation).count(),
+                1,
+                "case {case}: {terminal}"
+            );
+        }
+    }
 }
 
 #[test]
@@ -511,10 +689,15 @@ fn evolutionary_analysis_is_exact_private_and_deterministic() {
     assert_eq!(report["change_coupling"].as_array().unwrap().len(), 1);
     assert_eq!(report["evolutionary_findings"].as_array().unwrap().len(), 1);
     let terminal_text = String::from_utf8(serial_terminal.clone()).unwrap();
-    assert_eq!(terminal_text.matches("3/6 shared commits").count(), 1);
-    assert_eq!(terminal_text.matches("  a · 5 touches").count(), 1);
-    assert_eq!(terminal_text.matches("80% top share").count(), 1);
-    assert!(!terminal_text.contains("coupling a ↔ c"));
+    assert_eq!(
+        terminal_text
+            .matches("a ↔ b changed together in 3 of 6 commits · 50% · no code dependency")
+            .count(),
+        1
+    );
+    assert!(!terminal_text.contains("touches"));
+    assert!(!terminal_text.contains("top share"));
+    assert!(!terminal_text.contains("a ↔ c"));
     for private_value in [
         "Alice Example",
         "alice@example.invalid",
@@ -534,6 +717,42 @@ fn evolutionary_analysis_is_exact_private_and_deterministic() {
                 .any(|window| window == private_value.as_bytes())
         );
     }
+}
+
+#[test]
+fn default_history_snapshot_orders_strongest_actionable_findings_first() {
+    let project = history_strength_order_fixture();
+    let json = run_in(project.path(), ["--json", "--history", "36500d"]);
+    let report: serde_json::Value = serde_json::from_slice(&json).unwrap();
+    let package_path = |id: u64| report["packages"][id as usize]["path"].as_str().unwrap();
+    let stored_pairs = report["evolutionary_findings"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .map(|finding| {
+            (
+                package_path(finding["left"].as_u64().unwrap()),
+                package_path(finding["right"].as_u64().unwrap()),
+            )
+        })
+        .collect::<Vec<_>>();
+    assert_eq!(
+        stored_pairs,
+        [("a", "b"), ("b", "c"), ("c", "d"), ("d", "e")]
+    );
+
+    let terminal = run_in(project.path(), ["--color", "never", "--history", "36500d"]);
+    assert_snapshot(
+        "history-strength-order.terminal.txt",
+        &terminal,
+        include_bytes!("snapshots/history-strength-order.terminal.txt"),
+    );
+    let terminal = String::from_utf8(terminal).unwrap();
+    let strongest = terminal.find("b ↔ c").unwrap();
+    let second = terminal.find("c ↔ d").unwrap();
+    let third = terminal.find("d ↔ e").unwrap();
+    assert!(strongest < second && second < third, "{terminal}");
+    assert!(!terminal.contains("a ↔ b"), "{terminal}");
 }
 
 #[test]
@@ -578,7 +797,7 @@ fn diff_uses_history_as_context_and_can_explain_coupling() {
         ["diff", "main", "--color", "never", "--history", "36500d"],
     ))
     .unwrap();
-    assert!(!default_terminal.contains("coupling a ↔ b"));
+    assert!(default_terminal.contains("a ↔ b no longer change together without a code dependency"));
     let detailed_terminal = String::from_utf8(run_in(
         project.path(),
         [
@@ -592,8 +811,44 @@ fn diff_uses_history_as_context_and_can_explain_coupling() {
         ],
     ))
     .unwrap();
-    assert!(detailed_terminal.contains("coupling a ↔ b · 3/6 shared commits"));
-    assert!(detailed_terminal.contains("static use"));
+    assert!(
+        detailed_terminal
+            .contains("a ↔ b changed together in 3 of 6 commits · 50% · code dependency exists")
+    );
+    assert!(
+        detailed_terminal.contains("a ↔ b no longer change together without a code dependency")
+    );
+    assert!(!detailed_terminal.contains("coupling finding"));
+}
+
+#[test]
+fn diff_says_when_packages_now_change_together_without_a_code_dependency() {
+    let project = evolutionary_fixture();
+    fs::write(
+        project.path().join("b/main.js"),
+        "import { a } from '../a/main';\nexport const b = a;\n",
+    )
+    .unwrap();
+    commit_as(
+        project.path(),
+        "History Test",
+        "history@example.invalid",
+        "explain coupling",
+    );
+    fs::write(project.path().join("b/main.js"), "export const b = 6;\n").unwrap();
+
+    let terminal = run_in(
+        project.path(),
+        ["diff", "HEAD", "--color", "never", "--history", "36500d"],
+    );
+    assert_snapshot(
+        "evolutionary-introduced.terminal.txt",
+        &terminal,
+        include_bytes!("snapshots/evolutionary-introduced.terminal.txt"),
+    );
+    let terminal = String::from_utf8(terminal).unwrap();
+    assert!(terminal.contains("a ↔ b now change together without a code dependency"));
+    assert!(!terminal.contains("coupling finding"));
 }
 
 #[test]
@@ -671,16 +926,19 @@ fn fixture_and_generated_history_stays_descriptive_without_findings() {
         ["--color", "never", "--history", "36500d"],
     ))
     .unwrap();
-    assert!(!default.contains("coupling a ↔ b"));
-    assert!(!default.contains("coupling a ↔ c"));
+    assert!(!default.contains("a ↔ b change together"));
+    assert!(!default.contains("a ↔ c change together"));
     let detailed = String::from_utf8(run_in(
         project.path(),
         ["--all", "--color", "never", "--history", "36500d"],
     ))
     .unwrap();
-    assert!(detailed.contains("coupling a ↔ b · 3/3 shared commits"));
-    assert!(detailed.contains("coupling a ↔ c · 3/3 shared commits"));
-    assert!(detailed.contains("primary/trusted ↔ generated/trusted"));
+    assert!(
+        detailed.contains("a ↔ b changed together in 3 of 3 commits · 100% · no code dependency")
+    );
+    assert!(
+        detailed.contains("a ↔ c changed together in 3 of 3 commits · 100% · no code dependency")
+    );
 }
 
 #[test]
@@ -788,9 +1046,9 @@ fn generated_history_cannot_change_eligible_history_or_concentration() {
         ["--color", "never", "--history", "36500d"],
     ))
     .unwrap();
-    assert!(default.contains("eligible mapping 6/25 changes · 24% · 3 commits"));
-    assert!(default.contains("a · 3 touches"));
-    assert!(default.contains("1 contributors · 100% top share"));
+    assert!(!default.contains("eligible mapping"));
+    assert!(!default.contains("touches"));
+    assert!(!default.contains("top share"));
     assert!(!default.contains("generated/trusted"));
     assert!(!default.contains("a · 8 touches"));
 
@@ -799,11 +1057,11 @@ fn generated_history_cannot_change_eligible_history_or_concentration() {
         ["--all", "--color", "never", "--history", "36500d"],
     ))
     .unwrap();
-    assert!(detailed.contains("a · 8 touches"));
-    assert!(detailed.contains("8 contributors · 13% top share · generated/trusted"));
-    assert!(detailed.contains("generated/trusted ↔ generated/trusted"));
-    assert_eq!(detailed.matches("3/3 shared commits").count(), 1);
-    assert!(detailed.contains("● WATCH  coupling a ↔ b · 3/3 shared commits"));
+    assert!(detailed.contains("a · 8 commits"));
+    assert!(!detailed.contains("shared commits"));
+    assert!(
+        detailed.contains(" a ↔ b changed together in 3 of 3 commits · 100% · no code dependency")
+    );
 }
 
 #[test]
@@ -828,29 +1086,27 @@ fn complete_stream_without_eligible_mapping_cannot_create_findings() {
         ["--all", "--color", "never", "--history", "36500d"],
     ))
     .unwrap();
-    assert!(terminal.contains("complete local stream · 3 commits"));
-    assert!(terminal.contains("eligible mapping 0/9 changes · 0% · 0 commits"));
-    assert!(!terminal.contains("● WATCH"));
+    assert!(!terminal.contains("complete local stream"));
+    assert!(!terminal.contains("eligible mapping"));
+    assert!(!terminal.contains(''));
 }
 
 #[test]
-fn default_history_shows_each_package_once_across_eligible_roles() {
+fn all_history_shows_each_package_role_once() {
     let project = eligible_role_history_fixture();
     let default = String::from_utf8(run_in(
         project.path(),
         ["--color", "never", "--history", "36500d"],
     ))
     .unwrap();
-    assert_eq!(default.matches("  a · 2 touches").count(), 1);
+    assert!(!default.contains("HISTORY"));
 
     let detailed = String::from_utf8(run_in(
         project.path(),
         ["--all", "--color", "never", "--history", "36500d"],
     ))
     .unwrap();
-    assert_eq!(detailed.matches("  a · 2 touches").count(), 2);
-    assert!(detailed.contains("primary/trusted"));
-    assert!(detailed.contains("test/trusted"));
+    assert_eq!(detailed.matches("  a · 2 commits").count(), 2);
 }
 
 #[test]
@@ -873,13 +1129,20 @@ fn weak_coupling_stays_in_json_and_detailed_terminal_only() {
         ["--color", "never", "--history", "36500d"],
     ))
     .unwrap();
-    assert!(!default.contains("coupling a ↔ b"));
+    assert!(!default.contains("a ↔ b change together"));
     let detailed = String::from_utf8(run_in(
         project.path(),
         ["--all", "--color", "never", "--history", "36500d"],
     ))
     .unwrap();
-    assert!(detailed.contains("coupling a ↔ b · 2/4 shared commits"));
+    let expected = "a ↔ b changed together in 2 of 4 commits · 50% · no code dependency";
+    assert!(detailed.contains(expected));
+    let path = String::from_utf8(run_in(
+        project.path(),
+        ["a", "--all", "--color", "never", "--history", "36500d"],
+    ))
+    .unwrap();
+    assert!(path.contains(expected));
 }
 
 #[test]
@@ -900,8 +1163,10 @@ fn selected_package_shows_file_churn_all_coupling_and_omits_unrelated_history() 
         include_bytes!("snapshots/evolutionary-package.terminal.txt"),
     );
     let text = String::from_utf8(terminal).unwrap();
-    assert!(text.contains("file a/main.js · 5 touches"));
-    assert!(text.contains("coupling a ↔ b · 3/6 shared commits · 50% similarity · static use"));
+    assert!(text.contains("a/main.js · 5 commits"));
+    assert!(
+        text.contains("a ↔ b changed together in 3 of 6 commits · 50% · code dependency exists")
+    );
     assert!(!text.contains("c/main.js"));
     assert!(!text.contains("  c ·"));
 }
@@ -933,9 +1198,12 @@ fn selected_diff_package_shows_only_relevant_evolution_context() {
         include_bytes!("snapshots/evolutionary-diff-package.terminal.txt"),
     );
     let text = String::from_utf8(terminal).unwrap();
-    assert!(text.contains("b · 4 touches"));
-    assert!(text.contains("file b/main.js · 4 touches"));
-    assert!(text.contains("coupling a ↔ b · 3/6 shared commits"));
+    assert!(text.contains("b · 4 commits"));
+    assert!(text.contains("b/main.js · 4 commits"));
+    assert!(
+        text.contains("a ↔ b changed together in 3 of 6 commits · 50% · code dependency exists")
+    );
+    assert!(text.contains("a ↔ b no longer change together without a code dependency"));
     assert!(!text.contains("c/main.js"));
     assert!(!text.contains("  c ·"));
 }
@@ -962,9 +1230,9 @@ fn empty_git_history_is_unavailable_in_coverage_terminal_and_diagnostics() {
             })
     );
     let terminal = String::from_utf8(run_in(project.path(), ["--color", "never"])).unwrap();
-    assert!(terminal.contains("history unavailable: repository has no commits"));
-    assert!(terminal.contains("! Git history unavailable: repository has no commits"));
-    assert!(!terminal.contains("history incomplete"));
+    assert!(terminal.contains("WARNINGS"));
+    assert!(terminal.contains("History is unavailable."));
+    assert!(!terminal.contains("History is incomplete."));
 }
 
 #[test]
@@ -1511,6 +1779,103 @@ fn static_architecture_fixture() -> tempfile::TempDir {
     project
 }
 
+fn long_responsive_fixture() -> tempfile::TempDir {
+    let project = tempfile::tempdir().unwrap();
+    let source_package = "very-long-source-package-name";
+    let source_directory = "very-long-source-directory-name";
+    let source_file = "very-long-source-file-name.js";
+    let target_package = "very-long-target-package-name";
+    let target_directory = "very-long-target-directory-name";
+    let target_file = "very-long-target-file-name.js";
+    let source_path = format!("{source_package}/{source_directory}/{source_file}");
+    let target_path = format!("{target_package}/{target_directory}/{target_file}");
+    for package in [source_package, target_package] {
+        fs::create_dir_all(project.path().join(package)).unwrap();
+        fs::write(project.path().join(package).join("package.json"), "{}\n").unwrap();
+    }
+    fs::create_dir_all(project.path().join(source_package).join(source_directory)).unwrap();
+    fs::create_dir_all(project.path().join(target_package).join(target_directory)).unwrap();
+    let mut source = format!(
+        "import target from '../../{target_package}/{target_directory}/{target_file}';\n\
+         import choice from './choice';\n\
+         import library from 'extremely-long-external-library-name';\n\
+         const dynamicValue = require(dynamicModuleName);\n\
+         export class ExtremelyLongContainerNameThatMustRemainRecognizable {{\n\
+           extremelyLongMethodNameThatMustRemainRecognizable(input) {{\n"
+    );
+    for index in 0..55 {
+        source.push_str(&format!("    const value{index} = input + {index};\n"));
+    }
+    source.push_str("    return target(choice + library + dynamicValue + value54);\n  }\n}\n");
+    fs::write(project.path().join(&source_path), &source).unwrap();
+    fs::write(
+        project.path().join(&target_path),
+        format!(
+            "import source from '../../{source_package}/{source_directory}/{source_file}';\nexport default source;\n"
+        ),
+    )
+    .unwrap();
+    fs::write(
+        project
+            .path()
+            .join(source_package)
+            .join(source_directory)
+            .join("choice.js"),
+        "export default 1;\n",
+    )
+    .unwrap();
+    fs::write(
+        project
+            .path()
+            .join(source_package)
+            .join(source_directory)
+            .join("choice.ts"),
+        "export default 2;\n",
+    )
+    .unwrap();
+    let rust_package = "very-long-rust-ownership-package-name";
+    fs::create_dir_all(project.path().join(rust_package).join("src")).unwrap();
+    fs::write(
+        project.path().join(rust_package).join("Cargo.toml"),
+        "[package]\nname = 'long-owned'\nversion = '0.1.0'\n",
+    )
+    .unwrap();
+    fs::write(
+        project.path().join(rust_package).join("src/lib.rs"),
+        "mod extremely_long_owned_module_name_that_stays_visible;\n",
+    )
+    .unwrap();
+    fs::write(
+        project
+            .path()
+            .join(rust_package)
+            .join("src/extremely_long_owned_module_name_that_stays_visible.rs"),
+        "pub fn owned() {}\n",
+    )
+    .unwrap();
+    fs::write(
+        project.path().join(".smackdebt.toml"),
+        format!("[source_roles]\ntest = ['{source_path}']\n"),
+    )
+    .unwrap();
+    git(project.path(), ["init", "-b", "main"]);
+    commit_as(
+        project.path(),
+        "Responsive Test",
+        "responsive@example.invalid",
+        "initial",
+    );
+    source.push_str("// second activity commit\n");
+    fs::write(project.path().join(&source_path), source).unwrap();
+    commit_as(
+        project.path(),
+        "Responsive Test",
+        "responsive@example.invalid",
+        "activity",
+    );
+    project
+}
+
 fn git<const N: usize>(directory: &Path, arguments: [&str; N]) {
     let status = Command::new("git")
         .args(arguments)
@@ -1586,6 +1951,44 @@ fn evolutionary_fixture() -> tempfile::TempDir {
         "bob@example.invalid",
         "b only",
     );
+    project
+}
+
+fn history_strength_order_fixture() -> tempfile::TempDir {
+    let project = tempfile::tempdir().unwrap();
+    git(project.path(), ["init", "-b", "main"]);
+    for package in ["a", "b", "c", "d", "e"] {
+        fs::create_dir_all(project.path().join(package)).unwrap();
+        fs::write(project.path().join(package).join("package.json"), "{}\n").unwrap();
+        fs::write(
+            project.path().join(package).join("main.js"),
+            format!("export const {package} = 0;\n"),
+        )
+        .unwrap();
+    }
+    commit_as(
+        project.path(),
+        "History Test",
+        "history@example.invalid",
+        "initial",
+    );
+    for (left, right, commits) in [("a", "b", 3), ("b", "c", 6), ("c", "d", 4), ("d", "e", 3)] {
+        for version in 1..=commits {
+            for package in [left, right] {
+                fs::write(
+                    project.path().join(package).join("main.js"),
+                    format!("export const {package} = '{left}-{right}-{version}';\n"),
+                )
+                .unwrap();
+            }
+            commit_as(
+                project.path(),
+                "History Test",
+                "history@example.invalid",
+                &format!("{left} {right} {version}"),
+            );
+        }
+    }
     project
 }
 

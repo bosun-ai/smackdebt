@@ -25,40 +25,31 @@ Run `smackdebt` from anywhere inside a repository:
 ```console
 $ smackdebt
 
-smackdebt · codebase
-.
-2 packages · 184 files · 29,418 lines
+smackdebt codebase
+repository root
 
-QUALITY  3% need attention
-▍░░░░░░░░░░░  30 / 1,176 code units
-▲ 7 high · ● 23 watch · 1,146 healthy
-! 7 of 184 source files excluded from analysis
+QUALITY
+1,176 rated units · 30 need attention
+ 7 ·  23
 
-DEBT BY AREA
-  area          high  watch   share  rate
-  crates/api        4      8     40%  █▏░░░░░░░░░░  9%
-  packages/web      2      9     37%  █▍░░░░░░░░░░  11%
-  crates/core       1      6     23%  █▏░░░░░░░░░░  9%
-  … 4 quiet areas hidden (use --all)
+AREAS
+crates/api     4   8
+packages/web   2   9
+crates/core    1   6
 
-TOP FINDINGS
-▲ HIGH  process_checkout
+FINDINGS
+  process_checkout · function
         crates/api/src/checkout.rs:42
-        cognitive 31 · lines 126 · 14 touches
+        cognitive 31 · cyclomatic 14 · lines 126
 
 ARCHITECTURE
-142 internal · 86 external · 3 unresolved · 1 ambiguous
-▲ 1 high · ● 2 watch · 142 internal edges
-▲ HIGH  package dependency cycle
+ package dependency cycle
         crates/api/src/routes.rs → crates/core/src/orders.rs → crates/api/src/routes.rs
 
-EVOLUTION
-184 files · 3,812 commits · 127,440 lines of churn
-● 1 unexplained coupling · 12 retained package pairs
-● WATCH  packages change together without a static dependency
-         crates/api ↔ packages/web · 18/31 shared commits · 58% similarity
+HISTORY
+ crates/api ↔ packages/web changed together in 8 of 10 commits · 80% · no code dependency
 
-→ Explore: smackdebt crates/api
+ smackdebt crates/api
 ```
 
 Smackdebt combines fixed code-health limits with recent activity. A complex
@@ -66,10 +57,9 @@ function that changes often rises to the top. A complex function in quiet code
 still appears as debt, but does not outrank active risks just because it is
 large.
 
-`share` answers how much of the selected scope's debt lives in an area. `rate`
-answers how much of that area's rated code needs attention. Together they
-separate large contributors from smaller areas where debt is concentrated.
-Healthy-only areas stay out of the default view; `--all` shows the full shape.
+`AREAS` appears when debt spans several child paths and shows up to five. The
+first path is the next useful place to inspect. Empty `ARCHITECTURE` and
+`HISTORY` sections stay out of the way.
 
 Pass a reported path to progressively inspect the next level. Repository,
 package, directory, and file scopes retain the same repository-relative paths:
@@ -77,24 +67,23 @@ package, directory, and file scopes retain the same repository-relative paths:
 ```console
 $ smackdebt crates/api/src/checkout.rs
 
-smackdebt · codebase
+smackdebt codebase
 crates/api/src/checkout.rs
-1 package · 1 file · 612 lines
 
-QUALITY  11% need attention
-█▍░░░░░░░░░░  2 / 18 code units
-▲ 1 high · ● 1 watch · 16 healthy
-✓ all 1 source file analyzed
+QUALITY
+18 rated units · 2 need attention
+ 1 ·  1
 
-TOP FINDINGS
-▲ HIGH  process_checkout
+FINDINGS
+  process_checkout · function
         crates/api/src/checkout.rs:42
-        cognitive 31 · lines 126 · 14 touches
+        cognitive 31 · cyclomatic 14 · lines 126
 ```
 
-The default terminal view shows up to ten areas and three details. Use
-`--all` for every terminal row and detail. JSON is always complete, so
-`--all --json` is rejected.
+The default terminal view shows up to five affected areas and three findings.
+Use `--all` for all useful findings and relationships. It still omits healthy
+rows and processing detail. JSON is the complete report, so `--all --json` is
+rejected.
 
 The default history window is 90 days. It affects hotspot priority only:
 
@@ -110,29 +99,26 @@ Compare the current worktree with the branch it came from:
 ```console
 $ smackdebt diff
 
-smackdebt · diff
-.
-8 source files changed · 8 analyzed
+smackdebt diff
+repository root
 
-CHANGE  8 retained units
-▲ WORSE 3 · ▼ BETTER 1 · ● CHANGED 4
+QUALITY
+ 3 ·  1 ·  4
 
-CHANGE BY AREA
-  area          worse  better  changed  share
-  crates/api        2       1        1  ██████░░░░░░  50%
-  packages/web      1       –        1  ███░░░░░░░░░  25%
+AREAS
+crates/api     2   1   1
+packages/web   1   –   1
 
-TOP CHANGES
-▲ WORSE  process_checkout
+FINDINGS
+  process_checkout
         crates/api/src/checkout.rs
         cognitive 14 → 19 · cyclomatic 9 → 12 · lines 42 → 57
-▼ BETTER  groupOrders
+  groupOrders
         packages/web/src/orders.ts
         cognitive 28 → 7 · cyclomatic 17 → 5 · lines 91 → 38
 
-ARCHITECTURE CHANGE
-▲ WORSE 1 · ▼ BETTER 0 · ● CHANGED 2
-▲ WORSE  package dependency cycle introduced
+ARCHITECTURE
+ package dependency cycle introduced
         crates/api → crates/core → crates/api
 ```
 
@@ -161,9 +147,9 @@ Smackdebt reports separate signals instead of hiding them in one score.
 | Cyclomatic complexity | 11 | 21 |
 | Logical lines in a function | 50 | 100 |
 
-A function takes its highest signal rating. Package, directory, and file views
-show counts of healthy, watch, and high functions. They do not average one bad
-function into a reassuring project score.
+A function takes its highest signal rating. Terminal views focus on functions
+that need attention. JSON retains healthy, watch, and high counts for every
+scope. Neither view averages one bad function into a reassuring project score.
 
 Cognitive complexity starts at zero. A control-flow break adds one plus its
 nesting depth. Alternatives and labeled jumps add one. A run of `&&` or `and`
@@ -231,6 +217,11 @@ smackdebt crates/core
 smackdebt --all crates/core
 ```
 
+Human relationship rows stay direct: `source → target · 1 import`, `source owns target`,
+`external`, `could not be matched`, or `matched more than one file`.
+Non-primary roles and advisory evidence appear only when they change how the row
+should be read.
+
 Static analysis does not provide compiler type resolution, runtime tracing, or
 executed build configuration. Macros, generated paths, runtime imports, and
 unsupported aliases can therefore remain unresolved.
@@ -242,13 +233,13 @@ The `EVOLUTION` section uses all locally available non-merge Git history. The
 findings. Evolution keeps its evidence separate from current code health and
 the static dependency graph:
 
-- touches count distinct commits that changed a current file or package;
+- activity counts distinct commits that changed a current file or package;
 - churn reports textual lines added and deleted;
 - change coupling reports packages that changed in the same commits;
-- contributor count reports how many normalized contributors touched a
+- contributor count reports how many normalized contributors changed a
   package;
-- top-contributor share reports the largest contributor's package touches over
-  all contributor touches for that package.
+- top-contributor share reports the largest contributor's package commits over
+  all contributor commits for that package.
 
 Coupling uses Jaccard similarity: shared commits divided by commits touching
 either package. Default findings require at least three shared commits and 20%
@@ -258,9 +249,15 @@ because it can reveal a missing or unclear package relationship. Coupling that
 matches a static edge remains descriptive. Churn, contributor count, and
 contributor concentration do not receive health labels.
 
+Default `HISTORY` shows at most three actionable findings. It orders them by
+shared commits, then similarity, then stable package identity. Each row includes
+the shared and total commit counts, similarity, and the missing code dependency.
+`--all` and path views retain useful contextual history and label activity as `commit` or `commits`. Every shown pair keeps its shared and total commits,
+similarity, and ends with `code dependency exists` or `no code dependency`.
+
 Smackdebt follows detected renames back from files that still exist and assigns
 their history to the files' current packages. It does not reconstruct removed
-files or old package layouts. Binary changes count as touches without invented
+files or old package layouts. Binary changes count as commits without invented
 line totals. Shallow, partial, empty, or unavailable history is stated in the
 report while source and static architecture results remain usable.
 
@@ -272,12 +269,12 @@ These short examples run against generated public repositories in the release
 evidence. Each comment declares the exact exit status, empty stderr, and the
 stable stdout fragments that must appear in the stated order.
 
-<!-- smackdebt-example fixture=evolution status=0 stderr=empty stdout=QUALITY|ARCHITECTURE|EVOLUTION -->
+<!-- smackdebt-example fixture=evolution status=0 stderr=empty stdout=QUALITY|HISTORY|_a_↔_b -->
 ```console
 smackdebt --color never --jobs 1
 ```
 
-<!-- smackdebt-example fixture=worktree-change status=0 stderr=empty stdout=CHANGE|ARCHITECTURE_CHANGE|EVOLUTION_CONTEXT|TOP_CHANGES -->
+<!-- smackdebt-example fixture=worktree-change status=0 stderr=empty stdout=QUALITY|AREAS|FINDINGS|__b|ARCHITECTURE -->
 ```console
 smackdebt diff main --color never --jobs 1 --history 36500d
 ```
@@ -286,9 +283,10 @@ concentration operands. History and all other analysis stay on the local
 machine.
 
 Diff reports show evolution as existing context for changed files and packages.
-Historical values are not labelled Better or Worse. A worktree dependency can
-remove an unexplained-coupling finding, but it does not change the retained
-history values.
+Historical values are not labelled Better or Worse. When a worktree dependency
+changes the finding, the terminal says the packages `now change together
+without a code dependency` or `no longer change together without a code
+dependency`. The retained history values do not change.
 
 ## Discovery
 
@@ -368,7 +366,8 @@ triggered signals, cognitive complexity, cyclomatic complexity, logical lines,
 activity, path, and span. Findings show unit kind and any non-primary role.
 Default architecture output shows rated cycle witnesses rather than arbitrary
 edge samples. Use `--all` or a path drill to inspect relevant resolved,
-unresolved, ambiguous, ownership, and advisory relations.
+unresolved, ambiguous, ownership, and advisory relations. Human output omits
+primary/trusted evidence labels; JSON retains the exact role and trust fields.
 
 Finding debt does not fail the command. Exit codes describe whether Smackdebt
 could produce a report:
@@ -410,12 +409,19 @@ watch = 50
 high = 100
 ```
 
-Command-line values override the project file. Color defaults to automatic:
+Command-line values override the project file. Terminal output requires a Nerd
+Font for its one-cell status glyphs. There is no icon option, emoji mode, or
+ASCII fallback. Color defaults to automatic and applies only to those glyphs:
 `NO_COLOR` or `--color never` disables ANSI styling, while `--color always`
-keeps it when output is piped. `COLUMNS` overrides detected width. Reports use
-full, compact, or stacked layouts as space changes; redirected output defaults
-to 100 columns and keeps readable Unicode symbols and bars. JSON is always
-unstyled, and an explicit `--color` cannot be combined with `--json`.
+keeps it when output is piped. `COLUMNS` overrides detected width. Reports keep
+the same facts in aligned or stacked rows as space changes. Every visible line
+fits the resolved width. At 50 columns, changed metrics, relationship paths and
+counts, cycle witnesses, finding identity and context, coupling evidence, and
+activity counts and churn stack on separate lines. Long identities shorten in
+the middle so both ends stay recognizable while their facts remain visible.
+Reviewed 50-column flows do not need the unexpected-line safety shortening.
+Redirected output defaults to 100 columns and keeps the Unicode glyphs. JSON is
+always unstyled, and an explicit `--color` cannot be combined with `--json`.
 
 ## Design
 

@@ -40,18 +40,19 @@ area views SHALL add a rate bar whose non-zero value remains visible.
 - **THEN** the rate bar contains a fractional filled block
 
 ### Requirement: Codebase child order is severity-led
-Default codebase child rows SHALL include only debt-bearing children and sort by
-High count descending, Watch count descending, then repository-relative path
-ascending. `--all` SHALL retain that order and append healthy-only children in
-path order.
+Default codebase rows SHALL use the exact finding rank: rating, count of signals
+at that rating, total triggered signals, cognitive complexity, cyclomatic
+complexity, logical lines, recent activity, then repository-relative path and
+source span. Each comparison SHALL be descending except path and span, which
+SHALL be ascending.
 
-#### Scenario: Children have different health distributions
-- **WHEN** one child has more High units and another has more total debt units
-- **THEN** the child with more High units appears first
+#### Scenario: Two findings share a rating
+- **WHEN** one triggers more signals at that rating
+- **THEN** it appears first even when the other has greater recent activity
 
-#### Scenario: Healthy children exist
-- **WHEN** the selected scope contains healthy-only children
-- **THEN** the default view reports their count in one quiet summary and `--all` shows their rows
+#### Scenario: Every numeric key ties
+- **WHEN** rating, signal counts, metrics, and activity are equal
+- **THEN** path and span produce stable order
 
 ### Requirement: Structural single-child chains are passed visibly
 Terminal rendering SHALL pass through repository, package, or directory scopes
@@ -86,19 +87,17 @@ the meaning.
 - **THEN** the terminal omits the zero activity or excluded-file phrase
 
 ### Requirement: Codebase detail follows existing hotspot priority
-Non-file codebase views SHALL order retained findings by health, activity,
-measurements, path, and source span. Terminal detail SHALL present a severity
-identity, an unbroken repository-relative `path:line` location, and only the
-measured signals that reached Watch or High. File views SHALL show every
-retained finding with container identity when present.
+Every displayed finding SHALL show unit kind and SHALL show SourceRole whenever
+the role is not primary. Recovered advisory findings SHALL use the same ranking
+inside `--all` but SHALL remain absent from default detail.
 
-#### Scenario: Finding crosses one limit
-- **WHEN** a retained finding reaches Watch or High through one measured signal
-- **THEN** terminal detail names that signal and value without presenting healthy signals as reasons
+#### Scenario: A benchmark function is High
+- **WHEN** it appears in default detail
+- **THEN** its unit kind and benchmark role are visible
 
-#### Scenario: User drills into a file
-- **WHEN** a selected file contains several retained findings
-- **THEN** every finding is shown with its rating, attention-causing signals, and copyable source location
+#### Scenario: A recovered method is Watch
+- **WHEN** detailed output is requested
+- **THEN** its unit kind, role when non-primary, and advisory trust are visible
 
 ### Requirement: Explore points to the next debt-bearing area
 The terminal `Explore` command SHALL target the first displayed debt-bearing
@@ -266,17 +265,13 @@ use 100 columns.
 - **THEN** ANSI styling is absent
 
 ### Requirement: Package summary follows package scopes
-Repository summaries SHALL count descendant package scopes. A selected package,
-directory, or file SHALL report its nearest package ancestor once and SHALL
-report zero when it has none.
+Terminal output SHALL render package path `.` as `repository root` in headings,
+rows, breadcrumbs, witnesses, and drill guidance. JSON and all machine indexes
+SHALL retain `.` unchanged.
 
-#### Scenario: Repository has nested source scopes
-- **WHEN** one package contains many directories and files
-- **THEN** the repository summary counts that package once
-
-#### Scenario: File scope is selected
-- **WHEN** a selected file belongs to a package
-- **THEN** its summary reports one package rather than counting nested scopes
+#### Scenario: The root is one package
+- **WHEN** terminal and JSON render the same report
+- **THEN** terminal says `repository root` and JSON package path remains `.`
 
 ### Requirement: Diff details state only meaningful changes
 Terminal comparison cards SHALL state direction and identity, retain an
@@ -310,4 +305,33 @@ contributor concentration separately from code health and static architecture.
 - **THEN** its file and package churn, coupling relationships, concentration,
   and history coverage are shown
 - **AND** unrelated history regions are omitted from terminal presentation
+
+### Requirement: Architecture default shows witnesses rather than edge samples
+Default architecture output SHALL show architecture health and rated cycle
+witnesses only. It SHALL NOT select arbitrary ordinary edges as representative
+rows. `--all` and path drill SHALL expose relevant relation detail.
+
+#### Scenario: An acyclic graph has many edges
+- **WHEN** default output is rendered
+- **THEN** no arbitrary edge list appears
+- **AND** detailed output can still inspect the edges
+
+### Requirement: Default terminal sections do not duplicate evidence
+A retained fact SHALL appear once in the nearest useful default terminal
+section. Source, architecture, and evolution summaries SHALL NOT repeat an
+identical finding, relation, coupling pair, history row, or operand already
+shown as detail in the same view.
+
+#### Scenario: A coupling finding is the leading evolution fact
+- **WHEN** the default report includes its detail
+- **THEN** another default section does not repeat the same pair and operands
+
+### Requirement: Renderers consume completed presentation facts
+Analysis SHALL own rank keys, verdict inclusion, advisory state, and stable
+ordering. Terminal and JSON SHALL read one completed report without
+reclassification, trust policy, filesystem, Git, parser, or analysis work.
+
+#### Scenario: One report renders in two formats
+- **WHEN** terminal and JSON output are selected in separate runs
+- **THEN** role, trust, package, relation, history, and finding facts agree
 

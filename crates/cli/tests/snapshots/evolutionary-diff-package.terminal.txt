@@ -1,24 +1,16 @@
-smackdebt · diff
+smackdebt diff
 b
-1 source file changed · 1 clean
 
-CHANGE  0 retained units
-▲ WORSE 0 · ▼ BETTER 0 · ● CHANGED 0
-  ↓ b/main.js
+QUALITY
+No changes
+  b/main.js
 
-ARCHITECTURE CHANGE
-1 internal · 0 external · 0 unresolved · 0 ambiguous
-▲ WORSE 0 · ▼ BETTER 0 · ● CHANGED 1
-● CHANGED  edge added  b  a  references 0 → 1
+ARCHITECTURE
+ b/main.js → a/main.js · added
+  b/main.js → a/main.js · 1 import
 
-EVOLUTION CONTEXT
-complete local stream · 6 commits
-eligible mapping 10/14 changes · 71% · 6 commits
-0 context · 4 excluded · 0 uncounted · 0 rename gaps
-  b · 4 touches · +4 -3 · 2 contributors · 50% top share · primary/trusted
-    file b/main.js · 4 touches · +4 -3
-      evidence primary/trusted
-  coupling a ↔ b · 3/6 shared commits · 50% similarity · static use · primary/trusted ↔ primary/trusted
-▼ BETTER  coupling finding removed
-
-No changed units.
+HISTORY
+  a ↔ b changed together in 3 of 6 commits · 50% · code dependency exists
+  b · 4 commits · +4 -3
+  b/main.js · 4 commits · +4 -3
+ a ↔ b no longer change together without a code dependency

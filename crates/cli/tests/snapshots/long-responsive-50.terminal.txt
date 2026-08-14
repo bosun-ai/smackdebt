@@ -1,0 +1,68 @@
+smackdebt codebase
+repository root
+
+QUALITY
+2 rated units · 1 need attention
+ 1
+
+FINDINGS
+  ExtremelyLongContainerN…tMustRemainRecognizable
+        method · test
+        very-long-source-pa…-source-file-name.js:6
+        lines 56
+        2 commits
+
+ARCHITECTURE
+ package dependency cycle
+        very-long-source-pa…-source-file-name.js
+        → very-long-target-pa…-target-file-name.js
+        → very-long-source-pa…-source-file-name.js
+  very-long-rust-ownership-package-name/src/lib.rs
+        owns very-long-rust-own…t_stays_visible.rs
+  very-long-source-packag…long-source-file-name.js
+        → very-long-target-p…target-file-name.js
+        1 import
+        test
+  very-long-target-packag…long-target-file-name.js
+        → very-long-source-p…source-file-name.js
+        1 import
+  very-long-source-packag…long-source-file-name.js
+        → extremely-long-external-library-name
+        external
+        test
+  very-long-source-packag…ng-source-file-name.js:2
+        → ./choice
+        matched more than one file
+        test
+  very-long-source-packag…ng-source-file-name.js:4
+        → require(dynamicModuleName)
+        could not be matched
+        test
+
+HISTORY
+  very-long-source-package-name
+        2 commits · +65 -0
+  very-long-rust-ownership-package-name
+        1 commit · +2 -0
+  very-long-source-package-name
+        1 commit · +2 -0
+  very-long-target-package-name
+        1 commit · +2 -0
+  very-long-source-packag…long-source-file-name.js
+        2 commits · +65 -0
+  very-long-rust-ownershi…me_that_stays_visible.rs
+        1 commit · +1 -0
+  very-long-rust-ownership-package-name/src/lib.rs
+        1 commit · +1 -0
+  very-long-source-packag…directory-name/choice.js
+        1 commit · +1 -0
+  very-long-source-packag…directory-name/choice.ts
+        1 commit · +1 -0
+  very-long-target-packag…long-target-file-name.js
+        1 commit · +2 -0
+
+WARNINGS
+ 1 import could not be matched.
+ 1 import matched more than one file.
+
+ smackdebt very-long-source-package-name
