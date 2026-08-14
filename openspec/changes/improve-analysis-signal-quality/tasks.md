@@ -49,10 +49,10 @@
 ## 8. Three reviews and post-commit release evidence
 
 - [x] 8.1 Pass public semantic, schema, byte, privacy, allocation, performance, API, architecture, license, and workspace gates before real-workload review.
-- [ ] 8.2 Review self: fixture cycles gone, package references valid, root labels readable, and every default coupling above threshold.
-- [ ] 8.3 Review the private mixed application: generated schema and client findings excluded, weak coupling and ownership cycles gone, substantial hand-written functions prominent, and every default coupling above threshold.
-- [ ] 8.4 Review the private Rust workspace: ownership cycles gone, real high-complexity functions visible, and every default coupling above threshold.
-- [ ] 8.5 Commit only privacy-safe aggregate workload families and outcome categories, with no private path, source, Git identity, or history.
-- [ ] 8.6 Create the reviewed implementation commit before recording release evidence.
-- [ ] 8.7 From clean reviewed HEAD, record every public profile and all three aggregate reviews with one workflow and require one shared revision plus `workspace_dirty` false.
-- [ ] 8.8 Run formatting, Clippy, workspace tests, default and all-feature API snapshots, strict OpenSpec validation, and final diff check before completion.
+- [x] 8.2 Review self: fixture cycles gone, package references valid, root labels readable, and every default coupling above threshold.
+- [x] 8.3 Review the private mixed application: generated schema and client findings excluded, weak coupling and ownership cycles gone, substantial hand-written functions prominent, and every default coupling above threshold.
+- [x] 8.4 Review the private Rust workspace: ownership cycles gone, real high-complexity functions visible, and every default coupling above threshold.
+- [x] 8.5 Commit only privacy-safe aggregate workload families and outcome categories, with no private path, source, Git identity, or history.
+- [x] 8.6 Create the reviewed implementation commit before recording release evidence.
+- [x] 8.7 From clean reviewed HEAD, record every public profile and all three aggregate reviews with one workflow and require one shared revision plus `workspace_dirty` false.
+- [x] 8.8 Run formatting, Clippy, workspace tests, default and all-feature API snapshots, strict OpenSpec validation, and final diff check before completion.
