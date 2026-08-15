@@ -2,7 +2,7 @@ use std::fs;
 use std::path::Path;
 
 use serde::Deserialize;
-use smackdebt_project::SourceRoleRule;
+use smackdebt_project::{DEFAULT_MINIMUM_TOUCHES, SourceRoleRule};
 
 use crate::arguments::parse_days;
 
@@ -15,6 +15,7 @@ pub(crate) struct ProjectConfig {
     thresholds: Option<ThresholdConfig>,
     #[serde(default)]
     source_roles: RoleConfig,
+    hotspots: Option<HotspotConfig>,
 }
 
 #[cfg(test)]
@@ -40,6 +41,32 @@ mod tests {
                 ("fixture", "samples/**"),
                 ("generated", "src/api.rs")
             ]
+        );
+    }
+
+    #[test]
+    fn size_and_hotspot_settings_have_documented_defaults_and_overrides() {
+        let default = ProjectConfig::default();
+        assert_eq!(default.size_thresholds(), ((400, 800), (300, 600)));
+        assert_eq!(default.minimum_hotspot_touches(), 5);
+        let config: ProjectConfig = toml::from_str(
+            "[thresholds]\nfile_lines = { watch = 200, high = 500 }\ncontainer_lines = { watch = 100, high = 250 }\n[hotspots]\nminimum_touches = 12\n",
+        )
+        .unwrap();
+        config.validate().unwrap();
+        assert_eq!(config.size_thresholds(), ((200, 500), (100, 250)));
+        assert_eq!(config.minimum_hotspot_touches(), 12);
+    }
+
+    #[test]
+    fn weak_size_and_hotspot_settings_are_rejected() {
+        let sizes: ProjectConfig =
+            toml::from_str("[thresholds]\nfile_lines = { watch = 0, high = 5 }\n").unwrap();
+        assert!(sizes.validate().is_err());
+        let touches: ProjectConfig = toml::from_str("[hotspots]\nminimum_touches = 0\n").unwrap();
+        assert_eq!(
+            touches.validate(),
+            Err("hotspots.minimum_touches requires at least one touch".to_owned())
         );
     }
 
@@ -78,6 +105,14 @@ struct ThresholdConfig {
     cognitive: Option<LimitConfig>,
     cyclomatic: Option<LimitConfig>,
     function_lines: Option<LimitConfig>,
+    file_lines: Option<LimitConfig>,
+    container_lines: Option<LimitConfig>,
+}
+
+#[derive(Debug, Deserialize)]
+#[serde(deny_unknown_fields)]
+struct HotspotConfig {
+    minimum_touches: Option<u32>,
 }
 
 #[derive(Clone, Copy, Debug, Deserialize)]
@@ -146,7 +181,35 @@ impl ProjectConfig {
         )
     }
 
+    /// The configured file and container size thresholds.
+    pub(crate) fn size_thresholds(&self) -> ((u32, u32), (u32, u32)) {
+        let pair = |value: Option<LimitConfig>, fallback| {
+            value.map_or(fallback, |limit| (limit.watch, limit.high))
+        };
+        let thresholds = self.thresholds.as_ref();
+        (
+            pair(thresholds.and_then(|value| value.file_lines), (400, 800)),
+            pair(
+                thresholds.and_then(|value| value.container_lines),
+                (300, 600),
+            ),
+        )
+    }
+
+    /// The configured minimum touch count for a hotspot.
+    pub(crate) fn minimum_hotspot_touches(&self) -> u32 {
+        self.hotspots
+            .as_ref()
+            .and_then(|hotspots| hotspots.minimum_touches)
+            .unwrap_or(DEFAULT_MINIMUM_TOUCHES)
+    }
+
     fn validate(&self) -> Result<(), String> {
+        if let Some(hotspots) = &self.hotspots
+            && hotspots.minimum_touches == Some(0)
+        {
+            return Err("hotspots.minimum_touches requires at least one touch".to_owned());
+        }
         if let Some(history) = &self.history {
             parse_days(history)?;
         }
@@ -155,6 +218,8 @@ impl ProjectConfig {
                 ("cognitive", thresholds.cognitive),
                 ("cyclomatic", thresholds.cyclomatic),
                 ("function_lines", thresholds.function_lines),
+                ("file_lines", thresholds.file_lines),
+                ("container_lines", thresholds.container_lines),
             ] {
                 if let Some(limit) = limit
                     && (limit.watch == 0 || limit.high <= limit.watch)

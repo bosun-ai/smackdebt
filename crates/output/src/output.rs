@@ -1733,6 +1733,7 @@ fn finding_order(report: &Report, left: &Finding, right: &Finding) -> std::cmp::
     let right_file = &report.files()[right.file().index()];
     smackdebt_analysis::FindingRank::new(
         left,
+        report.is_hotspot(left.file()),
         left_file
             .activity()
             .map_or(0, |activity| activity.touches()),
@@ -1740,6 +1741,7 @@ fn finding_order(report: &Report, left: &Finding, right: &Finding) -> std::cmp::
     )
     .cmp(&smackdebt_analysis::FindingRank::new(
         right,
+        report.is_hotspot(right.file()),
         right_file
             .activity()
             .map_or(0, |activity| activity.touches()),

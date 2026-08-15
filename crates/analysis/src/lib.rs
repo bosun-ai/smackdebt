@@ -12,8 +12,10 @@ mod evolution;
 mod evolutionary_comparison;
 mod health;
 mod history_window;
+mod hotspot;
 mod instability;
 mod report;
+mod size;
 mod source;
 mod strongly_connected_components;
 
@@ -39,7 +41,9 @@ pub use evolution::{
 };
 pub use evolutionary_comparison::compare_evolution;
 pub use history_window::HistoryWindow;
+pub use hotspot::{DEFAULT_MINIMUM_TOUCHES, FileDebt, Hotspot, HotspotPolicy};
 pub use instability::instability;
+pub use size::{SizeFinding, SizePolicy, SizeSubject};
 pub use strongly_connected_components::strongly_connected_components;
 
 pub use comparison::{Comparison, ComparisonDirection, ComparisonKind, compare_units};

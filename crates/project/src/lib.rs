@@ -14,6 +14,7 @@ pub use requests::{
     CodebaseRequest, DiffRequest, ExecutionWidth, ProjectError, ProjectReport, SourceRoleRule,
     WorkStats,
 };
+pub use smackdebt_analysis::DEFAULT_MINIMUM_TOUCHES;
 
 #[doc(hidden)]
 pub use smackdebt_languages::{parser_time_ns, reset_parser_time};

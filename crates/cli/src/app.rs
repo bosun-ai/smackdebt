@@ -204,7 +204,11 @@ fn apply_codebase_common(
 
 fn apply_codebase_thresholds(request: CodebaseRequest, config: &ProjectConfig) -> CodebaseRequest {
     let (cognitive, cyclomatic, lines) = config.thresholds();
-    request.with_thresholds(cognitive, cyclomatic, lines)
+    let (file_lines, container_lines) = config.size_thresholds();
+    request
+        .with_thresholds(cognitive, cyclomatic, lines)
+        .with_size_thresholds(file_lines, container_lines)
+        .with_minimum_hotspot_touches(config.minimum_hotspot_touches())
 }
 
 fn apply_diff_common(request: DiffRequest, common: &Common, config: &ProjectConfig) -> DiffRequest {

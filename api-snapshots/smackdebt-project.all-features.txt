@@ -1,4 +1,5 @@
 pub mod smackdebt_project
+pub use smackdebt_project::DEFAULT_MINIMUM_TOUCHES
 pub enum smackdebt_project::ExecutionWidth
 pub smackdebt_project::ExecutionWidth::Automatic
 pub smackdebt_project::ExecutionWidth::Fixed(core::num::nonzero::NonZeroUsize)
@@ -21,7 +22,9 @@ pub fn smackdebt_project::CodebaseRequest::automatic(impl core::convert::Into<st
 pub fn smackdebt_project::CodebaseRequest::new(impl core::convert::Into<std::path::PathBuf>) -> Self
 pub fn smackdebt_project::CodebaseRequest::with_excludes(self, alloc::vec::Vec<alloc::string::String>) -> Self
 pub fn smackdebt_project::CodebaseRequest::with_history_days(self, u32) -> Self
+pub fn smackdebt_project::CodebaseRequest::with_minimum_hotspot_touches(self, u32) -> Self
 pub fn smackdebt_project::CodebaseRequest::with_role_rules(self, alloc::vec::Vec<smackdebt_project::SourceRoleRule>) -> Self
+pub fn smackdebt_project::CodebaseRequest::with_size_thresholds(self, (u32, u32), (u32, u32)) -> Self
 pub fn smackdebt_project::CodebaseRequest::with_thresholds(self, (u32, u32), (u32, u32), (u32, u32)) -> Self
 pub fn smackdebt_project::CodebaseRequest::with_width(self, smackdebt_project::ExecutionWidth) -> Self
 pub struct smackdebt_project::DiffRequest

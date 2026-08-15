@@ -1,5 +1,7 @@
 use crate::comparison::{Comparison, ComparisonDirection};
 use crate::health::{HealthAssessment, HealthCounts, Measurements};
+use crate::hotspot::Hotspot;
+use crate::size::SizeFinding;
 use crate::source::{Language, ParseStatus, SourceRole, SourceSpan, SourceTrust, UnitIdentity};
 use crate::{
     ArchitectureComparison, ArchitectureComparisonId, ArchitectureFinding, ArchitectureFindingId,
@@ -603,6 +605,8 @@ pub struct FindingRank<'a> {
     rating: Reverse<u8>,
     signals_at_rating: Reverse<u8>,
     triggered_signals: Reverse<u8>,
+    hot: Reverse<bool>,
+    role_class: u8,
     cognitive_complexity: Reverse<u32>,
     cyclomatic_complexity: Reverse<u32>,
     logical_lines: Reverse<u32>,
@@ -613,12 +617,15 @@ pub struct FindingRank<'a> {
 }
 
 impl<'a> FindingRank<'a> {
-    pub fn new(finding: &Finding, activity: u32, path: &'a str) -> Self {
+    /// Ranks one finding, where `hot` states whether its file is a hotspot.
+    pub fn new(finding: &Finding, hot: bool, activity: u32, path: &'a str) -> Self {
         let measurements = finding.measurements();
         Self {
             rating: Reverse(finding.assessment().rating().rank()),
             signals_at_rating: Reverse(finding.assessment().signals_at_rating()),
             triggered_signals: Reverse(finding.assessment().triggered_signals()),
+            hot: Reverse(hot),
+            role_class: role_class(finding.role()),
             cognitive_complexity: Reverse(measurements.cognitive_complexity()),
             cyclomatic_complexity: Reverse(measurements.cyclomatic_complexity()),
             logical_lines: Reverse(measurements.logical_lines()),
@@ -627,6 +634,19 @@ impl<'a> FindingRank<'a> {
             start_line: finding.span().start_line(),
             end_line: finding.span().end_line(),
         }
+    }
+}
+
+/// Primary source ranks before every other role at equal rating, and
+/// non-primary source stays visible below it rather than being removed.
+const fn role_class(role: SourceRole) -> u8 {
+    match role {
+        SourceRole::Primary => 0,
+        SourceRole::Test
+        | SourceRole::Example
+        | SourceRole::Benchmark
+        | SourceRole::Fixture
+        | SourceRole::Generated => 1,
     }
 }
 
@@ -714,6 +734,8 @@ pub struct Report {
     contributor_concentration: Vec<ContributorConcentration>,
     evolutionary_findings: Vec<EvolutionaryFinding>,
     evolutionary_comparisons: Vec<EvolutionaryComparison>,
+    hotspots: Vec<Hotspot>,
+    size_findings: Vec<SizeFinding>,
 }
 
 /// The source operation represented by a report.
@@ -785,6 +807,16 @@ impl ReportBuilder {
         self.report.package_graph = facts.graph.package_graph;
         self.report.architecture_findings = facts.findings;
         self.report.architecture_comparisons = facts.comparisons;
+    }
+
+    /// Sets the derived hotspot table, ordered by file table position.
+    pub fn set_hotspots(&mut self, hotspots: Vec<Hotspot>) {
+        self.report.hotspots = hotspots;
+    }
+
+    /// Sets the rated size findings, ordered by file, subject, and container.
+    pub fn set_size_findings(&mut self, findings: Vec<SizeFinding>) {
+        self.report.size_findings = findings;
     }
 
     pub fn set_evolution(&mut self, facts: EvolutionaryReportFacts) {
@@ -882,6 +914,8 @@ impl Report {
             contributor_concentration: Vec::new(),
             evolutionary_findings: Vec::new(),
             evolutionary_comparisons: Vec::new(),
+            hotspots: Vec::new(),
+            size_findings: Vec::new(),
         }
     }
 
@@ -962,6 +996,18 @@ impl Report {
     }
     pub fn evolutionary_comparisons(&self) -> &[EvolutionaryComparison] {
         &self.evolutionary_comparisons
+    }
+    pub fn hotspots(&self) -> &[Hotspot] {
+        &self.hotspots
+    }
+    pub fn size_findings(&self) -> &[SizeFinding] {
+        &self.size_findings
+    }
+    /// Whether a file crossed rated debt with enough change activity.
+    pub fn is_hotspot(&self, file: FileId) -> bool {
+        self.hotspots
+            .binary_search_by_key(&file, |hotspot| hotspot.file())
+            .is_ok()
     }
     fn add_scope(&mut self, scope: Scope) -> ScopeId {
         let id = scope.id();
@@ -1349,39 +1395,53 @@ mod tests {
                 HealthPolicy::default().assess(measurements),
             )
         }
+        fn rank<'a>(finding: &Finding, activity: u32, path: &'a str) -> FindingRank<'a> {
+            FindingRank::new(finding, false, activity, path)
+        }
 
         let high = finding("high", Measurements::new(25, 1, 1), SourceSpan::new(1, 1));
         let watch = finding("watch", Measurements::new(15, 1, 1), SourceSpan::new(1, 1));
-        assert!(FindingRank::new(&high, 0, "z") < FindingRank::new(&watch, 99, "a"));
+        assert!(rank(&high, 0, "z") < rank(&watch, 99, "a"));
 
         let two_high = finding("two", Measurements::new(25, 21, 1), SourceSpan::new(1, 1));
-        assert!(FindingRank::new(&two_high, 0, "z") < FindingRank::new(&high, 99, "a"));
+        assert!(rank(&two_high, 0, "z") < rank(&high, 99, "a"));
 
         let high_with_watch = finding(
             "triggered",
             Measurements::new(25, 11, 1),
             SourceSpan::new(1, 1),
         );
-        assert!(FindingRank::new(&high_with_watch, 0, "z") < FindingRank::new(&high, 99, "a"));
+        assert!(rank(&high_with_watch, 0, "z") < rank(&high, 99, "a"));
+
+        // Hot debt precedes equally rated cold debt, and primary source
+        // precedes non-primary source once hot state ties.
+        assert!(FindingRank::new(&high, true, 0, "z") < FindingRank::new(&high, false, 99, "a"));
+        let test_role = high
+            .clone()
+            .with_evidence(SourceRole::Test, SourceTrust::Trusted);
+        assert!(rank(&high, 0, "z") < rank(&test_role, 99, "a"));
+        assert!(
+            FindingRank::new(&test_role, true, 0, "z") < FindingRank::new(&high, false, 99, "a")
+        );
 
         let more_cognitive = finding(
             "cognitive",
             Measurements::new(26, 1, 1),
             SourceSpan::new(1, 1),
         );
-        assert!(FindingRank::new(&more_cognitive, 0, "z") < FindingRank::new(&high, 99, "a"));
+        assert!(rank(&more_cognitive, 0, "z") < rank(&high, 99, "a"));
 
         let more_cyclomatic = finding(
             "cyclomatic",
             Measurements::new(25, 2, 1),
             SourceSpan::new(1, 1),
         );
-        assert!(FindingRank::new(&more_cyclomatic, 0, "z") < FindingRank::new(&high, 99, "a"));
+        assert!(rank(&more_cyclomatic, 0, "z") < rank(&high, 99, "a"));
 
         let more_lines = finding("lines", Measurements::new(25, 1, 2), SourceSpan::new(1, 1));
-        assert!(FindingRank::new(&more_lines, 0, "z") < FindingRank::new(&high, 99, "a"));
-        assert!(FindingRank::new(&high, 2, "z") < FindingRank::new(&high, 1, "a"));
-        assert!(FindingRank::new(&high, 1, "a") < FindingRank::new(&high, 1, "b"));
+        assert!(rank(&more_lines, 0, "z") < rank(&high, 99, "a"));
+        assert!(rank(&high, 2, "z") < rank(&high, 1, "a"));
+        assert!(rank(&high, 1, "a") < rank(&high, 1, "b"));
 
         let earlier = finding(
             "earlier",
@@ -1389,12 +1449,51 @@ mod tests {
             SourceSpan::new(1, 2),
         );
         let later = finding("later", Measurements::new(25, 1, 1), SourceSpan::new(2, 3));
-        assert!(FindingRank::new(&earlier, 1, "a") < FindingRank::new(&later, 1, "a"));
+        assert!(rank(&earlier, 1, "a") < rank(&later, 1, "a"));
         let shorter = finding(
             "shorter",
             Measurements::new(25, 1, 1),
             SourceSpan::new(1, 1),
         );
-        assert!(FindingRank::new(&shorter, 1, "a") < FindingRank::new(&earlier, 1, "a"));
+        assert!(rank(&shorter, 1, "a") < rank(&earlier, 1, "a"));
+    }
+
+    #[test]
+    fn the_rank_order_is_total_data_stable_and_keeps_non_primary_debt_visible() {
+        let measurements = Measurements::new(25, 1, 1);
+        let assessment = HealthPolicy::default().assess(measurements);
+        let build = |index: usize, role: SourceRole| {
+            Finding::new(
+                FindingId::from_index(index),
+                FileId::from_index(index),
+                UnitIdentity::new("work", UnitKind::Function),
+                SourceSpan::new(1, 1),
+                measurements,
+                assessment,
+            )
+            .with_evidence(role, SourceTrust::Trusted)
+        };
+        let hot_test = build(0, SourceRole::Test);
+        let cold_primary = build(1, SourceRole::Primary);
+        let cold_test = build(2, SourceRole::Test);
+        let hot_primary = build(3, SourceRole::Primary);
+        let mut ranked = vec![
+            (FindingRank::new(&hot_test, true, 1, "a"), "hot test"),
+            (FindingRank::new(&cold_primary, false, 1, "a"), "primary"),
+            (FindingRank::new(&cold_test, false, 1, "a"), "test"),
+            (FindingRank::new(&hot_primary, true, 1, "a"), "hot primary"),
+        ];
+        ranked.sort_by(|left, right| left.0.cmp(&right.0));
+        assert_eq!(
+            ranked.iter().map(|entry| entry.1).collect::<Vec<_>>(),
+            ["hot primary", "hot test", "primary", "test"]
+        );
+        let mut reversed = ranked.clone();
+        reversed.reverse();
+        reversed.sort_by(|left, right| left.0.cmp(&right.0));
+        assert_eq!(
+            reversed.iter().map(|entry| entry.1).collect::<Vec<_>>(),
+            ranked.iter().map(|entry| entry.1).collect::<Vec<_>>()
+        );
     }
 }

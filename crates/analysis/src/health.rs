@@ -87,7 +87,7 @@ impl Thresholds {
         self.high
     }
 
-    const fn level(self, value: u32) -> Rating {
+    pub(crate) const fn level(self, value: u32) -> Rating {
         if value >= self.high {
             Rating::High
         } else if value >= self.watch {

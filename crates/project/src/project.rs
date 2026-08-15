@@ -13,13 +13,14 @@ use smackdebt_analysis::{
     ArchitectureFindingKind, ArchitectureGraph, ArchitectureReportFacts, Comparison, ComparisonId,
     ContributorId, Coverage, DependencyCoverage, DependencyEdge, DependencyEdgeId,
     DependencySyntax, DependencySyntaxState, Diagnostic, DiagnosticId, DiagnosticKind,
-    EvolutionAccumulator, ExternalDependency, FileActivity, FileAnalysis, FileId, FileRecord,
-    Finding, FindingId, HealthAssessment, HealthCounts, HealthPolicy, HistoryAvailability,
-    HistoryChangeFact, HistoryCommitFact, HistoryCoverage, HistoryWindow, Language,
-    PackageContainment, PackageEdge, PackageEdgeId, PackageGraphMeasurement, PackageId,
-    PackageRecord, ParseStatus, Rating, Report, ReportBuilder as AnalysisReportBuilder, ReportMode,
-    ResolutionDiagnostic, ResolutionIssueKind, Scope, ScopeId, ScopeKind, SourceCoverageOutcome,
-    SourceRole, SourceTrust, compare_architecture, compare_units, cycle_witness, dependency_degree,
+    EvolutionAccumulator, ExternalDependency, FileActivity, FileAnalysis, FileDebt, FileId,
+    FileRecord, Finding, FindingId, HealthAssessment, HealthCounts, HealthPolicy,
+    HistoryAvailability, HistoryChangeFact, HistoryCommitFact, HistoryCoverage, HistoryWindow,
+    HotspotPolicy, Language, PackageContainment, PackageEdge, PackageEdgeId,
+    PackageGraphMeasurement, PackageId, PackageRecord, ParseStatus, Rating, Report,
+    ReportBuilder as AnalysisReportBuilder, ReportMode, ResolutionDiagnostic, ResolutionIssueKind,
+    Scope, ScopeId, ScopeKind, SizeFinding, SizePolicy, SourceCoverageOutcome, SourceRole,
+    SourceTrust, compare_architecture, compare_units, cycle_witness, dependency_degree,
     strongly_connected_components,
 };
 use smackdebt_discovery::{DiscoveredFile, Inventory, generic_source_roles, glob_matches};
@@ -87,13 +88,16 @@ pub(super) fn analyze_codebase(request: &CodebaseRequest) -> Result<ProjectRepor
         &history_files,
     );
     let mut builder = CodebaseReportBuilder::new(
-        ReportMode::Codebase,
         selection.label,
         &inventory,
         &candidates,
         &history.activity,
         aliases,
         history.evolution,
+        SignalPolicies {
+            hotspots: request.hotspots,
+            size: request.size,
+        },
     );
     if let Some(message) = history.diagnostic {
         builder.add_general_diagnostic(DiagnosticKind::Other, message);
@@ -1589,25 +1593,49 @@ struct RatedFile {
     role: SourceRole,
     health: HealthCounts,
     debt: Vec<(usize, HealthAssessment)>,
+    rated_units: u32,
+    max_rating: Rating,
+    container_statements: Vec<(String, u32)>,
 }
 
 fn rate_file(analysis: FileAnalysis, role: SourceRole, policy: HealthPolicy) -> RatedFile {
     let mut health = HealthCounts::default();
     let mut debt = Vec::new();
+    let mut max_rating = Rating::Healthy;
+    // Container totals accumulate while units are rated, so no healthy unit is
+    // retained to compute container size later.
+    let mut container_statements: Vec<(String, u32)> = Vec::new();
     for (index, unit) in analysis.units().iter().enumerate() {
         let assessment = policy.assess(unit.measurements());
         if verdict_eligible(&analysis, role) {
             health.add_rating(assessment.rating());
         }
+        if assessment.rating() > max_rating {
+            max_rating = assessment.rating();
+        }
         if assessment.rating() != Rating::Healthy {
             debt.push((index, assessment));
         }
+        if let Some(container) = unit.identity().container() {
+            let statements = unit.measurements().logical_lines();
+            match container_statements
+                .iter_mut()
+                .find(|(name, _)| name == container)
+            {
+                Some(total) => total.1 += statements,
+                None => container_statements.push((container.to_owned(), statements)),
+            }
+        }
     }
+    let rated_units = u32::try_from(analysis.units().len()).unwrap_or(u32::MAX);
     RatedFile {
         analysis,
         role,
         health,
         debt,
+        rated_units,
+        max_rating,
+        container_statements,
     }
 }
 
@@ -1708,7 +1736,6 @@ impl Selection {
 }
 
 struct CodebaseReportBuilder<'a> {
-    mode: ReportMode,
     scopes: Vec<Scope>,
     files: Vec<FileRecord>,
     findings: Vec<Finding>,
@@ -1722,17 +1749,27 @@ struct CodebaseReportBuilder<'a> {
     manifest_names: Vec<Option<String>>,
     packages: Vec<PackageRecord>,
     evolution: EvolutionInput,
+    file_debt: Vec<FileDebt>,
+    size_findings: Vec<SizeFinding>,
+    policies: SignalPolicies,
+}
+
+/// The policies that own the derived signal tables.
+#[derive(Clone, Copy, Debug, Default)]
+struct SignalPolicies {
+    hotspots: HotspotPolicy,
+    size: SizePolicy,
 }
 
 impl<'a> CodebaseReportBuilder<'a> {
     fn new(
-        mode: ReportMode,
         label: String,
         inventory: &Inventory,
         candidates: &[&DiscoveredFile],
         activity: &'a HashMap<PathBuf, u32>,
         aliases: Vec<ResolutionAlias>,
         evolution: EvolutionInput,
+        policies: SignalPolicies,
     ) -> Self {
         let package_roots: Vec<PathBuf> = inventory
             .packages()
@@ -1767,7 +1804,6 @@ impl<'a> CodebaseReportBuilder<'a> {
             .collect();
 
         Self {
-            mode,
             scopes: hierarchy.scopes,
             files: Vec::with_capacity(candidates.len()),
             findings: Vec::with_capacity(candidates.len()),
@@ -1781,6 +1817,9 @@ impl<'a> CodebaseReportBuilder<'a> {
             manifest_names,
             packages,
             evolution,
+            file_debt: Vec::with_capacity(candidates.len()),
+            size_findings: Vec::with_capacity(candidates.len()),
+            policies,
         }
     }
 
@@ -1790,9 +1829,27 @@ impl<'a> CodebaseReportBuilder<'a> {
         let path = self.scopes[scope_id.index()].name().to_owned();
         let touches = self.activity.get(Path::new(&path)).copied();
         let mut health = HealthCounts::default();
+        let mut rated_units = 0;
+        let mut max_rating = Rating::Healthy;
         let (coverage, language) = match result {
             FileResult::Analyzed(rated) => {
                 health = rated.health;
+                rated_units = rated.rated_units;
+                max_rating = rated.max_rating;
+                self.size_findings.extend(
+                    self.policies
+                        .size
+                        .rate_file(file_id, rated.analysis.source_lines()),
+                );
+                let mut containers = rated.container_statements.clone();
+                containers.sort_by(|left, right| left.0.cmp(&right.0));
+                for (container, statements) in containers {
+                    self.size_findings.extend(
+                        self.policies
+                            .size
+                            .rate_container(file_id, &container, statements),
+                    );
+                }
                 for (unit_index, assessment) in rated.debt {
                     let unit = &rated.analysis.units()[unit_index];
                     let finding_id = FindingId::from_index(self.findings.len());
@@ -1882,6 +1939,12 @@ impl<'a> CodebaseReportBuilder<'a> {
         if let Some(touches) = touches {
             file = file.with_activity(FileActivity::new(touches));
         }
+        self.file_debt.push(FileDebt::new(
+            file_id,
+            rated_units,
+            max_rating,
+            touches.unwrap_or(0),
+        ));
         self.scopes[scope_id.index()].add_file(file_id);
         self.files.push(file);
     }
@@ -1940,7 +2003,7 @@ impl<'a> CodebaseReportBuilder<'a> {
         let evolutionary_findings = evolution.findings().to_vec();
         let root = ScopeId::from_index(0);
         let mut builder = AnalysisReportBuilder::with_capacity(
-            self.mode,
+            ReportMode::Codebase,
             self.scopes.len(),
             self.files.len(),
             self.findings.len(),
@@ -1972,6 +2035,8 @@ impl<'a> CodebaseReportBuilder<'a> {
             architecture.findings,
             Vec::new(),
         ));
+        builder.set_hotspots(self.policies.hotspots.hotspots(&self.file_debt));
+        builder.set_size_findings(self.size_findings);
         builder.set_evolution(evolution);
         for finding in evolutionary_findings {
             builder.link_evolutionary_finding(root, finding.id());
@@ -3805,6 +3870,117 @@ mod tests {
         assert_eq!(
             failed_history_availability(&smackdebt_git::GitError::EmptyHistory, 1),
             HistoryAvailability::Incomplete
+        );
+    }
+
+    #[test]
+    fn hotspots_cross_rated_files_with_their_windowed_touch_count() {
+        let root = tempfile::tempdir().unwrap();
+        let repository_path = root.path();
+        git(repository_path, ["init", "-q"]);
+        git(
+            repository_path,
+            ["config", "user.email", "test@example.invalid"],
+        );
+        git(repository_path, ["config", "user.name", "Smackdebt Test"]);
+        fs::write(repository_path.join("cold.rs"), "pub fn cold() {}\n").unwrap();
+        for revision in 0..5 {
+            fs::write(
+                repository_path.join("hot.rs"),
+                format!("pub fn hot(value: i32) -> i32 {{ value + {revision} }}\n"),
+            )
+            .unwrap();
+            git(repository_path, ["add", "."]);
+            git(repository_path, ["commit", "-qm", "change"]);
+        }
+
+        let report = analyze_codebase(&CodebaseRequest::new(repository_path)).unwrap();
+        let report = report.report();
+        let named = |file: FileId| report.files()[file.index()].path().to_owned();
+        let hotspots: Vec<_> = report
+            .hotspots()
+            .iter()
+            .map(|hotspot| (named(hotspot.file()), hotspot.touches()))
+            .collect();
+        assert_eq!(hotspots, [("hot.rs".to_owned(), 5)]);
+        assert!(
+            report.is_hotspot(
+                report
+                    .files()
+                    .iter()
+                    .find(|file| file.path() == "hot.rs")
+                    .unwrap()
+                    .id()
+            )
+        );
+
+        let below_boundary = analyze_codebase(
+            &CodebaseRequest::new(repository_path).with_minimum_hotspot_touches(6),
+        )
+        .unwrap();
+        assert!(below_boundary.report().hotspots().is_empty());
+    }
+
+    #[test]
+    fn file_and_container_size_are_rated_outside_the_unit_health_counts() {
+        let root = tempfile::tempdir().unwrap();
+        let repository_path = root.path();
+        git(repository_path, ["init", "-q"]);
+        git(
+            repository_path,
+            ["config", "user.email", "test@example.invalid"],
+        );
+        git(repository_path, ["config", "user.name", "Smackdebt Test"]);
+        fs::write(
+            repository_path.join("big.rs"),
+            "struct Worker;\nimpl Worker {\n    fn one(&self) {\n        let a = 1;\n        let b = 2;\n        let c = 3;\n    }\n    fn two(&self) {\n        let d = 4;\n        let e = 5;\n    }\n}\n",
+        )
+        .unwrap();
+        git(repository_path, ["add", "."]);
+        git(repository_path, ["commit", "-qm", "size"]);
+
+        let report = analyze_codebase(
+            &CodebaseRequest::new(repository_path).with_size_thresholds((10, 20), (4, 6)),
+        )
+        .unwrap();
+        let report = report.report();
+        let findings: Vec<_> = report
+            .size_findings()
+            .iter()
+            .map(|finding| {
+                (
+                    report.files()[finding.file().index()].path().to_owned(),
+                    finding.subject(),
+                    finding.container().map(str::to_owned),
+                    finding.value(),
+                    finding.rating(),
+                )
+            })
+            .collect();
+        assert_eq!(
+            findings,
+            [
+                (
+                    "big.rs".to_owned(),
+                    smackdebt_analysis::SizeSubject::File,
+                    None,
+                    12,
+                    Rating::Watch
+                ),
+                (
+                    "big.rs".to_owned(),
+                    smackdebt_analysis::SizeSubject::Container,
+                    Some("Worker".to_owned()),
+                    5,
+                    Rating::Watch
+                ),
+            ]
+        );
+        // Size findings never enter the unit verdict counts.
+        let root_scope = report.root().unwrap();
+        assert_eq!(
+            report.scopes()[root_scope.index()].health(),
+            HealthCounts::new(2, 0, 0)
         );
     }
 

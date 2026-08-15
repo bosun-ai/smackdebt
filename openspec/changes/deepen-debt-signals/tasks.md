@@ -6,10 +6,10 @@
 
 ## 2. Hotspots and rank
 
-- [ ] 2.1 Add hotspot policy crossing a file's maximum unit rating with its windowed touch count, with a configurable minimum touch count defaulting to 5 and integer operands only.
-- [ ] 2.2 Insert the hot rank key after total triggered signals and the role class key after it, keeping every following key in its current order.
-- [ ] 2.3 Prove the rank remains a total, data-stable order and that primary debt precedes non-primary debt at equal rating while non-primary debt stays visible.
-- [ ] 2.4 Add pure tests at the minimum-touch boundary, for an unrated hot file, and for a rated cold file.
+- [x] 2.1 Add hotspot policy crossing a file's maximum unit rating with its windowed touch count, with a configurable minimum touch count defaulting to 5 and integer operands only.
+- [x] 2.2 Insert the hot rank key after total triggered signals and the role class key after it, keeping every following key in its current order.
+- [x] 2.3 Prove the rank remains a total, data-stable order and that primary debt precedes non-primary debt at equal rating while non-primary debt stays visible.
+- [x] 2.4 Add pure tests at the minimum-touch boundary, for an unrated hot file, and for a rated cold file.
 
 ## 3. Architecture signals
 
@@ -30,8 +30,8 @@
 - [x] 5.2 Add parameter count per rated unit through the shared language contract with a default for languages without parameters.
 - [x] 5.3 Keep both measurements collected and unrated in this change and record the promotion as owned by `adopt-report-schema-v4`.
 - [x] 5.4 Add exact fixtures for both measurements in all 11 supported grammars, including Vue script, script-setup, and template regions.
-- [ ] 5.5 Add file size rating against 400 Watch and 800 High and container size rating against 300 Watch and 600 High on exclusive statement totals, both configurable.
-- [ ] 5.6 Add pure threshold-boundary tests for both size signals.
+- [x] 5.5 Add file size rating against 400 Watch and 800 High and container size rating against 300 Watch and 600 High on exclusive statement totals, both configurable.
+- [x] 5.6 Add pure threshold-boundary tests for both size signals.
 
 ## 6. Flow, evidence, and gates
 
