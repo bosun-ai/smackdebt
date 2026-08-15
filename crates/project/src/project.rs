@@ -287,6 +287,7 @@ pub(super) fn analyze_diff(request: &DiffRequest) -> Result<ProjectReport, Proje
                 references: analysis.dependencies().to_vec(),
                 role: *role,
                 trust: analysis.parse_status().trust(),
+                language: Some(analysis.language()),
             });
         }
         if let DiffSide::Analyzed { analysis, role, .. } = &result.before {
@@ -296,6 +297,7 @@ pub(super) fn analyze_diff(request: &DiffRequest) -> Result<ProjectReport, Proje
                 references: analysis.dependencies().to_vec(),
                 role: *role,
                 trust: analysis.parse_status().trust(),
+                language: Some(analysis.language()),
             });
         }
         let is_selected = selected_paths.contains(result.change.current_path());
@@ -348,6 +350,7 @@ pub(super) fn analyze_diff(request: &DiffRequest) -> Result<ProjectReport, Proje
                     references: rated.analysis.dependencies().to_vec(),
                     role: rated.role,
                     trust: rated.analysis.parse_status().trust(),
+                    language: Some(rated.analysis.language()),
                 };
                 current_dependencies.push(dependencies.clone());
                 before_dependencies.push(dependencies);
@@ -366,6 +369,7 @@ pub(super) fn analyze_diff(request: &DiffRequest) -> Result<ProjectReport, Proje
         }
         builder.add_file(record);
     }
+    let manifest_names = manifest_names_for(&inventory, &package_roots);
     let current_architecture = build_architecture(
         &work,
         builder.files(),
@@ -373,6 +377,7 @@ pub(super) fn analyze_diff(request: &DiffRequest) -> Result<ProjectReport, Proje
         &aliases,
         &current_package_roots,
         &package_roots,
+        &manifest_names,
     );
     let before_architecture = build_architecture(
         &work,
@@ -381,6 +386,7 @@ pub(super) fn analyze_diff(request: &DiffRequest) -> Result<ProjectReport, Proje
         &before_aliases,
         &before_package_roots,
         &package_roots,
+        &manifest_names,
     );
     let before_edges: Vec<_> = before_architecture
         .package_edges
@@ -1698,6 +1704,7 @@ struct CodebaseReportBuilder<'a> {
     dependencies: Vec<SourceDependencies>,
     aliases: Vec<ResolutionAlias>,
     package_roots: Vec<PathBuf>,
+    manifest_names: Vec<Option<String>>,
     packages: Vec<PackageRecord>,
     evolution: EvolutionInput,
 }
@@ -1716,6 +1723,11 @@ impl<'a> CodebaseReportBuilder<'a> {
             .packages()
             .iter()
             .map(|package| package.root().as_path().to_path_buf())
+            .collect();
+        let manifest_names: Vec<_> = inventory
+            .packages()
+            .iter()
+            .map(|package| package.manifest_name().map(str::to_owned))
             .collect();
         let mut hierarchy = HierarchyBuilder::new(label, &package_roots);
         let packages = package_roots
@@ -1751,6 +1763,7 @@ impl<'a> CodebaseReportBuilder<'a> {
             dependencies: Vec::with_capacity(candidates.len()),
             aliases,
             package_roots,
+            manifest_names,
             packages,
             evolution,
         }
@@ -1788,6 +1801,7 @@ impl<'a> CodebaseReportBuilder<'a> {
                     references: analysis.dependencies().to_vec(),
                     role: rated.role,
                     trust: analysis.parse_status().trust(),
+                    language: Some(analysis.language()),
                 });
                 let recovered = matches!(analysis.parse_status(), ParseStatus::Recovered);
                 let failed = matches!(analysis.parse_status(), ParseStatus::Failed);
@@ -1888,6 +1902,7 @@ impl<'a> CodebaseReportBuilder<'a> {
             &self.aliases,
             &self.package_roots,
             &self.package_roots,
+            &self.manifest_names,
         );
         let architecture_findings_for_links = architecture.findings.clone();
         let package_edges = architecture.package_edges.clone();
@@ -1986,6 +2001,7 @@ struct SourceDependencies {
     references: Vec<DependencySyntax>,
     role: SourceRole,
     trust: SourceTrust,
+    language: Option<Language>,
 }
 
 type DependencyEdgeKey = (
@@ -1996,6 +2012,13 @@ type DependencyEdgeKey = (
     SourceTrust,
 );
 type DependencyEdgeValue = (u32, Vec<smackdebt_analysis::SourceSpan>);
+type ExternalDependencyKey = (
+    FileId,
+    String,
+    smackdebt_analysis::StaticRelationKind,
+    SourceRole,
+    SourceTrust,
+);
 type ResolutionDiagnosticKey = (
     FileId,
     String,
@@ -2060,6 +2083,232 @@ impl DependencyPartitionCounts {
             self.context_relations,
         )
     }
+}
+
+/// What one unmatched reference means after the manifest-name index is read.
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+enum ManifestReference {
+    /// No unique internal package declares the referenced name.
+    Absent,
+    /// Several internal packages declare the referenced name.
+    Ambiguous,
+    /// The matched package presents this file as its entry point.
+    Entry(FileId),
+    /// The matched package has no resolvable entry file.
+    Package(PackageId),
+}
+
+/// The tables one architecture pass fills while it partitions references.
+#[derive(Default)]
+struct ReferenceTables {
+    coverage: DependencyPartitionCounts,
+    edge_values: BTreeMap<DependencyEdgeKey, DependencyEdgeValue>,
+    external_values: BTreeMap<ExternalDependencyKey, DependencyEdgeValue>,
+    diagnostic_values: BTreeMap<ResolutionDiagnosticKey, DependencyEdgeValue>,
+    manifest_package_values: BTreeMap<(PackageId, PackageId), (u32, u32)>,
+}
+
+impl ReferenceTables {
+    fn record_internal(
+        &mut self,
+        source: FileId,
+        target: FileId,
+        reference: &DependencySyntax,
+        dependencies: &SourceDependencies,
+    ) {
+        self.coverage.record(
+            reference.relation(),
+            dependencies.role,
+            dependencies.trust,
+            RelationResolution::ResolvedInternal,
+        );
+        if source == target {
+            return;
+        }
+        let value = self
+            .edge_values
+            .entry((
+                source,
+                target,
+                reference.relation(),
+                dependencies.role,
+                dependencies.trust,
+            ))
+            .or_default();
+        value.0 += 1;
+        if value.1.len() < RETAINED_RELATION_LOCATIONS {
+            value.1.push(reference.span());
+        }
+    }
+
+    fn record_external(
+        &mut self,
+        source: FileId,
+        reference: &DependencySyntax,
+        dependencies: &SourceDependencies,
+    ) {
+        self.coverage.record(
+            reference.relation(),
+            dependencies.role,
+            dependencies.trust,
+            RelationResolution::External,
+        );
+        let value = self
+            .external_values
+            .entry((
+                source,
+                reference.target().to_owned(),
+                reference.relation(),
+                dependencies.role,
+                dependencies.trust,
+            ))
+            .or_default();
+        value.0 += 1;
+        if value.1.len() < RETAINED_RELATION_LOCATIONS {
+            value.1.push(reference.span());
+        }
+    }
+
+    /// Records an internal reference that only names a package, not a file.
+    fn record_package(
+        &mut self,
+        source: PackageId,
+        target: PackageId,
+        reference: &DependencySyntax,
+        dependencies: &SourceDependencies,
+    ) {
+        self.coverage.record(
+            reference.relation(),
+            dependencies.role,
+            dependencies.trust,
+            RelationResolution::ResolvedInternal,
+        );
+        if source == target
+            || !(reference.relation() == smackdebt_analysis::StaticRelationKind::Uses
+                && dependencies.role.affects_verdict()
+                && dependencies.trust == SourceTrust::Trusted)
+        {
+            return;
+        }
+        let value = self
+            .manifest_package_values
+            .entry((source, target))
+            .or_default();
+        value.0 += 1;
+        value.1 += 1;
+    }
+
+    fn record_diagnostic(
+        &mut self,
+        source: FileId,
+        reference: &DependencySyntax,
+        dependencies: &SourceDependencies,
+        resolution: RelationResolution,
+        kind: ResolutionIssueKind,
+        reason: &str,
+    ) {
+        self.coverage.record(
+            reference.relation(),
+            dependencies.role,
+            dependencies.trust,
+            resolution,
+        );
+        record_resolution_diagnostic(
+            &mut self.diagnostic_values,
+            source,
+            reference,
+            dependencies.role,
+            dependencies.trust,
+            kind,
+            reason,
+        );
+    }
+
+    /// Records a reference no path candidate matched.
+    fn record_unmatched(
+        &mut self,
+        source: FileId,
+        source_package: PackageId,
+        reference: &DependencySyntax,
+        dependencies: &SourceDependencies,
+        resolution: ManifestReference,
+    ) {
+        match resolution {
+            ManifestReference::Entry(target) => {
+                self.record_internal(source, target, reference, dependencies);
+            }
+            ManifestReference::Package(target) => {
+                self.record_package(source_package, target, reference, dependencies);
+            }
+            ManifestReference::Ambiguous => self.record_diagnostic(
+                source,
+                reference,
+                dependencies,
+                RelationResolution::AmbiguousInternal,
+                ResolutionIssueKind::Ambiguous,
+                "several packages declare this name",
+            ),
+            ManifestReference::Absent => self.record_external(source, reference, dependencies),
+        }
+    }
+}
+
+/// Resolves one unmatched reference against the declared package names.
+fn resolve_manifest_name(
+    reference: &DependencySyntax,
+    dependencies: &SourceDependencies,
+    manifest_index: &ManifestNameIndex,
+    manifest_names: &[Option<String>],
+    package_roots: &[PathBuf],
+    index: &BTreeMap<PathBuf, FileId>,
+) -> ManifestReference {
+    if reference.relation() != smackdebt_analysis::StaticRelationKind::Uses {
+        return ManifestReference::Absent;
+    }
+    match manifest_index.resolve(reference.target(), dependencies.language) {
+        ManifestNameMatch::Absent => ManifestReference::Absent,
+        ManifestNameMatch::Ambiguous => ManifestReference::Ambiguous,
+        ManifestNameMatch::Package(position) => {
+            let root = &package_roots[position];
+            let name = manifest_names[position].as_deref().unwrap_or_default();
+            package_entry_file(root, name, index).map_or(
+                ManifestReference::Package(PackageId::from_index(position)),
+                ManifestReference::Entry,
+            )
+        }
+    }
+}
+
+/// Aligns discovered manifest names with the report's package positions.
+///
+/// A package root the working tree no longer has keeps no declared name: the
+/// diff sides read the names the current inventory declares.
+fn manifest_names_for(inventory: &Inventory, package_roots: &[PathBuf]) -> Vec<Option<String>> {
+    let declared: BTreeMap<_, _> = inventory
+        .packages()
+        .iter()
+        .map(|package| {
+            (
+                package.root().as_path().to_path_buf(),
+                package.manifest_name().map(str::to_owned),
+            )
+        })
+        .collect();
+    package_roots
+        .iter()
+        .map(|root| declared.get(root).cloned().flatten())
+        .collect()
+}
+
+/// Returns the report package that owns one repository path.
+fn package_of(path: &Path, side_package_roots: &[PathBuf], package_roots: &[PathBuf]) -> PackageId {
+    let root = nearest_package_root(path, side_package_roots);
+    PackageId::from_index(
+        package_roots
+            .iter()
+            .position(|candidate| candidate == &root)
+            .unwrap_or(0),
+    )
 }
 
 fn record_resolution_diagnostic(
@@ -2179,69 +2428,49 @@ fn build_architecture(
     aliases: &[ResolutionAlias],
     side_package_roots: &[PathBuf],
     package_roots: &[PathBuf],
+    manifest_names: &[Option<String>],
 ) -> ArchitectureBuild {
     work.record_algorithm_pass();
     let mut index = BTreeMap::new();
     for source in dependencies {
         index.insert(source.path.clone(), source.file);
     }
-    let mut coverage = DependencyPartitionCounts::default();
-    let mut edge_values: BTreeMap<DependencyEdgeKey, DependencyEdgeValue> = BTreeMap::new();
-    let mut external_values: BTreeMap<
-        (
-            FileId,
-            String,
-            smackdebt_analysis::StaticRelationKind,
-            SourceRole,
-            SourceTrust,
-        ),
-        DependencyEdgeValue,
-    > = BTreeMap::new();
-    let mut diagnostic_values: BTreeMap<ResolutionDiagnosticKey, DependencyEdgeValue> =
-        BTreeMap::new();
-
+    let manifest_index = ManifestNameIndex::new(manifest_names);
+    let mut tables = ReferenceTables::default();
     for dependencies in dependencies {
         let source = dependencies.file;
+        let source_package = package_of(&dependencies.path, side_package_roots, package_roots);
         for reference in &dependencies.references {
             match reference.state() {
                 DependencySyntaxState::External => {
-                    coverage.record(
-                        reference.relation(),
-                        dependencies.role,
-                        dependencies.trust,
-                        RelationResolution::External,
+                    let resolution = resolve_manifest_name(
+                        reference,
+                        dependencies,
+                        &manifest_index,
+                        manifest_names,
+                        package_roots,
+                        &index,
                     );
-                    let value = external_values
-                        .entry((
-                            source,
-                            reference.target().to_owned(),
-                            reference.relation(),
-                            dependencies.role,
-                            dependencies.trust,
-                        ))
-                        .or_default();
-                    value.0 += 1;
-                    if value.1.len() < RETAINED_RELATION_LOCATIONS {
-                        value.1.push(reference.span());
-                    }
+                    tables.record_unmatched(
+                        source,
+                        source_package,
+                        reference,
+                        dependencies,
+                        resolution,
+                    );
                 }
                 DependencySyntaxState::Unresolved(reason) => {
-                    coverage.record(
-                        reference.relation(),
-                        dependencies.role,
-                        dependencies.trust,
+                    let resolution =
                         if reference.intent() == smackdebt_analysis::DependencyIntent::Internal {
                             RelationResolution::UnresolvedInternal
                         } else {
                             RelationResolution::UnresolvedPackage
-                        },
-                    );
-                    record_resolution_diagnostic(
-                        &mut diagnostic_values,
+                        };
+                    tables.record_diagnostic(
                         source,
                         reference,
-                        dependencies.role,
-                        dependencies.trust,
+                        dependencies,
+                        resolution,
                         ResolutionIssueKind::Unresolved,
                         reason,
                     );
@@ -2253,79 +2482,41 @@ fn build_architecture(
                         [] if reference.intent()
                             == smackdebt_analysis::DependencyIntent::Internal =>
                         {
-                            coverage.record(
-                                reference.relation(),
-                                dependencies.role,
-                                dependencies.trust,
-                                RelationResolution::UnresolvedInternal,
-                            );
-                            record_resolution_diagnostic(
-                                &mut diagnostic_values,
+                            tables.record_diagnostic(
                                 source,
                                 reference,
-                                dependencies.role,
-                                dependencies.trust,
+                                dependencies,
+                                RelationResolution::UnresolvedInternal,
                                 ResolutionIssueKind::Unresolved,
                                 "no repository file matches",
                             );
                         }
                         [] => {
-                            coverage.record(
-                                reference.relation(),
-                                dependencies.role,
-                                dependencies.trust,
-                                RelationResolution::External,
+                            let resolution = resolve_manifest_name(
+                                reference,
+                                dependencies,
+                                &manifest_index,
+                                manifest_names,
+                                package_roots,
+                                &index,
                             );
-                            let value = external_values
-                                .entry((
-                                    source,
-                                    reference.target().to_owned(),
-                                    reference.relation(),
-                                    dependencies.role,
-                                    dependencies.trust,
-                                ))
-                                .or_default();
-                            value.0 += 1;
-                            if value.1.len() < RETAINED_RELATION_LOCATIONS {
-                                value.1.push(reference.span());
-                            }
+                            tables.record_unmatched(
+                                source,
+                                source_package,
+                                reference,
+                                dependencies,
+                                resolution,
+                            );
                         }
                         [target] => {
-                            coverage.record(
-                                reference.relation(),
-                                dependencies.role,
-                                dependencies.trust,
-                                RelationResolution::ResolvedInternal,
-                            );
-                            if source != *target {
-                                let entry = edge_values
-                                    .entry((
-                                        source,
-                                        *target,
-                                        reference.relation(),
-                                        dependencies.role,
-                                        dependencies.trust,
-                                    ))
-                                    .or_default();
-                                entry.0 += 1;
-                                if entry.1.len() < RETAINED_RELATION_LOCATIONS {
-                                    entry.1.push(reference.span());
-                                }
-                            }
+                            tables.record_internal(source, *target, reference, dependencies);
                         }
                         _ => {
-                            coverage.record(
-                                reference.relation(),
-                                dependencies.role,
-                                dependencies.trust,
-                                RelationResolution::AmbiguousInternal,
-                            );
-                            record_resolution_diagnostic(
-                                &mut diagnostic_values,
+                            tables.record_diagnostic(
                                 source,
                                 reference,
-                                dependencies.role,
-                                dependencies.trust,
+                                dependencies,
+                                RelationResolution::AmbiguousInternal,
                                 ResolutionIssueKind::Ambiguous,
                                 "several repository files match",
                             );
@@ -2335,6 +2526,13 @@ fn build_architecture(
             }
         }
     }
+    let ReferenceTables {
+        coverage,
+        edge_values,
+        external_values,
+        diagnostic_values,
+        manifest_package_values,
+    } = tables;
 
     let diagnostics = diagnostic_values
         .into_iter()
@@ -2390,26 +2588,19 @@ fn build_architecture(
             .find(|source| source.file == edge.target())
             .map(|source| source.path.as_path())
             .unwrap_or_else(|| Path::new(files[edge.target().index()].path()));
-        let source_root = nearest_package_root(source_path, side_package_roots);
-        let target_root = nearest_package_root(target_path, side_package_roots);
-        let source = PackageId::from_index(
-            package_roots
-                .iter()
-                .position(|root| root == &source_root)
-                .unwrap_or(0),
-        );
-        let target = PackageId::from_index(
-            package_roots
-                .iter()
-                .position(|root| root == &target_root)
-                .unwrap_or(0),
-        );
+        let source = package_of(source_path, side_package_roots, package_roots);
+        let target = package_of(target_path, side_package_roots, package_roots);
         if source != target {
             let value = package_values.entry((source, target)).or_default();
             value.0 += 1;
             value.1 += edge.references();
             value.2.push(edge.id());
         }
+    }
+    for ((source, target), (pairs, references)) in manifest_package_values {
+        let value = package_values.entry((source, target)).or_default();
+        value.0 += pairs;
+        value.1 += references;
     }
     let package_edges: Vec<_> = package_values
         .into_iter()
@@ -2546,6 +2737,122 @@ fn build_architecture(
         finding_links,
         cycles,
     }
+}
+
+/// What a declared manifest name means inside this repository.
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+enum ManifestNameMatch {
+    /// No internal package declares the name.
+    Absent,
+    /// Several internal packages declare the name.
+    Ambiguous,
+    /// Exactly one internal package declares the name.
+    Package(usize),
+}
+
+/// A read-only index from declared package names to internal packages.
+///
+/// Positions are package-root positions, so a match names the same package the
+/// rest of the build already knows.  The index is consulted only for references
+/// that path candidates would otherwise classify external.
+#[derive(Default)]
+struct ManifestNameIndex {
+    exact: BTreeMap<String, ManifestNameMatch>,
+    rust: BTreeMap<String, ManifestNameMatch>,
+}
+
+impl ManifestNameIndex {
+    fn new(names: &[Option<String>]) -> Self {
+        let mut index = Self::default();
+        for (position, name) in names.iter().enumerate() {
+            let Some(name) = name else {
+                continue;
+            };
+            index.insert_key(name.clone(), position, false);
+            index.insert_key(rust_manifest_key(name), position, true);
+        }
+        index
+    }
+
+    fn insert_key(&mut self, key: String, position: usize, rust: bool) {
+        let keys = if rust {
+            &mut self.rust
+        } else {
+            &mut self.exact
+        };
+        keys.entry(key)
+            .and_modify(|value| {
+                if *value != ManifestNameMatch::Package(position) {
+                    *value = ManifestNameMatch::Ambiguous;
+                }
+            })
+            .or_insert(ManifestNameMatch::Package(position));
+    }
+
+    fn resolve(&self, target: &str, language: Option<Language>) -> ManifestNameMatch {
+        let Some(root) = reference_root(target, language) else {
+            return ManifestNameMatch::Absent;
+        };
+        if language == Some(Language::Rust) {
+            return self
+                .rust
+                .get(&rust_manifest_key(root))
+                .copied()
+                .unwrap_or(ManifestNameMatch::Absent);
+        }
+        self.exact
+            .get(root)
+            .copied()
+            .unwrap_or(ManifestNameMatch::Absent)
+    }
+}
+
+/// Normalizes the Rust equivalence of hyphens and underscores in a name.
+fn rust_manifest_key(name: &str) -> String {
+    name.replace('-', "_")
+}
+
+/// Returns the package-naming first segment of an unresolved reference.
+fn reference_root(target: &str, language: Option<Language>) -> Option<&str> {
+    let root = match language {
+        Some(Language::Rust) => target.split("::").next(),
+        Some(Language::Python | Language::Java) => target.split(['.', '/']).next(),
+        _ if target.starts_with('@') => {
+            let mut parts = target.splitn(3, '/');
+            match (parts.next(), parts.next()) {
+                (Some(scope), Some(name)) => Some(&target[..scope.len() + name.len() + 1]),
+                _ => Some(target),
+            }
+        }
+        _ => target.split('/').next(),
+    }?;
+    (!root.is_empty()).then_some(root)
+}
+
+/// Returns the file a package presents as its entry point, when it has one.
+fn package_entry_file(
+    root: &Path,
+    name: &str,
+    index: &BTreeMap<PathBuf, FileId>,
+) -> Option<FileId> {
+    let module = name.rsplit('/').next().unwrap_or(name).replace('-', "_");
+    [
+        "src/lib.rs".to_owned(),
+        "src/main.rs".to_owned(),
+        "index.js".to_owned(),
+        "index.mjs".to_owned(),
+        "index.ts".to_owned(),
+        "src/index.js".to_owned(),
+        "src/index.mjs".to_owned(),
+        "src/index.ts".to_owned(),
+        "lib/index.js".to_owned(),
+        "__init__.py".to_owned(),
+        format!("{module}/__init__.py"),
+        format!("src/{module}/__init__.py"),
+        format!("lib/{module}.rb"),
+    ]
+    .into_iter()
+    .find_map(|candidate| index.get(&root.join(candidate)).copied())
 }
 
 fn resolve_candidates(
@@ -2868,6 +3175,131 @@ mod tests {
         git(&actual, ["add", "."]);
         git(&actual, ["commit", "-qm", "initial"]);
         root
+    }
+
+    fn workspace_with_declared_names() -> tempfile::TempDir {
+        let root = tempfile::tempdir().unwrap();
+        for (path, source) in [
+            (
+                "crates/core/Cargo.toml",
+                "[package]\nname='acme-core'\nversion='0.1.0'\n",
+            ),
+            (
+                "crates/core/src/lib.rs",
+                "pub fn core(value: i32) -> i32 { value }\n",
+            ),
+            (
+                "crates/app/Cargo.toml",
+                "[package]\nname='acme-app'\nversion='0.1.0'\n[lib]\nname='acme_renamed'\n",
+            ),
+            (
+                "crates/app/src/lib.rs",
+                "use acme_core::core;\npub fn app(value: i32) -> i32 { core(value) }\n",
+            ),
+            (
+                "ui/package.json",
+                "{\"name\":\"@acme/ui\",\"private\":true}\n",
+            ),
+            ("ui/index.js", "export const ui = 1;\n"),
+            (
+                "web/package.json",
+                "{\"name\":\"@acme/web\",\"private\":true}\n",
+            ),
+            (
+                "web/index.js",
+                "import { ui } from '@acme/ui/button';\nexport const web = ui;\n",
+            ),
+        ] {
+            let file = root.path().join(path);
+            fs::create_dir_all(file.parent().unwrap()).unwrap();
+            fs::write(file, source).unwrap();
+        }
+        root
+    }
+
+    fn package_pairs(report: &Report) -> Vec<(String, String)> {
+        report
+            .package_edges()
+            .iter()
+            .map(|edge| {
+                (
+                    report.packages()[edge.source().index()].path().to_owned(),
+                    report.packages()[edge.target().index()].path().to_owned(),
+                )
+            })
+            .collect()
+    }
+
+    #[test]
+    fn declared_manifest_names_resolve_cross_package_references() {
+        let root = workspace_with_declared_names();
+        let result = analyze_codebase(&CodebaseRequest::new(root.path())).unwrap();
+        let report = result.report();
+        assert_eq!(
+            package_pairs(report),
+            [
+                ("crates/app".to_owned(), "crates/core".to_owned()),
+                ("web".to_owned(), "ui".to_owned()),
+            ]
+        );
+        assert!(
+            report
+                .external_dependencies()
+                .iter()
+                .all(|external| external.target() != "acme_core"
+                    && external.target() != "@acme/ui/button"),
+            "{:?}",
+            report.external_dependencies()
+        );
+        let edges: Vec<_> = report
+            .dependency_edges()
+            .iter()
+            .map(|edge| {
+                (
+                    report.files()[edge.source().index()].path(),
+                    report.files()[edge.target().index()].path(),
+                )
+            })
+            .collect();
+        assert!(
+            edges.contains(&("crates/app/src/lib.rs", "crates/core/src/lib.rs")),
+            "{edges:?}"
+        );
+        assert!(
+            edges.contains(&("web/index.js", "ui/index.js")),
+            "{edges:?}"
+        );
+    }
+
+    #[test]
+    fn a_shadowed_manifest_name_stays_ambiguous_with_its_diagnostic() {
+        let root = workspace_with_declared_names();
+        fs::create_dir_all(root.path().join("mirror/core/src")).unwrap();
+        fs::write(
+            root.path().join("mirror/core/Cargo.toml"),
+            "[package]\nname='acme-core'\nversion='0.1.0'\n",
+        )
+        .unwrap();
+        fs::write(
+            root.path().join("mirror/core/src/lib.rs"),
+            "pub fn core(value: i32) -> i32 { value }\n",
+        )
+        .unwrap();
+
+        let result = analyze_codebase(&CodebaseRequest::new(root.path())).unwrap();
+        let report = result.report();
+        assert!(
+            !package_pairs(report).contains(&("crates/app".to_owned(), "crates/core".to_owned())),
+            "{:?}",
+            package_pairs(report)
+        );
+        let ambiguous: Vec<_> = report
+            .resolution_diagnostics()
+            .iter()
+            .filter(|value| value.kind() == ResolutionIssueKind::Ambiguous)
+            .map(|value| (value.target(), value.span().start_line()))
+            .collect();
+        assert_eq!(ambiguous, [("acme_core::core", 1)]);
     }
 
     #[test]
