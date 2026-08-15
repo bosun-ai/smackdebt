@@ -268,6 +268,44 @@ pub(crate) fn source_role_repository() -> GeneratedRepository {
     repository
 }
 
+/// A repository whose findings tie until the hot and role class rank keys.
+///
+/// `src/hot.js` carries fewer statements than `src/cold.js` but changes in five
+/// commits, and `spec/cold.js` repeats the cold file under a test role whose
+/// path sorts before the primary one.
+pub(crate) fn deepened_signal_repository() -> GeneratedRepository {
+    fn statements(name: &str, count: usize) -> Vec<u8> {
+        let mut source = format!("export function {name}() {{\n");
+        for index in 0..count {
+            source.push_str(&format!("  const value{index} = {index};\n"));
+        }
+        source.push_str("  return 0;\n}\n");
+        source.into_bytes()
+    }
+
+    let repository = GeneratedRepository::new("main");
+    repository.write("package.json", b"{\"name\":\"deepened\"}\n");
+    repository.write("src/cold.js", &statements("cold", 59));
+    repository.write("spec/cold.js", &statements("covered", 59));
+    repository.write("src/hot.js", &statements("hot", 54));
+    repository.commit(commit(
+        "test: deepened signals",
+        "Signal Fixture",
+        "signal@example.invalid",
+        "2026-01-01T12:00:00Z",
+    ));
+    for revision in 1..5 {
+        repository.write("src/hot.js", &statements("hot", 54 - revision));
+        repository.commit(commit(
+            "test: change the hot file",
+            "Signal Fixture",
+            "signal@example.invalid",
+            &format!("2026-01-0{}T12:00:00Z", revision + 1),
+        ));
+    }
+    repository
+}
+
 pub(crate) fn static_architecture_repository() -> GeneratedRepository {
     let repository = GeneratedRepository::new("main");
     let fixture_root =

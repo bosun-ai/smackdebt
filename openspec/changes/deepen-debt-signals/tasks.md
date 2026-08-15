@@ -38,8 +38,8 @@
 - [x] 6.1 Derive every new table inside existing passes with no new file read, traversal, or Git process.
 - [x] 6.2 Order every new table by data-stable keys and re-prove serial and parallel byte equality.
 - [x] 6.3 Prove work counts, allocation behavior, and performance gates stay inside their reviewed budgets.
-- [ ] 6.4 Add generated fixture evidence for hotspots, stable-dependency findings, knowledge concentration, size findings, orphan files, and window coverage fields.
-- [ ] 6.5 Prove JSON version 3 shape and terminal sections, labels, and vocabulary are unchanged and that every differing terminal byte is explained by the new rank keys.
+- [x] 6.4 Add generated fixture evidence for hotspots, stable-dependency findings, knowledge concentration, size findings, orphan files, and window coverage fields.
+- [x] 6.5 Prove JSON version 3 shape and terminal sections, labels, and vocabulary are unchanged and that every differing terminal byte is explained by the new rank keys.
 - [x] 6.6 Update the documented rank sequence to include the hot and role class keys.
 - [ ] 6.7 Re-run the release binary on smackdebt, swiftide, and fluyt and record that production debt now outranks test debt and that hot files are identifiable.
 - [ ] 6.8 Pass formatting, Clippy, workspace tests, architecture checks, performance tests, acceptance evidence, strict OpenSpec validation, and the final diff check.

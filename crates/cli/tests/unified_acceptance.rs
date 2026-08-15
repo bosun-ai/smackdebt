@@ -12,9 +12,9 @@ use unicode_width::UnicodeWidthStr;
 #[cfg(unix)]
 use support::coverage_failure_repository;
 use support::{
-    GeneratedRepository, Invocation, copy_language_truth_files, evolution_repository,
-    ref_diff_repository, shallow_clone, source_role_repository, static_architecture_repository,
-    workspace_manifest_repository, worktree_change_repository,
+    GeneratedRepository, Invocation, copy_language_truth_files, deepened_signal_repository,
+    evolution_repository, ref_diff_repository, shallow_clone, source_role_repository,
+    static_architecture_repository, workspace_manifest_repository, worktree_change_repository,
 };
 
 #[derive(Debug, Deserialize)]
@@ -224,6 +224,46 @@ fn the_selected_history_window_bounds_churn_coupling_and_concentration() {
     };
     assert!(activity(&complete) > 0);
     assert_eq!(activity(&windowed), 0);
+}
+
+#[test]
+fn hot_production_debt_outranks_equally_rated_cold_and_test_debt() {
+    let repository = deepened_signal_repository();
+    let result = Invocation::new(["--all", "--history", "36500d"]).run(repository.path());
+    result.success();
+    let terminal = String::from_utf8(result.stdout.clone()).unwrap();
+    let position = |needle: &str| {
+        terminal
+            .find(needle)
+            .unwrap_or_else(|| panic!("missing {needle} in\n{terminal}"))
+    };
+    // The hot file carries fewer statements than the cold file, so only the hot
+    // rank key can place it first; the test file stays visible below both.
+    assert!(position("src/hot.js") < position("src/cold.js"));
+    // The test file sorts before the primary file by path, so only the role
+    // class key can keep production debt above it.
+    assert!(position("src/cold.js") < position("spec/cold.js"));
+
+    let json = Invocation::new(["--json", "--history", "36500d"]).run(repository.path());
+    json.success();
+    let report = checked_json(&json.stdout);
+    let ratings: HashSet<_> = report["findings"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .map(|finding| finding["rating"].as_str().unwrap())
+        .collect();
+    assert_eq!(ratings, HashSet::from(["watch"]));
+    let hot = report["files"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .find(|file| report["paths"][file["path"].as_u64().unwrap() as usize] == "src/hot.js")
+        .unwrap();
+    assert_eq!(
+        report["activity"][hot["activity"].as_u64().unwrap() as usize]["touches"],
+        5
+    );
 }
 
 #[test]
@@ -711,6 +751,8 @@ fn committed_results_do_not_contain_generated_contributor_identities() {
             "review@example.invalid",
             "Coverage Fixture",
             "coverage@example.invalid",
+            "Signal Fixture",
+            "signal@example.invalid",
         ] {
             assert!(
                 !bytes
