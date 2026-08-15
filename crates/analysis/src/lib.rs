@@ -73,4 +73,7 @@ pub use source::{
     SourceRole, SourceSpan, SourceTrust, StaticRelationKind, UnitFact, UnitIdentity, UnitKind,
     is_symbolic_candidate,
 };
-pub use verdict::{CodebaseTier, FIGHTS_BACK_PERMILLE, VerdictCounts, WORN_PERMILLE};
+pub use verdict::{
+    CodebaseTier, DebtDiffFacts, DebtDiffSelection, DebtFamily, DiffTier, FIGHTS_BACK_PERMILLE,
+    VerdictCounts, WORN_PERMILLE,
+};
