@@ -1,5 +1,6 @@
 use smackdebt_analysis::{
-    DependencyKind, DependencySyntax, DependencySyntaxState, SourceSpan, StaticRelationKind,
+    CRATE_ROOT_CANDIDATE, DECLARING_FILE_CANDIDATE, DependencyKind, DependencySyntax,
+    DependencySyntaxState, SourceSpan, StaticRelationKind,
 };
 use tree_sitter::Node;
 
@@ -35,7 +36,7 @@ pub(super) fn rust(node: Node<'_>, source: &[u8]) -> Option<DependencySyntax> {
         "macro_invocation" => DependencyKind::Include,
         _ => return None,
     };
-    let text = node.utf8_text(source).ok()?.trim();
+    let text = strip_visibility(node.utf8_text(source).ok()?.trim());
     if node.kind() == "scoped_identifier"
         && (node
             .parent()
@@ -118,12 +119,30 @@ pub(super) fn rust(node: Node<'_>, source: &[u8]) -> Option<DependencySyntax> {
             "dependency target is malformed",
         ));
     }
-    let internal = node.kind() == "mod_item"
-        || target.starts_with("crate::")
-        || target.starts_with("self::")
-        || target.starts_with("super::");
+    let root = target.split("::").next().unwrap_or_default();
+    let internal = node.kind() == "mod_item" || matches!(root, "crate" | "self" | "super");
     if !internal {
         return Some(external(node, kind, target));
+    }
+    if node.kind() != "mod_item"
+        && matches!(root, "self" | "super")
+        && (target == root || inline_module_depth(node) > 0)
+    {
+        return Some(
+            candidates(
+                node,
+                kind,
+                target,
+                vec![DECLARING_FILE_CANDIDATE.to_owned()],
+            )
+            .with_internal_intent(),
+        );
+    }
+    if target == "crate" {
+        return Some(
+            candidates(node, kind, target, vec![CRATE_ROOT_CANDIDATE.to_owned()])
+                .with_internal_intent(),
+        );
     }
     let (prefix, value) = if node.kind() == "mod_item" || target.starts_with("self::") {
         ("./", target.trim_start_matches("self::"))
@@ -137,10 +156,16 @@ pub(super) fn rust(node: Node<'_>, source: &[u8]) -> Option<DependencySyntax> {
     if matches!(node.kind(), "use_declaration" | "scoped_identifier") {
         let mut parent = normalized.as_str();
         while let Some((prefix, _)) = parent.rsplit_once('/') {
+            if prefix.chars().all(|character| character == '.') {
+                break;
+            }
             values.push(format!("{prefix}.rs"));
             values.push(format!("{prefix}/mod.rs"));
             parent = prefix;
         }
+    }
+    if root == "crate" {
+        values.push(CRATE_ROOT_CANDIDATE.to_owned());
     }
     let dependency = candidates(node, kind, target, values).with_internal_intent();
     Some(if node.kind() == "mod_item" {
@@ -148,6 +173,46 @@ pub(super) fn rust(node: Node<'_>, source: &[u8]) -> Option<DependencySyntax> {
     } else {
         dependency
     })
+}
+
+/// Removes a leading Rust visibility modifier so it cannot become a target.
+fn strip_visibility(text: &str) -> &str {
+    let Some(rest) = text.strip_prefix("pub") else {
+        return text;
+    };
+    let Some(arguments) = rest.strip_prefix('(') else {
+        return if rest.starts_with(char::is_whitespace) {
+            rest.trim_start()
+        } else {
+            text
+        };
+    };
+    let mut depth = 1usize;
+    for (index, character) in arguments.char_indices() {
+        match character {
+            '(' => depth += 1,
+            ')' => {
+                depth -= 1;
+                if depth == 0 {
+                    return arguments[index + 1..].trim_start();
+                }
+            }
+            _ => {}
+        }
+    }
+    text
+}
+
+/// Counts the inline modules that contain this node inside its own file.
+fn inline_module_depth(mut node: Node<'_>) -> usize {
+    let mut depth = 0;
+    while let Some(parent) = node.parent() {
+        if parent.kind() == "mod_item" {
+            depth += 1;
+        }
+        node = parent;
+    }
+    depth
 }
 
 fn has_ancestor(mut node: Node<'_>, kind: &str) -> bool {

@@ -2557,6 +2557,9 @@ fn resolve_candidates(
     let parent = source.parent().unwrap_or(Path::new(""));
     let mut matches = std::collections::BTreeSet::new();
     for candidate in candidates {
+        if smackdebt_analysis::is_symbolic_candidate(candidate) {
+            continue;
+        }
         let mut expanded = vec![candidate.clone()];
         expanded.extend(aliases.iter().filter_map(|alias| alias.expand(candidate)));
         for candidate in expanded {
@@ -2584,7 +2587,37 @@ fn resolve_candidates(
             }
         }
     }
+    if matches.is_empty() {
+        matches.extend(resolve_symbolic_candidates(source, candidates, index));
+    }
     matches.into_iter().collect()
+}
+
+/// Resolves candidates that name a file by role instead of by path.
+///
+/// Symbolic candidates are the last resort of one reference: they are consulted
+/// only when no path candidate of the same reference matched a discovered file.
+fn resolve_symbolic_candidates(
+    source: &Path,
+    candidates: &[String],
+    index: &BTreeMap<PathBuf, FileId>,
+) -> Vec<FileId> {
+    let mut matches = Vec::new();
+    for candidate in candidates {
+        if candidate == smackdebt_analysis::DECLARING_FILE_CANDIDATE {
+            matches.extend(index.get(source).copied());
+        } else if candidate == smackdebt_analysis::CRATE_ROOT_CANDIDATE
+            && let Some(root) = rust_source_root(source)
+        {
+            matches.extend(
+                index
+                    .get(&root.join("lib.rs"))
+                    .or_else(|| index.get(&root.join("main.rs")))
+                    .copied(),
+            );
+        }
+    }
+    matches
 }
 
 fn rust_source_root(source: &Path) -> Option<PathBuf> {

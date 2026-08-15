@@ -47,6 +47,20 @@ pub enum DependencyIntent {
     Package,
 }
 
+/// The candidate that names the file declaring the reference.
+///
+/// A symbolic candidate is not a repository path.  It is consulted only when no
+/// path candidate of the same reference matches a discovered file.
+pub const DECLARING_FILE_CANDIDATE: &str = ".";
+
+/// The candidate that names the module root of the declaring file's package.
+pub const CRATE_ROOT_CANDIDATE: &str = "crate";
+
+/// Whether a candidate names a symbolic target rather than a repository path.
+pub fn is_symbolic_candidate(candidate: &str) -> bool {
+    matches!(candidate, DECLARING_FILE_CANDIDATE | CRATE_ROOT_CANDIDATE)
+}
+
 /// Why a dependency cannot safely produce path candidates.
 #[derive(Clone, Debug, Eq, Hash, Ord, PartialEq, PartialOrd)]
 pub enum DependencySyntaxState {

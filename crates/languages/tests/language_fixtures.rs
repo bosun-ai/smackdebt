@@ -591,6 +591,7 @@ fn root_package_malformed_and_unsupported_forms_do_not_guess() {
                 "core/work/mod.rs".to_owned(),
                 "core.rs".to_owned(),
                 "core/mod.rs".to_owned(),
+                "crate".to_owned(),
             ]),
         )
         .with_internal_intent()]
@@ -728,6 +729,99 @@ fn rust_qualified_paths_require_explicit_repository_intent() {
             && dependency.relation() == StaticRelationKind::Uses
             && dependency.span() == SourceSpan::new(1, 1)
     }));
+}
+
+#[test]
+fn rust_visibility_keywords_never_become_dependency_targets() {
+    let analysis = Analyzer::default()
+        .analyze(
+            Path::new("src/lib.rs"),
+            b"pub use a::b;\npub(crate) use c::d;\npub(in crate::e) use f::g;\npub mod child;\n"
+                .to_vec(),
+        )
+        .unwrap();
+    let targets: Vec<_> = analysis
+        .dependencies()
+        .iter()
+        .map(DependencySyntax::target)
+        .collect();
+    assert_eq!(targets, ["a::b", "c::d", "f::g", "child"]);
+    assert_eq!(
+        analysis.dependencies()[3].relation(),
+        StaticRelationKind::ModuleOwnership
+    );
+}
+
+#[test]
+fn rust_crate_rooted_references_offer_the_crate_root_as_a_fallback() {
+    let analysis = Analyzer::default()
+        .analyze(
+            Path::new("src/report.rs"),
+            b"use crate::{First, Second};\nuse crate::Item;\n".to_vec(),
+        )
+        .unwrap();
+    assert_eq!(
+        analysis.dependencies(),
+        &[
+            DependencySyntax::new(
+                DependencyKind::Import,
+                "crate",
+                SourceSpan::new(1, 1),
+                DependencySyntaxState::Candidates(vec!["crate".to_owned()]),
+            )
+            .with_internal_intent(),
+            DependencySyntax::new(
+                DependencyKind::Import,
+                "crate::Item",
+                SourceSpan::new(2, 2),
+                DependencySyntaxState::Candidates(vec![
+                    "Item.rs".to_owned(),
+                    "Item/mod.rs".to_owned(),
+                    "crate".to_owned(),
+                ]),
+            )
+            .with_internal_intent(),
+        ]
+    );
+}
+
+#[test]
+fn rust_super_inside_an_inline_module_targets_the_declaring_file() {
+    let analysis = Analyzer::default()
+        .analyze(
+            Path::new("src/report.rs"),
+            b"mod tests {\n    use super::*;\n    use super::Item;\n}\nuse super::sibling::work;\n"
+                .to_vec(),
+        )
+        .unwrap();
+    let states: Vec<_> = analysis
+        .dependencies()
+        .iter()
+        .filter(|dependency| dependency.relation() == StaticRelationKind::Uses)
+        .map(|dependency| (dependency.target(), dependency.state().clone()))
+        .collect();
+    assert_eq!(
+        states,
+        [
+            (
+                "super::*",
+                DependencySyntaxState::Candidates(vec![".".to_owned()])
+            ),
+            (
+                "super::Item",
+                DependencySyntaxState::Candidates(vec![".".to_owned()])
+            ),
+            (
+                "super::sibling::work",
+                DependencySyntaxState::Candidates(vec![
+                    "../sibling/work.rs".to_owned(),
+                    "../sibling/work/mod.rs".to_owned(),
+                    "../sibling.rs".to_owned(),
+                    "../sibling/mod.rs".to_owned(),
+                ])
+            ),
+        ]
+    );
 }
 
 #[test]
