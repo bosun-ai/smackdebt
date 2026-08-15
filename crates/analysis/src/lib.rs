@@ -20,6 +20,7 @@ mod size;
 mod source;
 mod stable_dependencies;
 mod strongly_connected_components;
+mod verdict;
 
 pub use architecture::{
     ArchitectureComparison, ArchitectureComparisonId, ArchitectureComparisonKind,
@@ -72,3 +73,4 @@ pub use source::{
     SourceRole, SourceSpan, SourceTrust, StaticRelationKind, UnitFact, UnitIdentity, UnitKind,
     is_symbolic_candidate,
 };
+pub use verdict::{CodebaseTier, FIGHTS_BACK_PERMILLE, VerdictCounts, WORN_PERMILLE};
