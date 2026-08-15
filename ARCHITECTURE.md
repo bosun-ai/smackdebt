@@ -338,55 +338,80 @@ from the hotspot table, which crosses a file's rated units with its windowed
 touch count; role class keeps primary source above non-primary source at equal
 rating without removing it. Hotspot and size input comes only from trusted
 parsed source in a verdict role, so advisory recovered facts and context fixture
-or generated files stay descriptive however often they change. Terminal output builds private
-borrowed presentation rows for the selected quality result, affected areas,
-ranked findings, relevant relationships, warnings, and next command. Selection
-and navigation happen once. Aligned and stacked writers consume those rows
-without scanning the report or running analysis. This seam can support a later
-interactive renderer without putting terminal state in the report domain or
-promising a public Rust interface.
+or generated files stay descriptive however often they change.
 
-The narrow writer stacks changed measurements; relationship identities, counts,
-statuses, and evidence; closed cycle witnesses; finding identity, kind, role,
-location, and measurements; coupling identity, evidence, and outcome; and
-activity paths, commit counts, and churn on separate indented lines. Each long
-identity is shortened in the middle with Unicode display width, preserving both
-ends and every fact. A final line writer measures visible width without counting
-ANSI sequences and safely shortens an unexpected overflow without splitting a
-glyph or escape sequence. Tests count that safety path directly: every reviewed
-50-column flow has zero uses, while a synthetic overflow proves it still works.
+The verdict, its tier sentence, its counts, and the worst offender with its
+resolved path and reason are completed analysis facts. The renderer prints them
+and never composes a sentence, derives a tier, or computes a count. Terminal
+output builds private borrowed presentation rows once for the verdict block,
+affected areas, ranked findings or debt-moving comparisons, relevant
+relationships, history rows, warnings, and next command. Selection, joining, and
+navigation happen once in that presentation step; the renderer performs no
+filesystem, Git, parser, or analysis work, and a path view reads owned tables
+only. This seam can support a later interactive renderer without putting
+terminal state in the report domain or promising a public Rust interface.
 
-The CLI resolves width and color before calling output. `COLUMNS` takes
-priority, followed by terminal width or a 100-column redirected default.
-Automatic color requires a terminal and no `NO_COLOR`; explicit always and
-never modes override that choice. The output crate reads no environment or
-terminal state. Only status glyphs receive color, with an immediate reset, so
-removing ANSI sequences yields the plain output byte for byte.
+Row shape is decided per row from that row's own content rather than from
+report-level width tiers. A row stays on one line when its content fits the
+resolved width and otherwise writes its head, then its location, then its facts
+on indented lines, one fact per line when they no longer share one. Text that
+still exceeds the width continues on the next line, preferring a word boundary
+and then a path separator, so measurements, counts, cycle witnesses, history
+evidence, dependency state, commands, and identities are never shortened away
+and no ellipsis is written. A final line writer measures visible width without
+counting ANSI sequences and safely shortens an unexpected overflow without
+splitting a glyph or escape sequence. Tests count that safety path directly:
+every reviewed 50-column flow has zero uses, while a synthetic overflow proves
+it still works.
 
-The private glyph vocabulary is High U+F024, Watch U+F0EB, Discover U+F46B,
-Worse U+F062, Better U+F063, Changed U+F111, and Warning U+F071. High and Worse
-are red, Watch and Warning use ANSI-256 color 208, Discover is cyan, Better is
-green, and Changed uses the normal text color. Each glyph occupies one display
-cell. Terminal output requires a Nerd Font and provides no alternate icon mode.
+Words carry every meaning. The human vocabulary is `high`, `watch`, `worse`,
+`better`, `changed`, `warning`, and `next:`. A glyph and the tier-colored `▌`
+bar are decoration: they may appear beside a word, never instead of it, and a
+new decorated element requires an adjacent word that carries its meaning and
+undecorated output that remains complete.
 
-`QUALITY` always appears. `AREAS` appears only for several affected children
-and shows at most five by default. `FINDINGS` shows at most three ranked source
-findings or changes. `ARCHITECTURE` appears for rated graph findings, while
-`HISTORY` appears for at most three actionable history findings, ordered by
-shared commits descending, similarity descending, then stable package names
-and IDs. Each default history row states the shared and total commit counts,
-similarity, and absent code dependency. Empty optional sections,
-healthy rows, bars, repeated summary percentages, processing totals, repeated
-status words, and omission bookkeeping stay out of human output. `--all` removes useful-detail
-limits without turning the terminal into a complete export. Path views retain
-incoming and outgoing relationships. JSON remains the complete view.
+The CLI resolves width, color, and decoration before calling output. `COLUMNS`
+takes priority, followed by terminal width or a 100-column redirected default.
+Automatic color requires a terminal and no `NO_COLOR`; automatic decoration
+requires a terminal only, so `NO_COLOR` removes styling while a terminal keeps
+its glyphs. Explicit always and never modes override both choices, and there is
+no separate decoration option. The output crate reads no environment or terminal
+state. Only decoration receives color, with an immediate reset, so removing ANSI
+sequences yields the plain decorated bytes and removing decoration yields the
+piped bytes.
+
+The decoration vocabulary is High U+F024, Watch U+F0EB, Discover U+F46B, Worse
+U+F062, Better U+F063, Changed U+F111, Warning U+F071, and the tier bar U+258C.
+High and Worse are red, Watch and Warning use ANSI-256 color 208, Discover is
+cyan, Better is green, Changed uses the normal text color, and the bar uses its
+tier color. Each occupies one display cell. Undecorated output contains no
+codepoint in U+E000–U+F8FF, which every public piped flow asserts.
+
+The verdict block always appears. `AREAS` appears only for several debt-bearing
+children and shows at most five with word-labeled counts. `FINDINGS` shows at
+most three ranked source findings or debt-moving comparisons. `ARCHITECTURE`
+appears for rated graph findings, stacks each cycle witness one step per line,
+and states stable-dependency rows with their integer instability operands.
+`HISTORY` appears for at most three actionable rows, ordered by shared commits
+descending, similarity descending, then stable package names and IDs, and adds
+knowledge-concentration rows as counts. `WARNINGS` groups one sentence per kind.
+A diff that moves no debt writes the verdict block and nothing after it.
+
+Empty optional sections, healthy rows, bars, summary ratios, processing totals,
+raw dependency edges, references outside the repository, churn totals,
+cyclomatic-one values, weak coupling, and omission bookkeeping stay out of every
+human view. `--all` removes the useful-debt limits without turning the terminal
+into a complete export. Path views retain incoming and outgoing debt-bearing
+relationships. JSON remains the complete view of everything the terminal omits.
 Every coupling row in `--all` and path views retains shared commits, union
 commits, similarity, and whether a code dependency exists.
 
 Human warnings group file problems and use short sentences. History and rename
-gaps, unmatched imports, and imports with several possible files have stable
-wording. Detailed and path views may add affected-file context without
-repeating the same summary for each file.
+gaps and imports that could not be followed have stable wording. Detailed and
+path views may add affected-file context without repeating the same summary for
+each file. The three common input failures — a missing path, a missing Git ref,
+and `--all --json` — write one exact line to standard error with no usage tail,
+no absolute path, and no operating-system or Git text.
 
 JSON starts with `schema_version: 3`. One package table owns stable package IDs,
 repository-relative paths, scope links, and current or base-only presence.

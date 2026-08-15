@@ -2,6 +2,7 @@ pub mod smackdebt_output
 pub struct smackdebt_output::TerminalOptions
 impl smackdebt_output::TerminalOptions
 pub const fn smackdebt_output::TerminalOptions::new(usize, bool, bool) -> Self
+pub const fn smackdebt_output::TerminalOptions::with_decorations(self, bool) -> Self
 impl core::default::Default for smackdebt_output::TerminalOptions
 pub fn smackdebt_output::TerminalOptions::default() -> Self
 pub fn smackdebt_output::write_json(&mut impl core::io::write::Write, &smackdebt_analysis::report::Report, core::option::Option<smackdebt_analysis::report::ScopeId>) -> core::io::error::Result<()>

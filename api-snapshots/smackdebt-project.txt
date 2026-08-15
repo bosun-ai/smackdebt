@@ -14,6 +14,7 @@ pub smackdebt_project::ProjectError::MissingReference
 pub smackdebt_project::ProjectError::SourceRoleConflict
 pub smackdebt_project::ProjectError::SourceRoleConflict::path: std::path::PathBuf
 pub smackdebt_project::ProjectError::SourceRoleConflict::roles: alloc::string::String
+pub smackdebt_project::ProjectError::UnknownReference(alloc::string::String)
 pub smackdebt_project::ProjectError::WorkerPool(rayon_core::ThreadPoolBuildError)
 pub struct smackdebt_project::CodebaseRequest
 impl smackdebt_project::CodebaseRequest

@@ -221,7 +221,9 @@ pub const fn smackdebt_analysis::Comparison::id(&self) -> smackdebt_analysis::Co
 pub fn smackdebt_analysis::Comparison::identity(&self) -> &smackdebt_analysis::UnitIdentity
 pub const fn smackdebt_analysis::Comparison::kind(&self) -> smackdebt_analysis::ComparisonKind
 pub fn smackdebt_analysis::Comparison::new(smackdebt_analysis::ComparisonId, smackdebt_analysis::UnitIdentity, smackdebt_analysis::ComparisonKind, core::option::Option<smackdebt_analysis::Measurements>, core::option::Option<smackdebt_analysis::Measurements>, core::option::Option<smackdebt_analysis::Rating>, core::option::Option<smackdebt_analysis::Rating>) -> Self
+pub const fn smackdebt_analysis::Comparison::span(&self) -> core::option::Option<smackdebt_analysis::SourceSpan>
 pub fn smackdebt_analysis::Comparison::with_file(self, smackdebt_analysis::FileId) -> Self
+pub const fn smackdebt_analysis::Comparison::with_span(self, smackdebt_analysis::SourceSpan) -> Self
 pub struct smackdebt_analysis::ComparisonId(_)
 impl smackdebt_analysis::ComparisonId
 pub const fn smackdebt_analysis::ComparisonId::from_index(usize) -> Self
@@ -881,6 +883,7 @@ pub fn smackdebt_analysis::is_entry_filename(&str) -> bool
 pub fn smackdebt_analysis::is_symbolic_candidate(&str) -> bool
 pub fn smackdebt_analysis::knowledge_concentration(&[smackdebt_analysis::ContributorConcentration]) -> alloc::vec::Vec<smackdebt_analysis::KnowledgeConcentrationFinding>
 pub fn smackdebt_analysis::orphan_files(&[smackdebt_analysis::OrphanCandidate<'_>]) -> alloc::vec::Vec<smackdebt_analysis::OrphanFile>
+pub fn smackdebt_analysis::qualifies_for_finding(smackdebt_analysis::ChangeCoupling) -> bool
 pub fn smackdebt_analysis::stable_dependency_findings(&[smackdebt_analysis::PackageEdge], &[smackdebt_analysis::PackageGraphMeasurement]) -> alloc::vec::Vec<smackdebt_analysis::StableDependencyFinding>
 pub fn smackdebt_analysis::strongly_connected_components(usize, &[(usize, usize)]) -> alloc::vec::Vec<alloc::vec::Vec<usize>>
 pub fn smackdebt_analysis::unexplained_coupling(&[smackdebt_analysis::ChangeCoupling], &[smackdebt_analysis::PackageEdge]) -> alloc::vec::Vec<smackdebt_analysis::EvolutionaryFinding>
