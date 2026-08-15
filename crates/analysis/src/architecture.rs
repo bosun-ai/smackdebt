@@ -76,6 +76,7 @@ macro_rules! architecture_index {
 }
 
 architecture_index!(DependencyEdgeId);
+architecture_index!(StableDependencyFindingId);
 architecture_index!(PackageEdgeId);
 architecture_index!(ArchitectureFindingId);
 architecture_index!(ArchitectureComparisonId);
@@ -259,7 +260,59 @@ impl Instability {
 pub enum ArchitectureFindingKind {
     PackageCycle,
     FileCycle,
-    StableDependencyViolation,
+}
+
+/// One package that depends on a less stable package.
+///
+/// Stable-dependency violations own their table and their own index type, so a
+/// row can never be mistaken for a position in the cycle finding table.
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct StableDependencyFinding {
+    id: StableDependencyFindingId,
+    rating: Rating,
+    source: PackageId,
+    target: PackageId,
+    evidence: StableDependencyEvidence,
+    witness_edges: Vec<DependencyEdgeId>,
+}
+
+impl StableDependencyFinding {
+    pub fn new(
+        id: StableDependencyFindingId,
+        source: PackageId,
+        target: PackageId,
+        evidence: StableDependencyEvidence,
+        witness_edges: Vec<DependencyEdgeId>,
+    ) -> Self {
+        Self {
+            id,
+            rating: Rating::Watch,
+            source,
+            target,
+            evidence,
+            witness_edges,
+        }
+    }
+    pub const fn id(&self) -> StableDependencyFindingId {
+        self.id
+    }
+    pub const fn rating(&self) -> Rating {
+        self.rating
+    }
+    /// The depending package.
+    pub const fn source(&self) -> PackageId {
+        self.source
+    }
+    /// The depended-on package.
+    pub const fn target(&self) -> PackageId {
+        self.target
+    }
+    pub const fn evidence(&self) -> StableDependencyEvidence {
+        self.evidence
+    }
+    pub fn witness_edges(&self) -> &[DependencyEdgeId] {
+        &self.witness_edges
+    }
 }
 
 /// The exact degree operands behind one stable-dependency violation.
@@ -304,7 +357,6 @@ pub struct ArchitectureFinding {
     packages: Vec<PackageId>,
     files: Vec<FileId>,
     witness_edges: Vec<DependencyEdgeId>,
-    stability: Option<StableDependencyEvidence>,
 }
 
 impl ArchitectureFinding {
@@ -317,8 +369,7 @@ impl ArchitectureFinding {
     ) -> Self {
         let rating = match kind {
             ArchitectureFindingKind::PackageCycle => Rating::High,
-            ArchitectureFindingKind::FileCycle
-            | ArchitectureFindingKind::StableDependencyViolation => Rating::Watch,
+            ArchitectureFindingKind::FileCycle => Rating::Watch,
         };
         Self {
             id,
@@ -327,18 +378,7 @@ impl ArchitectureFinding {
             packages,
             files,
             witness_edges,
-            stability: None,
         }
-    }
-
-    /// Retains both packages' exact degree operands and the reference count.
-    pub fn with_stability(mut self, evidence: StableDependencyEvidence) -> Self {
-        self.stability = Some(evidence);
-        self
-    }
-
-    pub const fn stability(&self) -> Option<StableDependencyEvidence> {
-        self.stability
     }
     pub const fn id(&self) -> ArchitectureFindingId {
         self.id

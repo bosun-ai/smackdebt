@@ -26,7 +26,8 @@ pub use architecture::{
     ArchitectureFinding, ArchitectureFindingId, ArchitectureFindingKind, ArchitectureGraph,
     ArchitectureReportFacts, DependencyCoverage, DependencyEdge, DependencyEdgeId,
     ExternalDependency, Instability, PackageEdge, PackageEdgeId, PackageGraphMeasurement,
-    ResolutionDiagnostic, ResolutionIssueKind, StableDependencyEvidence,
+    ResolutionDiagnostic, ResolutionIssueKind, StableDependencyEvidence, StableDependencyFinding,
+    StableDependencyFindingId,
 };
 pub use architecture_comparison::{PackageCycle, compare_architecture};
 pub use change_coupling::{PackageContainment, change_coupling, unexplained_coupling};
@@ -42,7 +43,8 @@ pub use evolution::{
     EvolutionAccumulator, EvolutionaryComparison, EvolutionaryComparisonId,
     EvolutionaryComparisonKind, EvolutionaryFinding, EvolutionaryFindingId,
     EvolutionaryFindingKind, EvolutionaryReportFacts, FileHistory, HistoryAvailability,
-    HistoryChangeFact, HistoryCommitFact, HistoryCoverage, PackageHistory,
+    HistoryChangeFact, HistoryCommitFact, HistoryCoverage, KnowledgeConcentrationFinding,
+    KnowledgeConcentrationFindingId, PackageHistory,
 };
 pub use evolutionary_comparison::compare_evolution;
 pub use history_window::HistoryWindow;

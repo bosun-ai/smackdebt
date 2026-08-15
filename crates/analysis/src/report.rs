@@ -7,12 +7,12 @@ use crate::source::{Language, ParseStatus, SourceRole, SourceSpan, SourceTrust, 
 use crate::{
     ArchitectureComparison, ArchitectureComparisonId, ArchitectureFinding, ArchitectureFindingId,
     ArchitectureReportFacts, DependencyCoverage, DependencyEdge, ExternalDependency, PackageEdge,
-    PackageGraphMeasurement, ResolutionDiagnostic,
+    PackageGraphMeasurement, ResolutionDiagnostic, StableDependencyFinding,
 };
 use crate::{
     ChangeCoupling, ContributorConcentration, EvolutionaryComparison, EvolutionaryComparisonId,
     EvolutionaryFinding, EvolutionaryFindingId, EvolutionaryReportFacts, FileHistory,
-    HistoryCoverage, PackageHistory,
+    HistoryCoverage, KnowledgeConcentrationFinding, PackageHistory,
 };
 #[cfg(test)]
 use crate::{HealthPolicy, LocalUnitId, Rating, Signal, Thresholds, compare_units};
@@ -738,8 +738,8 @@ pub struct Report {
     hotspots: Vec<Hotspot>,
     size_findings: Vec<SizeFinding>,
     orphan_files: Vec<OrphanFile>,
-    stable_dependency_findings: Vec<ArchitectureFinding>,
-    knowledge_concentration_findings: Vec<EvolutionaryFinding>,
+    stable_dependency_findings: Vec<StableDependencyFinding>,
+    knowledge_concentration_findings: Vec<KnowledgeConcentrationFinding>,
 }
 
 /// The source operation represented by a report.
@@ -829,7 +829,7 @@ impl ReportBuilder {
     }
 
     /// Sets the stable-dependency findings, ordered by package edge position.
-    pub fn set_stable_dependency_findings(&mut self, findings: Vec<ArchitectureFinding>) {
+    pub fn set_stable_dependency_findings(&mut self, findings: Vec<StableDependencyFinding>) {
         self.report.stable_dependency_findings = findings;
     }
 
@@ -1024,10 +1024,10 @@ impl Report {
     pub fn orphan_files(&self) -> &[OrphanFile] {
         &self.orphan_files
     }
-    pub fn stable_dependency_findings(&self) -> &[ArchitectureFinding] {
+    pub fn stable_dependency_findings(&self) -> &[StableDependencyFinding] {
         &self.stable_dependency_findings
     }
-    pub fn knowledge_concentration_findings(&self) -> &[EvolutionaryFinding] {
+    pub fn knowledge_concentration_findings(&self) -> &[KnowledgeConcentrationFinding] {
         &self.knowledge_concentration_findings
     }
     /// Whether a file crossed rated debt with enough change activity.

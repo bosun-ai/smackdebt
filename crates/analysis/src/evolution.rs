@@ -22,6 +22,7 @@ macro_rules! evolution_index {
 evolution_index!(ContributorId);
 evolution_index!(EvolutionaryFindingId);
 evolution_index!(EvolutionaryComparisonId);
+evolution_index!(KnowledgeConcentrationFindingId);
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub enum HistoryAvailability {
@@ -742,9 +743,8 @@ mod tests {
 
         assert_eq!(report.coupling[0].shared_commits(), 3);
         assert_eq!(report.coupling[0].union_commits(), 5);
-        let finding = report.findings()[0].coupling().expect("a coupling finding");
-        assert_eq!(finding.shared_commits(), 3);
-        assert_eq!(finding.union_commits(), 3);
+        assert_eq!(report.findings()[0].coupling().shared_commits(), 3);
+        assert_eq!(report.findings()[0].coupling().union_commits(), 3);
     }
 
     #[test]
@@ -1097,53 +1097,61 @@ pub enum EvolutionaryFindingKind {
     KnowledgeConcentration,
 }
 
-/// One Watch observation about how the code changed.
-///
-/// The kind discriminates the two observations, and each kind carries only its
-/// own operands. A knowledge-concentration finding carries counts alone: no
-/// name, address, raw author field, or internal contributor identifier.
+/// One Watch observation of packages that change together without a code
+/// dependency.
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub struct EvolutionaryFinding {
     id: EvolutionaryFindingId,
-    kind: EvolutionaryFindingKind,
-    coupling: Option<ChangeCoupling>,
-    concentration: Option<ContributorConcentration>,
+    coupling: ChangeCoupling,
 }
 
 impl EvolutionaryFinding {
     pub const fn new(id: EvolutionaryFindingId, coupling: ChangeCoupling) -> Self {
-        Self {
-            id,
-            kind: EvolutionaryFindingKind::UnexplainedCoupling,
-            coupling: Some(coupling),
-            concentration: None,
-        }
-    }
-    pub const fn knowledge_concentration(
-        id: EvolutionaryFindingId,
-        concentration: ContributorConcentration,
-    ) -> Self {
-        Self {
-            id,
-            kind: EvolutionaryFindingKind::KnowledgeConcentration,
-            coupling: None,
-            concentration: Some(concentration),
-        }
+        Self { id, coupling }
     }
     pub const fn id(self) -> EvolutionaryFindingId {
         self.id
     }
     pub const fn kind(self) -> EvolutionaryFindingKind {
-        self.kind
+        EvolutionaryFindingKind::UnexplainedCoupling
     }
-    /// Both kinds are Watch observations.
     pub const fn rating(self) -> crate::Rating {
         crate::Rating::Watch
     }
-    pub const fn coupling(self) -> Option<ChangeCoupling> {
+    pub const fn coupling(self) -> ChangeCoupling {
         self.coupling
     }
-    pub const fn concentration(self) -> Option<ContributorConcentration> {
+}
+
+/// One Watch observation of a package whose knowledge sits with one
+/// contributor.
+///
+/// The finding carries counts alone: no name, address, raw author field, or
+/// internal contributor identifier. It owns its table and its own index type,
+/// so a row can never be mistaken for a coupling finding position.
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub struct KnowledgeConcentrationFinding {
+    id: KnowledgeConcentrationFindingId,
+    concentration: ContributorConcentration,
+}
+
+impl KnowledgeConcentrationFinding {
+    pub const fn new(
+        id: KnowledgeConcentrationFindingId,
+        concentration: ContributorConcentration,
+    ) -> Self {
+        Self { id, concentration }
+    }
+    pub const fn id(self) -> KnowledgeConcentrationFindingId {
+        self.id
+    }
+    pub const fn kind(self) -> EvolutionaryFindingKind {
+        EvolutionaryFindingKind::KnowledgeConcentration
+    }
+    pub const fn rating(self) -> crate::Rating {
+        crate::Rating::Watch
+    }
+    pub const fn concentration(self) -> ContributorConcentration {
         self.concentration
     }
 }
@@ -1199,7 +1207,7 @@ pub struct EvolutionaryReportFacts {
     pub(crate) concentration: Vec<ContributorConcentration>,
     pub(crate) findings: Vec<EvolutionaryFinding>,
     pub(crate) comparisons: Vec<EvolutionaryComparison>,
-    pub(crate) concentration_findings: Vec<EvolutionaryFinding>,
+    pub(crate) concentration_findings: Vec<KnowledgeConcentrationFinding>,
 }
 
 impl EvolutionaryReportFacts {
@@ -1225,11 +1233,14 @@ impl EvolutionaryReportFacts {
         }
     }
     /// Adds the knowledge-concentration findings, kept in their own table.
-    pub fn with_concentration_findings(mut self, findings: Vec<EvolutionaryFinding>) -> Self {
+    pub fn with_concentration_findings(
+        mut self,
+        findings: Vec<KnowledgeConcentrationFinding>,
+    ) -> Self {
         self.concentration_findings = findings;
         self
     }
-    pub fn concentration_findings(&self) -> &[EvolutionaryFinding] {
+    pub fn concentration_findings(&self) -> &[KnowledgeConcentrationFinding] {
         &self.concentration_findings
     }
     pub fn findings(&self) -> &[EvolutionaryFinding] {

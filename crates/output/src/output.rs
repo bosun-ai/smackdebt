@@ -254,9 +254,6 @@ fn architecture_finding_name(kind: ArchitectureFindingKind) -> &'static str {
     match kind {
         ArchitectureFindingKind::PackageCycle => "package dependency cycle",
         ArchitectureFindingKind::FileCycle => "file dependency cycle",
-        // Stable-dependency findings live in their own analysis table and are
-        // not rendered until a later change presents them.
-        ArchitectureFindingKind::StableDependencyViolation => "stable dependency",
     }
 }
 
@@ -726,7 +723,7 @@ impl<'a, W: Write> Renderer<'a, W> {
         let mut finding_couplings = scope
             .evolutionary_findings()
             .iter()
-            .filter_map(|id| report.evolutionary_findings()[id.index()].coupling())
+            .map(|id| report.evolutionary_findings()[id.index()].coupling())
             .collect::<Vec<_>>();
         if !detail {
             finding_couplings.sort_by(|left, right| {

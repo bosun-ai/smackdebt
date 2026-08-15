@@ -74,38 +74,32 @@ impl SizePolicy {
 
     /// Rates one file against its line count.
     pub fn rate_file(self, file: FileId, source_lines: u32) -> Option<SizeFinding> {
-        Self::finding(self.file_lines, file, SizeSubject::File, None, source_lines)
+        let rating = self.file_lines.level(source_lines);
+        (rating != Rating::Healthy).then_some(SizeFinding {
+            file,
+            subject: SizeSubject::File,
+            container: None,
+            value: source_lines,
+            rating,
+        })
     }
 
     /// Rates one container against its exclusive statement total.
+    ///
+    /// The container name is owned only once the threshold decides, so a
+    /// healthy container costs no allocation.
     pub fn rate_container(
         self,
         file: FileId,
         container: &str,
         statements: u32,
     ) -> Option<SizeFinding> {
-        Self::finding(
-            self.container_lines,
-            file,
-            SizeSubject::Container,
-            Some(container.to_owned()),
-            statements,
-        )
-    }
-
-    fn finding(
-        thresholds: Thresholds,
-        file: FileId,
-        subject: SizeSubject,
-        container: Option<String>,
-        value: u32,
-    ) -> Option<SizeFinding> {
-        let rating = thresholds.level(value);
+        let rating = self.container_lines.level(statements);
         (rating != Rating::Healthy).then_some(SizeFinding {
             file,
-            subject,
-            container,
-            value,
+            subject: SizeSubject::Container,
+            container: Some(container.to_owned()),
+            value: statements,
             rating,
         })
     }

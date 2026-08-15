@@ -1,8 +1,8 @@
 use std::collections::{BTreeMap, BTreeSet};
 
 use crate::{
-    ContributorConcentration, ContributorId, EvolutionaryFinding, EvolutionaryFindingId,
-    HistoryCommitFact, PackageId, SourceRole, SourceTrust,
+    ContributorConcentration, ContributorId, HistoryCommitFact, KnowledgeConcentrationFinding,
+    KnowledgeConcentrationFindingId, PackageId, SourceRole, SourceTrust,
 };
 
 /// The windowed commits a package needs before its top share is a finding.
@@ -17,13 +17,15 @@ pub const MINIMUM_CONCENTRATION_PERCENT: u32 = 90;
 /// package, the contributor count, the numerator, and the denominator. Weaker
 /// observations stay descriptive. Context rows never qualify, so generated or
 /// fixture history cannot create a finding.
-pub fn knowledge_concentration(rows: &[ContributorConcentration]) -> Vec<EvolutionaryFinding> {
+pub fn knowledge_concentration(
+    rows: &[ContributorConcentration],
+) -> Vec<KnowledgeConcentrationFinding> {
     rows.iter()
         .filter(|row| row.affects_findings() && qualifies_for_finding(**row))
         .enumerate()
         .map(|(index, row)| {
-            EvolutionaryFinding::knowledge_concentration(
-                EvolutionaryFindingId::from_index(index),
+            KnowledgeConcentrationFinding::new(
+                KnowledgeConcentrationFindingId::from_index(index),
                 *row,
             )
         })
@@ -103,13 +105,16 @@ mod tests {
     fn one_contributor_owning_a_package_is_a_watch_finding_of_counts_only() {
         let findings = knowledge_concentration(&[row(3, 19, 20)]);
         assert_eq!(findings.len(), 1);
+        assert_eq!(
+            findings[0].id(),
+            KnowledgeConcentrationFindingId::from_index(0)
+        );
         assert_eq!(findings[0].rating(), Rating::Watch);
         assert_eq!(
             findings[0].kind(),
             EvolutionaryFindingKind::KnowledgeConcentration
         );
-        assert!(findings[0].coupling().is_none());
-        let concentration = findings[0].concentration().unwrap();
+        let concentration = findings[0].concentration();
         assert_eq!(concentration.package(), PackageId::from_index(0));
         assert_eq!(concentration.contributor_count(), 3);
         assert_eq!(concentration.numerator(), 19);

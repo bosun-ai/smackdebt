@@ -20,8 +20,8 @@ use smackdebt_analysis::{
     PackageEdgeId, PackageGraphMeasurement, PackageId, PackageRecord, ParseStatus, Rating, Report,
     ReportBuilder as AnalysisReportBuilder, ReportMode, ResolutionDiagnostic, ResolutionIssueKind,
     Scope, ScopeId, ScopeKind, SizeFinding, SizePolicy, SourceCoverageOutcome, SourceRole,
-    SourceTrust, compare_architecture, compare_units, cycle_witness, dependency_degree,
-    orphan_files, stable_dependency_findings, strongly_connected_components,
+    SourceTrust, StableDependencyFinding, compare_architecture, compare_units, cycle_witness,
+    dependency_degree, orphan_files, stable_dependency_findings, strongly_connected_components,
 };
 use smackdebt_discovery::{DiscoveredFile, Inventory, generic_source_roles, glob_matches};
 use smackdebt_git::{Change, ContributorIdentity, GitRepository};
@@ -527,9 +527,7 @@ pub(super) fn analyze_diff(request: &DiffRequest) -> Result<ProjectReport, Proje
         builder.add_diagnostic(Diagnostic::new(id, None, DiagnosticKind::Other, message, 0));
     }
     for finding in evolutionary_findings {
-        let Some(pair) = finding.coupling() else {
-            continue;
-        };
+        let pair = finding.coupling();
         builder.link_evolutionary_finding(root, finding.id());
         builder
             .link_evolutionary_finding(package_records[pair.left().index()].scope(), finding.id());
@@ -2059,9 +2057,7 @@ impl<'a> CodebaseReportBuilder<'a> {
         builder.set_size_findings(self.size_findings);
         builder.set_evolution(evolution);
         for finding in evolutionary_findings {
-            let Some(pair) = finding.coupling() else {
-                continue;
-            };
+            let pair = finding.coupling();
             builder.link_evolutionary_finding(root, finding.id());
             builder.link_evolutionary_finding(
                 self.packages[pair.left().index()].scope(),
@@ -2095,7 +2091,7 @@ impl<'a> CodebaseReportBuilder<'a> {
 struct ArchitectureBuild {
     coverage: DependencyCoverage,
     orphans: Vec<OrphanFile>,
-    stable_dependencies: Vec<ArchitectureFinding>,
+    stable_dependencies: Vec<StableDependencyFinding>,
     file_edges: Vec<DependencyEdge>,
     package_edges: Vec<PackageEdge>,
     external: Vec<ExternalDependency>,
@@ -3982,8 +3978,7 @@ mod tests {
         let findings = report.knowledge_concentration_findings();
         assert_eq!(findings.len(), 1);
         assert_eq!(findings[0].rating(), Rating::Watch);
-        assert!(findings[0].coupling().is_none());
-        let concentration = findings[0].concentration().unwrap();
+        let concentration = findings[0].concentration();
         assert_eq!(
             (
                 concentration.contributor_count(),
@@ -4105,10 +4100,10 @@ mod tests {
             .stable_dependency_findings()
             .iter()
             .map(|finding| {
-                let evidence = finding.stability().expect("degree operands");
+                let evidence = finding.evidence();
                 (
-                    package_path(finding.packages()[0]),
-                    package_path(finding.packages()[1]),
+                    package_path(finding.source()),
+                    package_path(finding.target()),
                     (
                         evidence.source().fan_in(),
                         evidence.source().fan_out(),

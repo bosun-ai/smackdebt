@@ -1,6 +1,6 @@
 use crate::architecture::{
-    ArchitectureFinding, ArchitectureFindingId, ArchitectureFindingKind, PackageEdge,
-    PackageGraphMeasurement, StableDependencyEvidence,
+    PackageEdge, PackageGraphMeasurement, StableDependencyEvidence, StableDependencyFinding,
+    StableDependencyFindingId,
 };
 
 /// The references one package needs into another before the direction matters.
@@ -18,7 +18,7 @@ pub const MINIMUM_STABLE_DEPENDENCY_REFERENCES: u32 = 2;
 pub fn stable_dependency_findings(
     edges: &[PackageEdge],
     graph: &[PackageGraphMeasurement],
-) -> Vec<ArchitectureFinding> {
+) -> Vec<StableDependencyFinding> {
     let mut findings = Vec::new();
     for edge in edges {
         if edge.references() < MINIMUM_STABLE_DEPENDENCY_REFERENCES {
@@ -39,20 +39,13 @@ pub fn stable_dependency_findings(
         {
             continue;
         }
-        findings.push(
-            ArchitectureFinding::new(
-                ArchitectureFindingId::from_index(findings.len()),
-                ArchitectureFindingKind::StableDependencyViolation,
-                vec![edge.source(), edge.target()],
-                Vec::new(),
-                edge.file_edges().to_vec(),
-            )
-            .with_stability(StableDependencyEvidence::new(
-                *source,
-                *target,
-                edge.references(),
-            )),
-        );
+        findings.push(StableDependencyFinding::new(
+            StableDependencyFindingId::from_index(findings.len()),
+            edge.source(),
+            edge.target(),
+            StableDependencyEvidence::new(*source, *target, edge.references()),
+            edge.file_edges().to_vec(),
+        ));
     }
     findings
 }
@@ -83,16 +76,13 @@ mod tests {
         let graph = [measurement(0, 3, 1), measurement(1, 1, 2)];
         let findings = stable_dependency_findings(&[edge(0, 1, 3)], &graph);
         assert_eq!(findings.len(), 1);
+        assert_eq!(findings[0].id(), StableDependencyFindingId::from_index(0));
         assert_eq!(findings[0].rating(), Rating::Watch);
         assert_eq!(
-            findings[0].kind(),
-            ArchitectureFindingKind::StableDependencyViolation
+            (findings[0].source(), findings[0].target()),
+            (PackageId::from_index(0), PackageId::from_index(1))
         );
-        assert_eq!(
-            findings[0].packages(),
-            [PackageId::from_index(0), PackageId::from_index(1)]
-        );
-        let evidence = findings[0].stability().unwrap();
+        let evidence = findings[0].evidence();
         assert_eq!(
             (evidence.source().fan_in(), evidence.source().fan_out()),
             (3, 1)
