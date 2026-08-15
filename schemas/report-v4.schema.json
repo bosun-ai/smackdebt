@@ -1903,10 +1903,7 @@
           "$ref": "#/$defs/index"
         },
         "rating": {
-          "enum": [
-            "watch",
-            "high"
-          ]
+          "$ref": "#/$defs/rating"
         },
         "touches": {
           "type": "integer",

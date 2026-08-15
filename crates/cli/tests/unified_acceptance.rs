@@ -1452,11 +1452,20 @@ fn every_derived_signal_table_carries_its_exact_rows() {
         .map(|hotspot| {
             (
                 file_path(hotspot["file"].as_u64().unwrap()),
+                hotspot["rating"].as_str().unwrap().to_owned(),
                 hotspot["touches"].as_u64().unwrap(),
             )
         })
         .collect();
-    assert_eq!(hot, [("core/main.js".to_owned(), 13)]);
+    // A hot file is a rated file that changes often, so a file whose units are
+    // all healthy is hot too and states `healthy` as its maximum rating.
+    assert_eq!(
+        hot,
+        [
+            ("core/main.js".to_owned(), "watch".to_owned(), 13),
+            ("helper/small.js".to_owned(), "healthy".to_owned(), 13),
+        ]
+    );
 
     let sizes: HashSet<(String, &str, u64)> = report["size_findings"]
         .as_array()

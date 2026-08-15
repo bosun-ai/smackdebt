@@ -374,8 +374,16 @@ pub(crate) fn signal_table_repository() -> GeneratedRepository {
         "solo@example.invalid",
         "2026-05-01T12:00:00Z",
     ));
-    // Twelve commits from one contributor make `core` both hot and concentrated.
+    // Twelve commits from one contributor make `core` both hot and concentrated,
+    // and carry a healthy file along so a hotspot's maximum rating can be
+    // healthy: a file is hot when it is rated and changes often, not when it
+    // carries debt.
     for revision in 1..=12 {
+        repository.write(
+            "helper/small.js",
+            format!("export default function small(value) {{ return value + {revision} - {revision}; }}\n")
+                .as_bytes(),
+        );
         repository.write(
             "core/main.js",
             format!(
