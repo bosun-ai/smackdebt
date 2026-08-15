@@ -3315,6 +3315,7 @@ impl HierarchyBuilder {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use smackdebt_analysis::{CodebaseTier, DiffTier, WorstOffenderReason};
     use std::process::Command;
 
     fn git<const N: usize>(root: &Path, args: [&str; N]) {
@@ -4052,6 +4053,18 @@ mod tests {
         assert_eq!(
             serial.report().knowledge_concentration_findings(),
             parallel.report().knowledge_concentration_findings()
+        );
+        // The verdict is derived from those tables, so both widths answer with
+        // the same tier, counts, selection, and worst offender.
+        assert!(serial.report().verdict().is_some());
+        assert_eq!(serial.report().verdict(), parallel.report().verdict());
+        assert!(
+            !serial
+                .report()
+                .verdict()
+                .unwrap()
+                .selection()
+                .has_duplicate_identity()
         );
     }
 
@@ -4931,6 +4944,116 @@ mod tests {
         );
         assert_eq!(report.dependency_coverage().resolved_internal_uses(), 2);
         assert_eq!(report.dependency_coverage().total(), 2);
+    }
+
+    #[test]
+    fn a_real_diff_answers_from_moved_debt_and_never_from_healthy_additions() {
+        let root = tempfile::tempdir().unwrap();
+        let repository_path = root.path();
+        git(repository_path, ["init", "-q"]);
+        git(
+            repository_path,
+            ["config", "user.email", "test@example.invalid"],
+        );
+        git(repository_path, ["config", "user.name", "Smackdebt Test"]);
+        fs::write(
+            repository_path.join("Cargo.toml"),
+            "[package]\nname='verdicts'\nversion='0.1.0'\n",
+        )
+        .unwrap();
+        let complex = "pub fn work(a: i32) -> i32 { if a > 0 { if a > 1 { return 1; } } 0 }\n";
+        fs::write(repository_path.join("work.rs"), complex).unwrap();
+        git(repository_path, ["add", "."]);
+        git(repository_path, ["commit", "-qm", "complex base"]);
+        let request = DiffRequest::new(repository_path)
+            .with_reference("HEAD")
+            .with_thresholds((1, 2), (5, 10), (50, 100));
+
+        fs::write(
+            repository_path.join("work.rs"),
+            format!("{complex}pub fn helper() -> i32 {{ 1 }}\n"),
+        )
+        .unwrap();
+        let added = analyze_diff(&request).unwrap();
+        let verdict = added.report().verdict().unwrap();
+        assert_eq!(verdict.diff_tier(), Some(DiffTier::NoDebtChange));
+        assert_eq!(verdict.sentence(), "No debt changed.");
+        assert!(verdict.selection().is_empty());
+        // The healthy addition stays in the machine report while it moves
+        // nothing.
+        assert!(
+            added
+                .report()
+                .comparisons()
+                .iter()
+                .any(|comparison| comparison.kind() == smackdebt_analysis::ComparisonKind::Added)
+        );
+
+        fs::write(
+            repository_path.join("work.rs"),
+            "pub fn work(a: i32) -> i32 { a }\n",
+        )
+        .unwrap();
+        let improved = analyze_diff(&request).unwrap();
+        assert_eq!(
+            improved.report().verdict().unwrap().diff_tier(),
+            Some(DiffTier::Better)
+        );
+
+        fs::write(
+            repository_path.join("work.rs"),
+            format!(
+                "pub fn work(a: i32) -> i32 {{ a }}\n{}",
+                complex.replace("work", "later")
+            ),
+        )
+        .unwrap();
+        let mixed = analyze_diff(&request).unwrap();
+        let verdict = mixed.report().verdict().unwrap();
+        assert_eq!(verdict.diff_tier(), Some(DiffTier::Mixed));
+        assert_eq!(verdict.sentence(), "Better here, worse there.");
+        assert_eq!(verdict.facts().source().worse(), 1);
+        assert_eq!(verdict.facts().source().better(), 1);
+        assert!(
+            verdict
+                .facts()
+                .moved(smackdebt_analysis::DebtFamily::Source)
+        );
+        assert!(
+            !verdict
+                .facts()
+                .moved(smackdebt_analysis::DebtFamily::Architecture)
+        );
+        assert!(!verdict.selection().has_duplicate_identity());
+    }
+
+    #[test]
+    fn a_codebase_verdict_states_the_tier_and_names_the_worst_offender() {
+        let root = tempfile::tempdir().unwrap();
+        fs::write(
+            root.path().join("Cargo.toml"),
+            "[package]\nname='verdicts'\nversion='0.1.0'\n",
+        )
+        .unwrap();
+        fs::write(
+            root.path().join("work.rs"),
+            "pub fn work(a: i32) -> i32 { if a > 0 { if a > 1 { return 1; } } 0 }\n",
+        )
+        .unwrap();
+        let report = CodebaseRequest::new(root.path())
+            .with_thresholds((1, 2), (5, 10), (50, 100))
+            .analyze()
+            .unwrap();
+        let verdict = report.report().verdict().unwrap();
+        assert_eq!(verdict.counts().checked(), 1);
+        assert_eq!(verdict.counts().high(), 1);
+        assert_eq!(verdict.counts().high_permille(), 1000);
+        assert_eq!(verdict.tier(), CodebaseTier::Lost);
+        assert_eq!(verdict.sentence(), "The code is winning.");
+        assert_eq!(verdict.diff_tier(), None);
+        let offender = verdict.worst_offender().unwrap();
+        assert_eq!(offender.path(), "work.rs");
+        assert_eq!(offender.reason(), WorstOffenderReason::MostComplex);
     }
 
     #[test]
