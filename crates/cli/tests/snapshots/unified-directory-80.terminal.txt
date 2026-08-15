@@ -1,5 +1,5 @@
 smackdebt · src
-The code is winning.
+  The code is winning.
 25 high · 2 watch · 27 checked
 worst: src/c.c — most complex
 
@@ -11,87 +11,87 @@ AREAS
   src/rust.rs · 2 high · 1 watch
 
 FINDINGS
-high controls · function
+  high controls · function
         src/c.c:1
         cognitive 9 · cyclomatic 8 · statements 6
-high Worker::run · method
+  high Worker::run · method
         src/rust.rs:6
         cognitive 7 · cyclomatic 4 · statements 3
-high vue.vue · template
+  high vue.vue · template
         src/vue.vue:1
         cognitive 5 · cyclomatic 6 · statements 3
-high outer::inner · function
+  high outer::inner · function
         src/python.py:2
         cognitive 4 · cyclomatic 5 · statements 4
-high Worker::run · method
+  high Worker::run · method
         src/java.java:3
         cognitive 4 · cyclomatic 4 · statements 5
-high ruby.rb · lambda
+  high ruby.rb · lambda
         src/ruby.rb:4
         cognitive 3 · cyclomatic 4 · statements 2
-high Worker::run · method
+  high Worker::run · method
         src/javascript.js:3
         cognitive 2 · cyclomatic 3 · statements 3
-high cpp.cpp · lambda
+  high cpp.cpp · lambda
         src/cpp.cpp:5
         cognitive 2 · cyclomatic 3 · statements 1
-high Worker::run · method
+  high Worker::run · method
         src/cpp.cpp:4
         cognitive 1 · cyclomatic 2 · statements 3
-high View::render · method
+  high View::render · method
         src/jsx.jsx:2
         cognitive 1 · cyclomatic 2 · statements 2
-high ruby.rb · closure
+  high ruby.rb · closure
         src/ruby.rb:5
         cognitive 1 · cyclomatic 2 · statements 2
-high View::render · method
+  high View::render · method
         src/tsx.tsx:2
         cognitive 1 · cyclomatic 2 · statements 2
-high Worker::run · method
+  high Worker::run · method
         src/typescript.ts:3
         cognitive 1 · cyclomatic 2 · statements 2
-high save · function
+  high save · function
         src/vue.vue:9
         cognitive 1 · cyclomatic 2 · statements 2
-high rust.rs · closure
+  high rust.rs · closure
         src/rust.rs:7
         cognitive 2 · cyclomatic 2
-high Worker::Worker · method
+  high Worker::Worker · method
         src/java.java:2
         cognitive 1 · cyclomatic 2 · statements 1
-high java.java · lambda
+  high java.java · lambda
         src/java.java:4
         cognitive 1 · cyclomatic 2
-high Worker::handler · closure
+  high Worker::handler · closure
         src/javascript.js:2
         cognitive 1 · cyclomatic 2
-high View::select · closure
+  high View::select · closure
         src/jsx.jsx:3
         cognitive 1 · cyclomatic 2
-high python.py · lambda
+  high python.py · lambda
         src/python.py:11
         cognitive 1 · cyclomatic 2
-high View::select · closure
+  high View::select · closure
         src/tsx.tsx:3
         cognitive 1 · cyclomatic 2
-high Worker::handler · closure
+  high Worker::handler · closure
         src/typescript.ts:2
         cognitive 1 · cyclomatic 2
-high helper · closure
+  high helper · closure
         src/vue.vue:8
         cognitive 1 · cyclomatic 2
-high outer · function
+  high outer · function
         src/python.py:1
         statements 2
-high Worker::run · method
+  high Worker::run · method
         src/ruby.rb:3
         statements 2
-watch Worker::self.empty · method
+  watch Worker::self.empty · method
         src/ruby.rb:11
-watch Work::run · method
+  watch Work::run · method
         src/rust.rs:2
 
 WARNINGS
-warning History is unavailable.
+  warning History is unavailable.
 
-next: smackdebt src/ruby.rb
+  next: smackdebt src/ruby.rb

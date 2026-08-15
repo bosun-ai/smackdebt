@@ -1,5 +1,5 @@
 smackdebt · repository root
-The code is winning.
+  The code is winning.
 1 high · 2 watch · 6 checked
 worst: b/main.js — most complex
 
@@ -9,20 +9,20 @@ AREAS
   e · 1 watch
 
 FINDINGS
-high b · function
+  high b · function
         b/main.js:1
         cognitive 6 · cyclomatic 4 · statements 2 · 1 commit
-watch renamed · function
+  watch renamed · function
         e/new.js:1
         cognitive 3 · cyclomatic 3 · statements 2
-watch c · function
+  watch c · function
         c/main.js:2
         statements 3 · 1 commit
 
 ARCHITECTURE
-high package dependency cycle
+  high package dependency cycle
         c/main.js
         → d/main.js
         → c/main.js
 
-next: smackdebt b
+  next: smackdebt b

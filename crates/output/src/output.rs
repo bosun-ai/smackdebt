@@ -1103,13 +1103,15 @@ impl<'a, W: Write> Renderer<'a, W> {
             Some(tier) => diff_tier_style(tier),
             None => codebase_tier_style(view.verdict.tier()),
         };
+        // The two cells the bar occupies are reserved either way, so a
+        // decorated and an undecorated report break their lines identically.
         if self.options.decorations {
             self.write_decoration(TIER_BAR, style)?;
             write!(self.writer, " ")?;
-            self.write_text(view.verdict.sentence(), 2)?;
         } else {
-            self.write_text(view.verdict.sentence(), 0)?;
+            write!(self.writer, "  ")?;
         }
+        self.write_text(view.verdict.sentence(), 2)?;
         self.write_text(&verdict_counts(&view.verdict, view.mode), 0)?;
         if let Some(worst) = view.verdict.worst_offender()
             && view.verdict.diff_tier() != Some(DiffTier::NoDebtChange)
@@ -1164,12 +1166,13 @@ impl<'a, W: Write> Renderer<'a, W> {
     }
 
     /// The visible cells a row's lead occupies before its head text.
+    ///
+    /// A decorated glyph fills the same two cells an undecorated report leaves
+    /// blank, so both reports choose the same shape for every row.
     fn lead_width(&self, word: Option<Word>) -> usize {
         match word {
             None => 2,
-            Some(word) => {
-                usize::from(self.options.decorations) * 2 + UnicodeWidthStr::width(word.text()) + 1
-            }
+            Some(word) => 2 + UnicodeWidthStr::width(word.text()) + 1,
         }
     }
 
@@ -1181,6 +1184,8 @@ impl<'a, W: Write> Renderer<'a, W> {
                 if self.options.decorations {
                     self.write_decoration(word.glyph(), word.style())?;
                     write!(self.writer, " ")?;
+                } else {
+                    write!(self.writer, "  ")?;
                 }
                 write!(self.writer, "{} ", word.text())?;
             }
@@ -1928,7 +1933,7 @@ mod tests {
         let plain = render(&report, TerminalOptions::new(100, true, false));
         assert_eq!(private_use(&plain), Vec::<char>::new(), "{plain}");
         assert!(!plain.contains(TIER_BAR));
-        assert!(plain.contains("watch unit-"), "{plain}");
+        assert!(plain.contains("  watch unit-"), "{plain}");
         assert!(plain.contains("warning "), "{plain}");
     }
 
@@ -1972,18 +1977,18 @@ mod tests {
     /// Removes ANSI, every private-use glyph, the tier bar, and the single
     /// space each decoration is separated from its word by.
     fn strip_decorations(value: &str) -> String {
-        let mut result = String::new();
-        let mut characters = value.chars().peekable();
-        while let Some(character) = characters.next() {
-            if ('\u{e000}'..='\u{f8ff}').contains(&character) || character == TIER_BAR {
-                if characters.peek() == Some(&' ') {
-                    characters.next();
+        value
+            .chars()
+            .map(|character| {
+                // A decoration fills the two cells an undecorated report
+                // leaves blank, so removing it restores those two spaces.
+                if ('\u{e000}'..='\u{f8ff}').contains(&character) || character == TIER_BAR {
+                    ' '
+                } else {
+                    character
                 }
-                continue;
-            }
-            result.push(character);
-        }
-        result
+            })
+            .collect()
     }
 
     fn strip_ansi(value: &[u8]) -> Vec<u8> {
@@ -2013,7 +2018,7 @@ mod tests {
         let report = builder.finish();
         let output = render(&report, TerminalOptions::default());
         assert!(
-            output.starts_with("smackdebt · repository root\nNothing was checked.\n"),
+            output.starts_with("smackdebt · repository root\n  Nothing was checked.\n"),
             "{output}"
         );
         assert_eq!(report.scopes()[0].name(), ".");
@@ -2048,7 +2053,7 @@ mod tests {
         let terminal = render(&report, TerminalOptions::new(100, true, false));
         assert_eq!(
             terminal,
-            "smackdebt diff · repository root\nNo debt changed.\nworse 0 · better 0 · changed 0\n"
+            "smackdebt diff · repository root\n  No debt changed.\nworse 0 · better 0 · changed 0\n"
         );
     }
 
@@ -2062,7 +2067,7 @@ mod tests {
             "{terminal}"
         );
         assert!(
-            terminal.contains("worse package dependency cycle introduced"),
+            terminal.contains("  worse package dependency cycle introduced"),
             "{terminal}"
         );
         assert!(terminal.contains("        api\n        → core\n        → api\n"));
@@ -2102,7 +2107,7 @@ mod tests {
         assert!(!render(&report, TerminalOptions::default()).contains("broken"));
         assert!(
             render(&report, TerminalOptions::new(100, true, false))
-                .contains("high broken · function · benchmark · advisory")
+                .contains("  high broken · function · benchmark · advisory")
         );
     }
 
@@ -2228,7 +2233,7 @@ mod tests {
         let default = render(&report, TerminalOptions::default());
         let watch_rows = |text: &str| {
             text.lines()
-                .filter(|line| line.starts_with("watch "))
+                .filter(|line| line.starts_with("  watch "))
                 .count()
         };
         assert_eq!(watch_rows(&default), 3, "{default}");

@@ -1,8 +1,8 @@
 smackdebt · repository root
-Nothing was checked.
+  Nothing was checked.
 0 high · 0 watch · 0 checked
 
 HISTORY
-watch b ↔ c changed together in 7 of 14 commits · 50% · no code dependency
-watch c ↔ d changed together in 5 of 14 commits · 36% · no code dependency
-watch d ↔ e changed together in 4 of 8 commits · 50% · no code dependency
+  watch b ↔ c changed together in 7 of 14 commits · 50% · no code dependency
+  watch c ↔ d changed together in 5 of 14 commits · 36% · no code dependency
+  watch d ↔ e changed together in 4 of 8 commits · 50% · no code dependency

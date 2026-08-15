@@ -1,5 +1,5 @@
 smackdebt diff · repository root
-You made it worse.
+  You made it worse.
 worse 1 (architecture) · better 0 · changed 0
 worst: app/main.js — package dependency cycle
 
@@ -8,10 +8,10 @@ AREAS
   core · worse 1
 
 ARCHITECTURE
-worse package dependency cycle introduced
+  worse package dependency cycle introduced
         app
         → core
         → app
 
 WARNINGS
-warning 2 imports could not be followed.
+  warning 2 imports could not be followed.

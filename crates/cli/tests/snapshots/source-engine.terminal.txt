@@ -1,6 +1,6 @@
 smackdebt · repository root
-Clean. Ship it.
+  Clean. Ship it.
 0 high · 0 watch · 2 checked
 
 WARNINGS
-warning History is unavailable.
+  warning History is unavailable.

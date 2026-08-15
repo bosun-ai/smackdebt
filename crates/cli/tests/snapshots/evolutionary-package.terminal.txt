@@ -1,5 +1,5 @@
 smackdebt · a
-Nothing was checked.
+  Nothing was checked.
 0 high · 0 watch · 0 checked
 
 ARCHITECTURE

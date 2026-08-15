@@ -1,5 +1,5 @@
 smackdebt diff · repository root
-You made it worse.
+  You made it worse.
 worse 1 (evolutionary) · better 0 · changed 0
 
 AREAS
@@ -7,5 +7,5 @@ AREAS
   b · worse 1
 
 HISTORY
-watch a ↔ b changed together in 3 of 7 commits · 43% · no code dependency
-worse a ↔ b now change together without a code dependency
+  watch a ↔ b changed together in 3 of 7 commits · 43% · no code dependency
+  worse a ↔ b now change together without a code dependency

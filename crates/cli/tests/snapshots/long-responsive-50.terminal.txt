@@ -1,5 +1,5 @@
 smackdebt · repository root
-Worn in the usual places.
+  Worn in the usual places.
 0 high · 1 watch · 2 checked
 worst: very-long-source-package-name/
         very-long-source-directory-name/
@@ -7,16 +7,16 @@ worst: very-long-source-package-name/
         complex
 
 FINDINGS
-watch ExtremelyLongContainerNameThatMustRemainReco
-        gnizable::extremelyLongMethodNameThatMustR
-        emainRecognizable · method · test
+  watch ExtremelyLongContainerNameThatMustRemainRe
+        cognizable::extremelyLongMethodNameThatMus
+        tRemainRecognizable · method · test
         very-long-source-package-name/
         very-long-source-directory-name/
         very-long-source-file-name.js:6
         statements 56 · 2 commits
 
 ARCHITECTURE
-high package dependency cycle
+  high package dependency cycle
         very-long-source-package-name/
         very-long-source-directory-name/
         very-long-source-file-name.js
@@ -37,6 +37,6 @@ high package dependency cycle
         could not be matched · test
 
 WARNINGS
-warning 2 imports could not be followed.
+  warning 2 imports could not be followed.
 
-next: smackdebt very-long-source-package-name
+  next: smackdebt very-long-source-package-name

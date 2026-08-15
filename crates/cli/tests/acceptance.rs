@@ -1821,21 +1821,21 @@ fn private_use_codepoints(value: &[u8]) -> Vec<char> {
         .collect()
 }
 
-/// Removes each decoration and the one space that separates it from its word.
+/// Removes each decoration, restoring the cells it filled.
 fn strip_decorations(value: &[u8]) -> Vec<u8> {
-    let text = String::from_utf8_lossy(value);
-    let mut result = String::new();
-    let mut characters = text.chars().peekable();
-    while let Some(character) = characters.next() {
-        if ('\u{e000}'..='\u{f8ff}').contains(&character) || character == '\u{258c}' {
-            if characters.peek() == Some(&' ') {
-                characters.next();
+    String::from_utf8_lossy(value)
+        .chars()
+        .map(|character| {
+            // A decoration fills the two cells an undecorated report leaves
+            // blank, so removing it restores those two spaces.
+            if ('\u{e000}'..='\u{f8ff}').contains(&character) || character == '\u{258c}' {
+                ' '
+            } else {
+                character
             }
-            continue;
-        }
-        result.push(character);
-    }
-    result.into_bytes()
+        })
+        .collect::<String>()
+        .into_bytes()
 }
 
 fn strip_ansi(value: &[u8]) -> Vec<u8> {
