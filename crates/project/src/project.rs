@@ -287,7 +287,7 @@ pub(super) fn analyze_diff(request: &DiffRequest) -> Result<ProjectReport, Proje
                 references: analysis.dependencies().to_vec(),
                 role: *role,
                 trust: analysis.parse_status().trust(),
-                language: Some(analysis.language()),
+                language: analysis.language(),
             });
         }
         if let DiffSide::Analyzed { analysis, role, .. } = &result.before {
@@ -297,7 +297,7 @@ pub(super) fn analyze_diff(request: &DiffRequest) -> Result<ProjectReport, Proje
                 references: analysis.dependencies().to_vec(),
                 role: *role,
                 trust: analysis.parse_status().trust(),
-                language: Some(analysis.language()),
+                language: analysis.language(),
             });
         }
         let is_selected = selected_paths.contains(result.change.current_path());
@@ -350,7 +350,7 @@ pub(super) fn analyze_diff(request: &DiffRequest) -> Result<ProjectReport, Proje
                     references: rated.analysis.dependencies().to_vec(),
                     role: rated.role,
                     trust: rated.analysis.parse_status().trust(),
-                    language: Some(rated.analysis.language()),
+                    language: rated.analysis.language(),
                 };
                 current_dependencies.push(dependencies.clone());
                 before_dependencies.push(dependencies);
@@ -1808,7 +1808,7 @@ impl<'a> CodebaseReportBuilder<'a> {
                     references: analysis.dependencies().to_vec(),
                     role: rated.role,
                     trust: analysis.parse_status().trust(),
-                    language: Some(analysis.language()),
+                    language: analysis.language(),
                 });
                 let recovered = matches!(analysis.parse_status(), ParseStatus::Recovered);
                 let failed = matches!(analysis.parse_status(), ParseStatus::Failed);
@@ -2016,7 +2016,7 @@ struct SourceDependencies {
     references: Vec<DependencySyntax>,
     role: SourceRole,
     trust: SourceTrust,
-    language: Option<Language>,
+    language: Language,
 }
 
 type DependencyEdgeKey = (
@@ -2806,11 +2806,11 @@ impl ManifestNameIndex {
             .or_insert(ManifestNameMatch::Package(position));
     }
 
-    fn resolve(&self, target: &str, language: Option<Language>) -> ManifestNameMatch {
+    fn resolve(&self, target: &str, language: Language) -> ManifestNameMatch {
         let Some(root) = reference_root(target, language) else {
             return ManifestNameMatch::Absent;
         };
-        if language == Some(Language::Rust) {
+        if language == Language::Rust {
             return self
                 .rust
                 .get(&rust_manifest_key(root))
@@ -2830,10 +2830,10 @@ fn rust_manifest_key(name: &str) -> String {
 }
 
 /// Returns the package-naming first segment of an unresolved reference.
-fn reference_root(target: &str, language: Option<Language>) -> Option<&str> {
+fn reference_root(target: &str, language: Language) -> Option<&str> {
     let root = match language {
-        Some(Language::Rust) => target.split("::").next(),
-        Some(Language::Python | Language::Java) => target.split(['.', '/']).next(),
+        Language::Rust => target.split("::").next(),
+        Language::Python | Language::Java => target.split(['.', '/']).next(),
         _ if target.starts_with('@') => {
             let mut parts = target.splitn(3, '/');
             match (parts.next(), parts.next()) {
@@ -3317,6 +3317,68 @@ mod tests {
             .map(|value| (value.target(), value.span().start_line()))
             .collect();
         assert_eq!(ambiguous, [("acme_core::core", 1)]);
+    }
+
+    #[test]
+    fn a_package_without_an_entry_file_keeps_a_package_scoped_edge() {
+        let root = tempfile::tempdir().unwrap();
+        for (path, source) in [
+            (
+                "crates/tool/Cargo.toml",
+                "[package]\nname='acme-tool'\nversion='0.1.0'\n",
+            ),
+            (
+                "crates/tool/other/thing.rs",
+                "pub fn thing(value: i32) -> i32 { value }\n",
+            ),
+            (
+                "crates/app/Cargo.toml",
+                "[package]\nname='acme-app'\nversion='0.1.0'\n",
+            ),
+            (
+                "crates/app/src/lib.rs",
+                "use acme_tool::thing;\nuse acme_tool::other::more;\npub fn app(value: i32) -> i32 { thing(more(value)) }\n",
+            ),
+            (
+                "crates/app/src/second.rs",
+                "use acme_tool::thing;\npub fn second(value: i32) -> i32 { thing(value) }\n",
+            ),
+        ] {
+            let file = root.path().join(path);
+            fs::create_dir_all(file.parent().unwrap()).unwrap();
+            fs::write(file, source).unwrap();
+        }
+
+        let result = analyze_codebase(&CodebaseRequest::new(root.path())).unwrap();
+        let report = result.report();
+        assert_eq!(
+            package_pairs(report),
+            [("crates/app".to_owned(), "crates/tool".to_owned())]
+        );
+        let edge = &report.package_edges()[0];
+        assert_eq!(
+            (edge.file_pairs(), edge.references(), edge.file_edges()),
+            (2, 3, [].as_slice()),
+            "two files make three package-scoped references"
+        );
+        assert!(
+            report
+                .dependency_edges()
+                .iter()
+                .all(|edge| !report.files()[edge.target().index()]
+                    .path()
+                    .starts_with("crates/tool")),
+            "a package without an entry file has no file-level target"
+        );
+        assert_eq!(report.dependency_coverage().resolved_internal_uses(), 3);
+        assert!(
+            report
+                .external_dependencies()
+                .iter()
+                .all(|external| !external.target().starts_with("acme_tool")),
+            "{:?}",
+            report.external_dependencies()
+        );
     }
 
     #[test]
