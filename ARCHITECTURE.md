@@ -151,7 +151,11 @@ three independent modules. Cognitive complexity owns structural, nesting,
 alternative, jump, and boolean-run state. Cyclomatic complexity owns decision
 counts. Logical lines own statement counts. A nested rated unit is skipped in
 its parent's traversal and measured separately, so direct complexity and
-exclusive statements need no child-result subtraction.
+exclusive statements need no child-result subtraction. The same traversal
+collects the deepest nesting level reached, and the language contract reports
+the unit's declared parameter count through a shared default. Both are exposed
+as measurements and are not rated until `adopt-report-schema-v4` promotes
+them.
 
 The engine constructs analysis-owned `FileAnalysis` and `UnitFact` values
 directly. Tree-sitter nodes, trees, grammars, and semantic traversal values do
@@ -201,7 +205,11 @@ and neighbors use stable path order, so worker completion order cannot change a
 witness or report byte.
 
 A package cycle is a High architecture finding. A file cycle inside one package
-is Watch. Fan-in, fan-out, instability, reference counts, and coverage are
+is Watch. A package that depends on a less stable package with at least two
+references into it is a Watch stable-dependency finding, decided by integer
+cross-multiplication of the degree operands rather than a float. A supported
+primary file with no incoming verdict edge that is not an entry file is a
+descriptive orphan fact. Fan-in, fan-out, instability, reference counts, and coverage are
 descriptive facts. Architecture findings and source findings use separate flat
 tables and separate summary counts.
 
@@ -262,8 +270,8 @@ those paths to the current inventory, follows unbroken rename chains from a
 current file to its earlier names, and converts contributor identity to a
 temporary integer before calling analysis.
 
-Analysis owns separate churn, change-coupling, contributor-concentration, and
-evolutionary-comparison modules. Package activity and contributor activity count
+Analysis owns separate churn, change-coupling, contributor-concentration,
+knowledge-concentration, and evolutionary-comparison modules. Package activity and contributor activity count
 once per commit. Change coupling counts each unordered package pair once per
 commit. Default findings require at least three shared commits and 20% Jaccard
 similarity; weaker observations remain available through JSON and `--all`. A
@@ -271,6 +279,11 @@ recurrent pair without a static package edge in either direction creates a
 Watch finding. All ratios retain their numerator and denominator. Output only reads the completed
 aggregate tables; contributor names, addresses, raw fields, and temporary
 identifiers cannot enter a report value.
+
+The selected history window is applied once, where streamed records become
+facts, so activity, churn, coupling, and concentration describe the same
+commits. History coverage states the window length and how many streamed commits
+the window excluded, counted separately from changes excluded for other reasons.
 
 History is anchored to files and package assignments in the current inventory.
 Deleted files and old package layouts are not reconstructed. Binary changes add
@@ -301,8 +314,11 @@ file-level comparison diagnostic instead of a guessed match.
 ## Output and failure behavior
 
 Analysis owns the exact source finding rank: rating, count of signals at that
-rating, total triggered signals, cognitive complexity, cyclomatic complexity,
-logical lines, activity, path, then span. Terminal output builds private
+rating, total triggered signals, hot state, role class, cognitive complexity,
+cyclomatic complexity, logical lines, activity, path, then span. Hot state comes
+from the hotspot table, which crosses a file's rated units with its windowed
+touch count; role class keeps primary source above non-primary source at equal
+rating without removing it. Terminal output builds private
 borrowed presentation rows for the selected quality result, affected areas,
 ranked findings, relevant relationships, warnings, and next command. Selection
 and navigation happen once. Aligned and stacked writers consume those rows

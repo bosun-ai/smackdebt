@@ -1834,7 +1834,7 @@ impl<'a> CodebaseReportBuilder<'a> {
         let mut rated_units = 0;
         let mut max_rating = Rating::Healthy;
         let (coverage, language) = match result {
-            FileResult::Analyzed(rated) => {
+            FileResult::Analyzed(mut rated) => {
                 health = rated.health;
                 rated_units = rated.rated_units;
                 max_rating = rated.max_rating;
@@ -1843,7 +1843,7 @@ impl<'a> CodebaseReportBuilder<'a> {
                         .size
                         .rate_file(file_id, rated.analysis.source_lines()),
                 );
-                let mut containers = rated.container_statements.clone();
+                let mut containers = std::mem::take(&mut rated.container_statements);
                 containers.sort_by(|left, right| left.0.cmp(&right.0));
                 for (container, statements) in containers {
                     self.size_findings.extend(

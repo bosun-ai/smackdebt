@@ -433,6 +433,17 @@ high = 21
 [thresholds.function_lines]
 watch = 50
 high = 100
+
+[thresholds.file_lines]
+watch = 400
+high = 800
+
+[thresholds.container_lines]
+watch = 300
+high = 600
+
+[hotspots]
+minimum_touches = 5
 ```
 
 Command-line values override the project file. Terminal output requires a Nerd
