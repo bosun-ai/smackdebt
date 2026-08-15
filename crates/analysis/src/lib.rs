@@ -14,9 +14,11 @@ mod health;
 mod history_window;
 mod hotspot;
 mod instability;
+mod orphan;
 mod report;
 mod size;
 mod source;
+mod stable_dependencies;
 mod strongly_connected_components;
 
 pub use architecture::{
@@ -24,26 +26,31 @@ pub use architecture::{
     ArchitectureFinding, ArchitectureFindingId, ArchitectureFindingKind, ArchitectureGraph,
     ArchitectureReportFacts, DependencyCoverage, DependencyEdge, DependencyEdgeId,
     ExternalDependency, Instability, PackageEdge, PackageEdgeId, PackageGraphMeasurement,
-    ResolutionDiagnostic, ResolutionIssueKind,
+    ResolutionDiagnostic, ResolutionIssueKind, StableDependencyEvidence,
 };
 pub use architecture_comparison::{PackageCycle, compare_architecture};
 pub use change_coupling::{PackageContainment, change_coupling, unexplained_coupling};
 pub use churn::churn;
-pub use contributor_concentration::contributor_concentration;
+pub use contributor_concentration::{
+    MINIMUM_CONCENTRATION_COMMITS, MINIMUM_CONCENTRATION_PERCENT, contributor_concentration,
+    knowledge_concentration,
+};
 pub use cycle_witness::cycle_witness;
 pub use dependency_degree::dependency_degree;
 pub use evolution::{
     ChangeCoupling, ContributorConcentration, ContributorId, CouplingEvidence,
     EvolutionAccumulator, EvolutionaryComparison, EvolutionaryComparisonId,
     EvolutionaryComparisonKind, EvolutionaryFinding, EvolutionaryFindingId,
-    EvolutionaryReportFacts, FileHistory, HistoryAvailability, HistoryChangeFact,
-    HistoryCommitFact, HistoryCoverage, PackageHistory,
+    EvolutionaryFindingKind, EvolutionaryReportFacts, FileHistory, HistoryAvailability,
+    HistoryChangeFact, HistoryCommitFact, HistoryCoverage, PackageHistory,
 };
 pub use evolutionary_comparison::compare_evolution;
 pub use history_window::HistoryWindow;
 pub use hotspot::{DEFAULT_MINIMUM_TOUCHES, FileDebt, Hotspot, HotspotPolicy};
 pub use instability::instability;
+pub use orphan::{ENTRY_FILENAMES, OrphanCandidate, OrphanFile, is_entry_filename, orphan_files};
 pub use size::{SizeFinding, SizePolicy, SizeSubject};
+pub use stable_dependencies::{MINIMUM_STABLE_DEPENDENCY_REFERENCES, stable_dependency_findings};
 pub use strongly_connected_components::strongly_connected_components;
 
 pub use comparison::{Comparison, ComparisonDirection, ComparisonKind, compare_units};

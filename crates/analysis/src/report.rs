@@ -1,6 +1,7 @@
 use crate::comparison::{Comparison, ComparisonDirection};
 use crate::health::{HealthAssessment, HealthCounts, Measurements};
 use crate::hotspot::Hotspot;
+use crate::orphan::OrphanFile;
 use crate::size::SizeFinding;
 use crate::source::{Language, ParseStatus, SourceRole, SourceSpan, SourceTrust, UnitIdentity};
 use crate::{
@@ -736,6 +737,9 @@ pub struct Report {
     evolutionary_comparisons: Vec<EvolutionaryComparison>,
     hotspots: Vec<Hotspot>,
     size_findings: Vec<SizeFinding>,
+    orphan_files: Vec<OrphanFile>,
+    stable_dependency_findings: Vec<ArchitectureFinding>,
+    knowledge_concentration_findings: Vec<EvolutionaryFinding>,
 }
 
 /// The source operation represented by a report.
@@ -819,6 +823,16 @@ impl ReportBuilder {
         self.report.size_findings = findings;
     }
 
+    /// Sets the descriptive orphan table, ordered by file table position.
+    pub fn set_orphan_files(&mut self, orphans: Vec<OrphanFile>) {
+        self.report.orphan_files = orphans;
+    }
+
+    /// Sets the stable-dependency findings, ordered by package edge position.
+    pub fn set_stable_dependency_findings(&mut self, findings: Vec<ArchitectureFinding>) {
+        self.report.stable_dependency_findings = findings;
+    }
+
     pub fn set_evolution(&mut self, facts: EvolutionaryReportFacts) {
         self.report.history_coverage = facts.coverage;
         self.report.file_history = facts.file_history;
@@ -827,6 +841,7 @@ impl ReportBuilder {
         self.report.contributor_concentration = facts.concentration;
         self.report.evolutionary_findings = facts.findings;
         self.report.evolutionary_comparisons = facts.comparisons;
+        self.report.knowledge_concentration_findings = facts.concentration_findings;
     }
 
     pub fn link_architecture_finding(&mut self, scope: ScopeId, finding: ArchitectureFindingId) {
@@ -916,6 +931,9 @@ impl Report {
             evolutionary_comparisons: Vec::new(),
             hotspots: Vec::new(),
             size_findings: Vec::new(),
+            orphan_files: Vec::new(),
+            stable_dependency_findings: Vec::new(),
+            knowledge_concentration_findings: Vec::new(),
         }
     }
 
@@ -1002,6 +1020,15 @@ impl Report {
     }
     pub fn size_findings(&self) -> &[SizeFinding] {
         &self.size_findings
+    }
+    pub fn orphan_files(&self) -> &[OrphanFile] {
+        &self.orphan_files
+    }
+    pub fn stable_dependency_findings(&self) -> &[ArchitectureFinding] {
+        &self.stable_dependency_findings
+    }
+    pub fn knowledge_concentration_findings(&self) -> &[EvolutionaryFinding] {
+        &self.knowledge_concentration_findings
     }
     /// Whether a file crossed rated debt with enough change activity.
     pub fn is_hotspot(&self, file: FileId) -> bool {

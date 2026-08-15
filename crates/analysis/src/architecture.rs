@@ -259,6 +259,41 @@ impl Instability {
 pub enum ArchitectureFindingKind {
     PackageCycle,
     FileCycle,
+    StableDependencyViolation,
+}
+
+/// The exact degree operands behind one stable-dependency violation.
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub struct StableDependencyEvidence {
+    source: PackageGraphMeasurement,
+    target: PackageGraphMeasurement,
+    references: u32,
+}
+
+impl StableDependencyEvidence {
+    pub const fn new(
+        source: PackageGraphMeasurement,
+        target: PackageGraphMeasurement,
+        references: u32,
+    ) -> Self {
+        Self {
+            source,
+            target,
+            references,
+        }
+    }
+    /// The depending package's degree facts.
+    pub const fn source(self) -> PackageGraphMeasurement {
+        self.source
+    }
+    /// The depended-on package's degree facts.
+    pub const fn target(self) -> PackageGraphMeasurement {
+        self.target
+    }
+    /// References the depending package has into the depended-on package.
+    pub const fn references(self) -> u32 {
+        self.references
+    }
 }
 
 #[derive(Clone, Debug, Eq, PartialEq)]
@@ -269,6 +304,7 @@ pub struct ArchitectureFinding {
     packages: Vec<PackageId>,
     files: Vec<FileId>,
     witness_edges: Vec<DependencyEdgeId>,
+    stability: Option<StableDependencyEvidence>,
 }
 
 impl ArchitectureFinding {
@@ -281,7 +317,8 @@ impl ArchitectureFinding {
     ) -> Self {
         let rating = match kind {
             ArchitectureFindingKind::PackageCycle => Rating::High,
-            ArchitectureFindingKind::FileCycle => Rating::Watch,
+            ArchitectureFindingKind::FileCycle
+            | ArchitectureFindingKind::StableDependencyViolation => Rating::Watch,
         };
         Self {
             id,
@@ -290,7 +327,18 @@ impl ArchitectureFinding {
             packages,
             files,
             witness_edges,
+            stability: None,
         }
+    }
+
+    /// Retains both packages' exact degree operands and the reference count.
+    pub fn with_stability(mut self, evidence: StableDependencyEvidence) -> Self {
+        self.stability = Some(evidence);
+        self
+    }
+
+    pub const fn stability(&self) -> Option<StableDependencyEvidence> {
+        self.stability
     }
     pub const fn id(&self) -> ArchitectureFindingId {
         self.id

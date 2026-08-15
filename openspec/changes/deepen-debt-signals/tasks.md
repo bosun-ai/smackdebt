@@ -13,16 +13,16 @@
 
 ## 3. Architecture signals
 
-- [ ] 3.1 Add stable-dependency policy using integer cross-multiplication of degree operands with a minimum of 2 references, emitting a Watch architecture finding that retains both packages' exact operands.
-- [ ] 3.2 Add orphan file facts for supported primary files with zero verdict-graph incoming dependencies, exempting entry files by name and by manifest-declared entry.
-- [ ] 3.3 Add pure tests for the exact-equality non-violation case, the one-reference case, an entry file, and a file with one incoming dependency.
+- [x] 3.1 Add stable-dependency policy using integer cross-multiplication of degree operands with a minimum of 2 references, emitting a Watch architecture finding that retains both packages' exact operands.
+- [x] 3.2 Add orphan file facts for supported primary files with zero verdict-graph incoming dependencies, exempting entry files by name and by manifest-declared entry.
+- [x] 3.3 Add pure tests for the exact-equality non-violation case, the one-reference case, an entry file, and a file with one incoming dependency.
 
 ## 4. Knowledge concentration
 
-- [ ] 4.1 Emit a Watch evolutionary finding at 10 or more windowed commits with a top-contributor share of at least 90%, carrying package, contributor count, numerator, and denominator only.
-- [ ] 4.2 Add a kind discriminator to evolutionary findings so unexplained coupling and knowledge concentration stay distinguishable.
+- [x] 4.1 Emit a Watch evolutionary finding at 10 or more windowed commits with a top-contributor share of at least 90%, carrying package, contributor count, numerator, and denominator only.
+- [x] 4.2 Add a kind discriminator to evolutionary findings so unexplained coupling and knowledge concentration stay distinguishable.
 - [ ] 4.3 Prove no contributor name, address, raw author field, or internal identifier reaches the report, terminal, or JSON.
-- [ ] 4.4 Add pure boundary tests at 9 and 10 commits and at 89% and 90% share using integer comparison.
+- [x] 4.4 Add pure boundary tests at 9 and 10 commits and at 89% and 90% share using integer comparison.
 
 ## 5. Measurements
 

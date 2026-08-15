@@ -641,8 +641,14 @@ impl Serialize for ConcentrationView {
 struct EvolutionaryFindings<'a>(&'a [EvolutionaryFinding]);
 impl Serialize for EvolutionaryFindings<'_> {
     fn serialize<S: Serializer>(&self, serializer: S) -> Result<S::Ok, S::Error> {
-        let mut sequence = serializer.serialize_seq(Some(self.0.len()))?;
-        for value in self.0 {
+        // Version 3 documents describe unexplained coupling only.
+        let coupling: Vec<_> = self
+            .0
+            .iter()
+            .filter(|finding| finding.coupling().is_some())
+            .collect();
+        let mut sequence = serializer.serialize_seq(Some(coupling.len()))?;
+        for value in coupling {
             sequence.serialize_element(&EvolutionaryFindingView(*value))?;
         }
         sequence.end()
@@ -651,7 +657,10 @@ impl Serialize for EvolutionaryFindings<'_> {
 struct EvolutionaryFindingView(EvolutionaryFinding);
 impl Serialize for EvolutionaryFindingView {
     fn serialize<S: Serializer>(&self, serializer: S) -> Result<S::Ok, S::Error> {
-        let pair = self.0.coupling();
+        let pair = self
+            .0
+            .coupling()
+            .expect("a version 3 evolutionary finding describes coupling");
         let mut map = serializer.serialize_map(Some(7))?;
         map.serialize_entry("id", &self.0.id().get())?;
         map.serialize_entry("rating", "watch")?;
@@ -713,6 +722,11 @@ impl Serialize for ArchitectureFindingView<'_> {
         let kind = match self.0.kind() {
             smackdebt_analysis::ArchitectureFindingKind::PackageCycle => "package_cycle",
             smackdebt_analysis::ArchitectureFindingKind::FileCycle => "file_cycle",
+            // Stable-dependency findings live in their own analysis table and
+            // reach no version 3 document.
+            smackdebt_analysis::ArchitectureFindingKind::StableDependencyViolation => {
+                "stable_dependency_violation"
+            }
         };
         map.serialize_entry("kind", kind)?;
         map.serialize_entry("rating", rating_name(self.0.rating()))?;

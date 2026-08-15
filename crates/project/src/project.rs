@@ -1,7 +1,7 @@
 //! Repository use cases. This crate is the only place that composes discovery,
 //! parsers, Git, health policy, and parallel execution.
 
-use std::collections::{BTreeMap, HashMap};
+use std::collections::{BTreeMap, BTreeSet, HashMap};
 use std::fs;
 use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicUsize, Ordering};
@@ -16,12 +16,12 @@ use smackdebt_analysis::{
     EvolutionAccumulator, ExternalDependency, FileActivity, FileAnalysis, FileDebt, FileId,
     FileRecord, Finding, FindingId, HealthAssessment, HealthCounts, HealthPolicy,
     HistoryAvailability, HistoryChangeFact, HistoryCommitFact, HistoryCoverage, HistoryWindow,
-    HotspotPolicy, Language, PackageContainment, PackageEdge, PackageEdgeId,
-    PackageGraphMeasurement, PackageId, PackageRecord, ParseStatus, Rating, Report,
+    HotspotPolicy, Language, OrphanCandidate, OrphanFile, PackageContainment, PackageEdge,
+    PackageEdgeId, PackageGraphMeasurement, PackageId, PackageRecord, ParseStatus, Rating, Report,
     ReportBuilder as AnalysisReportBuilder, ReportMode, ResolutionDiagnostic, ResolutionIssueKind,
     Scope, ScopeId, ScopeKind, SizeFinding, SizePolicy, SourceCoverageOutcome, SourceRole,
     SourceTrust, compare_architecture, compare_units, cycle_witness, dependency_degree,
-    strongly_connected_components,
+    orphan_files, stable_dependency_findings, strongly_connected_components,
 };
 use smackdebt_discovery::{DiscoveredFile, Inventory, generic_source_roles, glob_matches};
 use smackdebt_git::{Change, ContributorIdentity, GitRepository};
@@ -527,8 +527,10 @@ pub(super) fn analyze_diff(request: &DiffRequest) -> Result<ProjectReport, Proje
         builder.add_diagnostic(Diagnostic::new(id, None, DiagnosticKind::Other, message, 0));
     }
     for finding in evolutionary_findings {
+        let Some(pair) = finding.coupling() else {
+            continue;
+        };
         builder.link_evolutionary_finding(root, finding.id());
-        let pair = finding.coupling();
         builder
             .link_evolutionary_finding(package_records[pair.left().index()].scope(), finding.id());
         builder
@@ -2036,11 +2038,15 @@ impl<'a> CodebaseReportBuilder<'a> {
             Vec::new(),
         ));
         builder.set_hotspots(self.policies.hotspots.hotspots(&self.file_debt));
+        builder.set_orphan_files(architecture.orphans);
+        builder.set_stable_dependency_findings(architecture.stable_dependencies);
         builder.set_size_findings(self.size_findings);
         builder.set_evolution(evolution);
         for finding in evolutionary_findings {
+            let Some(pair) = finding.coupling() else {
+                continue;
+            };
             builder.link_evolutionary_finding(root, finding.id());
-            let pair = finding.coupling();
             builder.link_evolutionary_finding(
                 self.packages[pair.left().index()].scope(),
                 finding.id(),
@@ -2072,6 +2078,8 @@ impl<'a> CodebaseReportBuilder<'a> {
 
 struct ArchitectureBuild {
     coverage: DependencyCoverage,
+    orphans: Vec<OrphanFile>,
+    stable_dependencies: Vec<ArchitectureFinding>,
     file_edges: Vec<DependencyEdge>,
     package_edges: Vec<PackageEdge>,
     external: Vec<ExternalDependency>,
@@ -2712,7 +2720,7 @@ fn build_architecture(
         .map(|edge| (edge.source().index(), edge.target().index()))
         .collect();
     let degrees = dependency_degree(package_count, &package_pairs);
-    let measurements = degrees
+    let measurements: Vec<_> = degrees
         .into_iter()
         .enumerate()
         .map(|(index, (incoming, outgoing))| {
@@ -2773,11 +2781,21 @@ fn build_architecture(
             witness_edges,
         ));
     }
+    let stable_dependencies = stable_dependency_findings(&package_edges, &measurements);
+
     let file_pairs: Vec<_> = file_edges
         .iter()
         .filter(|edge| edge.affects_verdict())
         .map(|edge| (edge.source().index(), edge.target().index()))
         .collect();
+    let orphans = derive_orphans(
+        files,
+        dependencies,
+        &file_pairs,
+        package_roots,
+        manifest_names,
+        &index,
+    );
     for component in strongly_connected_components(files.len(), &file_pairs)
         .into_iter()
         .filter(|component| component.len() > 1)
@@ -2818,6 +2836,8 @@ fn build_architecture(
 
     ArchitectureBuild {
         coverage: coverage.finish(),
+        orphans,
+        stable_dependencies,
         file_edges,
         package_edges,
         external,
@@ -2827,6 +2847,54 @@ fn build_architecture(
         finding_links,
         cycles,
     }
+}
+
+/// Derives orphan facts from the degree of the existing verdict file graph.
+///
+/// No new traversal is introduced: the file pairs and the file table are the
+/// tables the architecture pass already produced.
+fn derive_orphans(
+    files: &[FileRecord],
+    dependencies: &[SourceDependencies],
+    file_pairs: &[(usize, usize)],
+    package_roots: &[PathBuf],
+    manifest_names: &[Option<String>],
+    index: &BTreeMap<PathBuf, FileId>,
+) -> Vec<OrphanFile> {
+    let degrees = dependency_degree(files.len(), file_pairs);
+    let mut declared_entries = BTreeSet::new();
+    for (position, root) in package_roots.iter().enumerate() {
+        let fallback = root
+            .file_name()
+            .and_then(|name| name.to_str())
+            .unwrap_or_default();
+        let name = manifest_names
+            .get(position)
+            .and_then(Option::as_deref)
+            .unwrap_or(fallback);
+        if let Some(entry) = package_entry_file(root, name, index) {
+            declared_entries.insert(entry);
+        }
+    }
+    let mut analyzed = BTreeSet::new();
+    for source in dependencies {
+        analyzed.insert(source.file);
+    }
+    let candidates: Vec<_> = files
+        .iter()
+        .enumerate()
+        .map(|(position, file)| {
+            OrphanCandidate::new(
+                file.id(),
+                file.path(),
+                file.role(),
+                analyzed.contains(&file.id()),
+                degrees.get(position).map_or(0, |(incoming, _)| *incoming),
+                declared_entries.contains(&file.id()),
+            )
+        })
+        .collect();
+    orphan_files(&candidates)
 }
 
 /// What a declared manifest name means inside this repository.
@@ -3871,6 +3939,123 @@ mod tests {
             failed_history_availability(&smackdebt_git::GitError::EmptyHistory, 1),
             HistoryAvailability::Incomplete
         );
+    }
+
+    #[test]
+    fn concentrated_package_knowledge_is_a_watch_finding_of_counts_only() {
+        let root = tempfile::tempdir().unwrap();
+        let repository_path = root.path();
+        git(repository_path, ["init", "-q"]);
+        git(
+            repository_path,
+            ["config", "user.email", "owner@example.invalid"],
+        );
+        git(repository_path, ["config", "user.name", "Sole Owner"]);
+        for revision in 0..10 {
+            fs::write(
+                repository_path.join("owned.rs"),
+                format!("pub fn owned() -> i32 {{ {revision} }}\n"),
+            )
+            .unwrap();
+            git(repository_path, ["add", "."]);
+            git(repository_path, ["commit", "-qm", "change"]);
+        }
+
+        let analyzed = analyze_codebase(&CodebaseRequest::new(repository_path)).unwrap();
+        let report = analyzed.report();
+        let findings = report.knowledge_concentration_findings();
+        assert_eq!(findings.len(), 1);
+        assert_eq!(findings[0].rating(), Rating::Watch);
+        assert!(findings[0].coupling().is_none());
+        let concentration = findings[0].concentration().unwrap();
+        assert_eq!(
+            (
+                concentration.contributor_count(),
+                concentration.numerator(),
+                concentration.denominator()
+            ),
+            (1, 10, 10)
+        );
+        assert!(report.evolutionary_findings().is_empty());
+    }
+
+    #[test]
+    fn stable_dependency_violations_and_orphan_files_are_derived_from_the_graph() {
+        let root = tempfile::tempdir().unwrap();
+        let repository_path = root.path();
+        for (path, source) in [
+            ("a/package.json", "{\"name\":\"a\"}\n"),
+            (
+                "a/index.js",
+                "import { b } from '../b/index.js';\nimport { other } from '../b/index.js';\nexport const a = b + other;\n",
+            ),
+            ("a/orphan.js", "export function orphan() { return 1; }\n"),
+            ("b/package.json", "{\"name\":\"b\"}\n"),
+            (
+                "b/index.js",
+                "import { e } from '../e/index.js';\nexport const b = e;\nexport const other = e;\n",
+            ),
+            ("c/package.json", "{\"name\":\"c\"}\n"),
+            (
+                "c/index.js",
+                "import { a } from '../a/index.js';\nexport const c = a;\n",
+            ),
+            ("d/package.json", "{\"name\":\"d\"}\n"),
+            (
+                "d/index.js",
+                "import { a } from '../a/index.js';\nexport const d = a;\n",
+            ),
+            ("e/package.json", "{\"name\":\"e\"}\n"),
+            ("e/index.js", "export const e = 1;\n"),
+        ] {
+            let file = repository_path.join(path);
+            fs::create_dir_all(file.parent().unwrap()).unwrap();
+            fs::write(file, source).unwrap();
+        }
+
+        let analyzed = analyze_codebase(&CodebaseRequest::new(repository_path)).unwrap();
+        let report = analyzed.report();
+        let package_path =
+            |package: PackageId| report.packages()[package.index()].path().to_owned();
+
+        // Package `a` is more stable than `b`, so depending on it with two
+        // references reverses the intended direction.
+        let violations: Vec<_> = report
+            .stable_dependency_findings()
+            .iter()
+            .map(|finding| {
+                let evidence = finding.stability().expect("degree operands");
+                (
+                    package_path(finding.packages()[0]),
+                    package_path(finding.packages()[1]),
+                    (
+                        evidence.source().fan_in(),
+                        evidence.source().fan_out(),
+                        evidence.target().fan_in(),
+                        evidence.target().fan_out(),
+                    ),
+                    evidence.references(),
+                    finding.rating(),
+                )
+            })
+            .collect();
+        assert_eq!(
+            violations,
+            [(
+                "a".to_owned(),
+                "b".to_owned(),
+                (2, 1, 1, 1),
+                2,
+                Rating::Watch
+            )]
+        );
+
+        let orphans: Vec<_> = report
+            .orphan_files()
+            .iter()
+            .map(|orphan| report.files()[orphan.file().index()].path().to_owned())
+            .collect();
+        assert_eq!(orphans, ["a/orphan.js".to_owned()]);
     }
 
     #[test]
