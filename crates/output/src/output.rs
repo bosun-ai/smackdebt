@@ -576,7 +576,7 @@ fn changed_measurements(comparison: &Comparison) -> Vec<String> {
         _ => {}
     }
     let (Some(before), Some(after)) = (comparison.before(), comparison.after()) else {
-        return vec![comparison_name(comparison.kind()).to_owned()];
+        return vec![changed_summary(comparison.kind()).to_owned()];
     };
     let values = [
         (
@@ -590,6 +590,12 @@ fn changed_measurements(comparison: &Comparison) -> Vec<String> {
             after.cyclomatic_complexity(),
         ),
         ("statements", before.logical_lines(), after.logical_lines()),
+        ("nesting", before.max_nesting(), after.max_nesting()),
+        (
+            "parameters",
+            before.parameter_count(),
+            after.parameter_count(),
+        ),
     ];
     let facts: Vec<String> = values
         .into_iter()
@@ -597,9 +603,25 @@ fn changed_measurements(comparison: &Comparison) -> Vec<String> {
         .map(|(name, before, after)| format!("{name} {before} → {after}"))
         .collect();
     if facts.is_empty() {
-        return vec![comparison_name(comparison.kind()).to_owned()];
+        return vec![changed_summary(comparison.kind()).to_owned()];
     }
     facts
+}
+
+/// The human sentence a comparison falls back to when no measurement moved.
+///
+/// The machine name of a kind is snake_case, which is a machine word: human
+/// output states what happened in the words the rest of the report uses.
+const fn changed_summary(kind: ComparisonKind) -> &'static str {
+    match kind {
+        ComparisonKind::Added => "added",
+        ComparisonKind::Removed => "removed",
+        ComparisonKind::Improved => "rating improved",
+        ComparisonKind::Regressed => "rating regressed",
+        ComparisonKind::MetricChanged => "measurements changed",
+        ComparisonKind::Ambiguous => "identity could not be matched safely",
+        ComparisonKind::Unchanged => "unchanged",
+    }
 }
 
 fn architecture_rows(
@@ -710,8 +732,10 @@ fn edge_change_rows(report: &Report, selected: &Scope, selection: &DebtDiffSelec
             } else {
                 format!("{source} → {target}")
             };
-            let mut row =
-                Row::new(Some(Word::direction(comparison.direction())), head).with_fact(change);
+            // These rows are context: they never reach a `changed n` count, so
+            // they never wear a verdict word either, exactly like the
+            // relationship rows they sit beside.
+            let mut row = Row::new(None, head).with_fact(change);
             for fact in evidence_facts(comparison.role(), comparison.trust()) {
                 row = row.with_fact(fact);
             }
@@ -1884,10 +1908,18 @@ mod tests {
                         PackageId::from_index(1),
                         PackageId::from_index(0),
                     ]),
+                    // An edge change is context: it never joins the selection.
+                    ArchitectureComparison::new(
+                        ArchitectureComparisonId::from_index(1),
+                        ArchitectureComparisonKind::EdgeAdded,
+                        vec![PackageId::from_index(0), PackageId::from_index(1)],
+                    ),
                 ],
             ));
             builder
                 .link_architecture_comparison(file_scope, ArchitectureComparisonId::from_index(0));
+            builder
+                .link_architecture_comparison(file_scope, ArchitectureComparisonId::from_index(1));
         }
         builder.finish()
     }
@@ -2071,6 +2103,60 @@ mod tests {
             "{terminal}"
         );
         assert!(terminal.contains("        api\n        → core\n        → api\n"));
+    }
+
+    #[test]
+    fn an_edge_change_row_is_context_and_wears_no_verdict_word() {
+        let report = diff_report(Some(ArchitectureComparisonKind::CycleIntroduced));
+        let terminal = render(&report, TerminalOptions::new(100, true, false));
+        let row = terminal
+            .lines()
+            .find(|line| line.contains("added"))
+            .unwrap_or_else(|| panic!("{terminal}"));
+        // The row does not count toward `changed n`, so it states no direction.
+        assert!(!row.contains("changed "), "{terminal}");
+        assert!(!row.contains("worse "), "{terminal}");
+        assert!(!row.contains("better "), "{terminal}");
+        assert!(row.starts_with("  ?"), "{terminal}");
+    }
+
+    #[test]
+    fn a_comparison_without_a_moved_measurement_states_a_human_word() {
+        // The machine kind is `metric_changed`; a reader is told what changed.
+        assert_eq!(
+            changed_summary(ComparisonKind::MetricChanged),
+            "measurements changed"
+        );
+        assert_eq!(changed_summary(ComparisonKind::Improved), "rating improved");
+        assert_eq!(
+            changed_summary(ComparisonKind::Regressed),
+            "rating regressed"
+        );
+        for kind in [
+            ComparisonKind::Added,
+            ComparisonKind::Removed,
+            ComparisonKind::Improved,
+            ComparisonKind::Regressed,
+            ComparisonKind::MetricChanged,
+            ComparisonKind::Ambiguous,
+            ComparisonKind::Unchanged,
+        ] {
+            assert!(!changed_summary(kind).contains('_'), "{kind:?}");
+        }
+        let measurements = Measurements::new(1, 1, 1);
+        let comparison = Comparison::new(
+            ComparisonId::from_index(0),
+            UnitIdentity::new("work", UnitKind::Function),
+            ComparisonKind::MetricChanged,
+            Some(measurements),
+            Some(measurements),
+            Some(Rating::Watch),
+            Some(Rating::Watch),
+        );
+        assert_eq!(
+            changed_measurements(&comparison),
+            vec!["measurements changed".to_owned()]
+        );
     }
 
     #[test]
