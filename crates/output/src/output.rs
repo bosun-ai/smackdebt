@@ -1579,6 +1579,8 @@ fn signal_name(signal: Signal) -> &'static str {
         Signal::CognitiveComplexity => "cognitive",
         Signal::CyclomaticComplexity => "cyclomatic",
         Signal::LogicalLines => "statements",
+        Signal::MaxNesting => "nesting",
+        Signal::ParameterCount => "parameters",
     }
 }
 

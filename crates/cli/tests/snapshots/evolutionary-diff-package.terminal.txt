@@ -3,7 +3,7 @@ smackdebt diff · b
 worse 0 · better 1 (evolutionary) · changed 0
 
 ARCHITECTURE
-  changed b/main.js → a/main.js · added
+  b/main.js → a/main.js · added
   b/main.js → a/main.js · 1 import
 
 HISTORY

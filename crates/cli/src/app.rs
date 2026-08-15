@@ -221,10 +221,10 @@ fn apply_codebase_common(
 }
 
 fn apply_codebase_thresholds(request: CodebaseRequest, config: &ProjectConfig) -> CodebaseRequest {
-    let (cognitive, cyclomatic, lines) = config.thresholds();
+    let (cognitive, cyclomatic, lines, nesting, parameters) = config.thresholds();
     let (file_lines, container_lines) = config.size_thresholds();
     request
-        .with_thresholds(cognitive, cyclomatic, lines)
+        .with_thresholds(cognitive, cyclomatic, lines, nesting, parameters)
         .with_size_thresholds(file_lines, container_lines)
         .with_minimum_hotspot_touches(config.minimum_hotspot_touches())
 }
@@ -234,11 +234,11 @@ fn apply_diff_common(request: DiffRequest, common: &Common, config: &ProjectConf
         .history
         .as_deref()
         .and_then(|value| parse_days(value).ok());
-    let (cognitive, cyclomatic, lines) = config.thresholds();
+    let (cognitive, cyclomatic, lines, nesting, parameters) = config.thresholds();
     request
         .with_history_days(common.history.or(configured_history).unwrap_or(90))
         .with_role_rules(config.role_rules())
-        .with_thresholds(cognitive, cyclomatic, lines)
+        .with_thresholds(cognitive, cyclomatic, lines, nesting, parameters)
 }
 
 fn execution_width(jobs: Option<usize>) -> Option<ExecutionWidth> {

@@ -45,6 +45,25 @@ mod tests {
     }
 
     #[test]
+    fn nesting_and_parameter_thresholds_have_documented_defaults_and_overrides() {
+        let default = ProjectConfig::default();
+        let (_, _, _, nesting, parameters) = default.thresholds();
+        assert_eq!(nesting, (4, 7));
+        assert_eq!(parameters, (6, 9));
+        let config: ProjectConfig = toml::from_str(
+            "[thresholds]\nnesting = { watch = 2, high = 3 }\nparameters = { watch = 3, high = 4 }\n",
+        )
+        .unwrap();
+        config.validate().unwrap();
+        let (_, _, _, nesting, parameters) = config.thresholds();
+        assert_eq!(nesting, (2, 3));
+        assert_eq!(parameters, (3, 4));
+        let weak: ProjectConfig =
+            toml::from_str("[thresholds]\nnesting = { watch = 3, high = 3 }\n").unwrap();
+        assert!(weak.validate().is_err());
+    }
+
+    #[test]
     fn size_and_hotspot_settings_have_documented_defaults_and_overrides() {
         let default = ProjectConfig::default();
         assert_eq!(default.size_thresholds(), ((400, 800), (300, 600)));
@@ -107,6 +126,8 @@ struct ThresholdConfig {
     function_lines: Option<LimitConfig>,
     file_lines: Option<LimitConfig>,
     container_lines: Option<LimitConfig>,
+    nesting: Option<LimitConfig>,
+    parameters: Option<LimitConfig>,
 }
 
 #[derive(Debug, Deserialize)]
@@ -169,7 +190,10 @@ impl ProjectConfig {
         }
         rules
     }
-    pub(crate) fn thresholds(&self) -> ((u32, u32), (u32, u32), (u32, u32)) {
+    #[allow(clippy::type_complexity)]
+    pub(crate) fn thresholds(
+        &self,
+    ) -> ((u32, u32), (u32, u32), (u32, u32), (u32, u32), (u32, u32)) {
         let pair = |value: Option<LimitConfig>, fallback| {
             value.map_or(fallback, |limit| (limit.watch, limit.high))
         };
@@ -178,6 +202,8 @@ impl ProjectConfig {
             pair(thresholds.and_then(|value| value.cognitive), (15, 25)),
             pair(thresholds.and_then(|value| value.cyclomatic), (11, 21)),
             pair(thresholds.and_then(|value| value.function_lines), (50, 100)),
+            pair(thresholds.and_then(|value| value.nesting), (4, 7)),
+            pair(thresholds.and_then(|value| value.parameters), (6, 9)),
         )
     }
 
@@ -220,6 +246,8 @@ impl ProjectConfig {
                 ("function_lines", thresholds.function_lines),
                 ("file_lines", thresholds.file_lines),
                 ("container_lines", thresholds.container_lines),
+                ("nesting", thresholds.nesting),
+                ("parameters", thresholds.parameters),
             ] {
                 if let Some(limit) = limit
                     && (limit.watch == 0 || limit.high <= limit.watch)

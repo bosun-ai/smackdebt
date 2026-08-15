@@ -1,9 +1,9 @@
 /// The measurements retained for one unit.
 ///
-/// Cognitive complexity, cyclomatic complexity, and exclusive logical lines are
-/// the rated measurements. Maximum nesting depth and parameter count are
-/// collected and exposed without being rated; `adopt-report-schema-v4` owns
-/// their promotion, so nothing here may read them as a signal.
+/// All five measurements are rated: cognitive complexity, cyclomatic
+/// complexity, exclusive logical lines, maximum nesting depth, and parameter
+/// count. A unit's rating is therefore explainable entirely from the five
+/// values the machine report serializes.
 #[derive(Clone, Copy, Debug, Default, Eq, Hash, Ord, PartialEq, PartialOrd)]
 pub struct Measurements {
     cognitive_complexity: u32,
@@ -45,12 +45,14 @@ impl Measurements {
         self.parameter_count
     }
 
-    /// The three rated measurements, in policy order.
-    pub const fn rated(self) -> (u32, u32, u32) {
+    /// The five rated measurements, in policy order.
+    pub const fn rated(self) -> (u32, u32, u32, u32, u32) {
         (
             self.cognitive_complexity,
             self.cyclomatic_complexity,
             self.logical_lines,
+            self.max_nesting,
+            self.parameter_count,
         )
     }
 
@@ -104,6 +106,8 @@ pub enum Signal {
     CognitiveComplexity,
     CyclomaticComplexity,
     LogicalLines,
+    MaxNesting,
+    ParameterCount,
 }
 
 /// The severity of one signal or a unit as a whole.
@@ -150,7 +154,7 @@ impl SignalAssessment {
 #[derive(Clone, Copy, Debug, Eq, Hash, PartialEq)]
 pub struct HealthAssessment {
     rating: Rating,
-    signals: [SignalAssessment; 3],
+    signals: [SignalAssessment; 5],
 }
 
 impl HealthAssessment {
@@ -158,7 +162,7 @@ impl HealthAssessment {
         self.rating
     }
 
-    pub const fn signals(self) -> [SignalAssessment; 3] {
+    pub const fn signals(self) -> [SignalAssessment; 5] {
         self.signals
     }
 
@@ -167,6 +171,8 @@ impl HealthAssessment {
             Signal::CognitiveComplexity => self.signals[0],
             Signal::CyclomaticComplexity => self.signals[1],
             Signal::LogicalLines => self.signals[2],
+            Signal::MaxNesting => self.signals[3],
+            Signal::ParameterCount => self.signals[4],
         }
     }
 
@@ -191,6 +197,8 @@ pub struct HealthPolicy {
     cognitive: Thresholds,
     cyclomatic: Thresholds,
     logical_lines: Thresholds,
+    nesting: Thresholds,
+    parameters: Thresholds,
 }
 
 impl Default for HealthPolicy {
@@ -199,6 +207,8 @@ impl Default for HealthPolicy {
             cognitive: Thresholds::new(15, 25),
             cyclomatic: Thresholds::new(11, 21),
             logical_lines: Thresholds::new(50, 100),
+            nesting: Thresholds::new(4, 7),
+            parameters: Thresholds::new(6, 9),
         }
     }
 }
@@ -208,11 +218,15 @@ impl HealthPolicy {
         cognitive: Thresholds,
         cyclomatic: Thresholds,
         logical_lines: Thresholds,
+        nesting: Thresholds,
+        parameters: Thresholds,
     ) -> Self {
         Self {
             cognitive,
             cyclomatic,
             logical_lines,
+            nesting,
+            parameters,
         }
     }
 
@@ -226,6 +240,16 @@ impl HealthPolicy {
 
     pub const fn logical_lines(self) -> Thresholds {
         self.logical_lines
+    }
+
+    /// The maximum nesting depth thresholds.
+    pub const fn nesting(self) -> Thresholds {
+        self.nesting
+    }
+
+    /// The declared parameter count thresholds.
+    pub const fn parameters(self) -> Thresholds {
+        self.parameters
     }
 
     pub const fn assess(self, measurements: Measurements) -> HealthAssessment {
@@ -244,6 +268,16 @@ impl HealthPolicy {
                 signal: Signal::LogicalLines,
                 value: measurements.logical_lines,
                 rating: self.logical_lines.level(measurements.logical_lines),
+            },
+            SignalAssessment {
+                signal: Signal::MaxNesting,
+                value: measurements.max_nesting,
+                rating: self.nesting.level(measurements.max_nesting),
+            },
+            SignalAssessment {
+                signal: Signal::ParameterCount,
+                value: measurements.parameter_count,
+                rating: self.parameters.level(measurements.parameter_count),
             },
         ];
         let mut rating = Rating::Healthy;

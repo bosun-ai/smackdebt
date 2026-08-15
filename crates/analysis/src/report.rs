@@ -1631,24 +1631,68 @@ mod tests {
     }
 
     #[test]
-    fn collected_shape_measurements_are_exposed_without_changing_a_rating() {
+    fn shape_measurements_are_rated_and_explain_a_rating_on_their_own() {
         let policy = HealthPolicy::default();
-        let flat = Measurements::new(15, 2, 120);
-        let shaped = flat.with_shape(7, 4);
-        assert_eq!(shaped.max_nesting(), 7);
-        assert_eq!(shaped.parameter_count(), 4);
-        assert_eq!(Measurements::new(1, 1, 1).max_nesting(), 0);
-        assert_eq!(Measurements::new(1, 1, 1).parameter_count(), 0);
-        assert_eq!(policy.assess(shaped), policy.assess(flat));
-        assert_eq!(shaped.rated(), flat.rated());
+        let healthy = Measurements::new(1, 1, 1);
+        assert_eq!(healthy.max_nesting(), 0);
+        assert_eq!(healthy.parameter_count(), 0);
+        assert_eq!(policy.assess(healthy).rating(), Rating::Healthy);
+        // A unit whose complexity, cyclomatic, and statement values are healthy
+        // is still High when it nests seven levels deep.
+        let nested = healthy.with_shape(7, 0);
+        assert_eq!(policy.assess(nested).rating(), Rating::High);
+        assert_eq!(policy.assess(nested).signal(Signal::MaxNesting).value(), 7);
+        let many_parameters = healthy.with_shape(0, 9);
+        assert_eq!(policy.assess(many_parameters).rating(), Rating::High);
+        assert_eq!(
+            policy
+                .assess(many_parameters)
+                .signal(Signal::ParameterCount)
+                .value(),
+            9
+        );
     }
 
     #[test]
-    fn only_rated_measurements_classify_a_unit_comparison() {
+    fn nesting_and_parameter_thresholds_trigger_on_their_exact_values() {
+        let policy = HealthPolicy::default();
+        let base = Measurements::new(1, 1, 1);
+        let nesting = |value| policy.assess(base.with_shape(value, 0)).rating();
+        assert_eq!(nesting(3), Rating::Healthy);
+        assert_eq!(nesting(4), Rating::Watch);
+        assert_eq!(nesting(6), Rating::Watch);
+        assert_eq!(nesting(7), Rating::High);
+        let parameters = |value| policy.assess(base.with_shape(0, value)).rating();
+        assert_eq!(parameters(5), Rating::Healthy);
+        assert_eq!(parameters(6), Rating::Watch);
+        assert_eq!(parameters(8), Rating::Watch);
+        assert_eq!(parameters(9), Rating::High);
+    }
+
+    #[test]
+    fn both_promoted_thresholds_are_configurable() {
+        let policy = HealthPolicy::new(
+            Thresholds::new(15, 25),
+            Thresholds::new(11, 21),
+            Thresholds::new(50, 100),
+            Thresholds::new(2, 3),
+            Thresholds::new(2, 3),
+        );
+        assert_eq!(policy.nesting(), Thresholds::new(2, 3));
+        assert_eq!(policy.parameters(), Thresholds::new(2, 3));
+        let base = Measurements::new(1, 1, 1);
+        assert_eq!(policy.assess(base.with_shape(2, 0)).rating(), Rating::Watch);
+        assert_eq!(policy.assess(base.with_shape(0, 3)).rating(), Rating::High);
+    }
+
+    #[test]
+    fn every_rated_measurement_classifies_a_unit_comparison() {
         let before = [unit("same", Measurements::new(2, 1, 1).with_shape(1, 1))];
-        let after = [unit("same", Measurements::new(2, 1, 1).with_shape(6, 4))];
+        let after = [unit("same", Measurements::new(2, 1, 1).with_shape(2, 1))];
         let comparisons = compare_units(&before, &after, HealthPolicy::default());
-        assert_eq!(comparisons[0].kind(), ComparisonKind::Unchanged);
+        assert_eq!(comparisons[0].kind(), ComparisonKind::MetricChanged);
+        let unchanged = compare_units(&before, &before, HealthPolicy::default());
+        assert_eq!(unchanged[0].kind(), ComparisonKind::Unchanged);
     }
 
     #[test]
@@ -1657,6 +1701,8 @@ mod tests {
         assert_eq!(policy.cognitive(), Thresholds::new(15, 25));
         assert_eq!(policy.cyclomatic(), Thresholds::new(11, 21));
         assert_eq!(policy.logical_lines(), Thresholds::new(50, 100));
+        assert_eq!(policy.nesting(), Thresholds::new(4, 7));
+        assert_eq!(policy.parameters(), Thresholds::new(6, 9));
     }
 
     #[test]

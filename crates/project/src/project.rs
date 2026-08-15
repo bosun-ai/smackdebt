@@ -3671,6 +3671,8 @@ mod tests {
             smackdebt_analysis::Thresholds::new(1, 2),
             smackdebt_analysis::Thresholds::new(1, 2),
             smackdebt_analysis::Thresholds::new(1, 2),
+            smackdebt_analysis::Thresholds::new(4, 7),
+            smackdebt_analysis::Thresholds::new(6, 9),
         );
         for role in [
             SourceRole::Primary,
@@ -3713,6 +3715,8 @@ mod tests {
             (1, 2),
             (1, 2),
             (1, 2),
+            (4, 7),
+            (6, 9),
         ))
         .unwrap();
         let report = result.report();
@@ -3747,6 +3751,8 @@ mod tests {
                 smackdebt_analysis::Thresholds::new(1, 2),
                 smackdebt_analysis::Thresholds::new(1, 2),
                 smackdebt_analysis::Thresholds::new(1, 2),
+                smackdebt_analysis::Thresholds::new(4, 7),
+                smackdebt_analysis::Thresholds::new(6, 9),
             ),
         );
         assert_eq!(rated.health, HealthCounts::default());
@@ -3786,6 +3792,8 @@ mod tests {
             (1, 2),
             (1, 2),
             (1, 2),
+            (4, 7),
+            (6, 9),
         ))
         .unwrap();
         let report = result.report();
@@ -3922,7 +3930,7 @@ mod tests {
         let result = analyze_diff(
             &DiffRequest::new(root.path())
                 .with_reference("HEAD")
-                .with_thresholds((1, 2), (1, 2), (1, 2)),
+                .with_thresholds((1, 2), (1, 2), (1, 2), (4, 7), (6, 9)),
         )
         .unwrap();
         let report = result.report();
@@ -4978,7 +4986,7 @@ mod tests {
         git(repository_path, ["commit", "-qm", "complex base"]);
         let request = DiffRequest::new(repository_path)
             .with_reference("HEAD")
-            .with_thresholds((1, 2), (5, 10), (50, 100));
+            .with_thresholds((1, 2), (5, 10), (50, 100), (4, 7), (6, 9));
 
         fs::write(
             repository_path.join("work.rs"),
@@ -5052,7 +5060,7 @@ mod tests {
         )
         .unwrap();
         let report = CodebaseRequest::new(root.path())
-            .with_thresholds((1, 2), (5, 10), (50, 100))
+            .with_thresholds((1, 2), (5, 10), (50, 100), (4, 7), (6, 9))
             .analyze()
             .unwrap();
         let verdict = report.report().verdict().unwrap();
