@@ -1,9 +1,11 @@
-smackdebt diff
-repository root
+smackdebt diff · repository root
+You made it worse.
+worse 1 (evolutionary) · better 0 · changed 0
 
-QUALITY
-No changes
+AREAS
+  a · worse 1
+  b · worse 1
 
 HISTORY
- a ↔ b changed together in 3 of 7 commits · 43% · no code dependency
- a ↔ b now change together without a code dependency
+watch a ↔ b changed together in 3 of 7 commits · 43% · no code dependency
+worse a ↔ b now change together without a code dependency

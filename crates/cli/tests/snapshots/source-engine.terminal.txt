@@ -1,10 +1,6 @@
-smackdebt codebase
-repository root
-
-QUALITY
-2 rated units · 0 need attention
-  src
-  src/work.rb
+smackdebt · repository root
+Clean. Ship it.
+0 high · 0 watch · 2 checked
 
 WARNINGS
- History is unavailable.
+warning History is unavailable.

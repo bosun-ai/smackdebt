@@ -178,7 +178,11 @@ pub fn unexplained_coupling(
         .collect()
 }
 
-pub(crate) fn qualifies_for_finding(pair: ChangeCoupling) -> bool {
+/// Whether one coupling pair is strong enough to be reported at all.
+///
+/// The strength rule lives here so no consumer re-derives it: a report shows
+/// weak coupling only in JSON.
+pub fn qualifies_for_finding(pair: ChangeCoupling) -> bool {
     pair.shared_commits() >= 3
         && u64::from(pair.shared_commits()) * 5 >= u64::from(pair.union_commits())
 }

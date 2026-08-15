@@ -1,8 +1,6 @@
-smackdebt codebase
-repository root
-
-QUALITY
-0 rated units · 0 need attention
+smackdebt · repository root
+Nothing was checked.
+0 high · 0 watch · 0 checked
 
 HISTORY
- a ↔ b changed together in 3 of 6 commits · 50% · no code dependency
+watch a ↔ b changed together in 3 of 6 commits · 50% · no code dependency

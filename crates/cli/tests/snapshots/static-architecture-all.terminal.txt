@@ -1,24 +1,20 @@
-smackdebt codebase
-repository root
-
-QUALITY
-7 rated units · 0 need attention
+smackdebt · repository root
+Worn in the usual places.
+0 high · 0 watch · 7 checked
+worst: app/main.js — package dependency cycle
 
 ARCHITECTURE
- package dependency cycle
-        app/main.js → core/main.js → app/main.js
- file dependency cycle
-        app/choice.js → app/helper.js → app/choice.js
-  app/choice.js → app/helper.js · 1 import
-  app/helper.js → app/choice.js · 1 import
-  app/main.js → core/main.js · 1 import
-  core/main.js → app/main.js · 1 import
-  native/src/lib.rs owns native/src/helper.rs
-  app/main.js → external-library · external
+high package dependency cycle
+        app/main.js
+        → core/main.js
+        → app/main.js
+watch file dependency cycle
+        app/choice.js
+        → app/helper.js
+        → app/choice.js
   app/main.js:2 → ./choice · matched more than one file
   app/main.js:5 → require(moduleName) · could not be matched
 
 WARNINGS
- History is unavailable.
- 1 import could not be matched.
- 1 import matched more than one file.
+warning History is unavailable.
+warning 2 imports could not be followed.

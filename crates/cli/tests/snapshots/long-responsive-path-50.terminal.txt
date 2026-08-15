@@ -1,6 +1,6 @@
-smackdebt · repository root
+smackdebt · very-long-source-package-name
 Worn in the usual places.
-0 high · 1 watch · 2 checked
+0 high · 1 watch · 1 checked
 worst: very-long-source-package-name/
         very-long-source-directory-name/
         very-long-source-file-name.js — most
@@ -28,6 +28,20 @@ high package dependency cycle
         very-long-source-file-name.js
   very-long-source-package-name/
         very-long-source-directory-name/
+        very-long-source-file-name.js →
+        very-long-target-package-name/
+        very-long-target-directory-name/
+        very-long-target-file-name.js
+        1 import · test
+  very-long-target-package-name/
+        very-long-target-directory-name/
+        very-long-target-file-name.js →
+        very-long-source-package-name/
+        very-long-source-directory-name/
+        very-long-source-file-name.js
+        1 import
+  very-long-source-package-name/
+        very-long-source-directory-name/
         very-long-source-file-name.js:2 → ./choice
         matched more than one file · test
   very-long-source-package-name/
@@ -39,4 +53,6 @@ high package dependency cycle
 WARNINGS
 warning 2 imports could not be followed.
 
-next: smackdebt very-long-source-package-name
+next: smackdebt very-long-source-package-name/
+        very-long-source-directory-name/
+        very-long-source-file-name.js

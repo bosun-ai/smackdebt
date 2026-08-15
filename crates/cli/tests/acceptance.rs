@@ -19,7 +19,9 @@ fn serial_and_parallel_codebase_output_match() {
     let parallel = run(["--jobs", "4", project.path().to_str().unwrap()]);
     assert_eq!(serial, parallel);
     let text = String::from_utf8(serial).unwrap();
-    assert!(text.contains("QUALITY"));
+    assert!(text.starts_with("smackdebt · "), "{text}");
+    assert!(text.contains(" high · "), "{text}");
+    assert!(text.contains(" checked"), "{text}");
     assert!(!text.contains("AREAS"));
     assert!(!text.contains("FINDINGS"));
 }
@@ -252,7 +254,10 @@ fn terminal_color_can_be_forced_or_disabled_through_a_pipe() {
 
     let plain = run(["--color", "never", path]);
     assert!(!plain.windows(2).any(|bytes| bytes == b"\x1b["));
-    assert_eq!(strip_ansi(&colored), plain);
+    // Forcing color also forces decoration, so the plain report is what
+    // remains once the glyphs, the tier bar, and the styling are removed.
+    assert_eq!(strip_decorations(&strip_ansi(&colored)), plain);
+    assert!(private_use_codepoints(&plain).is_empty());
 }
 
 #[test]
@@ -345,15 +350,11 @@ fn static_architecture_codebase_snapshots_are_reviewed() {
             .iter()
             .any(|package| package["fan_in"] == 1 && package["fan_out"] == 1)
     );
+    // `--all` shows all useful debt; raw dependency edges live in JSON and in
+    // the path views that exist to explain one path's relationships.
     let detailed_text = String::from_utf8(detailed).unwrap();
-    assert!(
-        detailed_text.contains("app/main.js → core/main.js · 1 import"),
-        "{detailed_text}"
-    );
-    assert!(
-        detailed_text.contains("native/src/lib.rs owns native/src/helper.rs"),
-        "{detailed_text}"
-    );
+    assert!(!detailed_text.contains("· 1 import"), "{detailed_text}");
+    assert!(!detailed_text.contains(" owns "), "{detailed_text}");
     assert!(!detailed_text.contains("primary/trusted"));
 }
 
@@ -377,19 +378,8 @@ fn long_fact_families_keep_their_meaning_at_fifty_columns() {
         include_bytes!("snapshots/long-responsive-50.terminal.txt"),
     );
     let terminal = String::from_utf8(output.stdout).unwrap();
-    for line in terminal.lines() {
-        assert!(unicode_width::UnicodeWidthStr::width(line) <= 50, "{line}");
-        assert!(!line.ends_with('…'), "safety fallback clipped: {line}");
-    }
-    for fact in [
-        "method · test",
-        "1 import",
-        "owns",
-        "external",
-        "could not be matched",
-        "matched more than one file",
-        "2 commits ·",
-    ] {
+    assert_narrow(&terminal, 50);
+    for fact in ["method · test", "statements 56", "2 commits"] {
         assert!(terminal.contains(fact), "missing {fact}: {terminal}");
     }
     let lines = terminal.lines().collect::<Vec<_>>();
@@ -397,11 +387,80 @@ fn long_fact_families_keep_their_meaning_at_fifty_columns() {
         .iter()
         .position(|line| line.contains("package dependency cycle"))
         .unwrap();
-    assert_eq!(
-        lines[cycle + 1].trim(),
-        lines[cycle + 3].trim().trim_start_matches("→ "),
+    let witness = lines[cycle + 1..]
+        .iter()
+        .take_while(|line| line.starts_with("        "))
+        .map(|line| line.trim().trim_start_matches("→ ").to_owned())
+        .collect::<Vec<_>>()
+        .join("");
+    assert!(
+        witness.starts_with("very-long-source-package-name/"),
         "{terminal}"
     );
+    assert!(
+        witness.ends_with("very-long-source-package-name/very-long-source-directory-name/very-long-source-file-name.js"),
+        "{terminal}"
+    );
+
+    // A path view keeps the relationships that explain one package, still at
+    // fifty columns and still without losing a fact.
+    let path = cargo_bin_cmd!("smackdebt")
+        .current_dir(project.path())
+        .env("COLUMNS", "50")
+        .args([
+            "very-long-source-package-name",
+            "--all",
+            "--color",
+            "never",
+            "--history",
+            "36500d",
+        ])
+        .output()
+        .unwrap();
+    assert!(
+        path.status.success(),
+        "{}",
+        String::from_utf8_lossy(&path.stderr)
+    );
+    assert_snapshot(
+        "long-responsive-path-50.terminal.txt",
+        &path.stdout,
+        include_bytes!("snapshots/long-responsive-path-50.terminal.txt"),
+    );
+    let path = String::from_utf8(path.stdout).unwrap();
+    assert_narrow(&path, 50);
+    for fact in [
+        "1 import",
+        "could not be matched",
+        "matched more than one file",
+    ] {
+        assert!(path.contains(fact), "missing {fact}: {path}");
+    }
+    // References outside the repository are not debt and never reach a human.
+    assert!(!path.contains("external"), "{path}");
+
+    let owned = String::from_utf8(run_in(
+        project.path(),
+        [
+            "very-long-rust-ownership-package-name",
+            "--all",
+            "--color",
+            "never",
+        ],
+    ))
+    .unwrap();
+    assert!(owned.contains(" owns "), "{owned}");
+}
+
+/// Every line fits the requested width and none reached the safety shortening.
+fn assert_narrow(terminal: &str, width: usize) {
+    for line in terminal.lines() {
+        assert!(
+            unicode_width::UnicodeWidthStr::width(line) <= width,
+            "{line}"
+        );
+        assert!(!line.ends_with('…'), "safety fallback clipped: {line}");
+    }
 }
 
 #[test]
@@ -410,26 +469,35 @@ fn architecture_path_drill_keeps_incoming_edges_and_omits_unrelated_regions() {
     git(project.path(), ["init", "-b", "main"]);
     let output = run_in(project.path(), ["app", "--all", "--color", "never"]);
     let text = String::from_utf8(output).unwrap();
-    assert!(text.contains("core/main.js → app/main.js"));
+    assert!(text.contains("core/main.js → app/main.js"), "{text}");
+    assert!(
+        text.contains("app/main.js → core/main.js · 1 import"),
+        "{text}"
+    );
     assert!(!text.contains("native/src/helper.rs"));
+
+    let native = String::from_utf8(run_in(
+        project.path(),
+        ["native", "--all", "--color", "never"],
+    ))
+    .unwrap();
+    assert!(
+        native.contains("native/src/lib.rs owns native/src/helper.rs"),
+        "{native}"
+    );
 }
 
 #[test]
 fn selected_path_scopes_import_warning_counts() {
     let project = static_architecture_fixture();
     let app = String::from_utf8(run_in(project.path(), ["app", "--color", "never"])).unwrap();
-    assert!(app.contains("2 imports could not be matched."), "{app}");
     assert!(
-        app.contains("1 import matched more than one file."),
+        app.contains("warning 3 imports could not be followed."),
         "{app}"
     );
 
     let native = String::from_utf8(run_in(project.path(), ["native", "--color", "never"])).unwrap();
-    assert!(!native.contains("import could not be matched."), "{native}");
-    assert!(
-        !native.contains("import matched more than one file."),
-        "{native}"
-    );
+    assert!(!native.contains("could not be followed."), "{native}");
 }
 
 #[test]
@@ -449,16 +517,24 @@ fn diff_detail_and_path_views_show_current_edges_without_an_empty_heading() {
     )
     .unwrap();
 
-    let default =
+    // Adding one import moves no rated debt, so every diff view is the
+    // verdict block and nothing else.
+    let root =
         String::from_utf8(run_in(project.path(), ["diff", "main", "--color", "never"])).unwrap();
-    assert!(!default.contains("ARCHITECTURE\n\n"));
-    assert!(!default.contains("\nARCHITECTURE\n"));
-
+    assert!(root.contains("No debt changed."), "{root}");
+    assert!(!root.contains("ARCHITECTURE"), "{root}");
     for arguments in [
-        ["diff", "main", "--all", "--color", "never"],
         ["diff", "main", "app", "--color", "never"],
         ["diff", "main", "core", "--color", "never"],
     ] {
+        let terminal = String::from_utf8(run_in(project.path(), arguments)).unwrap();
+        assert!(terminal.contains("No debt changed."), "{terminal}");
+        assert!(!terminal.contains("ARCHITECTURE"), "{terminal}");
+        assert!(!terminal.contains("HISTORY"), "{terminal}");
+        assert!(!terminal.contains("WARNINGS"), "{terminal}");
+    }
+    // The current relationship stays inspectable from either endpoint.
+    for arguments in [["app", "--color", "never"], ["core", "--color", "never"]] {
         let terminal = String::from_utf8(run_in(project.path(), arguments)).unwrap();
         assert_eq!(
             terminal
@@ -497,8 +573,8 @@ fn diff_detail_renders_external_unresolved_and_ambiguous_relations_once() {
     .unwrap();
 
     for (case, arguments) in [
-        ["diff", "main", "--all", "--color", "never"],
-        ["diff", "main", "app", "--color", "never"],
+        vec!["app", "--color", "never"],
+        vec!["app", "--all", "--color", "never"],
     ]
     .into_iter()
     .enumerate()
@@ -518,13 +594,25 @@ fn diff_detail_renders_external_unresolved_and_ambiguous_relations_once() {
             terminal.contains("\nARCHITECTURE\n"),
             "case {case}: {terminal}"
         );
+        // References outside the repository are not debt, so no external row
+        // reaches a human view again.
+        assert!(
+            !terminal.contains("external-library"),
+            "case {case}: {terminal}"
+        );
         for relation in [
-            "app/main.js → external-library · external",
-            "app/main.js:1 → ./choice · matched more than one file",
-            "app/main.js:3 → require(moduleName) · could not be matched",
+            "app/main.js:1 → ./choice",
+            "app/main.js:3 → require(moduleName)",
         ] {
             assert_eq!(
                 terminal.matches(relation).count(),
+                1,
+                "case {case}: {terminal}"
+            );
+        }
+        for status in ["matched more than one file", "could not be matched"] {
+            assert_eq!(
+                terminal.matches(status).count(),
                 1,
                 "case {case}: {terminal}"
             );
@@ -813,7 +901,8 @@ fn diff_uses_history_as_context_and_can_explain_coupling() {
     .unwrap();
     assert!(
         detailed_terminal
-            .contains("a ↔ b changed together in 3 of 6 commits · 50% · code dependency exists")
+            .contains("a ↔ b changed together in 3 of 6 commits · 50% · code dependency exists"),
+        "{detailed_terminal}"
     );
     assert!(
         detailed_terminal.contains("a ↔ b no longer change together without a code dependency")
@@ -1043,10 +1132,13 @@ fn generated_history_cannot_change_eligible_history_or_concentration() {
         ["--all", "--color", "never", "--history", "36500d"],
     ))
     .unwrap();
-    assert!(detailed.contains("a · 8 commits"));
+    // Churn dumps left the terminal; the actionable coupling finding stayed.
+    assert!(!detailed.contains("a · 8 commits"), "{detailed}");
     assert!(!detailed.contains("shared commits"));
     assert!(
-        detailed.contains(" a ↔ b changed together in 3 of 3 commits · 100% · no code dependency")
+        detailed
+            .contains("watch a ↔ b changed together in 3 of 3 commits · 100% · no code dependency"),
+        "{detailed}"
     );
 }
 
@@ -1078,7 +1170,7 @@ fn complete_stream_without_eligible_mapping_cannot_create_findings() {
 }
 
 #[test]
-fn all_history_shows_each_package_role_once() {
+fn package_churn_stays_in_json_instead_of_repeating_in_the_terminal() {
     let project = eligible_role_history_fixture();
     let default = String::from_utf8(run_in(
         project.path(),
@@ -1092,11 +1184,22 @@ fn all_history_shows_each_package_role_once() {
         ["--all", "--color", "never", "--history", "36500d"],
     ))
     .unwrap();
-    assert_eq!(detailed.matches("  a · 2 commits").count(), 2);
+    assert!(!detailed.contains("a · 2 commits"), "{detailed}");
+    let report: serde_json::Value =
+        serde_json::from_slice(&run_in(project.path(), ["--json", "--history", "36500d"])).unwrap();
+    assert_eq!(
+        report["package_history"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .filter(|row| row["touches"] == 2)
+            .count(),
+        2
+    );
 }
 
 #[test]
-fn weak_coupling_stays_in_json_and_detailed_terminal_only() {
+fn weak_coupling_stays_in_json_only() {
     let project = weak_history_fixture();
     let report: serde_json::Value =
         serde_json::from_slice(&run_in(project.path(), ["--json", "--history", "36500d"])).unwrap();
@@ -1110,29 +1213,24 @@ fn weak_coupling_stays_in_json_and_detailed_terminal_only() {
             .is_empty()
     );
 
-    let default = String::from_utf8(run_in(
-        project.path(),
-        ["--color", "never", "--history", "36500d"],
-    ))
-    .unwrap();
-    assert!(!default.contains("a ↔ b change together"));
-    let detailed = String::from_utf8(run_in(
-        project.path(),
-        ["--all", "--color", "never", "--history", "36500d"],
-    ))
-    .unwrap();
-    let expected = "a ↔ b changed together in 2 of 4 commits · 50% · no code dependency";
-    assert!(detailed.contains(expected));
-    let path = String::from_utf8(run_in(
-        project.path(),
-        ["a", "--all", "--color", "never", "--history", "36500d"],
-    ))
-    .unwrap();
-    assert!(path.contains(expected));
+    for terminal in [
+        run_in(project.path(), ["--color", "never", "--history", "36500d"]),
+        run_in(
+            project.path(),
+            ["--all", "--color", "never", "--history", "36500d"],
+        ),
+        run_in(
+            project.path(),
+            ["a", "--all", "--color", "never", "--history", "36500d"],
+        ),
+    ] {
+        let terminal = String::from_utf8(terminal).unwrap();
+        assert!(!terminal.contains("a ↔ b"), "{terminal}");
+    }
 }
 
 #[test]
-fn selected_package_shows_file_churn_all_coupling_and_omits_unrelated_history() {
+fn selected_package_keeps_its_coupling_and_omits_unrelated_history() {
     let project = evolutionary_fixture();
     fs::write(
         project.path().join("b/main.js"),
@@ -1149,9 +1247,10 @@ fn selected_package_shows_file_churn_all_coupling_and_omits_unrelated_history() 
         include_bytes!("snapshots/evolutionary-package.terminal.txt"),
     );
     let text = String::from_utf8(terminal).unwrap();
-    assert!(text.contains("a/main.js · 5 commits"));
+    assert!(!text.contains("a/main.js · 5 commits"), "{text}");
     assert!(
-        text.contains("a ↔ b changed together in 3 of 6 commits · 50% · code dependency exists")
+        text.contains("a ↔ b changed together in 3 of 6 commits · 50% · code dependency exists"),
+        "{text}"
     );
     assert!(!text.contains("c/main.js"));
     assert!(!text.contains("  c ·"));
@@ -1184,10 +1283,11 @@ fn selected_diff_package_shows_only_relevant_evolution_context() {
         include_bytes!("snapshots/evolutionary-diff-package.terminal.txt"),
     );
     let text = String::from_utf8(terminal).unwrap();
-    assert!(text.contains("b · 4 commits"));
-    assert!(text.contains("b/main.js · 4 commits"));
+    assert!(!text.contains("b · 4 commits"), "{text}");
+    assert!(!text.contains("b/main.js · 4 commits"), "{text}");
     assert!(
-        text.contains("a ↔ b changed together in 3 of 6 commits · 50% · code dependency exists")
+        text.contains("a ↔ b changed together in 3 of 6 commits · 50% · code dependency exists"),
+        "{text}"
     );
     assert!(text.contains("a ↔ b no longer change together without a code dependency"));
     assert!(!text.contains("c/main.js"));
@@ -1690,6 +1790,31 @@ fn json_schema_rejects_weak_evolution_verdict_thresholds() {
         weak_similarity[table][0]["similarity"] = 0.19.into();
         assert!(validator.validate(&weak_similarity).is_err(), "{table}");
     }
+}
+
+/// Every private-use codepoint, which may never reach a machine consumer.
+fn private_use_codepoints(value: &[u8]) -> Vec<char> {
+    String::from_utf8_lossy(value)
+        .chars()
+        .filter(|character| ('\u{e000}'..='\u{f8ff}').contains(character))
+        .collect()
+}
+
+/// Removes each decoration and the one space that separates it from its word.
+fn strip_decorations(value: &[u8]) -> Vec<u8> {
+    let text = String::from_utf8_lossy(value);
+    let mut result = String::new();
+    let mut characters = text.chars().peekable();
+    while let Some(character) = characters.next() {
+        if ('\u{e000}'..='\u{f8ff}').contains(&character) || character == '\u{258c}' {
+            if characters.peek() == Some(&' ') {
+                characters.next();
+            }
+            continue;
+        }
+        result.push(character);
+    }
+    result.into_bytes()
 }
 
 fn strip_ansi(value: &[u8]) -> Vec<u8> {

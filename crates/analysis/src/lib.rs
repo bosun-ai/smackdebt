@@ -31,7 +31,9 @@ pub use architecture::{
     StableDependencyFindingId,
 };
 pub use architecture_comparison::{PackageCycle, compare_architecture};
-pub use change_coupling::{PackageContainment, change_coupling, unexplained_coupling};
+pub use change_coupling::{
+    PackageContainment, change_coupling, qualifies_for_finding, unexplained_coupling,
+};
 pub use churn::churn;
 pub use contributor_concentration::{
     MINIMUM_CONCENTRATION_COMMITS, MINIMUM_CONCENTRATION_PERCENT, contributor_concentration,

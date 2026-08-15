@@ -11,7 +11,7 @@ use smackdebt_analysis::{
     ComparisonDirection, ComparisonKind, DebtDiffSelection, DebtFamily, Diagnostic, DiagnosticKind,
     DiffTier, FileId, FileRecord, Finding, Instability, Language, Rating, Report, ReportMode,
     ResolutionIssueKind, Scope, ScopeId, ScopeKind, Signal, SourceRole, SourceTrust,
-    StaticRelationKind, UnitKind, Verdict, instability,
+    StaticRelationKind, UnitKind, Verdict, instability, qualifies_for_finding,
 };
 use unicode_width::{UnicodeWidthChar, UnicodeWidthStr};
 
@@ -357,7 +357,7 @@ impl Presentation {
             ReportMode::Diff => diff_finding_rows(report, displayed, all, selection),
         };
         let architecture = architecture_rows(report, selected, all, detail, verdict.selection());
-        let history = history_rows(report, selected, all, verdict.selection());
+        let history = history_rows(report, selected, detail, verdict.selection());
         let (warnings, warning_detail) = warning_rows(report, selected, detail);
         let next = (report.mode() == ReportMode::Codebase)
             .then(|| drill_path_from_visible(report, selected, areas.first()))
@@ -833,9 +833,15 @@ fn unmatched_import_rows(report: &Report, selected: &Scope) -> Vec<Row> {
                 ResolutionIssueKind::Unresolved => "could not be matched",
                 ResolutionIssueKind::Ambiguous => "matched more than one file",
             };
-            let mut row = Row::new(None, format!("{source} → {}", diagnostic.target()))
-                .with_location(format!("{source}:{}", diagnostic.span().start_line()))
-                .with_fact(status);
+            let mut row = Row::new(
+                None,
+                format!(
+                    "{source}:{} → {}",
+                    diagnostic.span().start_line(),
+                    diagnostic.target()
+                ),
+            )
+            .with_fact(status);
             for fact in evidence_facts(Some(diagnostic.role()), Some(diagnostic.trust())) {
                 row = row.with_fact(fact);
             }
@@ -847,7 +853,7 @@ fn unmatched_import_rows(report: &Report, selected: &Scope) -> Vec<Row> {
 fn history_rows(
     report: &Report,
     selected: &Scope,
-    all: bool,
+    detail: bool,
     selection: &DebtDiffSelection,
 ) -> Section {
     let mut section = Section::new("HISTORY");
@@ -878,12 +884,34 @@ fn history_rows(
             .then_with(|| left.left().cmp(&right.left()))
             .then_with(|| left.right().cmp(&right.right()))
     });
-    for pair in couplings {
+    // A path view or `--all` also states the strong coupling a code
+    // dependency already explains; weak coupling stays in JSON.
+    let context: Vec<_> = if detail {
+        report
+            .change_coupling()
+            .iter()
+            .copied()
+            .filter(|pair| qualifies_for_finding(*pair))
+            .filter(|pair| {
+                relevant_packages.contains(&pair.left())
+                    || relevant_packages.contains(&pair.right())
+            })
+            .filter(|pair| !couplings.iter().any(|finding| same_pair(*finding, *pair)))
+            .collect()
+    } else {
+        Vec::new()
+    };
+    for (pair, finding) in couplings
+        .iter()
+        .copied()
+        .map(|pair| (pair, true))
+        .chain(context.into_iter().map(|pair| (pair, false)))
+    {
         let left = package_name(report, pair.left().index()).unwrap_or("?");
         let right = package_name(report, pair.right().index()).unwrap_or("?");
         section.rows.push(
             Row::new(
-                Some(Word::Watch),
+                finding.then_some(Word::Watch),
                 format!(
                     "{left} ↔ {right} changed together in {} of {} commits",
                     pair.shared_commits(),
@@ -919,7 +947,9 @@ fn history_rows(
             ),
         ));
     }
-    if !all {
+    // The concise view states at most three actionable history rows; a path
+    // view and `--all` keep the relevant context they exist to show.
+    if !detail {
         section.rows.truncate(3);
     }
 
@@ -1292,7 +1322,9 @@ fn break_point(value: &str, available: usize) -> usize {
         }
     }
     let usable = |offset: &usize| *offset > 0 && *offset < limit;
-    match space.filter(usable).or_else(|| slash.filter(usable)) {
+    // The later boundary packs more onto the line and keeps an arrow with the
+    // path it points at.
+    match space.filter(usable).max(slash.filter(usable)) {
         Some(offset) => offset,
         None => limit.max(first_char_len(value)),
     }
@@ -1390,7 +1422,15 @@ fn unit_kind_label(kind: UnitKind) -> &'static str {
     }
 }
 
-/// Whether two coupling rows describe the same unordered package pair.
+/// Whether two rows describe the same unordered package pair.
+fn same_pair(
+    left: smackdebt_analysis::ChangeCoupling,
+    right: smackdebt_analysis::ChangeCoupling,
+) -> bool {
+    (left.left(), left.right()) == (right.left(), right.right())
+        || (left.left(), left.right()) == (right.right(), right.left())
+}
+
 fn coupling_has_code_dependency(
     report: &Report,
     coupling: smackdebt_analysis::ChangeCoupling,
