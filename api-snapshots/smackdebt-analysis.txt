@@ -295,7 +295,7 @@ pub const fn smackdebt_analysis::DiffCounts::worse(self) -> u32
 pub struct smackdebt_analysis::EvolutionAccumulator
 impl smackdebt_analysis::EvolutionAccumulator
 pub fn smackdebt_analysis::EvolutionAccumulator::accept(&mut self, smackdebt_analysis::HistoryCommitFact)
-pub fn smackdebt_analysis::EvolutionAccumulator::finish(self, smackdebt_analysis::HistoryCoverage, usize, usize, &[smackdebt_analysis::PackageEdge], core::option::Option<&[smackdebt_analysis::PackageEdge]>) -> smackdebt_analysis::EvolutionaryReportFacts
+pub fn smackdebt_analysis::EvolutionAccumulator::finish(self, smackdebt_analysis::HistoryCoverage, usize, usize, &smackdebt_analysis::PackageContainment, &[smackdebt_analysis::PackageEdge], core::option::Option<&[smackdebt_analysis::PackageEdge]>) -> smackdebt_analysis::EvolutionaryReportFacts
 pub fn smackdebt_analysis::EvolutionAccumulator::register_source(&mut self, smackdebt_analysis::FileId, smackdebt_analysis::PackageId, smackdebt_analysis::SourceRole, smackdebt_analysis::SourceTrust)
 pub struct smackdebt_analysis::EvolutionaryComparison
 impl smackdebt_analysis::EvolutionaryComparison
@@ -482,6 +482,10 @@ pub const fn smackdebt_analysis::Measurements::cognitive_complexity(self) -> u32
 pub const fn smackdebt_analysis::Measurements::cyclomatic_complexity(self) -> u32
 pub const fn smackdebt_analysis::Measurements::logical_lines(self) -> u32
 pub const fn smackdebt_analysis::Measurements::new(u32, u32, u32) -> Self
+pub struct smackdebt_analysis::PackageContainment
+impl smackdebt_analysis::PackageContainment
+pub fn smackdebt_analysis::PackageContainment::from_paths(&[alloc::string::String]) -> Self
+pub fn smackdebt_analysis::PackageContainment::is_nested(&self, smackdebt_analysis::PackageId, smackdebt_analysis::PackageId) -> bool
 pub struct smackdebt_analysis::PackageEdge
 impl smackdebt_analysis::PackageEdge
 pub fn smackdebt_analysis::PackageEdge::file_edges(&self) -> &[smackdebt_analysis::DependencyEdgeId]
@@ -662,9 +666,11 @@ pub fn smackdebt_analysis::UnitIdentity::in_container(self, impl core::convert::
 pub const fn smackdebt_analysis::UnitIdentity::kind(&self) -> smackdebt_analysis::UnitKind
 pub fn smackdebt_analysis::UnitIdentity::name(&self) -> &str
 pub fn smackdebt_analysis::UnitIdentity::new(impl core::convert::Into<alloc::string::String>, smackdebt_analysis::UnitKind) -> Self
+pub const smackdebt_analysis::CRATE_ROOT_CANDIDATE: &str
+pub const smackdebt_analysis::DECLARING_FILE_CANDIDATE: &str
 pub fn smackdebt_analysis::aggregate_comparisons(&mut [smackdebt_analysis::Scope], &[smackdebt_analysis::Comparison], smackdebt_analysis::ScopeId)
 pub fn smackdebt_analysis::aggregate_scopes(&mut [smackdebt_analysis::Scope], &[smackdebt_analysis::FileRecord], smackdebt_analysis::ScopeId)
-pub fn smackdebt_analysis::change_coupling(&[smackdebt_analysis::HistoryCommitFact]) -> alloc::vec::Vec<smackdebt_analysis::ChangeCoupling>
+pub fn smackdebt_analysis::change_coupling(&[smackdebt_analysis::HistoryCommitFact], &smackdebt_analysis::PackageContainment) -> alloc::vec::Vec<smackdebt_analysis::ChangeCoupling>
 pub fn smackdebt_analysis::churn(usize, usize, &[smackdebt_analysis::HistoryCommitFact]) -> (alloc::vec::Vec<smackdebt_analysis::FileHistory>, alloc::vec::Vec<smackdebt_analysis::PackageHistory>)
 pub fn smackdebt_analysis::compare_architecture(&[(smackdebt_analysis::PackageId, smackdebt_analysis::PackageId)], &[(smackdebt_analysis::PackageId, smackdebt_analysis::PackageId)], &[smackdebt_analysis::PackageCycle], &[smackdebt_analysis::PackageCycle]) -> alloc::vec::Vec<smackdebt_analysis::ArchitectureComparison>
 pub fn smackdebt_analysis::compare_evolution(&[smackdebt_analysis::ChangeCoupling], &[smackdebt_analysis::PackageEdge], &[smackdebt_analysis::PackageEdge]) -> alloc::vec::Vec<smackdebt_analysis::EvolutionaryComparison>
@@ -673,6 +679,7 @@ pub fn smackdebt_analysis::contributor_concentration(&[smackdebt_analysis::Histo
 pub fn smackdebt_analysis::cycle_witness(&[usize], &[(usize, usize)]) -> core::option::Option<alloc::vec::Vec<(usize, usize)>>
 pub fn smackdebt_analysis::dependency_degree(usize, &[(usize, usize)]) -> alloc::vec::Vec<(u32, u32)>
 pub const fn smackdebt_analysis::instability(u32, u32) -> core::option::Option<smackdebt_analysis::Instability>
+pub fn smackdebt_analysis::is_symbolic_candidate(&str) -> bool
 pub fn smackdebt_analysis::strongly_connected_components(usize, &[(usize, usize)]) -> alloc::vec::Vec<alloc::vec::Vec<usize>>
 pub fn smackdebt_analysis::unexplained_coupling(&[smackdebt_analysis::ChangeCoupling], &[smackdebt_analysis::PackageEdge]) -> alloc::vec::Vec<smackdebt_analysis::EvolutionaryFinding>
 pub type smackdebt_analysis::PackageCycle = (alloc::vec::Vec<smackdebt_analysis::PackageId>, alloc::vec::Vec<smackdebt_analysis::PackageId>)

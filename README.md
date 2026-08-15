@@ -198,6 +198,19 @@ Smackdebt does not guess when identity is unclear. The unresolved and ambiguous
 counts stay visible in terminal output, and JSON retains their locations and
 reasons.
 
+A reference written against the name a package declares for itself resolves
+inside the repository. When no repository path matches a reference, Smackdebt
+compares its first segment with the names packages declare in their manifests:
+`Cargo.toml` `[package] name` with a `[lib] name` override, `package.json`
+`name` including a scoped `@scope/name`, `pyproject.toml` `[project] name`, and
+a gemspec name. Rust treats hyphens and underscores as the same character; other
+ecosystems compare declared names exactly. The reference becomes an internal
+`uses` edge only when exactly one package in the repository declares that name.
+When two packages declare the same name, the reference stays unresolved with its
+diagnostic instead of guessing. Smackdebt reads declared names only: it never
+executes build configuration and never emulates lockfiles, resolver algorithms,
+workspace inheritance, or version constraints.
+
 A cycle crossing packages is High. A file cycle contained in one package is
 Watch. Fan-in is the number of packages that depend on a package; fan-out is the
 number it depends on. Instability is `fan-out / (fan-in + fan-out)` and is absent
@@ -254,6 +267,13 @@ shared commits, then similarity, then stable package identity. Each row includes
 the shared and total commit counts, similarity, and the missing code dependency.
 `--all` and path views retain useful contextual history and label activity as `commit` or `commits`. Every shown pair keeps its shared and total commits,
 similarity, and ends with `code dependency exists` or `no code dependency`.
+
+A package pair is reported once. Source role and trust variants are aggregated
+into that one row, and per-role history stays in the package history rows. A
+scope and its own ancestor never form a pair, because commits they share are
+structural rather than hidden coupling. `no code dependency` means no trusted
+eligible `uses` relation exists in either direction, including relations
+resolved through a declared manifest name.
 
 Smackdebt follows detected renames back from files that still exist and assigns
 their history to the files' current packages. It does not reconstruct removed
