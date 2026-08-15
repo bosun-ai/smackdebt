@@ -24,6 +24,19 @@ pub(crate) const fn color(choice: ColorChoice, is_terminal: bool, no_color: bool
     }
 }
 
+/// Whether glyphs and the tier bar decorate the words.
+///
+/// Decoration is resolved beside color and needs no option of its own.
+/// `NO_COLOR` removes styling only, so a terminal keeps its glyphs while a
+/// pipe receives the same report in words alone.
+pub(crate) const fn decorations(choice: ColorChoice, is_terminal: bool) -> bool {
+    match choice {
+        ColorChoice::Auto => is_terminal,
+        ColorChoice::Always => true,
+        ColorChoice::Never => false,
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -33,6 +46,14 @@ mod tests {
         assert_eq!(width(false, Some("80")), 80);
         assert_eq!(width(false, None), 100);
         assert_eq!(width(false, Some("20")), 100);
+    }
+
+    #[test]
+    fn decorations_follow_the_terminal_without_a_new_option() {
+        assert!(decorations(ColorChoice::Auto, true));
+        assert!(!decorations(ColorChoice::Auto, false));
+        assert!(decorations(ColorChoice::Always, false));
+        assert!(!decorations(ColorChoice::Never, true));
     }
 
     #[test]

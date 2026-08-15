@@ -45,7 +45,7 @@ pub(crate) struct Common {
     #[arg(long, value_parser = parse_days)]
     pub(crate) history: Option<u32>,
     /// Show all useful terminal detail.
-    #[arg(long, conflicts_with = "json")]
+    #[arg(long)]
     pub(crate) all: bool,
     /// Glyph color: auto, always, or never.
     #[arg(long, value_enum, conflicts_with = "json")]
@@ -95,6 +95,12 @@ mod tests {
     #[test]
     fn rejects_zero_jobs() {
         assert!(Cli::try_parse_from(["smackdebt", "--jobs", "0"]).is_err());
+    }
+
+    #[test]
+    fn all_and_json_are_rejected_by_the_command_not_by_usage_text() {
+        let cli = Cli::try_parse_from(["smackdebt", "--json", "--all"]).unwrap();
+        assert!(cli.common.json && cli.common.all);
     }
 
     #[test]

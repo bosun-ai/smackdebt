@@ -56,6 +56,22 @@ fn run(arguments: impl IntoIterator<Item = OsString>) -> ExitCode {
         }
     };
 
+    if cli.common.json && cli.common.all
+        || cli
+            .command
+            .as_ref()
+            .is_some_and(|Command::Diff(args)| args.common.json && args.common.all)
+    {
+        return fail_with("--all cannot be used with --json", 2);
+    }
+    let selected_path = match &cli.command {
+        None => cli.path.as_deref(),
+        Some(Command::Diff(args)) => args.path.as_deref().or(cli.path.as_deref()),
+    };
+    if let Some(path) = selected_path.filter(|path| !path.exists()) {
+        return fail_with(&format!("path not found: {}", path.display()), 1);
+    }
+
     let config_path = match &cli.command {
         None => cli.path.clone().unwrap_or_else(|| PathBuf::from(".")),
         Some(Command::Diff(args)) => args
@@ -127,11 +143,13 @@ fn run(arguments: impl IntoIterator<Item = OsString>) -> ExitCode {
             } else {
                 let width =
                     terminal::width(stdout_is_terminal, std::env::var("COLUMNS").ok().as_deref());
+                let choice = common.color.unwrap_or(ColorChoice::Auto);
                 let color = terminal::color(
-                    common.color.unwrap_or(ColorChoice::Auto),
+                    choice,
                     stdout_is_terminal,
                     std::env::var_os("NO_COLOR").is_some(),
                 );
+                let decorations = terminal::decorations(choice, stdout_is_terminal);
                 #[cfg(feature = "evidence-stats")]
                 if evidence_enabled {
                     smackdebt_project::record_renderer_entry();
@@ -140,7 +158,7 @@ fn run(arguments: impl IntoIterator<Item = OsString>) -> ExitCode {
                     &mut stdout,
                     result.report(),
                     result.selected_scope(),
-                    TerminalOptions::new(width, common.all, color),
+                    TerminalOptions::new(width, common.all, color).with_decorations(decorations),
                 )
             };
             match rendered {
@@ -237,6 +255,9 @@ fn fail(error: &ProjectError) -> ExitCode {
         ProjectError::MissingReference => {
             "no comparison branch was found; pass one, for example `smackdebt diff main`".to_owned()
         }
+        // Git's own command, status, and fatal output stay out of the message:
+        // the ref the user typed is the only fixable value.
+        ProjectError::UnknownReference(reference) => format!("Git ref not found: {reference}"),
         ProjectError::SourceRoleConflict { path, roles } => {
             format!(
                 "source roles conflict for {}: {roles}; update .smackdebt.toml",
@@ -244,10 +265,16 @@ fn fail(error: &ProjectError) -> ExitCode {
             )
         }
     };
-    let _ = writeln!(io::stderr().lock(), "smackdebt: {message}");
-    if matches!(error, ProjectError::SourceRoleConflict { .. }) {
-        ExitCode::from(2)
+    let status = if matches!(error, ProjectError::SourceRoleConflict { .. }) {
+        2
     } else {
-        ExitCode::from(1)
-    }
+        1
+    };
+    fail_with(&message, status)
+}
+
+/// Writes one exact user-facing line to standard error with no usage tail.
+fn fail_with(message: &str, status: u8) -> ExitCode {
+    let _ = writeln!(io::stderr().lock(), "smackdebt: {message}");
+    ExitCode::from(status)
 }

@@ -314,6 +314,9 @@ pub enum ProjectError {
     Git(#[from] smackdebt_git::GitError),
     #[error("no default Git ref was found; pass a ref explicitly")]
     MissingReference,
+    /// The selected Git ref does not name anything in this repository.
+    #[error("Git ref not found: {0}")]
+    UnknownReference(String),
     #[error("source role conflict for {path}: {roles}")]
     SourceRoleConflict { path: PathBuf, roles: String },
 }

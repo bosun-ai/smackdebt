@@ -145,7 +145,16 @@ pub(super) fn analyze_diff(request: &DiffRequest) -> Result<ProjectReport, Proje
             .default_ref()?
             .ok_or(ProjectError::MissingReference)?,
     };
-    let base = repository.merge_base(&reference, "HEAD")?;
+    let base = repository
+        .merge_base(&reference, "HEAD")
+        .map_err(|error| match error {
+            // Git reports an unknown ref through a failed command, so the
+            // failure is restated as the fixable value the user supplied.
+            smackdebt_git::GitError::Command { .. } | smackdebt_git::GitError::MissingObject(_) => {
+                ProjectError::UnknownReference(reference.clone())
+            }
+            other => ProjectError::Git(other),
+        })?;
     let mut changed = repository.changes_from(&base)?;
     let inventory =
         Inventory::discover_sources(repository.root(), Vec::new()).map_err(|source| {
@@ -1015,18 +1024,20 @@ fn add_diff_result(
 
     for comparison in result.comparisons.iter().filter(|_| included_in_code_diff) {
         let comparison_id = ComparisonId::from_index(indexes.comparison);
-        report.add_comparison(
-            Comparison::new(
-                comparison_id,
-                comparison.identity().clone(),
-                comparison.kind(),
-                comparison.before(),
-                comparison.after(),
-                comparison.before_rating(),
-                comparison.after_rating(),
-            )
-            .with_file(file_id),
-        );
+        let mut retained = Comparison::new(
+            comparison_id,
+            comparison.identity().clone(),
+            comparison.kind(),
+            comparison.before(),
+            comparison.after(),
+            comparison.before_rating(),
+            comparison.after_rating(),
+        )
+        .with_file(file_id);
+        if let Some(span) = comparison.span() {
+            retained = retained.with_span(span);
+        }
+        report.add_comparison(retained);
         report.link_comparison(scope_id, comparison_id);
         indexes.comparison += 1;
     }

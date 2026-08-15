@@ -2,7 +2,7 @@ use std::cmp::Ordering;
 
 use crate::health::{HealthPolicy, Measurements, Rating};
 use crate::report::{ComparisonId, FileId};
-use crate::source::{UnitFact, UnitIdentity};
+use crate::source::{SourceSpan, UnitFact, UnitIdentity};
 
 /// Whether a diff unit was added, removed, or changed.
 #[derive(Clone, Copy, Debug, Eq, Hash, Ord, PartialEq, PartialOrd)]
@@ -35,6 +35,7 @@ pub struct Comparison {
     before_rating: Option<Rating>,
     after_rating: Option<Rating>,
     file: Option<FileId>,
+    span: Option<SourceSpan>,
 }
 
 impl Comparison {
@@ -56,6 +57,7 @@ impl Comparison {
             before_rating,
             after_rating,
             file: None,
+            span: None,
         }
     }
 
@@ -85,6 +87,17 @@ impl Comparison {
     }
     pub fn with_file(mut self, file: FileId) -> Self {
         self.file = Some(file);
+        self
+    }
+    /// The unit's location on the side that still has one.
+    ///
+    /// The span locates a comparison for a reader; it is presentation context
+    /// and stays out of the machine report, which identifies a unit by name.
+    pub const fn span(&self) -> Option<SourceSpan> {
+        self.span
+    }
+    pub const fn with_span(mut self, span: SourceSpan) -> Self {
+        self.span = Some(span);
         self
     }
     pub const fn direction(&self) -> ComparisonDirection {
@@ -146,15 +159,18 @@ pub fn compare_units(
             }
             let identity = left[left_start].identity().clone();
             if left_index - left_start != 1 || right_index - right_start != 1 {
-                comparisons.push(Comparison::new(
-                    ComparisonId::from_index(comparison_id),
-                    identity,
-                    ComparisonKind::Ambiguous,
-                    None,
-                    None,
-                    None,
-                    None,
-                ));
+                comparisons.push(
+                    Comparison::new(
+                        ComparisonId::from_index(comparison_id),
+                        identity,
+                        ComparisonKind::Ambiguous,
+                        None,
+                        None,
+                        None,
+                        None,
+                    )
+                    .with_span(right[right_start].span()),
+                );
             } else {
                 let left_unit = left[left_start];
                 let right_unit = right[right_start];
@@ -173,15 +189,18 @@ pub fn compare_units(
                     }
                     Ordering::Equal => ComparisonKind::Unchanged,
                 };
-                comparisons.push(Comparison::new(
-                    ComparisonId::from_index(comparison_id),
-                    identity,
-                    kind,
-                    Some(left_unit.measurements()),
-                    Some(right_unit.measurements()),
-                    Some(left_assessment.rating()),
-                    Some(right_assessment.rating()),
-                ));
+                comparisons.push(
+                    Comparison::new(
+                        ComparisonId::from_index(comparison_id),
+                        identity,
+                        kind,
+                        Some(left_unit.measurements()),
+                        Some(right_unit.measurements()),
+                        Some(left_assessment.rating()),
+                        Some(right_assessment.rating()),
+                    )
+                    .with_span(right_unit.span()),
+                );
             }
         } else if identity_order == Ordering::Less {
             let start = left_index;
@@ -190,27 +209,33 @@ pub fn compare_units(
             }
             let identity = left[start].identity().clone();
             if left_index - start != 1 {
-                comparisons.push(Comparison::new(
-                    ComparisonId::from_index(comparison_id),
-                    identity,
-                    ComparisonKind::Ambiguous,
-                    None,
-                    None,
-                    None,
-                    None,
-                ));
+                comparisons.push(
+                    Comparison::new(
+                        ComparisonId::from_index(comparison_id),
+                        identity,
+                        ComparisonKind::Ambiguous,
+                        None,
+                        None,
+                        None,
+                        None,
+                    )
+                    .with_span(left[start].span()),
+                );
             } else {
                 let unit = left[start];
                 let assessment = policy.assess(unit.measurements());
-                comparisons.push(Comparison::new(
-                    ComparisonId::from_index(comparison_id),
-                    identity,
-                    ComparisonKind::Removed,
-                    Some(unit.measurements()),
-                    None,
-                    Some(assessment.rating()),
-                    None,
-                ));
+                comparisons.push(
+                    Comparison::new(
+                        ComparisonId::from_index(comparison_id),
+                        identity,
+                        ComparisonKind::Removed,
+                        Some(unit.measurements()),
+                        None,
+                        Some(assessment.rating()),
+                        None,
+                    )
+                    .with_span(unit.span()),
+                );
             }
         } else {
             let start = right_index;
@@ -221,27 +246,33 @@ pub fn compare_units(
             }
             let identity = right[start].identity().clone();
             if right_index - start != 1 {
-                comparisons.push(Comparison::new(
-                    ComparisonId::from_index(comparison_id),
-                    identity,
-                    ComparisonKind::Ambiguous,
-                    None,
-                    None,
-                    None,
-                    None,
-                ));
+                comparisons.push(
+                    Comparison::new(
+                        ComparisonId::from_index(comparison_id),
+                        identity,
+                        ComparisonKind::Ambiguous,
+                        None,
+                        None,
+                        None,
+                        None,
+                    )
+                    .with_span(right[start].span()),
+                );
             } else {
                 let unit = right[start];
                 let assessment = policy.assess(unit.measurements());
-                comparisons.push(Comparison::new(
-                    ComparisonId::from_index(comparison_id),
-                    identity,
-                    ComparisonKind::Added,
-                    None,
-                    Some(unit.measurements()),
-                    None,
-                    Some(assessment.rating()),
-                ));
+                comparisons.push(
+                    Comparison::new(
+                        ComparisonId::from_index(comparison_id),
+                        identity,
+                        ComparisonKind::Added,
+                        None,
+                        Some(unit.measurements()),
+                        None,
+                        Some(assessment.rating()),
+                    )
+                    .with_span(unit.span()),
+                );
             }
         }
         comparison_id += 1;
