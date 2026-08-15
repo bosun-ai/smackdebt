@@ -48,7 +48,10 @@ fn contains(ancestor: &str, descendant: &str) -> bool {
     if ancestor == descendant {
         return false;
     }
-    ancestor == "." || descendant.starts_with(&format!("{ancestor}/"))
+    ancestor == "."
+        || descendant
+            .strip_prefix(ancestor)
+            .is_some_and(|rest| rest.starts_with('/'))
 }
 
 pub fn change_coupling(

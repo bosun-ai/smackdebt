@@ -130,6 +130,10 @@ impl ManifestKind {
 /// Reads `spec.name = "value"` from a gemspec without executing Ruby.
 fn gemspec_name(source: &str) -> Option<String> {
     source.lines().find_map(|line| {
+        let line = line.trim_start();
+        if line.starts_with('#') {
+            return None;
+        }
         let (receiver, value) = line.split_once('=')?;
         if !receiver.trim_end().ends_with(".name") {
             return None;
@@ -749,7 +753,7 @@ mod tests {
             (
                 "ruby",
                 "ruby.gemspec",
-                "Gem::Specification.new do |spec|\n  spec.name = \"gem-package\"\nend\n",
+                "Gem::Specification.new do |spec|\n  # spec.name = \"commented-out\"\n  spec.name = \"gem-package\"\nend\n",
                 Some("gem-package"),
             ),
             ("empty", "Cargo.toml", "[package]\nname = \"\"\n", None),
