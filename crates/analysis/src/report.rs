@@ -1303,11 +1303,11 @@ fn aggregate_scope(scopes: &mut [Scope], files: &[FileRecord], scope_id: ScopeId
 mod tests {
     use super::*;
     use crate::architecture::{
-        ArchitectureFinding, ArchitectureFindingKind, ArchitectureGraph, DependencyEdge,
-        DependencyEdgeId,
+        ArchitectureComparisonKind, ArchitectureFinding, ArchitectureFindingKind,
+        ArchitectureGraph, DependencyEdge, DependencyEdgeId,
     };
     use crate::hotspot::Hotspot;
-    use crate::verdict::{CodebaseTier, DiffTier, WorstOffenderReason};
+    use crate::verdict::{CodebaseTier, DebtFamily, DiffTier, WorstOffenderReason};
     use crate::{ComparisonKind, UnitFact, UnitKind};
 
     /// Builds a one-package repository whose single file carries the given
@@ -1555,6 +1555,46 @@ mod tests {
             report.scope_verdict(fixture_scope).diff_tier(),
             Some(DiffTier::NoDebtChange)
         );
+    }
+
+    #[test]
+    fn an_introduced_cycle_makes_a_composed_diff_worse_without_any_source_movement() {
+        let mut fixture = ReportFixture::new(ReportMode::Diff);
+        let (scope, file) = fixture.add_file("src/work.rs", HealthCounts::new(10, 0, 0));
+        let unchanged = comparison(
+            0,
+            file,
+            ComparisonKind::Unchanged,
+            Some(Rating::High),
+            Some(Rating::High),
+        );
+        fixture.builder.add_comparison(unchanged);
+        fixture
+            .builder
+            .link_comparison(scope, ComparisonId::from_index(0));
+        let introduced = ArchitectureComparison::new(
+            ArchitectureComparisonId::from_index(0),
+            ArchitectureComparisonKind::CycleIntroduced,
+            vec![PackageId::from_index(0), PackageId::from_index(1)],
+        );
+        fixture
+            .builder
+            .set_architecture(ArchitectureReportFacts::new(
+                ArchitectureGraph::default(),
+                Vec::new(),
+                vec![introduced],
+            ));
+        fixture
+            .builder
+            .link_architecture_comparison(scope, ArchitectureComparisonId::from_index(0));
+        let report = fixture.finish();
+        let verdict = report.verdict().unwrap();
+        assert_eq!(verdict.diff_tier(), Some(DiffTier::Worse));
+        assert_eq!(verdict.sentence(), "You made it worse.");
+        assert!(verdict.facts().moved(DebtFamily::Architecture));
+        assert!(!verdict.facts().moved(DebtFamily::Source));
+        assert_eq!(verdict.facts().source(), DiffCounts::default());
+        assert_eq!(verdict.facts().architecture(), DiffCounts::new(1, 0, 0));
     }
 
     fn unit(name: &str, measurements: Measurements) -> UnitFact {

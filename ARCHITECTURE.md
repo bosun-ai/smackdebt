@@ -101,6 +101,24 @@ Aggregation walks child scopes once in post-order and links retained findings
 and comparisons through indexes. Parent scopes add counts; they never average
 debt into a project score.
 
+Analysis also owns the verdict: the one statement those counts support. Tier
+identifiers are frozen as the machine contract and their sentences are owned
+beside them, so a terminal renderer and a machine consumer print identical
+bytes. A codebase tier comes from integer permille of High debt over checked
+units, where a boundary value belongs to the lower tier, and package dependency
+cycles floor the result at `worn` from one finding and at `fights_back` from
+three. No floating-point value participates. A diff tier reconciles source,
+architecture, and evolutionary movement in one decision from the debt-diff
+selection: the typed identities that count as human debt movement. Healthy
+added or removed units, unchanged and ambiguous comparisons, and fixture or
+generated source stay in the machine report and never move a verdict. Every
+family keeps its own counts, including zero counts, so a report can name the
+family that moved. The worst offender is the top of the same finding rank with
+its path resolved once, falling back to the first witness of a package cycle.
+The root verdict completes while the report is built, and any other retained
+scope is answered by a pure function of the completed report, so no renderer
+performs analysis to get one.
+
 ## Package discovery
 
 Discovery performs one filesystem walk without reading source contents. It
