@@ -1018,26 +1018,12 @@ fn generated_history_cannot_change_eligible_history_or_concentration() {
         assert_eq!(context["numerator"], 1);
         assert_eq!(context["denominator"], 8);
     }
-    assert!(
-        report["change_coupling"]
-            .as_array()
-            .unwrap()
-            .iter()
-            .any(|row| row["left_role"] == "primary"
-                && row["right_role"] == "primary"
-                && row["shared_commits"] == 3
-                && row["union_commits"] == 3)
-    );
-    assert!(
-        report["change_coupling"]
-            .as_array()
-            .unwrap()
-            .iter()
-            .any(|row| row["left_role"] == "generated"
-                && row["right_role"] == "generated"
-                && row["shared_commits"] == 8
-                && row["union_commits"] == 8)
-    );
+    let coupling = report["change_coupling"].as_array().unwrap();
+    assert_eq!(coupling.len(), 1, "{coupling:?}");
+    assert_eq!(coupling[0]["left_role"], "primary");
+    assert_eq!(coupling[0]["right_role"], "primary");
+    assert_eq!(coupling[0]["shared_commits"], 10);
+    assert_eq!(coupling[0]["union_commits"], 10);
     assert_eq!(report["evolutionary_findings"][0]["shared_commits"], 3);
     assert_eq!(report["evolutionary_findings"][0]["union_commits"], 3);
 

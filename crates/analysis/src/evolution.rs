@@ -262,11 +262,12 @@ impl EvolutionAccumulator {
         coverage: HistoryCoverage,
         file_count: usize,
         package_count: usize,
+        containment: &crate::PackageContainment,
         static_edges: &[PackageEdge],
         before_static_edges: Option<&[PackageEdge]>,
     ) -> EvolutionaryReportFacts {
         let (file_history, package_history) = self.churn.finish(file_count, package_count);
-        let (coupling, eligible_coupling) = self.coupling.finish();
+        let (coupling, eligible_coupling) = self.coupling.finish(containment);
         let concentration = self.concentration.finish();
         let history_is_sufficient = coverage.availability() == HistoryAvailability::Complete
             && coverage.eligible_commits() > 0
@@ -380,7 +381,7 @@ mod tests {
             commit(1, &[(0, 0, Some(1), Some(0))]),
             commit(2, &[(2, 1, Some(1), Some(0))]),
         ];
-        let values = change_coupling(&commits);
+        let values = change_coupling(&commits, &crate::PackageContainment::default());
         assert_eq!(
             values,
             vec![
@@ -495,6 +496,7 @@ mod tests {
             ),
             2,
             2,
+            &crate::PackageContainment::default(),
             &[],
             None,
         );
@@ -530,6 +532,7 @@ mod tests {
             ),
             2,
             2,
+            &crate::PackageContainment::default(),
             &[],
             Some(&[PackageEdge::new(
                 PackageEdgeId::from_index(0),
@@ -587,6 +590,7 @@ mod tests {
             ),
             2,
             2,
+            &crate::PackageContainment::default(),
             &[],
             None,
         );
@@ -637,14 +641,78 @@ mod tests {
             ),
             3,
             2,
+            &crate::PackageContainment::default(),
             &[],
             None,
         );
 
         assert_eq!(report.coupling[0].shared_commits(), 3);
-        assert_eq!(report.coupling[0].union_commits(), 3);
+        assert_eq!(report.coupling[0].union_commits(), 5);
         assert_eq!(report.findings()[0].coupling().shared_commits(), 3);
         assert_eq!(report.findings()[0].coupling().union_commits(), 3);
+    }
+
+    #[test]
+    fn one_package_pair_keeps_one_row_across_role_and_trust_variants() {
+        let primary = |file, package| {
+            HistoryChangeFact::new(
+                FileId::from_index(file),
+                PackageId::from_index(package),
+                None,
+                None,
+            )
+        };
+        let test_role = |file, package| {
+            primary(file, package).with_source_evidence(SourceRole::Test, SourceTrust::Trusted)
+        };
+        let commits = vec![
+            HistoryCommitFact::new(
+                ContributorId::from_index(0),
+                vec![primary(0, 0), test_role(1, 0), primary(2, 1)],
+            ),
+            HistoryCommitFact::new(
+                ContributorId::from_index(0),
+                vec![test_role(1, 0), test_role(3, 1)],
+            ),
+        ];
+        let values = change_coupling(&commits, &crate::PackageContainment::default());
+        assert_eq!(values.len(), 1);
+        assert_eq!(
+            (values[0].shared_commits(), values[0].union_commits()),
+            (2, 2)
+        );
+        let evidence = values[0].evidence().unwrap();
+        assert_eq!(
+            (evidence.left_role(), evidence.right_role()),
+            (SourceRole::Primary, SourceRole::Primary)
+        );
+    }
+
+    #[test]
+    fn a_scope_and_its_own_descendant_are_not_a_coupling_pair() {
+        let containment = crate::PackageContainment::from_paths(&[
+            ".".to_owned(),
+            "crates/project".to_owned(),
+            "other".to_owned(),
+        ]);
+        assert!(containment.is_nested(PackageId::from_index(0), PackageId::from_index(1)));
+        assert!(!containment.is_nested(PackageId::from_index(1), PackageId::from_index(2)));
+        let commits = vec![
+            commit(
+                0,
+                &[(0, 0, None, None), (1, 1, None, None), (2, 2, None, None)],
+            ),
+            commit(
+                1,
+                &[(0, 0, None, None), (1, 1, None, None), (2, 2, None, None)],
+            ),
+        ];
+        let values = change_coupling(&commits, &containment);
+        let pairs: Vec<_> = values
+            .iter()
+            .map(|pair| (pair.left().index(), pair.right().index()))
+            .collect();
+        assert_eq!(pairs, [(1, 2)]);
     }
 
     #[test]
@@ -658,7 +726,7 @@ mod tests {
             })
             .collect::<Vec<_>>();
         let commits = vec![commit(0, &changes), commit(1, &changes)];
-        let values = change_coupling(&commits);
+        let values = change_coupling(&commits, &crate::PackageContainment::default());
         assert_eq!(values.len(), 50 * 49 / 2);
         assert!(
             values

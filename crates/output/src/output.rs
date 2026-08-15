@@ -749,33 +749,17 @@ impl<'a, W: Write> Renderer<'a, W> {
                 .iter()
                 .copied()
                 .filter(|pair| relevant(pair.left()) || relevant(pair.right()))
-                .map(|pair| {
-                    let finding = finding_couplings
+                .filter(|pair| {
+                    !finding_couplings
                         .iter()
-                        .any(|candidate| same_coupling_operands(*candidate, pair));
-                    (pair, finding)
+                        .any(|candidate| same_coupling_pair(*candidate, *pair))
                 })
+                .map(|pair| (pair, false))
                 .collect::<Vec<_>>()
         } else {
-            finding_couplings
-                .iter()
-                .copied()
-                .map(|pair| (pair, true))
-                .collect::<Vec<_>>()
+            Vec::new()
         };
-        if detail {
-            let missing_findings = finding_couplings
-                .iter()
-                .copied()
-                .filter(|finding| {
-                    !couplings
-                        .iter()
-                        .any(|(pair, _)| same_coupling_operands(*pair, *finding))
-                })
-                .map(|pair| (pair, true))
-                .collect::<Vec<_>>();
-            couplings.extend(missing_findings);
-        }
+        couplings.extend(finding_couplings.iter().copied().map(|pair| (pair, true)));
         let has_comparisons =
             report.mode() == ReportMode::Diff && !scope.evolutionary_comparisons().is_empty();
         if couplings.is_empty() && histories.is_empty() && files.is_empty() && !has_comparisons {
@@ -1586,14 +1570,16 @@ impl Theme {
     }
 }
 
-fn same_coupling_operands(
+/// Whether two coupling rows describe the same unordered package pair.
+///
+/// One pair is rendered once, with the finding's operands when it has a
+/// finding, so no view can print the same pair with different numbers.
+fn same_coupling_pair(
     left: smackdebt_analysis::ChangeCoupling,
     right: smackdebt_analysis::ChangeCoupling,
 ) -> bool {
-    left.left() == right.left()
-        && left.right() == right.right()
-        && left.shared_commits() == right.shared_commits()
-        && left.union_commits() == right.union_commits()
+    (left.left(), left.right()) == (right.left(), right.right())
+        || (left.left(), left.right()) == (right.right(), right.left())
 }
 
 fn coupling_has_code_dependency(

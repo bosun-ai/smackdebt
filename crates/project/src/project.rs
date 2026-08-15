@@ -15,10 +15,10 @@ use smackdebt_analysis::{
     DependencySyntax, DependencySyntaxState, Diagnostic, DiagnosticId, DiagnosticKind,
     EvolutionAccumulator, ExternalDependency, FileActivity, FileAnalysis, FileId, FileRecord,
     Finding, FindingId, HealthAssessment, HealthCounts, HealthPolicy, HistoryAvailability,
-    HistoryChangeFact, HistoryCommitFact, HistoryCoverage, Language, PackageEdge, PackageEdgeId,
-    PackageGraphMeasurement, PackageId, PackageRecord, ParseStatus, Rating, Report,
-    ReportBuilder as AnalysisReportBuilder, ReportMode, ResolutionDiagnostic, ResolutionIssueKind,
-    Scope, ScopeId, ScopeKind, SourceCoverageOutcome, SourceRole, SourceTrust,
+    HistoryChangeFact, HistoryCommitFact, HistoryCoverage, Language, PackageContainment,
+    PackageEdge, PackageEdgeId, PackageGraphMeasurement, PackageId, PackageRecord, ParseStatus,
+    Rating, Report, ReportBuilder as AnalysisReportBuilder, ReportMode, ResolutionDiagnostic,
+    ResolutionIssueKind, Scope, ScopeId, ScopeKind, SourceCoverageOutcome, SourceRole, SourceTrust,
     compare_architecture, compare_units, cycle_witness, dependency_degree,
     strongly_connected_components,
 };
@@ -489,10 +489,17 @@ pub(super) fn analyze_diff(request: &DiffRequest) -> Result<ProjectReport, Proje
     let current_package_edges = current_architecture.package_edges.clone();
     let before_package_edges = before_architecture.package_edges.clone();
     work.record_algorithm_pass();
+    let containment = PackageContainment::from_paths(
+        &package_roots
+            .iter()
+            .map(|root| report_package_path(root))
+            .collect::<Vec<_>>(),
+    );
     let evolution = history.evolution.accumulator.finish(
         history.evolution.coverage,
         builder.files().len(),
         package_roots.len(),
+        &containment,
         &current_package_edges,
         Some(&before_package_edges),
     );
@@ -1907,10 +1914,18 @@ impl<'a> CodebaseReportBuilder<'a> {
         let architecture_findings_for_links = architecture.findings.clone();
         let package_edges = architecture.package_edges.clone();
         work.record_algorithm_pass();
+        let containment = PackageContainment::from_paths(
+            &self
+                .package_roots
+                .iter()
+                .map(|root| report_package_path(root))
+                .collect::<Vec<_>>(),
+        );
         let evolution = self.evolution.accumulator.finish(
             self.evolution.coverage,
             self.files.len(),
             self.package_roots.len(),
+            &containment,
             &package_edges,
             None,
         );

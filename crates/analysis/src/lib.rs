@@ -24,7 +24,7 @@ pub use architecture::{
     ResolutionDiagnostic, ResolutionIssueKind,
 };
 pub use architecture_comparison::{PackageCycle, compare_architecture};
-pub use change_coupling::{change_coupling, unexplained_coupling};
+pub use change_coupling::{PackageContainment, change_coupling, unexplained_coupling};
 pub use churn::churn;
 pub use contributor_concentration::contributor_concentration;
 pub use cycle_witness::cycle_witness;
