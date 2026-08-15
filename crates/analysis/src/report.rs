@@ -1443,6 +1443,46 @@ mod tests {
         // Hot debt precedes equally rated cold debt, and primary source
         // precedes non-primary source once hot state ties.
         assert!(FindingRank::new(&high, true, 0, "z") < FindingRank::new(&high, false, 99, "a"));
+        // Rating still dominates hot state: cold High precedes hot Watch.
+        assert!(FindingRank::new(&high, false, 0, "z") < FindingRank::new(&watch, true, 99, "a"));
+        let test_watch = watch
+            .clone()
+            .with_evidence(SourceRole::Test, SourceTrust::Trusted);
+        assert!(
+            FindingRank::new(&high, false, 0, "z") < FindingRank::new(&test_watch, true, 99, "a")
+        );
+        // Hot state still dominates every measurement key: a hot Watch finding
+        // precedes a cold Watch finding with strictly more cognitive
+        // complexity, more cyclomatic complexity, and more statements.
+        let heavier_watch = finding(
+            "heavier",
+            Measurements::new(20, 11, 50),
+            SourceSpan::new(1, 1),
+        );
+        let lighter_watch = finding(
+            "lighter",
+            Measurements::new(15, 11, 50),
+            SourceSpan::new(1, 1),
+        );
+        assert_eq!(
+            heavier_watch.assessment().rating(),
+            lighter_watch.assessment().rating()
+        );
+        assert_eq!(
+            (
+                heavier_watch.assessment().signals_at_rating(),
+                heavier_watch.assessment().triggered_signals()
+            ),
+            (
+                lighter_watch.assessment().signals_at_rating(),
+                lighter_watch.assessment().triggered_signals()
+            )
+        );
+        assert!(rank(&heavier_watch, 0, "a") < rank(&lighter_watch, 0, "a"));
+        assert!(
+            FindingRank::new(&lighter_watch, true, 0, "z")
+                < FindingRank::new(&heavier_watch, false, 99, "a")
+        );
         let test_role = high
             .clone()
             .with_evidence(SourceRole::Test, SourceTrust::Trusted);
