@@ -15,8 +15,10 @@ use crate::source::SourceRole;
 ///
 /// The declaration order is the severity order used by architecture
 /// escalation, which may raise a tier but never lower one.
-#[derive(Clone, Copy, Debug, Eq, Hash, Ord, PartialEq, PartialOrd)]
+#[derive(Clone, Copy, Debug, Default, Eq, Hash, Ord, PartialEq, PartialOrd)]
 pub enum CodebaseTier {
+    /// Nothing was checked, which is also the answer before a report is built.
+    #[default]
     Empty,
     Clean,
     Solid,
@@ -351,6 +353,118 @@ impl DebtDiffSelection {
     /// while a report is built.
     pub fn has_duplicate_identity(&self) -> bool {
         repeats(&self.source) || repeats(&self.architecture) || repeats(&self.evolutionary)
+    }
+}
+
+/// Why one finding is the worst thing in a scope.
+#[derive(Clone, Copy, Debug, Eq, Hash, Ord, PartialEq, PartialOrd)]
+pub enum WorstOffenderReason {
+    HotAndComplex,
+    MostComplex,
+    PackageDependencyCycle,
+}
+
+impl WorstOffenderReason {
+    /// The exact words every consumer prints for this reason.
+    pub const fn text(self) -> &'static str {
+        match self {
+            Self::HotAndComplex => "hot AND complex",
+            Self::MostComplex => "most complex",
+            Self::PackageDependencyCycle => "package dependency cycle",
+        }
+    }
+}
+
+/// The single worst thing in one scope, named with a resolved path.
+///
+/// The path is resolved while the report is built so a consumer states the
+/// offender without joining index tables.
+#[derive(Clone, Debug, Eq, Hash, Ord, PartialEq, PartialOrd)]
+pub struct WorstOffender {
+    path: String,
+    reason: WorstOffenderReason,
+}
+
+impl WorstOffender {
+    pub fn new(path: impl Into<String>, reason: WorstOffenderReason) -> Self {
+        Self {
+            path: path.into(),
+            reason,
+        }
+    }
+
+    /// The repository-relative path of the offending source.
+    pub fn path(&self) -> &str {
+        &self.path
+    }
+    pub const fn reason(&self) -> WorstOffenderReason {
+        self.reason
+    }
+}
+
+/// One completed answer for one scope.
+#[derive(Clone, Debug, Default, Eq, PartialEq)]
+pub struct Verdict {
+    tier: CodebaseTier,
+    counts: VerdictCounts,
+    diff: Option<DiffTier>,
+    selection: DebtDiffSelection,
+    worst_offender: Option<WorstOffender>,
+}
+
+impl Verdict {
+    /// Completes a codebase verdict, which reconciles no comparison.
+    pub fn codebase(counts: VerdictCounts, worst_offender: Option<WorstOffender>) -> Self {
+        Self {
+            tier: CodebaseTier::select(counts),
+            counts,
+            diff: None,
+            selection: DebtDiffSelection::default(),
+            worst_offender,
+        }
+    }
+
+    /// Completes a diff verdict from one scope's debt-diff selection.
+    pub fn diff(
+        counts: VerdictCounts,
+        selection: DebtDiffSelection,
+        worst_offender: Option<WorstOffender>,
+    ) -> Self {
+        Self {
+            tier: CodebaseTier::select(counts),
+            counts,
+            diff: Some(selection.tier()),
+            selection,
+            worst_offender,
+        }
+    }
+
+    pub const fn tier(&self) -> CodebaseTier {
+        self.tier
+    }
+    pub const fn counts(&self) -> VerdictCounts {
+        self.counts
+    }
+    /// The diff tier, present only for a diff report.
+    pub const fn diff_tier(&self) -> Option<DiffTier> {
+        self.diff
+    }
+    pub const fn selection(&self) -> &DebtDiffSelection {
+        &self.selection
+    }
+    /// The per-family counts behind the diff tier.
+    pub const fn facts(&self) -> DebtDiffFacts {
+        self.selection.facts()
+    }
+    pub const fn worst_offender(&self) -> Option<&WorstOffender> {
+        self.worst_offender.as_ref()
+    }
+    /// The exact sentence this verdict answers with.
+    pub const fn sentence(&self) -> &'static str {
+        match self.diff {
+            Some(tier) => tier.sentence(),
+            None => self.tier.sentence(),
+        }
     }
 }
 
@@ -692,6 +806,54 @@ mod tests {
         assert_eq!(DebtFamily::Source.name(), "source");
         assert_eq!(DebtFamily::Architecture.name(), "architecture");
         assert_eq!(DebtFamily::Evolutionary.name(), "evolutionary");
+    }
+
+    #[test]
+    fn every_worst_offender_reason_keeps_its_exact_words() {
+        let vocabulary = [
+            (WorstOffenderReason::HotAndComplex, "hot AND complex"),
+            (WorstOffenderReason::MostComplex, "most complex"),
+            (
+                WorstOffenderReason::PackageDependencyCycle,
+                "package dependency cycle",
+            ),
+        ];
+        for (reason, words) in vocabulary {
+            assert_eq!(reason.text(), words);
+        }
+    }
+
+    #[test]
+    fn a_codebase_verdict_states_its_tier_sentence_and_offender() {
+        let verdict = Verdict::codebase(
+            counts(1_000, 4, 10, 0),
+            Some(WorstOffender::new(
+                "crates/analysis/src/report.rs",
+                WorstOffenderReason::HotAndComplex,
+            )),
+        );
+        assert_eq!(verdict.tier(), CodebaseTier::Worn);
+        assert_eq!(verdict.sentence(), "Worn in the usual places.");
+        assert_eq!(verdict.diff_tier(), None);
+        assert_eq!(verdict.counts().high(), 10);
+        let offender = verdict.worst_offender().unwrap();
+        assert_eq!(offender.path(), "crates/analysis/src/report.rs");
+        assert_eq!(offender.reason(), WorstOffenderReason::HotAndComplex);
+        assert!(verdict.selection().is_empty());
+    }
+
+    #[test]
+    fn a_diff_verdict_answers_with_its_diff_sentence() {
+        let mut selection = DebtDiffSelection::default();
+        selection.select_architecture(&architecture(
+            0,
+            ArchitectureComparisonKind::CycleIntroduced,
+        ));
+        let verdict = Verdict::diff(counts(1_000, 0, 0, 1), selection, None);
+        assert_eq!(verdict.diff_tier(), Some(DiffTier::Worse));
+        assert_eq!(verdict.sentence(), "You made it worse.");
+        assert_eq!(verdict.tier(), CodebaseTier::Worn);
+        assert!(verdict.facts().moved(DebtFamily::Architecture));
     }
 
     #[test]

@@ -7,6 +7,17 @@ pub smackdebt_analysis::ArchitectureComparisonKind::EdgeRemoved
 pub enum smackdebt_analysis::ArchitectureFindingKind
 pub smackdebt_analysis::ArchitectureFindingKind::FileCycle
 pub smackdebt_analysis::ArchitectureFindingKind::PackageCycle
+pub enum smackdebt_analysis::CodebaseTier
+pub smackdebt_analysis::CodebaseTier::Clean
+pub smackdebt_analysis::CodebaseTier::Empty
+pub smackdebt_analysis::CodebaseTier::FightsBack
+pub smackdebt_analysis::CodebaseTier::Lost
+pub smackdebt_analysis::CodebaseTier::Solid
+pub smackdebt_analysis::CodebaseTier::Worn
+impl smackdebt_analysis::CodebaseTier
+pub const fn smackdebt_analysis::CodebaseTier::id(self) -> &'static str
+pub const fn smackdebt_analysis::CodebaseTier::select(smackdebt_analysis::VerdictCounts) -> Self
+pub const fn smackdebt_analysis::CodebaseTier::sentence(self) -> &'static str
 pub enum smackdebt_analysis::ComparisonDirection
 pub smackdebt_analysis::ComparisonDirection::Better
 pub smackdebt_analysis::ComparisonDirection::Changed
@@ -19,6 +30,13 @@ pub smackdebt_analysis::ComparisonKind::MetricChanged
 pub smackdebt_analysis::ComparisonKind::Regressed
 pub smackdebt_analysis::ComparisonKind::Removed
 pub smackdebt_analysis::ComparisonKind::Unchanged
+pub enum smackdebt_analysis::DebtFamily
+pub smackdebt_analysis::DebtFamily::Architecture
+pub smackdebt_analysis::DebtFamily::Evolutionary
+pub smackdebt_analysis::DebtFamily::Source
+impl smackdebt_analysis::DebtFamily
+pub const smackdebt_analysis::DebtFamily::ALL: [Self; 3]
+pub const fn smackdebt_analysis::DebtFamily::name(self) -> &'static str
 pub enum smackdebt_analysis::DependencyIntent
 pub smackdebt_analysis::DependencyIntent::Internal
 pub smackdebt_analysis::DependencyIntent::Package
@@ -39,6 +57,15 @@ pub smackdebt_analysis::DiagnosticKind::ParseFailure
 pub smackdebt_analysis::DiagnosticKind::UnreadableFile
 pub smackdebt_analysis::DiagnosticKind::UnsafeReference
 pub smackdebt_analysis::DiagnosticKind::UnsupportedLanguage
+pub enum smackdebt_analysis::DiffTier
+pub smackdebt_analysis::DiffTier::Better
+pub smackdebt_analysis::DiffTier::Mixed
+pub smackdebt_analysis::DiffTier::NoDebtChange
+pub smackdebt_analysis::DiffTier::Worse
+impl smackdebt_analysis::DiffTier
+pub const fn smackdebt_analysis::DiffTier::id(self) -> &'static str
+pub const fn smackdebt_analysis::DiffTier::reconcile(smackdebt_analysis::DebtDiffFacts) -> Self
+pub const fn smackdebt_analysis::DiffTier::sentence(self) -> &'static str
 pub enum smackdebt_analysis::EvolutionaryComparisonKind
 pub smackdebt_analysis::EvolutionaryComparisonKind::FindingIntroduced
 pub smackdebt_analysis::EvolutionaryComparisonKind::FindingRemoved
@@ -123,6 +150,12 @@ pub smackdebt_analysis::UnitKind::Lambda
 pub smackdebt_analysis::UnitKind::Method
 pub smackdebt_analysis::UnitKind::SyntheticTopLevel
 pub smackdebt_analysis::UnitKind::Template
+pub enum smackdebt_analysis::WorstOffenderReason
+pub smackdebt_analysis::WorstOffenderReason::HotAndComplex
+pub smackdebt_analysis::WorstOffenderReason::MostComplex
+pub smackdebt_analysis::WorstOffenderReason::PackageDependencyCycle
+impl smackdebt_analysis::WorstOffenderReason
+pub const fn smackdebt_analysis::WorstOffenderReason::text(self) -> &'static str
 pub struct smackdebt_analysis::ArchitectureComparison
 impl smackdebt_analysis::ArchitectureComparison
 pub const fn smackdebt_analysis::ArchitectureComparison::after_references(&self) -> core::option::Option<u32>
@@ -231,6 +264,27 @@ pub const fn smackdebt_analysis::Coverage::recovered_files(self) -> u32
 pub const fn smackdebt_analysis::Coverage::selected_files(self) -> u32
 pub const fn smackdebt_analysis::Coverage::source_lines(self) -> u32
 pub const fn smackdebt_analysis::Coverage::unsupported_files(self) -> u32
+pub struct smackdebt_analysis::DebtDiffFacts
+impl smackdebt_analysis::DebtDiffFacts
+pub const fn smackdebt_analysis::DebtDiffFacts::architecture(self) -> smackdebt_analysis::DiffCounts
+pub const fn smackdebt_analysis::DebtDiffFacts::counts(self, smackdebt_analysis::DebtFamily) -> smackdebt_analysis::DiffCounts
+pub const fn smackdebt_analysis::DebtDiffFacts::evolutionary(self) -> smackdebt_analysis::DiffCounts
+pub const fn smackdebt_analysis::DebtDiffFacts::moved(self, smackdebt_analysis::DebtFamily) -> bool
+pub const fn smackdebt_analysis::DebtDiffFacts::new(smackdebt_analysis::DiffCounts, smackdebt_analysis::DiffCounts, smackdebt_analysis::DiffCounts) -> Self
+pub const fn smackdebt_analysis::DebtDiffFacts::source(self) -> smackdebt_analysis::DiffCounts
+pub const fn smackdebt_analysis::DebtDiffFacts::total(self) -> smackdebt_analysis::DiffCounts
+pub struct smackdebt_analysis::DebtDiffSelection
+impl smackdebt_analysis::DebtDiffSelection
+pub fn smackdebt_analysis::DebtDiffSelection::architecture(&self) -> &[smackdebt_analysis::ArchitectureComparisonId]
+pub fn smackdebt_analysis::DebtDiffSelection::evolutionary(&self) -> &[smackdebt_analysis::EvolutionaryComparisonId]
+pub const fn smackdebt_analysis::DebtDiffSelection::facts(&self) -> smackdebt_analysis::DebtDiffFacts
+pub fn smackdebt_analysis::DebtDiffSelection::has_duplicate_identity(&self) -> bool
+pub fn smackdebt_analysis::DebtDiffSelection::is_empty(&self) -> bool
+pub fn smackdebt_analysis::DebtDiffSelection::select_architecture(&mut self, &smackdebt_analysis::ArchitectureComparison)
+pub fn smackdebt_analysis::DebtDiffSelection::select_evolutionary(&mut self, smackdebt_analysis::EvolutionaryComparison)
+pub fn smackdebt_analysis::DebtDiffSelection::select_source(&mut self, &smackdebt_analysis::Comparison, smackdebt_analysis::SourceRole)
+pub fn smackdebt_analysis::DebtDiffSelection::source(&self) -> &[smackdebt_analysis::ComparisonId]
+pub const fn smackdebt_analysis::DebtDiffSelection::tier(&self) -> smackdebt_analysis::DiffTier
 pub struct smackdebt_analysis::DependencyCoverage
 impl smackdebt_analysis::DependencyCoverage
 pub const fn smackdebt_analysis::DependencyCoverage::ambiguous(self) -> u32
@@ -632,9 +686,11 @@ pub fn smackdebt_analysis::Report::paths(&self) -> &[alloc::string::String]
 pub fn smackdebt_analysis::Report::resolution_diagnostics(&self) -> &[smackdebt_analysis::ResolutionDiagnostic]
 pub const fn smackdebt_analysis::Report::root(&self) -> core::option::Option<smackdebt_analysis::ScopeId>
 pub const fn smackdebt_analysis::Report::schema_version(&self) -> u32
+pub fn smackdebt_analysis::Report::scope_verdict(&self, smackdebt_analysis::ScopeId) -> smackdebt_analysis::Verdict
 pub fn smackdebt_analysis::Report::scopes(&self) -> &[smackdebt_analysis::Scope]
 pub fn smackdebt_analysis::Report::size_findings(&self) -> &[smackdebt_analysis::SizeFinding]
 pub fn smackdebt_analysis::Report::stable_dependency_findings(&self) -> &[smackdebt_analysis::StableDependencyFinding]
+pub const fn smackdebt_analysis::Report::verdict(&self) -> core::option::Option<&smackdebt_analysis::Verdict>
 pub struct smackdebt_analysis::ReportBuilder
 impl smackdebt_analysis::ReportBuilder
 pub fn smackdebt_analysis::ReportBuilder::add_comparison(&mut self, smackdebt_analysis::Comparison) -> smackdebt_analysis::ComparisonId
@@ -777,13 +833,39 @@ pub fn smackdebt_analysis::UnitIdentity::in_container(self, impl core::convert::
 pub const fn smackdebt_analysis::UnitIdentity::kind(&self) -> smackdebt_analysis::UnitKind
 pub fn smackdebt_analysis::UnitIdentity::name(&self) -> &str
 pub fn smackdebt_analysis::UnitIdentity::new(impl core::convert::Into<alloc::string::String>, smackdebt_analysis::UnitKind) -> Self
+pub struct smackdebt_analysis::Verdict
+impl smackdebt_analysis::Verdict
+pub fn smackdebt_analysis::Verdict::codebase(smackdebt_analysis::VerdictCounts, core::option::Option<smackdebt_analysis::WorstOffender>) -> Self
+pub const fn smackdebt_analysis::Verdict::counts(&self) -> smackdebt_analysis::VerdictCounts
+pub fn smackdebt_analysis::Verdict::diff(smackdebt_analysis::VerdictCounts, smackdebt_analysis::DebtDiffSelection, core::option::Option<smackdebt_analysis::WorstOffender>) -> Self
+pub const fn smackdebt_analysis::Verdict::diff_tier(&self) -> core::option::Option<smackdebt_analysis::DiffTier>
+pub const fn smackdebt_analysis::Verdict::facts(&self) -> smackdebt_analysis::DebtDiffFacts
+pub const fn smackdebt_analysis::Verdict::selection(&self) -> &smackdebt_analysis::DebtDiffSelection
+pub const fn smackdebt_analysis::Verdict::sentence(&self) -> &'static str
+pub const fn smackdebt_analysis::Verdict::tier(&self) -> smackdebt_analysis::CodebaseTier
+pub const fn smackdebt_analysis::Verdict::worst_offender(&self) -> core::option::Option<&smackdebt_analysis::WorstOffender>
+pub struct smackdebt_analysis::VerdictCounts
+impl smackdebt_analysis::VerdictCounts
+pub const fn smackdebt_analysis::VerdictCounts::checked(self) -> u32
+pub const fn smackdebt_analysis::VerdictCounts::high(self) -> u32
+pub const fn smackdebt_analysis::VerdictCounts::high_architecture_findings(self) -> u32
+pub const fn smackdebt_analysis::VerdictCounts::high_permille(self) -> u32
+pub const fn smackdebt_analysis::VerdictCounts::new(smackdebt_analysis::HealthCounts, u32) -> Self
+pub const fn smackdebt_analysis::VerdictCounts::watch(self) -> u32
+pub struct smackdebt_analysis::WorstOffender
+impl smackdebt_analysis::WorstOffender
+pub fn smackdebt_analysis::WorstOffender::new(impl core::convert::Into<alloc::string::String>, smackdebt_analysis::WorstOffenderReason) -> Self
+pub fn smackdebt_analysis::WorstOffender::path(&self) -> &str
+pub const fn smackdebt_analysis::WorstOffender::reason(&self) -> smackdebt_analysis::WorstOffenderReason
 pub const smackdebt_analysis::CRATE_ROOT_CANDIDATE: &str
 pub const smackdebt_analysis::DECLARING_FILE_CANDIDATE: &str
 pub const smackdebt_analysis::DEFAULT_MINIMUM_TOUCHES: u32
 pub const smackdebt_analysis::ENTRY_FILENAMES: &[&str]
+pub const smackdebt_analysis::FIGHTS_BACK_PERMILLE: u32
 pub const smackdebt_analysis::MINIMUM_CONCENTRATION_COMMITS: u32
 pub const smackdebt_analysis::MINIMUM_CONCENTRATION_PERCENT: u32
 pub const smackdebt_analysis::MINIMUM_STABLE_DEPENDENCY_REFERENCES: u32
+pub const smackdebt_analysis::WORN_PERMILLE: u32
 pub fn smackdebt_analysis::aggregate_comparisons(&mut [smackdebt_analysis::Scope], &[smackdebt_analysis::Comparison], smackdebt_analysis::ScopeId)
 pub fn smackdebt_analysis::aggregate_scopes(&mut [smackdebt_analysis::Scope], &[smackdebt_analysis::FileRecord], smackdebt_analysis::ScopeId)
 pub fn smackdebt_analysis::change_coupling(&[smackdebt_analysis::HistoryCommitFact], &smackdebt_analysis::PackageContainment) -> alloc::vec::Vec<smackdebt_analysis::ChangeCoupling>

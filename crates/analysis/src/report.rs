@@ -1,13 +1,17 @@
 use crate::comparison::{Comparison, ComparisonDirection};
-use crate::health::{HealthAssessment, HealthCounts, Measurements};
+use crate::health::{HealthAssessment, HealthCounts, Measurements, Rating};
 use crate::hotspot::Hotspot;
 use crate::orphan::OrphanFile;
 use crate::size::SizeFinding;
 use crate::source::{Language, ParseStatus, SourceRole, SourceSpan, SourceTrust, UnitIdentity};
+use crate::verdict::{
+    DebtDiffSelection, Verdict, VerdictCounts, WorstOffender, WorstOffenderReason,
+};
 use crate::{
     ArchitectureComparison, ArchitectureComparisonId, ArchitectureFinding, ArchitectureFindingId,
-    ArchitectureReportFacts, DependencyCoverage, DependencyEdge, ExternalDependency, PackageEdge,
-    PackageGraphMeasurement, ResolutionDiagnostic, StableDependencyFinding,
+    ArchitectureFindingKind, ArchitectureReportFacts, DependencyCoverage, DependencyEdge,
+    ExternalDependency, PackageEdge, PackageGraphMeasurement, ResolutionDiagnostic,
+    StableDependencyFinding,
 };
 use crate::{
     ChangeCoupling, ContributorConcentration, EvolutionaryComparison, EvolutionaryComparisonId,
@@ -15,7 +19,7 @@ use crate::{
     HistoryCoverage, KnowledgeConcentrationFinding, PackageHistory,
 };
 #[cfg(test)]
-use crate::{HealthPolicy, LocalUnitId, Rating, Signal, Thresholds, compare_units};
+use crate::{HealthPolicy, LocalUnitId, Signal, Thresholds, compare_units};
 use std::cmp::Reverse;
 
 macro_rules! index_type {
@@ -740,6 +744,7 @@ pub struct Report {
     orphan_files: Vec<OrphanFile>,
     stable_dependency_findings: Vec<StableDependencyFinding>,
     knowledge_concentration_findings: Vec<KnowledgeConcentrationFinding>,
+    verdict: Option<Verdict>,
 }
 
 /// The source operation represented by a report.
@@ -934,6 +939,7 @@ impl Report {
             orphan_files: Vec::new(),
             stable_dependency_findings: Vec::new(),
             knowledge_concentration_findings: Vec::new(),
+            verdict: None,
         }
     }
 
@@ -1036,6 +1042,110 @@ impl Report {
             .binary_search_by_key(&file, |hotspot| hotspot.file())
             .is_ok()
     }
+    /// The completed answer for the report's root scope.
+    pub const fn verdict(&self) -> Option<&Verdict> {
+        self.verdict.as_ref()
+    }
+
+    /// Answers for any retained scope from the completed report.
+    ///
+    /// This reads owned tables only: no filesystem, Git, parser, or analysis
+    /// work runs, so a renderer can drill into a path without reanalyzing it.
+    pub fn scope_verdict(&self, scope: ScopeId) -> Verdict {
+        let scope = &self.scopes[scope.index()];
+        let counts = VerdictCounts::new(scope.health(), self.high_architecture_findings(scope));
+        let worst_offender = self.worst_offender(scope);
+        match self.mode {
+            ReportMode::Codebase => Verdict::codebase(counts, worst_offender),
+            ReportMode::Diff => Verdict::diff(counts, self.debt_diff(scope), worst_offender),
+        }
+    }
+
+    /// Counts the High-rated architecture findings that escalate a tier.
+    fn high_architecture_findings(&self, scope: &Scope) -> u32 {
+        let count = scope
+            .architecture_findings()
+            .iter()
+            .filter(|id| self.architecture_findings[id.index()].rating() == Rating::High)
+            .count();
+        u32::try_from(count).unwrap_or(u32::MAX)
+    }
+
+    /// Selects the comparisons and findings that move human debt in a scope.
+    fn debt_diff(&self, scope: &Scope) -> DebtDiffSelection {
+        let mut selection = DebtDiffSelection::default();
+        for &id in scope.comparisons() {
+            let comparison = &self.comparisons[id.index()];
+            let role = comparison
+                .file()
+                .map_or(SourceRole::Primary, |file| self.files[file.index()].role());
+            selection.select_source(comparison, role);
+        }
+        for &id in scope.architecture_comparisons() {
+            selection.select_architecture(&self.architecture_comparisons[id.index()]);
+        }
+        for &id in scope.evolutionary_comparisons() {
+            selection.select_evolutionary(self.evolutionary_comparisons[id.index()]);
+        }
+        selection
+    }
+
+    /// Names the single worst thing in a scope with its resolved path.
+    ///
+    /// Fixture and generated debt never moves a verdict, so it can never be
+    /// the worst offender either. A scope whose only debt is structural falls
+    /// back to the first witness of its first package dependency cycle.
+    fn worst_offender(&self, scope: &Scope) -> Option<WorstOffender> {
+        let ranked = scope
+            .findings()
+            .iter()
+            .map(|id| &self.findings[id.index()])
+            .filter(|finding| finding.affects_verdict())
+            .map(|finding| (self.rank(finding), finding))
+            .min_by(|left, right| left.0.cmp(&right.0));
+        if let Some((_, finding)) = ranked {
+            let reason = if self.is_hotspot(finding.file()) {
+                WorstOffenderReason::HotAndComplex
+            } else {
+                WorstOffenderReason::MostComplex
+            };
+            return Some(WorstOffender::new(
+                self.files[finding.file().index()].path(),
+                reason,
+            ));
+        }
+        let cycle = scope
+            .architecture_findings()
+            .iter()
+            .map(|id| &self.architecture_findings[id.index()])
+            .find(|finding| finding.kind() == ArchitectureFindingKind::PackageCycle)?;
+        Some(WorstOffender::new(
+            self.cycle_witness_path(cycle)?,
+            WorstOffenderReason::PackageDependencyCycle,
+        ))
+    }
+
+    fn rank(&self, finding: &Finding) -> FindingRank<'_> {
+        let file = &self.files[finding.file().index()];
+        FindingRank::new(
+            finding,
+            self.is_hotspot(finding.file()),
+            file.activity().map_or(0, FileActivity::touches),
+            file.path(),
+        )
+    }
+
+    /// The path of a cycle's first witness, which is the source of its first
+    /// witness edge.
+    fn cycle_witness_path(&self, finding: &ArchitectureFinding) -> Option<&str> {
+        let witness = finding
+            .witness_edges()
+            .first()
+            .and_then(|id| self.dependency_edges.get(id.index()))
+            .map(DependencyEdge::source)
+            .or_else(|| finding.files().first().copied());
+        witness.map(|file| self.files[file.index()].path())
+    }
     fn add_scope(&mut self, scope: Scope) -> ScopeId {
         let id = scope.id();
         let path_id = self.intern_path(scope.name());
@@ -1093,6 +1203,7 @@ impl Report {
         };
         aggregate_scope(&mut self.scopes, &self.files, root);
         aggregate_comparison_scope(&mut self.scopes, &self.comparisons, root);
+        self.verdict = Some(self.scope_verdict(root));
     }
 }
 
@@ -1191,7 +1302,260 @@ fn aggregate_scope(scopes: &mut [Scope], files: &[FileRecord], scope_id: ScopeId
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::architecture::{
+        ArchitectureFinding, ArchitectureFindingKind, ArchitectureGraph, DependencyEdge,
+        DependencyEdgeId,
+    };
+    use crate::hotspot::Hotspot;
+    use crate::verdict::{CodebaseTier, DiffTier, WorstOffenderReason};
     use crate::{ComparisonKind, UnitFact, UnitKind};
+
+    /// Builds a one-package repository whose single file carries the given
+    /// units, so verdict composition can be proven without any project work.
+    struct ReportFixture {
+        builder: ReportBuilder,
+        root: ScopeId,
+        packages: Vec<PackageRecord>,
+        files: usize,
+    }
+
+    impl ReportFixture {
+        fn new(mode: ReportMode) -> Self {
+            let mut builder = ReportBuilder::new(mode);
+            let root = ScopeId::from_index(0);
+            builder.add_scope(Scope::new(root, ScopeKind::Repository, ".", None));
+            builder.set_root(root);
+            Self {
+                builder,
+                root,
+                packages: Vec::new(),
+                files: 0,
+            }
+        }
+
+        /// Adds one file scope with its rated counts and returns both ids.
+        fn add_file(&mut self, path: &str, health: HealthCounts) -> (ScopeId, FileId) {
+            let scope = ScopeId::from_index(self.builder.report.scopes.len());
+            self.builder
+                .add_scope(Scope::new(scope, ScopeKind::File, path, Some(self.root)));
+            self.builder.report.scopes[self.root.index()].add_child(scope);
+            let file = FileId::from_index(self.files);
+            self.files += 1;
+            let package = PackageId::from_index(self.packages.len());
+            self.packages
+                .push(PackageRecord::current(package, scope, path));
+            self.builder.add_file(
+                FileRecord::new(file, scope, path, Coverage::new(1, 1, 0, 0, 10, 0), health)
+                    .with_package(package)
+                    .with_source_state(SourceRole::Primary, ParseStatus::Parsed),
+            );
+            self.builder.link_file(scope, file);
+            (scope, file)
+        }
+
+        fn add_finding(&mut self, scope: ScopeId, file: FileId, name: &str, cognitive: u32) {
+            let measurements = Measurements::new(cognitive, 1, 1);
+            let id = FindingId::from_index(self.builder.report.findings.len());
+            self.builder.add_finding(Finding::new(
+                id,
+                file,
+                UnitIdentity::new(name, UnitKind::Function),
+                SourceSpan::new(1, 4),
+                measurements,
+                HealthPolicy::default().assess(measurements),
+            ));
+            self.builder.link_finding(scope, id);
+        }
+
+        fn finish(mut self) -> Report {
+            let packages = std::mem::take(&mut self.packages);
+            self.builder.set_packages(packages);
+            self.builder.finish()
+        }
+    }
+
+    fn comparison(
+        index: usize,
+        file: FileId,
+        kind: ComparisonKind,
+        before: Option<Rating>,
+        after: Option<Rating>,
+    ) -> Comparison {
+        let measurements = Measurements::new(1, 1, 1);
+        Comparison::new(
+            ComparisonId::from_index(index),
+            UnitIdentity::new("work", UnitKind::Function),
+            kind,
+            before.map(|_| measurements),
+            after.map(|_| measurements),
+            before,
+            after,
+        )
+        .with_file(file)
+    }
+
+    #[test]
+    fn the_root_verdict_is_completed_while_the_report_is_built() {
+        let mut fixture = ReportFixture::new(ReportMode::Codebase);
+        let (scope, file) = fixture.add_file("src/work.rs", HealthCounts::new(97, 2, 1));
+        fixture.add_finding(scope, file, "work", 25);
+        let report = fixture.finish();
+        let verdict = report.verdict().expect("a built report answers");
+        assert_eq!(verdict.tier(), CodebaseTier::Worn);
+        assert_eq!(verdict.sentence(), "Worn in the usual places.");
+        assert_eq!(verdict.counts().checked(), 100);
+        assert_eq!(verdict.counts().high(), 1);
+        assert_eq!(verdict.diff_tier(), None);
+        let offender = verdict
+            .worst_offender()
+            .expect("rated debt has an offender");
+        assert_eq!(offender.path(), "src/work.rs");
+        assert_eq!(offender.reason(), WorstOffenderReason::MostComplex);
+        assert_eq!(&report.scope_verdict(report.root().unwrap()), verdict);
+    }
+
+    #[test]
+    fn a_worst_offender_in_a_hot_file_is_hot_and_complex() {
+        let mut fixture = ReportFixture::new(ReportMode::Codebase);
+        let (scope, file) = fixture.add_file("src/work.rs", HealthCounts::new(97, 2, 1));
+        fixture.add_finding(scope, file, "work", 25);
+        fixture
+            .builder
+            .set_hotspots(vec![Hotspot::new(file, Rating::High, 9)]);
+        let report = fixture.finish();
+        let offender = report.verdict().unwrap().worst_offender().unwrap();
+        assert_eq!(offender.reason(), WorstOffenderReason::HotAndComplex);
+    }
+
+    #[test]
+    fn a_scope_without_debt_or_a_cycle_has_no_worst_offender() {
+        let mut fixture = ReportFixture::new(ReportMode::Codebase);
+        fixture.add_file("src/work.rs", HealthCounts::new(10, 0, 0));
+        let report = fixture.finish();
+        let verdict = report.verdict().unwrap();
+        assert_eq!(verdict.tier(), CodebaseTier::Clean);
+        assert!(verdict.worst_offender().is_none());
+    }
+
+    #[test]
+    fn a_package_cycle_is_the_worst_offender_when_no_source_finding_exists() {
+        let mut fixture = ReportFixture::new(ReportMode::Codebase);
+        let (left_scope, left) = fixture.add_file("src/left.rs", HealthCounts::new(10, 0, 0));
+        let (_, right) = fixture.add_file("src/right.rs", HealthCounts::new(10, 0, 0));
+        let edge = DependencyEdgeId::from_index(0);
+        let finding = ArchitectureFinding::new(
+            ArchitectureFindingId::from_index(0),
+            ArchitectureFindingKind::PackageCycle,
+            vec![PackageId::from_index(0), PackageId::from_index(1)],
+            vec![left, right],
+            vec![edge],
+        );
+        fixture
+            .builder
+            .set_architecture(ArchitectureReportFacts::new(
+                ArchitectureGraph::new(
+                    DependencyCoverage::default(),
+                    vec![DependencyEdge::new(edge, left, right, 1, Vec::new())],
+                    Vec::new(),
+                    Vec::new(),
+                    Vec::new(),
+                    Vec::new(),
+                ),
+                vec![finding],
+                Vec::new(),
+            ));
+        fixture
+            .builder
+            .link_architecture_finding(left_scope, ArchitectureFindingId::from_index(0));
+        let report = fixture.finish();
+        let verdict = report.verdict().unwrap();
+        assert_eq!(verdict.counts().high_architecture_findings(), 1);
+        assert_eq!(verdict.tier(), CodebaseTier::Worn);
+        let offender = verdict.worst_offender().unwrap();
+        assert_eq!(offender.path(), "src/left.rs");
+        assert_eq!(
+            offender.reason(),
+            WorstOffenderReason::PackageDependencyCycle
+        );
+    }
+
+    #[test]
+    fn a_scope_verdict_answers_about_that_scope_rather_than_the_repository() {
+        let mut fixture = ReportFixture::new(ReportMode::Codebase);
+        let (heavy, heavy_file) = fixture.add_file("src/heavy.rs", HealthCounts::new(0, 0, 2));
+        fixture.add_finding(heavy, heavy_file, "heavy", 25);
+        let (light, _) = fixture.add_file("src/light.rs", HealthCounts::new(998, 0, 0));
+        let report = fixture.finish();
+        assert_eq!(report.verdict().unwrap().tier(), CodebaseTier::Worn);
+        assert_eq!(report.scope_verdict(heavy).tier(), CodebaseTier::Lost);
+        assert_eq!(report.scope_verdict(light).tier(), CodebaseTier::Clean);
+        assert!(report.scope_verdict(light).worst_offender().is_none());
+        assert_eq!(
+            report.scope_verdict(heavy).worst_offender().unwrap().path(),
+            "src/heavy.rs"
+        );
+    }
+
+    #[test]
+    fn a_diff_selection_holds_only_moved_debt_and_holds_it_once() {
+        let mut fixture = ReportFixture::new(ReportMode::Diff);
+        let (scope, file) = fixture.add_file("src/work.rs", HealthCounts::new(10, 1, 0));
+        let (fixture_scope, fixture_file) =
+            fixture.add_file("tests/fixtures/big.js", HealthCounts::default());
+        fixture.builder.report.files[fixture_file.index()] = FileRecord::new(
+            fixture_file,
+            fixture_scope,
+            "tests/fixtures/big.js",
+            Coverage::new(1, 0, 0, 0, 10, 0),
+            HealthCounts::default(),
+        )
+        .with_source_state(SourceRole::Fixture, ParseStatus::Parsed);
+        let members = [
+            comparison(
+                0,
+                file,
+                ComparisonKind::Regressed,
+                Some(Rating::Healthy),
+                Some(Rating::Watch),
+            ),
+            comparison(1, file, ComparisonKind::Added, None, Some(Rating::Healthy)),
+            comparison(
+                2,
+                fixture_file,
+                ComparisonKind::Regressed,
+                Some(Rating::Healthy),
+                Some(Rating::High),
+            ),
+        ];
+        for member in members {
+            let id = member.id();
+            let linked = if member.file() == Some(file) {
+                scope
+            } else {
+                fixture_scope
+            };
+            fixture.builder.add_comparison(member);
+            fixture.builder.link_comparison(linked, id);
+        }
+        let report = fixture.finish();
+        let verdict = report.verdict().unwrap();
+        assert_eq!(verdict.selection().source(), &[ComparisonId::from_index(0)]);
+        assert!(!verdict.selection().has_duplicate_identity());
+        assert_eq!(verdict.diff_tier(), Some(DiffTier::Worse));
+        assert_eq!(verdict.sentence(), "You made it worse.");
+        assert_eq!(verdict.facts().source(), DiffCounts::new(1, 0, 0));
+        // The healthy addition and the fixture regression stay in the machine
+        // report while neither moves the verdict.
+        assert_eq!(report.comparisons().len(), 3);
+        assert_eq!(
+            report.scope_verdict(scope).diff_tier(),
+            Some(DiffTier::Worse)
+        );
+        assert_eq!(
+            report.scope_verdict(fixture_scope).diff_tier(),
+            Some(DiffTier::NoDebtChange)
+        );
+    }
 
     fn unit(name: &str, measurements: Measurements) -> UnitFact {
         unit_with_id(0, name, measurements)

@@ -75,5 +75,5 @@ pub use source::{
 };
 pub use verdict::{
     CodebaseTier, DebtDiffFacts, DebtDiffSelection, DebtFamily, DiffTier, FIGHTS_BACK_PERMILLE,
-    VerdictCounts, WORN_PERMILLE,
+    Verdict, VerdictCounts, WORN_PERMILLE, WorstOffender, WorstOffenderReason,
 };
