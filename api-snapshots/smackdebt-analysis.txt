@@ -464,8 +464,20 @@ pub fn smackdebt_analysis::HistoryCoverage::revision(&self) -> core::option::Opt
 pub const fn smackdebt_analysis::HistoryCoverage::textual_changes(&self) -> u32
 pub fn smackdebt_analysis::HistoryCoverage::unavailable(impl core::convert::Into<alloc::string::String>) -> Self
 pub const fn smackdebt_analysis::HistoryCoverage::uncounted_changes(&self) -> u32
+pub const fn smackdebt_analysis::HistoryCoverage::window_days(&self) -> core::option::Option<u32>
+pub const fn smackdebt_analysis::HistoryCoverage::window_excluded_commits(&self) -> u32
+pub fn smackdebt_analysis::HistoryCoverage::with_window(self, core::option::Option<u32>, u32) -> Self
 impl core::default::Default for smackdebt_analysis::HistoryCoverage
 pub fn smackdebt_analysis::HistoryCoverage::default() -> Self
+pub struct smackdebt_analysis::HistoryWindow
+impl smackdebt_analysis::HistoryWindow
+pub const fn smackdebt_analysis::HistoryWindow::cutoff(self) -> i64
+pub const fn smackdebt_analysis::HistoryWindow::days(self) -> core::option::Option<u32>
+pub const fn smackdebt_analysis::HistoryWindow::includes(self, i64) -> bool
+pub const fn smackdebt_analysis::HistoryWindow::of_days(u32, i64) -> Self
+pub const fn smackdebt_analysis::HistoryWindow::unbounded() -> Self
+impl core::default::Default for smackdebt_analysis::HistoryWindow
+pub fn smackdebt_analysis::HistoryWindow::default() -> Self
 pub struct smackdebt_analysis::Instability
 impl smackdebt_analysis::Instability
 pub const fn smackdebt_analysis::Instability::denominator(self) -> u32

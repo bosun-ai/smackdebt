@@ -45,6 +45,8 @@ pub struct HistoryCoverage {
     excluded_changes: u32,
     rename_gaps: u32,
     reason: Option<String>,
+    window_days: Option<u32>,
+    window_excluded_commits: u32,
 }
 
 impl HistoryCoverage {
@@ -87,7 +89,19 @@ impl HistoryCoverage {
             excluded_changes,
             rename_gaps,
             reason,
+            window_days: None,
+            window_excluded_commits: 0,
         }
+    }
+    /// Records the selected window and the commits it excluded.
+    pub fn with_window(mut self, days: Option<u32>, excluded_commits: u32) -> Self {
+        assert!(
+            excluded_commits <= self.commits,
+            "window-excluded commits cannot exceed streamed commits"
+        );
+        self.window_days = days;
+        self.window_excluded_commits = excluded_commits;
+        self
     }
     pub fn unavailable(reason: impl Into<String>) -> Self {
         Self::new(
@@ -151,6 +165,15 @@ impl HistoryCoverage {
     }
     pub fn reason(&self) -> Option<&str> {
         self.reason.as_deref()
+    }
+    /// The selected history window length in days, when a window is selected.
+    pub const fn window_days(&self) -> Option<u32> {
+        self.window_days
+    }
+    /// Streamed commits the selected window excluded, counted separately from
+    /// changes excluded for other reasons.
+    pub const fn window_excluded_commits(&self) -> u32 {
+        self.window_excluded_commits
     }
 }
 
@@ -322,6 +345,71 @@ mod tests {
                 })
                 .collect(),
         )
+    }
+
+    #[test]
+    fn a_window_governs_churn_coupling_and_concentration_and_coverage_states_it() {
+        let old = 100_000;
+        let recent = 150_000;
+        let streamed = [
+            (old, commit(0, &[(0, 0, None, None), (1, 1, None, None)])),
+            (old, commit(0, &[(0, 0, None, None), (1, 1, None, None)])),
+            (recent, commit(0, &[(0, 0, None, None)])),
+            (recent, commit(1, &[(0, 0, None, None), (1, 1, None, None)])),
+        ];
+        let window = crate::HistoryWindow::of_days(1, 200_000);
+        let windowed: Vec<_> = streamed
+            .iter()
+            .filter(|(timestamp, _)| window.includes(*timestamp))
+            .map(|(_, commit)| commit.clone())
+            .collect();
+        let every: Vec<_> = streamed.iter().map(|(_, commit)| commit.clone()).collect();
+        let excluded = (every.len() - windowed.len()) as u32;
+
+        let (all_files, _) = crate::churn(2, 2, &every);
+        let (window_files, _) = crate::churn(2, 2, &windowed);
+        assert_eq!((all_files[0].touches(), window_files[0].touches()), (4, 2));
+
+        let containment = crate::PackageContainment::default();
+        assert_eq!(change_coupling(&every, &containment)[0].shared_commits(), 3);
+        assert!(change_coupling(&windowed, &containment).is_empty());
+
+        let all_concentration = contributor_concentration(&every);
+        let window_concentration = contributor_concentration(&windowed);
+        assert_eq!(
+            (
+                all_concentration[0].numerator(),
+                all_concentration[0].denominator()
+            ),
+            (3, 4)
+        );
+        assert_eq!(
+            (
+                window_concentration[0].numerator(),
+                window_concentration[0].denominator()
+            ),
+            (1, 2)
+        );
+
+        let coverage = HistoryCoverage::new(
+            HistoryAvailability::Complete,
+            None,
+            every.len() as u32,
+            windowed.len() as u32,
+            3,
+            0,
+            None,
+            None,
+            0,
+            3,
+            0,
+            0,
+            None,
+        )
+        .with_window(window.days(), excluded);
+        assert_eq!(coverage.window_days(), Some(1));
+        assert_eq!(coverage.window_excluded_commits(), 2);
+        assert_eq!(coverage.commits(), 4);
     }
 
     #[test]

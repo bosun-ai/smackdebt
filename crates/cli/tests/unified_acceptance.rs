@@ -173,23 +173,77 @@ fn evolution_fact_manifest_matches_public_json_and_keeps_identity_private() {
 }
 
 #[test]
+fn the_selected_history_window_bounds_churn_coupling_and_concentration() {
+    let repository = evolution_repository();
+    let windowed = Invocation::new(["--json"]).run(repository.path());
+    windowed.success();
+    let windowed = checked_json(&windowed.stdout);
+    let complete = Invocation::new(["--json", "--history", "36500d"]).run(repository.path());
+    complete.success();
+    let complete = checked_json(&complete.stdout);
+
+    // The generated repository commits are older than the default window, so a
+    // default run streams the same commits and derives no history facts.
+    assert_eq!(
+        windowed["history_coverage"]["commits"],
+        complete["history_coverage"]["commits"]
+    );
+    assert!(complete["history_coverage"]["mapped_eligible_changes"].as_u64() > Some(0));
+    assert_eq!(windowed["history_coverage"]["mapped_eligible_changes"], 0);
+    assert!(!complete["change_coupling"].as_array().unwrap().is_empty());
+    assert!(windowed["change_coupling"].as_array().unwrap().is_empty());
+    assert!(
+        !complete["contributor_concentration"]
+            .as_array()
+            .unwrap()
+            .is_empty()
+    );
+    assert!(
+        windowed["contributor_concentration"]
+            .as_array()
+            .unwrap()
+            .is_empty()
+    );
+    let touches = |report: &Value| {
+        report["file_history"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .map(|history| history["touches"].as_u64().unwrap())
+            .sum::<u64>()
+    };
+    assert!(touches(&complete) > 0);
+    assert_eq!(touches(&windowed), 0);
+    let activity = |report: &Value| {
+        report["activity"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .filter(|entry| !entry["touches"].is_null())
+            .count()
+    };
+    assert!(activity(&complete) > 0);
+    assert_eq!(activity(&windowed), 0);
+}
+
+#[test]
 fn unified_codebase_terminal_and_json_are_exact_and_deterministic() {
     let repository = worktree_change_repository();
-    let concise = Invocation::new(std::iter::empty::<&str>()).run(repository.path());
+    let concise = Invocation::new(["--history", "36500d"]).run(repository.path());
     concise.success();
     assert_golden("unified-codebase-concise.terminal.txt", &concise.stdout);
-    let serial_terminal = Invocation::new(["--all"]).run(repository.path());
+    let serial_terminal = Invocation::new(["--all", "--history", "36500d"]).run(repository.path());
     serial_terminal.success();
-    let parallel_terminal = Invocation::new(["--all"])
+    let parallel_terminal = Invocation::new(["--all", "--history", "36500d"])
         .automatic_workers()
         .run(repository.path());
     parallel_terminal.success();
     assert_eq!(serial_terminal, parallel_terminal);
     assert_golden("unified-codebase-120.terminal.txt", &serial_terminal.stdout);
 
-    let serial_json = Invocation::new(["--json"]).run(repository.path());
+    let serial_json = Invocation::new(["--json", "--history", "36500d"]).run(repository.path());
     serial_json.success();
-    let parallel_json = Invocation::new(["--json"])
+    let parallel_json = Invocation::new(["--json", "--history", "36500d"])
         .automatic_workers()
         .run(repository.path());
     parallel_json.success();
@@ -346,7 +400,7 @@ fn committed_ref_diff_has_exact_terminal_and_json_with_a_clean_worktree() {
 fn terminal_width_color_and_path_drills_have_exact_public_bytes() {
     let repository = worktree_change_repository();
     for width in [120, 80, 50] {
-        let result = Invocation::new(["--all"])
+        let result = Invocation::new(["--all", "--history", "36500d"])
             .columns(width)
             .run(repository.path());
         result.success();
@@ -355,10 +409,10 @@ fn terminal_width_color_and_path_drills_have_exact_public_bytes() {
             &result.stdout,
         );
     }
-    let narrow_plain = Invocation::new(["--all"])
+    let narrow_plain = Invocation::new(["--all", "--history", "36500d"])
         .columns(50)
         .run(repository.path());
-    let narrow_colored = Invocation::new(["--all"])
+    let narrow_colored = Invocation::new(["--all", "--history", "36500d"])
         .columns(50)
         .color("always")
         .run(repository.path());
@@ -367,15 +421,15 @@ fn terminal_width_color_and_path_drills_have_exact_public_bytes() {
     assert_eq!(strip_ansi(&narrow_colored.stdout), narrow_plain.stdout);
     assert_glyph_only_ansi(&narrow_colored.stdout);
     assert_max_display_width(&narrow_colored.stdout, 50, "colored codebase");
-    let plain = Invocation::new(["--all"]).run(repository.path());
-    let colored = Invocation::new(["--all"])
+    let plain = Invocation::new(["--all", "--history", "36500d"]).run(repository.path());
+    let colored = Invocation::new(["--all", "--history", "36500d"])
         .color("always")
         .run(repository.path());
     plain.success();
     colored.success();
     assert_eq!(strip_ansi(&colored.stdout), plain.stdout);
     assert_glyph_only_ansi(&colored.stdout);
-    let colored_diff = Invocation::new(["diff", "main", "--all"])
+    let colored_diff = Invocation::new(["diff", "main", "--all", "--history", "36500d"])
         .color("always")
         .run(repository.path());
     colored_diff.success();
@@ -391,11 +445,11 @@ fn terminal_width_color_and_path_drills_have_exact_public_bytes() {
     assert!(!colored_diff_text.contains("\u{1b}[31m"));
     assert!(!colored_diff_text.contains("\u{1b}[32m"));
     assert!(!colored_diff_text.contains("\u{1b}[38;5;208m"));
-    let redirected = Invocation::new(["--all"])
+    let redirected = Invocation::new(["--all", "--history", "36500d"])
         .automatic_color()
         .without_no_color()
         .run(repository.path());
-    let no_color = Invocation::new(["--all"])
+    let no_color = Invocation::new(["--all", "--history", "36500d"])
         .automatic_color()
         .run(repository.path());
     redirected.success();
@@ -407,12 +461,12 @@ fn terminal_width_color_and_path_drills_have_exact_public_bytes() {
 
     for (arguments, stem, wide_golden) in [
         (
-            vec!["a", "--all"],
+            vec!["a", "--all", "--history", "36500d"],
             "unified-package",
             "unified-package.terminal.txt",
         ),
         (
-            vec!["a/main.js", "--all"],
+            vec!["a/main.js", "--all", "--history", "36500d"],
             "unified-file",
             "unified-file.terminal.txt",
         ),
@@ -436,8 +490,14 @@ fn terminal_width_color_and_path_drills_have_exact_public_bytes() {
         }
     }
     for (arguments, golden) in [
-        (vec!["a", "--json"], "unified-package.json"),
-        (vec!["a/main.js", "--json"], "unified-file.json"),
+        (
+            vec!["a", "--json", "--history", "36500d"],
+            "unified-package.json",
+        ),
+        (
+            vec!["a/main.js", "--json", "--history", "36500d"],
+            "unified-file.json",
+        ),
     ] {
         let result = Invocation::new(arguments.clone()).run(repository.path());
         result.success();
@@ -515,9 +575,9 @@ fn assert_max_display_width(bytes: &[u8], width: usize, name: &str) {
 fn failures_and_recoverable_coverage_obey_status_and_stream_contracts() {
     let repository = coverage_failure_repository();
     let facts: Value = repository.facts("coverage-failures.json");
-    let success = Invocation::new(["--json"]).run(repository.path());
+    let success = Invocation::new(["--json", "--history", "36500d"]).run(repository.path());
     success.success();
-    let automatic_success = Invocation::new(["--json"])
+    let automatic_success = Invocation::new(["--json", "--history", "36500d"])
         .automatic_workers()
         .run(repository.path());
     assert_eq!(success, automatic_success);

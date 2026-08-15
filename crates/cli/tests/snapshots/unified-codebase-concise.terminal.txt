@@ -13,13 +13,13 @@ e              –   1
 FINDINGS
   b · function
         b/main.js:1
-        cognitive 6 · cyclomatic 4 · statements 2
+        cognitive 6 · cyclomatic 4 · statements 2 · 1 commit
   renamed · function
         e/new.js:1
         cognitive 3 · cyclomatic 3 · statements 2
   c · function
         c/main.js:2
-        statements 3
+        statements 3 · 1 commit
 
 ARCHITECTURE
  package dependency cycle

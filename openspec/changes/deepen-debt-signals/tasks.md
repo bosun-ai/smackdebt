@@ -1,8 +1,8 @@
 ## 1. History window governs history signals
 
-- [ ] 1.1 Apply the `--history` cutoff when history records become facts so churn, touches, coupling, and concentration all describe the same window.
-- [ ] 1.2 Expose the window length in days and the count of streamed commits excluded by the window in history coverage, counted separately from other exclusions.
-- [ ] 1.3 Add pure tests proving a windowed run and an unwindowed run differ in churn, coupling, and concentration and that coverage states the window.
+- [x] 1.1 Apply the `--history` cutoff when history records become facts so churn, touches, coupling, and concentration all describe the same window.
+- [x] 1.2 Expose the window length in days and the count of streamed commits excluded by the window in history coverage, counted separately from other exclusions.
+- [x] 1.3 Add pure tests proving a windowed run and an unwindowed run differ in churn, coupling, and concentration and that coverage states the window.
 
 ## 2. Hotspots and rank
 

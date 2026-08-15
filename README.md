@@ -291,7 +291,7 @@ stable stdout fragments that must appear in the stated order.
 
 <!-- smackdebt-example fixture=evolution status=0 stderr=empty stdout=QUALITY|HISTORY|_a_↔_b -->
 ```console
-smackdebt --color never --jobs 1
+smackdebt --color never --jobs 1 --history 36500d
 ```
 
 <!-- smackdebt-example fixture=worktree-change status=0 stderr=empty stdout=QUALITY|AREAS|FINDINGS|__b|ARCHITECTURE -->

@@ -15,11 +15,11 @@ use smackdebt_analysis::{
     DependencySyntax, DependencySyntaxState, Diagnostic, DiagnosticId, DiagnosticKind,
     EvolutionAccumulator, ExternalDependency, FileActivity, FileAnalysis, FileId, FileRecord,
     Finding, FindingId, HealthAssessment, HealthCounts, HealthPolicy, HistoryAvailability,
-    HistoryChangeFact, HistoryCommitFact, HistoryCoverage, Language, PackageContainment,
-    PackageEdge, PackageEdgeId, PackageGraphMeasurement, PackageId, PackageRecord, ParseStatus,
-    Rating, Report, ReportBuilder as AnalysisReportBuilder, ReportMode, ResolutionDiagnostic,
-    ResolutionIssueKind, Scope, ScopeId, ScopeKind, SourceCoverageOutcome, SourceRole, SourceTrust,
-    compare_architecture, compare_units, cycle_witness, dependency_degree,
+    HistoryChangeFact, HistoryCommitFact, HistoryCoverage, HistoryWindow, Language,
+    PackageContainment, PackageEdge, PackageEdgeId, PackageGraphMeasurement, PackageId,
+    PackageRecord, ParseStatus, Rating, Report, ReportBuilder as AnalysisReportBuilder, ReportMode,
+    ResolutionDiagnostic, ResolutionIssueKind, Scope, ScopeId, ScopeKind, SourceCoverageOutcome,
+    SourceRole, SourceTrust, compare_architecture, compare_units, cycle_witness, dependency_degree,
     strongly_connected_components,
 };
 use smackdebt_discovery::{DiscoveredFile, Inventory, generic_source_roles, glob_matches};
@@ -1431,13 +1431,19 @@ fn load_evolution(
     let mut excluded_changes = 0u32;
     let mut rename_gaps = 0u32;
     let mut streamed_commits = 0u32;
-    let cutoff = std::time::SystemTime::now()
+    let mut window_excluded_commits = 0u32;
+    let now = std::time::SystemTime::now()
         .duration_since(std::time::UNIX_EPOCH)
-        .map_or(i64::MIN, |duration| duration.as_secs() as i64)
-        .saturating_sub(i64::from(history_days) * 86_400);
+        .map_or(i64::MIN, |duration| duration.as_secs() as i64);
+    let window = HistoryWindow::of_days(history_days, now);
     let history = repository.stream_history(|commit| {
         streamed_commits += 1;
-        let contributes_activity = commit.timestamp() >= cutoff;
+        // The window is applied where streamed records become facts, so churn,
+        // touches, coupling, and concentration all describe the same commits.
+        if !window.includes(commit.timestamp()) {
+            window_excluded_commits += 1;
+            return Ok(());
+        }
         let next_contributor = ContributorId::from_index(contributors.len());
         let contributor = *contributors
             .entry(commit.contributor().clone())
@@ -1478,7 +1484,7 @@ fn load_evolution(
             } else {
                 uncounted_changes += 1;
             }
-            if contributes_activity && let Some(path) = file_paths.get(&file) {
+            if let Some(path) = file_paths.get(&file) {
                 *activity.entry(path.clone()).or_default() += 1;
             }
             if role.affects_verdict() && trust == SourceTrust::Trusted {
@@ -1523,7 +1529,8 @@ fn load_evolution(
                     summary
                         .is_shallow()
                         .then(|| "repository history is shallow".to_owned()),
-                ),
+                )
+                .with_window(window.days(), window_excluded_commits),
             },
             activity,
             processes: process_count,
@@ -1555,7 +1562,8 @@ fn load_evolution(
                         excluded_changes,
                         rename_gaps,
                         Some(reason.clone()),
-                    ),
+                    )
+                    .with_window(window.days(), window_excluded_commits),
                 },
                 activity,
                 processes: process_count,
@@ -3798,6 +3806,64 @@ mod tests {
             failed_history_availability(&smackdebt_git::GitError::EmptyHistory, 1),
             HistoryAvailability::Incomplete
         );
+    }
+
+    #[test]
+    fn the_history_window_excludes_older_commits_and_coverage_states_it() {
+        let root = tempfile::tempdir().unwrap();
+        let repository_path = root.path();
+        git(repository_path, ["init", "-q"]);
+        git(
+            repository_path,
+            ["config", "user.email", "test@example.invalid"],
+        );
+        git(repository_path, ["config", "user.name", "Smackdebt Test"]);
+        fs::write(repository_path.join("old.rs"), "pub fn old() {}\n").unwrap();
+        git(repository_path, ["add", "."]);
+        git(
+            repository_path,
+            [
+                "commit",
+                "-qm",
+                "old",
+                "--date",
+                "2001-02-03T04:05:06+00:00",
+            ],
+        );
+        fs::write(repository_path.join("recent.rs"), "pub fn recent() {}\n").unwrap();
+        git(repository_path, ["add", "."]);
+        git(repository_path, ["commit", "-qm", "recent"]);
+
+        let windowed = analyze_codebase(&CodebaseRequest::new(repository_path)).unwrap();
+        let coverage = windowed.report().history_coverage();
+        assert_eq!(coverage.window_days(), Some(90));
+        assert_eq!(coverage.commits(), 2);
+        assert_eq!(coverage.window_excluded_commits(), 1);
+        assert_eq!(coverage.eligible_commits(), 1);
+        let touches = |report: &Report, path: &str| {
+            let file = report
+                .files()
+                .iter()
+                .find(|file| file.path() == path)
+                .expect("selected file");
+            report
+                .file_history()
+                .iter()
+                .filter(|history| history.file() == file.id())
+                .map(|history| history.touches())
+                .sum::<u32>()
+        };
+        assert_eq!(touches(windowed.report(), "old.rs"), 0);
+        assert_eq!(touches(windowed.report(), "recent.rs"), 1);
+
+        let complete =
+            analyze_codebase(&CodebaseRequest::new(repository_path).with_history_days(36_500))
+                .unwrap();
+        let coverage = complete.report().history_coverage();
+        assert_eq!(coverage.window_days(), Some(36_500));
+        assert_eq!(coverage.window_excluded_commits(), 0);
+        assert_eq!(coverage.eligible_commits(), 2);
+        assert_eq!(touches(complete.report(), "old.rs"), 1);
     }
 
     #[test]

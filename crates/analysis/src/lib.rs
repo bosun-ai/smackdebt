@@ -11,6 +11,7 @@ mod dependency_degree;
 mod evolution;
 mod evolutionary_comparison;
 mod health;
+mod history_window;
 mod instability;
 mod report;
 mod source;
@@ -37,6 +38,7 @@ pub use evolution::{
     HistoryCommitFact, HistoryCoverage, PackageHistory,
 };
 pub use evolutionary_comparison::compare_evolution;
+pub use history_window::HistoryWindow;
 pub use instability::instability;
 pub use strongly_connected_components::strongly_connected_components;
 
