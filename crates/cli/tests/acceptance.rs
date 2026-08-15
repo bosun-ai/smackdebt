@@ -687,6 +687,19 @@ fn static_architecture_diff_snapshot_uses_unchanged_return_edges() {
             .any(|comparison| comparison["kind"] == "cycle_introduced"
                 && comparison["direction"] == "worse")
     );
+    // The contradiction case: no source comparison moved and the diff is
+    // still worse, because the new package cycle is the debt that moved.
+    assert!(report["comparisons"].as_array().unwrap().is_empty());
+    let text = String::from_utf8(terminal).unwrap();
+    assert!(text.contains("You made it worse."), "{text}");
+    assert!(
+        text.contains("worse 1 (architecture) · better 0 · changed 0"),
+        "{text}"
+    );
+    assert!(
+        text.contains("worse package dependency cycle introduced"),
+        "{text}"
+    );
 }
 
 #[test]
@@ -885,6 +898,14 @@ fn diff_uses_history_as_context_and_can_explain_coupling() {
         ["diff", "main", "--color", "never", "--history", "36500d"],
     ))
     .unwrap();
+    assert!(
+        default_terminal.contains("You made it better."),
+        "{default_terminal}"
+    );
+    assert!(
+        default_terminal.contains("worse 0 · better 1 (evolutionary) · changed 0"),
+        "{default_terminal}"
+    );
     assert!(default_terminal.contains("a ↔ b no longer change together without a code dependency"));
     let detailed_terminal = String::from_utf8(run_in(
         project.path(),

@@ -1,5 +1,5 @@
 smackdebt · repository root
-The code is winning.
+[31m▌[0m The code is winning.
 1 high · 2 watch · 6 checked
 worst: b/main.js — most complex
 
@@ -9,27 +9,23 @@ AREAS
   e · 1 watch
 
 FINDINGS
-high b · function
+[31m[0m high b · function
         b/main.js:1
-        cognitive 6
-        cyclomatic 4
-        statements 2
-        1 commit
-watch renamed · function
+        cognitive 6 · cyclomatic 4 · statements 2 · 1 commit
+[38;5;208m[0m watch renamed · function
         e/new.js:1
         cognitive 3 · cyclomatic 3 · statements 2
-watch c · function
+[38;5;208m[0m watch c · function
         c/main.js:2
         statements 3 · 1 commit
 
 ARCHITECTURE
-high package dependency cycle
+[31m[0m high package dependency cycle
         c/main.js
         → d/main.js
         → c/main.js
 
 HISTORY
-  h ↔ i changed together in 4 of 4 commits
-        100% · code dependency exists
+  h ↔ i changed together in 4 of 4 commits · 100% · code dependency exists
 
-next: smackdebt b
+[36m[0m next: smackdebt b

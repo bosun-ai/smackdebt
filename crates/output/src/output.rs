@@ -467,6 +467,9 @@ fn codebase_finding_rows(report: &Report, displayed: &Scope, all: bool) -> Secti
             .signals()
             .iter()
             .filter(|signal| signal.rating() != Rating::Healthy)
+            // Cyclomatic complexity starts at one, so a value of one states
+            // nothing and never reaches a reader.
+            .filter(|signal| signal.signal() != Signal::CyclomaticComplexity || signal.value() != 1)
             .map(|signal| format!("{} {}", signal_name(signal.signal()), signal.value()))
             .collect();
         if let Some(touches) = hotspot_touches(report, finding.file()) {

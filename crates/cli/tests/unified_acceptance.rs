@@ -458,8 +458,11 @@ fn terminal_width_color_and_path_drills_have_exact_public_bytes() {
         .run(repository.path());
     narrow_plain.success();
     narrow_colored.success();
-    assert_eq!(strip_ansi(&narrow_colored.stdout), narrow_plain.stdout);
-    assert_glyph_only_ansi(&narrow_colored.stdout);
+    assert_eq!(
+        strip_decorations(&strip_ansi(&narrow_colored.stdout)),
+        narrow_plain.stdout
+    );
+    assert_decoration_only_ansi(&narrow_colored.stdout);
     assert_max_display_width(&narrow_colored.stdout, 50, "colored codebase");
     let plain = Invocation::new(["--all", "--history", "36500d"]).run(repository.path());
     let colored = Invocation::new(["--all", "--history", "36500d"])
@@ -467,24 +470,34 @@ fn terminal_width_color_and_path_drills_have_exact_public_bytes() {
         .run(repository.path());
     plain.success();
     colored.success();
-    assert_eq!(strip_ansi(&colored.stdout), plain.stdout);
-    assert_glyph_only_ansi(&colored.stdout);
+    assert_golden("unified-codebase-decorated.terminal.txt", &colored.stdout);
+    // A pipe receives the same report stated in words alone.
+    assert_eq!(
+        strip_decorations(&strip_ansi(&colored.stdout)),
+        plain.stdout
+    );
+    assert_decoration_only_ansi(&colored.stdout);
     let colored_diff = Invocation::new(["diff", "main", "--all", "--history", "36500d"])
         .color("always")
         .run(repository.path());
     colored_diff.success();
-    assert_glyph_only_ansi(&colored_diff.stdout);
+    assert_decoration_only_ansi(&colored_diff.stdout);
     let colored_text = String::from_utf8_lossy(&colored.stdout);
     let colored_diff_text = String::from_utf8_lossy(&colored_diff.stdout);
-    for glyph in ['', '', ''] {
-        assert!(colored_text.contains(glyph));
+    // Every glyph decorates the word beside it and never replaces it.
+    for (glyph, word) in [('', "high"), ('', "watch"), ('', "next:")] {
+        assert!(
+            colored_text.contains(&format!("{glyph}\u{1b}[0m {word} ")),
+            "{word}: {colored_text}"
+        );
     }
-    for glyph in ['', '', ''] {
-        assert!(colored_diff_text.contains(glyph));
+    for (glyph, word) in [('', "worse"), ('', "better")] {
+        assert!(
+            colored_diff_text.contains(&format!("{glyph}\u{1b}[0m {word} ")),
+            "{word}: {colored_diff_text}"
+        );
     }
-    assert!(!colored_diff_text.contains("\u{1b}[31m"));
-    assert!(!colored_diff_text.contains("\u{1b}[32m"));
-    assert!(!colored_diff_text.contains("\u{1b}[38;5;208m"));
+    assert!(colored_text.contains('\u{258c}'), "{colored_text}");
     let redirected = Invocation::new(["--all", "--history", "36500d"])
         .automatic_color()
         .without_no_color()
@@ -594,7 +607,62 @@ fn every_fifty_column_snapshot_respects_unicode_display_width() {
         assert_max_display_width(&fs::read(entry.path()).unwrap(), 50, &name);
         checked += 1;
     }
-    assert_eq!(checked, 6, "expected every reviewed 50-column view");
+    assert_eq!(checked, 7, "expected every reviewed 50-column view");
+}
+
+#[test]
+fn every_piped_public_flow_is_words_only() {
+    let repository = worktree_change_repository();
+    for arguments in [
+        vec!["--history", "36500d"],
+        vec!["--all", "--history", "36500d"],
+        vec!["a", "--all", "--history", "36500d"],
+        vec!["a/main.js", "--all", "--history", "36500d"],
+        vec!["diff", "main", "--history", "36500d"],
+        vec!["diff", "main", "--all", "--history", "36500d"],
+        vec!["diff", "main", "b", "--all", "--history", "36500d"],
+    ] {
+        let result = Invocation::new(arguments.clone()).run(repository.path());
+        result.success();
+        assert_eq!(
+            private_use_codepoints(&result.stdout),
+            Vec::<char>::new(),
+            "{arguments:?}"
+        );
+        assert!(
+            !result.stdout.windows(2).any(|bytes| bytes == b"\x1b["),
+            "{arguments:?}"
+        );
+        let text = String::from_utf8(result.stdout).unwrap();
+        assert!(text.starts_with("smackdebt"), "{arguments:?}: {text}");
+        assert!(!text.contains('\u{258c}'), "{arguments:?}: {text}");
+        assert!(!text.contains('\u{2026}'), "{arguments:?}: {text}");
+    }
+}
+
+/// Every private-use codepoint, which may never reach a machine consumer.
+fn private_use_codepoints(bytes: &[u8]) -> Vec<char> {
+    String::from_utf8_lossy(bytes)
+        .chars()
+        .filter(|character| ('\u{e000}'..='\u{f8ff}').contains(character))
+        .collect()
+}
+
+/// Removes each decoration and the one space separating it from its word.
+fn strip_decorations(bytes: &[u8]) -> Vec<u8> {
+    let text = String::from_utf8_lossy(bytes);
+    let mut result = String::new();
+    let mut characters = text.chars().peekable();
+    while let Some(character) = characters.next() {
+        if ('\u{e000}'..='\u{f8ff}').contains(&character) || character == '\u{258c}' {
+            if characters.peek() == Some(&' ') {
+                characters.next();
+            }
+            continue;
+        }
+        result.push(character);
+    }
+    result.into_bytes()
 }
 
 fn assert_max_display_width(bytes: &[u8], width: usize, name: &str) {
@@ -675,6 +743,37 @@ fn failures_and_recoverable_coverage_obey_status_and_stream_contracts() {
     assert_eq!(bad_ref.stderr_text(), facts["expected_invalid_ref_stderr"]);
     assert_short_terminal_text(&bad_ref.stderr);
 
+    let missing_path = Invocation::new(["does/not/exist"]).run(repository.path());
+    assert_eq!(
+        missing_path.status.code(),
+        facts["expected_missing_path_exit"]
+            .as_i64()
+            .map(|v| v as i32)
+    );
+    assert!(missing_path.stdout.is_empty());
+    assert_eq!(
+        missing_path.stderr_text(),
+        facts["expected_missing_path_stderr"]
+    );
+    assert_short_terminal_text(&missing_path.stderr);
+
+    let all_json = Invocation::new(["--all", "--json"]).run(repository.path());
+    assert_eq!(
+        all_json.status.code(),
+        facts["expected_all_json_exit"].as_i64().map(|v| v as i32)
+    );
+    assert!(all_json.stdout.is_empty());
+    assert_eq!(all_json.stderr_text(), facts["expected_all_json_stderr"]);
+    assert_short_terminal_text(&all_json.stderr);
+
+    let diff_all_json = Invocation::new(["diff", "main", "--all", "--json"]).run(repository.path());
+    assert_eq!(diff_all_json.status.code(), Some(2));
+    assert!(diff_all_json.stdout.is_empty());
+    assert_eq!(
+        diff_all_json.stderr_text(),
+        facts["expected_all_json_stderr"]
+    );
+
     let bad_argument = Invocation::new(["--jobs", "0"]).run(repository.path());
     assert_eq!(
         bad_argument.status.code(),
@@ -718,6 +817,80 @@ fn failures_and_recoverable_coverage_obey_status_and_stream_contracts() {
         facts["expected_outside_git_diff_stderr"]
     );
     assert_short_terminal_text(&diff.stderr);
+}
+
+#[test]
+fn every_codebase_tier_states_its_own_sentence_and_counts() {
+    // One generated repository per reachable tier, so the frozen sentences are
+    // proven from public bytes rather than from analysis unit tests.
+    let empty = GeneratedRepository::new("main");
+    empty.write("notes.txt", b"nothing to check\n");
+    let clean = GeneratedRepository::new("main");
+    clean.write("main.js", b"export function small() { return 1; }\n");
+    let solid = GeneratedRepository::new("main");
+    solid.write("main.js", watch_source(1).as_bytes());
+    let worn = GeneratedRepository::new("main");
+    worn.write("main.js", &mixed_source(1, 200));
+    let fights_back = GeneratedRepository::new("main");
+    fights_back.write("main.js", &mixed_source(1, 60));
+    let lost = GeneratedRepository::new("main");
+    lost.write("main.js", &mixed_source(1, 4));
+
+    for (repository, tier, sentence) in [
+        (&empty, "empty", "Nothing was checked."),
+        (&clean, "clean", "Clean. Ship it."),
+        (&solid, "solid", "Solid, with rough edges."),
+        (&worn, "worn", "Worn in the usual places."),
+        (&fights_back, "fights_back", "This code fights back."),
+        (&lost, "lost", "The code is winning."),
+    ] {
+        let result = Invocation::new(["--history", "36500d"]).run(repository.path());
+        result.success();
+        let text = String::from_utf8(result.stdout).unwrap();
+        let mut lines = text.lines();
+        assert_eq!(lines.next(), Some("smackdebt · repository root"), "{tier}");
+        assert_eq!(lines.next(), Some(sentence), "{tier}: {text}");
+        let counts = lines.next().unwrap_or_default();
+        assert!(
+            counts.contains(" high · ")
+                && counts.contains(" watch · ")
+                && counts.ends_with(" checked"),
+            "{tier}: {counts}"
+        );
+    }
+}
+
+/// Source with `high` units and enough healthy units to place the High share
+/// in the requested tier band.
+fn mixed_source(high: usize, healthy: usize) -> Vec<u8> {
+    let mut source = String::new();
+    for index in 0..high {
+        source.push_str(&high_source(index));
+    }
+    for index in 0..healthy {
+        source.push_str(&format!(
+            "export function healthy{index}() {{ return {index}; }}\n"
+        ));
+    }
+    source.into_bytes()
+}
+
+fn high_source(index: usize) -> String {
+    let mut source = format!("export function heavy{index}(input) {{\n");
+    for depth in 0..26 {
+        source.push_str(&format!("  if (input > {depth}) {{ input += {depth}; }}\n"));
+    }
+    source.push_str("  return input;\n}\n");
+    source
+}
+
+fn watch_source(index: usize) -> String {
+    let mut source = format!("export function moderate{index}(input) {{\n");
+    for depth in 0..16 {
+        source.push_str(&format!("  if (input > {depth}) {{ input += {depth}; }}\n"));
+    }
+    source.push_str("  return input;\n}\n");
+    source
 }
 
 #[test]
@@ -826,24 +999,38 @@ fn readme_console_examples_use_the_simple_terminal_vocabulary() {
     }
     assert!(!inside, "README console block is not closed");
     for required in [
-        "QUALITY",
         "AREAS",
         "FINDINGS",
         "ARCHITECTURE",
+        "HISTORY",
+        "WARNINGS",
         "changed together in 8 of 10 commits · 80% · no code dependency",
         "source → target · 1 import",
         "source owns target",
-        "label activity as `commit` or `commits`",
-        " smackdebt",
+        "one contributor made 34 of 36 commits to crates/api",
+        "instability 1/4 → 2/3",
+        "hot (14 commits)",
+        "GraphEditor.vue · closure",
+        "next: smackdebt crates/api",
+        "worse 0 · better 0 · changed 0",
+        "smackdebt: path not found: does/not/exist",
+        "smackdebt: Git ref not found: no-such-ref",
+        "smackdebt: --all cannot be used with --json",
+        "U+E000–U+F8FF",
+        "`fights_back`",
+        "`no_debt_change`",
     ] {
         assert!(readme.contains(required), "README is missing {required}");
     }
     for removed in [
+        "QUALITY",
         "change together without a dependency",
         "touches count distinct commits",
         "external uses · primary/trusted",
         "unresolved uses · primary/trusted",
         "coupling finding",
+        "ASCII fallback",
+        "rated units ·",
     ] {
         assert!(!readme.contains(removed), "README contains {removed}");
     }
@@ -1590,7 +1777,13 @@ fn assert_short_terminal_text(bytes: &[u8]) {
         "CHANGE BY AREA",
         "TOP FINDINGS",
         "TOP CHANGES",
+        "QUALITY",
         "\u{ec3f}",
+        // Generated internal identities and ellipsis truncation are gone.
+        "<closure ",
+        "<lambda ",
+        "\u{2026}",
+        "No changes",
     ] {
         assert!(
             !text.contains(removed),
@@ -1623,7 +1816,9 @@ fn strip_ansi(value: &[u8]) -> Vec<u8> {
     result
 }
 
-fn assert_glyph_only_ansi(value: &[u8]) {
+/// Styling reaches decoration only: a glyph or the tier bar, always followed
+/// by its word, and always reset immediately.
+fn assert_decoration_only_ansi(value: &[u8]) {
     let text = std::str::from_utf8(value).unwrap();
     let mut remainder = text;
     while let Some(start) = remainder.find("\x1b[") {
@@ -1631,29 +1826,33 @@ fn assert_glyph_only_ansi(value: &[u8]) {
         let style_end = remainder.find('m').expect("ANSI style terminator") + 1;
         let style = &remainder[..style_end];
         remainder = &remainder[style_end..];
-        let glyph = remainder.chars().next().expect("styled glyph");
-        assert!(
-            [
-                '\u{f024}', '\u{f0eb}', '\u{f46b}', '\u{f062}', '\u{f063}', '\u{f071}'
-            ]
-            .contains(&glyph),
-            "styled non-status text {glyph:?}"
-        );
-        let expected_style = match glyph {
-            '' | '' => "\u{1b}[31m",
-            '' | '' => "\u{1b}[38;5;208m",
-            '' => "\u{1b}[36m",
-            '' => "\u{1b}[32m",
-            _ => unreachable!(),
+        let decoration = remainder.chars().next().expect("styled decoration");
+        let expected_style = match decoration {
+            '\u{f024}' | '\u{f062}' => "\u{1b}[31m",
+            '\u{f0eb}' | '\u{f071}' => "\u{1b}[38;5;208m",
+            '\u{f46b}' => "\u{1b}[36m",
+            '\u{f063}' => "\u{1b}[32m",
+            // The verdict bar carries its tier color.
+            '\u{258c}' => style,
+            other => panic!("styled non-decoration text {other:?}"),
         };
-        assert_eq!(style, expected_style, "wrong style for {glyph:?}");
-        remainder = &remainder[glyph.len_utf8()..];
+        assert_eq!(style, expected_style, "wrong style for {decoration:?}");
+        remainder = &remainder[decoration.len_utf8()..];
         assert!(
             remainder.starts_with("\x1b["),
-            "glyph style was not reset immediately"
+            "decoration style was not reset immediately"
         );
         let reset_end = remainder.find('m').expect("ANSI reset terminator") + 1;
         remainder = &remainder[reset_end..];
+        // The word the decoration decorates follows it directly.
+        assert!(
+            remainder.starts_with(' ')
+                && remainder[1..]
+                    .chars()
+                    .next()
+                    .is_some_and(|next| next.is_ascii_uppercase() || next.is_ascii_lowercase()),
+            "decoration is not adjacent to a word: {remainder:.20}"
+        );
     }
 }
 

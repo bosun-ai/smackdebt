@@ -1,28 +1,28 @@
-smackdebt codebase
-repository root
-
-QUALITY
-6 rated units · 3 need attention
- 1 ·  2
+smackdebt · repository root
+The code is winning.
+1 high · 2 watch · 6 checked
+worst: b/main.js — most complex
 
 AREAS
-b              1   –
-c              –   1
-e              –   1
+  b · 1 high
+  c · 1 watch
+  e · 1 watch
 
 FINDINGS
-  b · function
+high b · function
         b/main.js:1
         cognitive 6 · cyclomatic 4 · statements 2 · 1 commit
-  renamed · function
+watch renamed · function
         e/new.js:1
         cognitive 3 · cyclomatic 3 · statements 2
-  c · function
+watch c · function
         c/main.js:2
         statements 3 · 1 commit
 
 ARCHITECTURE
- package dependency cycle
-        c/main.js → d/main.js → c/main.js
+high package dependency cycle
+        c/main.js
+        → d/main.js
+        → c/main.js
 
- smackdebt b
+next: smackdebt b

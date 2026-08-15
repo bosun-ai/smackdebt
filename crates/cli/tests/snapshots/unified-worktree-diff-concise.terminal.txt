@@ -1,32 +1,35 @@
-smackdebt diff
-repository root
-
-QUALITY
- 2 ·  1 ·  4
+smackdebt diff · repository root
+Better here, worse there.
+worse 3 (source, architecture) · better 3 (source, architecture, evolutionary) · changed 1 (source)
+worst: c/main.js — package dependency cycle
 
 AREAS
-e              1   –   1
-b              1   –   –
-a              –   1   –
-c              –   –   1
-f              –   –   1
+  b · worse 1 · better 1
+  c · worse 1 · changed 1
+  d · worse 1
+  e · worse 1
+  a · better 2
 
 FINDINGS
-  b
-        b/main.js
+worse b · function
+        b/main.js:1
         cognitive 1 → 6 · cyclomatic 2 → 4 · statements 1 → 2
-  renamed
-        e/new.js
+worse renamed · function
+        e/new.js:1
         added
-  a
-        a/main.js
+better a · function
+        a/main.js:2
         cognitive 3 → 0 · cyclomatic 3 → 1 · statements 2 → 1
 
 ARCHITECTURE
- package cycle introduced
-        c → d → c
- package cycle removed
-        a → b → a
+worse package dependency cycle introduced
+        c
+        → d
+        → c
+better package dependency cycle removed
+        a
+        → b
+        → a
 
 HISTORY
- h ↔ i no longer change together without a code dependency
+better h ↔ i no longer change together without a code dependency

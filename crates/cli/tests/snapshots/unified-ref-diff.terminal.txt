@@ -1,95 +1,44 @@
-smackdebt diff
-repository root
-
-QUALITY
- 2 ·  1 ·  4
+smackdebt diff · repository root
+Better here, worse there.
+worse 3 (source, architecture) · better 3 (source, architecture, evolutionary) · changed 1 (source)
+worst: c/main.js — package dependency cycle
 
 AREAS
-e              1   –   1
-b              1   –   –
-a              –   1   –
-c              –   –   1
-f              –   –   1
-new            –   –   1
+  b · worse 1 · better 1
+  c · worse 1 · changed 1
+  d · worse 1
+  e · worse 1
+  a · better 2
 
 FINDINGS
-  b
-        b/main.js
+worse b · function
+        b/main.js:1
         cognitive 1 → 6 · cyclomatic 2 → 4 · statements 1 → 2
-  renamed
-        e/new.js
+worse renamed · function
+        e/new.js:1
         added
-  a
-        a/main.js
+better a · function
+        a/main.js:2
         cognitive 3 → 0 · cyclomatic 3 → 1 · statements 2 → 1
-  c
-        c/main.js
+changed c · function
+        c/main.js:2
         statements 2 → 3
-  removed
-        f/deleted.js
-        removed
-  renamed
-        e/old.js
-        removed
-  untracked
-        new/untracked.js
-        added
 
 ARCHITECTURE
- package cycle introduced
-        c → d → c
- package cycle removed
-        a → b → a
- a/main.js → b/main.js · removed
- a/main.js → c/main.js · added
- b/main.js → a/main.js · removed
- d/main.js → c/main.js · added
- h/main.js → i/main.js · added
-  a/main.js → c/main.js · 1 import
-  c/main.js → d/main.js · 1 import
-  d/main.js → c/main.js · 1 import
-  h/main.js → i/main.js · 1 import
+worse package dependency cycle introduced
+        c
+        → d
+        → c
+better package dependency cycle removed
+        a
+        → b
+        → a
+changed a/main.js → b/main.js · removed
+changed a/main.js → c/main.js · added
+changed b/main.js → a/main.js · removed
+changed d/main.js → c/main.js · added
+changed h/main.js → i/main.js · added
 
 HISTORY
-  a ↔ b changed together in 2 of 2 commits · 100% · no code dependency
-  a ↔ c changed together in 2 of 2 commits · 100% · code dependency exists
-  a ↔ d changed together in 2 of 2 commits · 100% · no code dependency
-  a ↔ e changed together in 2 of 2 commits · 100% · no code dependency
-  a ↔ f changed together in 2 of 2 commits · 100% · no code dependency
-  a ↔ h changed together in 2 of 5 commits · 40% · no code dependency
-  b ↔ c changed together in 2 of 2 commits · 100% · no code dependency
-  b ↔ d changed together in 2 of 2 commits · 100% · no code dependency
-  b ↔ e changed together in 2 of 2 commits · 100% · no code dependency
-  b ↔ f changed together in 2 of 2 commits · 100% · no code dependency
-  b ↔ h changed together in 2 of 5 commits · 40% · no code dependency
-  c ↔ d changed together in 2 of 2 commits · 100% · code dependency exists
-  c ↔ e changed together in 2 of 2 commits · 100% · no code dependency
-  c ↔ f changed together in 2 of 2 commits · 100% · no code dependency
-  c ↔ h changed together in 2 of 5 commits · 40% · no code dependency
-  d ↔ e changed together in 2 of 2 commits · 100% · no code dependency
-  d ↔ f changed together in 2 of 2 commits · 100% · no code dependency
-  d ↔ h changed together in 2 of 5 commits · 40% · no code dependency
-  e ↔ f changed together in 2 of 2 commits · 100% · no code dependency
-  e ↔ h changed together in 2 of 5 commits · 40% · no code dependency
-  f ↔ h changed together in 2 of 5 commits · 40% · no code dependency
   h ↔ i changed together in 4 of 5 commits · 80% · code dependency exists
-  h · 5 commits · +6 -4
-  i · 4 commits · +4 -3
-  a · 2 commits · +9 -7
-  b · 2 commits · +10 -2
-  c · 2 commits · +3 -1
-  d · 2 commits · +3 -1
-  e · 2 commits · +2 -1
-  f · 2 commits · +1 -1
-  new · 1 commit · +1 -0
-  h/main.js · 5 commits · +6 -4
-  i/main.js · 4 commits · +4 -3
-  a/main.js · 2 commits · +9 -7
-  b/main.js · 2 commits · +10 -2
-  c/main.js · 2 commits · +3 -1
-  d/main.js · 2 commits · +3 -1
-  e/old.js · 2 commits · +1 -1
-  f/deleted.js · 2 commits · +1 -1
-  e/new.js · 1 commit · +1 -0
-  new/untracked.js · 1 commit · +1 -0
- h ↔ i no longer change together without a code dependency
+better h ↔ i no longer change together without a code dependency
