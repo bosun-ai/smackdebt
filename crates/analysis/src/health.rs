@@ -1,9 +1,16 @@
-/// The three measurements retained by the product policy.
+/// The measurements retained for one unit.
+///
+/// Cognitive complexity, cyclomatic complexity, and exclusive logical lines are
+/// the rated measurements. Maximum nesting depth and parameter count are
+/// collected and exposed without being rated; `adopt-report-schema-v4` owns
+/// their promotion, so nothing here may read them as a signal.
 #[derive(Clone, Copy, Debug, Default, Eq, Hash, Ord, PartialEq, PartialOrd)]
 pub struct Measurements {
     cognitive_complexity: u32,
     cyclomatic_complexity: u32,
     logical_lines: u32,
+    max_nesting: u32,
+    parameter_count: u32,
 }
 
 impl Measurements {
@@ -16,7 +23,35 @@ impl Measurements {
             cognitive_complexity,
             cyclomatic_complexity,
             logical_lines,
+            max_nesting: 0,
+            parameter_count: 0,
         }
+    }
+
+    /// Adds the collected shape measurements to the rated measurements.
+    pub const fn with_shape(mut self, max_nesting: u32, parameter_count: u32) -> Self {
+        self.max_nesting = max_nesting;
+        self.parameter_count = parameter_count;
+        self
+    }
+
+    /// The deepest nesting level reached inside this unit.
+    pub const fn max_nesting(self) -> u32 {
+        self.max_nesting
+    }
+
+    /// The number of parameters this unit declares.
+    pub const fn parameter_count(self) -> u32 {
+        self.parameter_count
+    }
+
+    /// The three rated measurements, in policy order.
+    pub const fn rated(self) -> (u32, u32, u32) {
+        (
+            self.cognitive_complexity,
+            self.cyclomatic_complexity,
+            self.logical_lines,
+        )
     }
 
     pub const fn cognitive_complexity(self) -> u32 {

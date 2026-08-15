@@ -26,10 +26,10 @@
 
 ## 5. Measurements
 
-- [ ] 5.1 Expose maximum nesting depth per rated unit from the existing nesting events, counted from zero at the unit body.
-- [ ] 5.2 Add parameter count per rated unit through the shared language contract with a default for languages without parameters.
-- [ ] 5.3 Keep both measurements collected and unrated in this change and record the promotion as owned by `adopt-report-schema-v4`.
-- [ ] 5.4 Add exact fixtures for both measurements in all 11 supported grammars, including Vue script, script-setup, and template regions.
+- [x] 5.1 Expose maximum nesting depth per rated unit from the existing nesting events, counted from zero at the unit body.
+- [x] 5.2 Add parameter count per rated unit through the shared language contract with a default for languages without parameters.
+- [x] 5.3 Keep both measurements collected and unrated in this change and record the promotion as owned by `adopt-report-schema-v4`.
+- [x] 5.4 Add exact fixtures for both measurements in all 11 supported grammars, including Vue script, script-setup, and template regions.
 - [ ] 5.5 Add file size rating against 400 Watch and 800 High and container size rating against 300 Watch and 600 High on exclusive statement totals, both configurable.
 - [ ] 5.6 Add pure threshold-boundary tests for both size signals.
 

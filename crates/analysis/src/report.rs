@@ -1154,6 +1154,27 @@ mod tests {
     }
 
     #[test]
+    fn collected_shape_measurements_are_exposed_without_changing_a_rating() {
+        let policy = HealthPolicy::default();
+        let flat = Measurements::new(15, 2, 120);
+        let shaped = flat.with_shape(7, 4);
+        assert_eq!(shaped.max_nesting(), 7);
+        assert_eq!(shaped.parameter_count(), 4);
+        assert_eq!(Measurements::new(1, 1, 1).max_nesting(), 0);
+        assert_eq!(Measurements::new(1, 1, 1).parameter_count(), 0);
+        assert_eq!(policy.assess(shaped), policy.assess(flat));
+        assert_eq!(shaped.rated(), flat.rated());
+    }
+
+    #[test]
+    fn only_rated_measurements_classify_a_unit_comparison() {
+        let before = [unit("same", Measurements::new(2, 1, 1).with_shape(1, 1))];
+        let after = [unit("same", Measurements::new(2, 1, 1).with_shape(6, 4))];
+        let comparisons = compare_units(&before, &after, HealthPolicy::default());
+        assert_eq!(comparisons[0].kind(), ComparisonKind::Unchanged);
+    }
+
+    #[test]
     fn default_policy_has_documented_limits() {
         let policy = HealthPolicy::default();
         assert_eq!(policy.cognitive(), Thresholds::new(15, 25));

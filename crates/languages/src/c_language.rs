@@ -2,7 +2,7 @@ use smackdebt_analysis::{DependencySyntax, Language as ReportLanguage, UnitKind}
 use tree_sitter::{Language as Grammar, Node};
 
 use crate::language::Language;
-use crate::language_common::{boolean_syntax, statement};
+use crate::language_common::{boolean_syntax, declarator_parameter_count, statement};
 use crate::semantic::Syntax;
 
 pub(crate) struct C;
@@ -28,6 +28,10 @@ impl Language for C {
 
     fn is_container(_node: Node<'_>) -> bool {
         false
+    }
+
+    fn parameter_count(node: Node<'_>, _source: &[u8]) -> u32 {
+        declarator_parameter_count(node)
     }
 
     fn name(node: Node<'_>, source: &[u8]) -> String {

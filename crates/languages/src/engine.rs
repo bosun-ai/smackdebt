@@ -294,7 +294,7 @@ fn measure<L: Language>(root: Node<'_>, source: &[u8], scratch: &mut Scratch) ->
     for observation in scratch.observations.iter().copied() {
         metrics.observe(observation.syntax, observation.nesting);
     }
-    metrics.finish()
+    metrics.finish(L::parameter_count(root, source))
 }
 
 #[derive(Default)]
@@ -302,6 +302,7 @@ pub(super) struct MetricState {
     cognitive: CognitiveComplexity,
     cyclomatic: CyclomaticComplexity,
     logical: LogicalLines,
+    max_nesting: u32,
 }
 
 impl MetricState {
@@ -313,14 +314,21 @@ impl MetricState {
         self.cognitive.observe(syntax.secondary_cognitive, nesting);
         self.cyclomatic.observe(syntax.decision);
         self.logical.observe(syntax.logical_statement);
+        // Depth starts at zero at the unit body and grows through the same
+        // nesting events cognitive complexity already uses.
+        let depth = nesting + u32::from(syntax.nests);
+        if depth > self.max_nesting {
+            self.max_nesting = depth;
+        }
     }
 
-    pub(super) fn finish(self) -> Measurements {
+    pub(super) fn finish(self, parameter_count: u32) -> Measurements {
         Measurements::new(
             self.cognitive.finish(),
             self.cyclomatic.finish(),
             self.logical.finish(),
         )
+        .with_shape(self.max_nesting, parameter_count)
     }
 }
 
@@ -390,5 +398,43 @@ mod tests {
         assert!(scratch.observations.capacity() >= observation_capacity);
         assert!(scratch.unit_drafts.capacity() >= result_capacity);
         assert!(!scratch.nesting_by_depth.is_empty());
+    }
+
+    fn shapes(source: &str) -> Vec<(u32, u32)> {
+        let mut parser = Parser::new();
+        let mut scratch = Scratch::default();
+        analyze::<Rust>(&mut parser, source.as_bytes(), &mut scratch)
+            .unwrap()
+            .units()
+            .iter()
+            .map(|unit| {
+                (
+                    unit.measurements().max_nesting(),
+                    unit.measurements().parameter_count(),
+                )
+            })
+            .collect()
+    }
+
+    #[test]
+    fn maximum_nesting_counts_the_deepest_entered_nesting_events() {
+        assert_eq!(
+            shapes("fn work(a: i32) { if a > 0 { while a > 1 { for _ in 0..a {} } } }"),
+            [(3, 1)]
+        );
+    }
+
+    #[test]
+    fn a_flat_unit_reports_no_nesting_and_its_declared_parameters() {
+        assert_eq!(shapes("fn work(a: i32, b: i32) -> i32 { a + b }"), [(0, 2)]);
+        assert_eq!(shapes("fn work() {}"), [(0, 0)]);
+    }
+
+    #[test]
+    fn a_separately_rated_closure_keeps_its_own_depth_out_of_its_parent() {
+        assert_eq!(
+            shapes("fn work(a: i32) { let deep = |b: i32| if b > 0 { while b > 1 {} }; }"),
+            [(0, 1), (2, 1)]
+        );
     }
 }

@@ -242,7 +242,8 @@ fn template_measurements(
     if let Some(message) = expression_error {
         Err(message)
     } else {
-        Ok(metrics.finish())
+        // A template unit cannot declare parameters.
+        Ok(metrics.finish(0))
     }
 }
 

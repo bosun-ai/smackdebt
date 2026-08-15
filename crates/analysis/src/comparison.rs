@@ -163,7 +163,12 @@ pub fn compare_units(
                 let kind = match left_assessment.rating().cmp(&right_assessment.rating()) {
                     Ordering::Less => ComparisonKind::Regressed,
                     Ordering::Greater => ComparisonKind::Improved,
-                    Ordering::Equal if left_unit.measurements() != right_unit.measurements() => {
+                    // Only the rated measurements classify a change, so an
+                    // unrated collected value never invents a diff outcome.
+                    Ordering::Equal
+                        if left_unit.measurements().rated()
+                            != right_unit.measurements().rated() =>
+                    {
                         ComparisonKind::MetricChanged
                     }
                     Ordering::Equal => ComparisonKind::Unchanged,

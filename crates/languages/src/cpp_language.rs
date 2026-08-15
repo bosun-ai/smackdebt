@@ -3,6 +3,7 @@ use tree_sitter::{Language as Grammar, Node};
 
 use crate::c_language::{c_syntax, declarator_name};
 use crate::language::{Language, node_name};
+use crate::language_common::declarator_parameter_count;
 use crate::semantic::Syntax;
 
 pub(crate) struct Cpp;
@@ -27,6 +28,10 @@ impl Language for Cpp {
                     || line.contains("automatically generated")
             })
         })
+    }
+
+    fn parameter_count(node: Node<'_>, _source: &[u8]) -> u32 {
+        declarator_parameter_count(node)
     }
 
     fn unit_kind(node: Node<'_>) -> Option<UnitKind> {

@@ -23,6 +23,8 @@ struct ExpectedUnit<'a> {
     cognitive: u32,
     cyclomatic: u32,
     logical: u32,
+    nesting: u32,
+    parameters: u32,
 }
 
 #[test]
@@ -42,6 +44,8 @@ fn every_supported_language_has_a_complete_ordered_truth_fixture() {
                 9,
                 8,
                 6,
+                2,
+                3,
             )],
         ),
         file(
@@ -49,7 +53,19 @@ fn every_supported_language_has_a_complete_ordered_truth_fixture() {
             include_bytes!("fixtures/cpp.cpp"),
             Language::Cpp,
             &[
-                unit("run", Some("Worker"), UnitKind::Method, None, 4, 8, 1, 2, 3),
+                unit(
+                    "run",
+                    Some("Worker"),
+                    UnitKind::Method,
+                    None,
+                    4,
+                    8,
+                    1,
+                    2,
+                    3,
+                    1,
+                    1,
+                ),
                 unit(
                     "<lambda 5>",
                     Some("Worker"),
@@ -59,6 +75,8 @@ fn every_supported_language_has_a_complete_ordered_truth_fixture() {
                     5,
                     2,
                     3,
+                    1,
+                    1,
                     1,
                 ),
             ],
@@ -78,6 +96,8 @@ fn every_supported_language_has_a_complete_ordered_truth_fixture() {
                     1,
                     2,
                     1,
+                    1,
+                    1,
                 ),
                 unit(
                     "run",
@@ -89,6 +109,8 @@ fn every_supported_language_has_a_complete_ordered_truth_fixture() {
                     4,
                     4,
                     5,
+                    1,
+                    1,
                 ),
                 unit(
                     "<lambda 4>",
@@ -100,6 +122,8 @@ fn every_supported_language_has_a_complete_ordered_truth_fixture() {
                     1,
                     2,
                     0,
+                    1,
+                    1,
                 ),
             ],
         ),
@@ -118,8 +142,22 @@ fn every_supported_language_has_a_complete_ordered_truth_fixture() {
                     1,
                     2,
                     0,
+                    0,
+                    1,
                 ),
-                unit("run", Some("Worker"), UnitKind::Method, None, 3, 7, 2, 3, 3),
+                unit(
+                    "run",
+                    Some("Worker"),
+                    UnitKind::Method,
+                    None,
+                    3,
+                    7,
+                    2,
+                    3,
+                    3,
+                    1,
+                    1,
+                ),
             ],
         ),
         file(
@@ -137,6 +175,8 @@ fn every_supported_language_has_a_complete_ordered_truth_fixture() {
                     1,
                     2,
                     2,
+                    0,
+                    0,
                 ),
                 unit(
                     "select",
@@ -148,6 +188,8 @@ fn every_supported_language_has_a_complete_ordered_truth_fixture() {
                     1,
                     2,
                     0,
+                    1,
+                    1,
                 ),
             ],
         ),
@@ -156,7 +198,19 @@ fn every_supported_language_has_a_complete_ordered_truth_fixture() {
             include_bytes!("fixtures/python.py"),
             Language::Python,
             &[
-                unit("outer", None, UnitKind::Function, None, 1, 12, 0, 1, 2),
+                unit(
+                    "outer",
+                    None,
+                    UnitKind::Function,
+                    None,
+                    1,
+                    12,
+                    0,
+                    1,
+                    2,
+                    0,
+                    1,
+                ),
                 unit(
                     "inner",
                     Some("outer"),
@@ -167,6 +221,8 @@ fn every_supported_language_has_a_complete_ordered_truth_fixture() {
                     4,
                     5,
                     4,
+                    1,
+                    1,
                 ),
                 unit(
                     "<lambda 11>",
@@ -178,6 +234,8 @@ fn every_supported_language_has_a_complete_ordered_truth_fixture() {
                     1,
                     2,
                     0,
+                    1,
+                    1,
                 ),
             ],
         ),
@@ -186,7 +244,19 @@ fn every_supported_language_has_a_complete_ordered_truth_fixture() {
             include_bytes!("fixtures/rust.rs"),
             Language::Rust,
             &[
-                unit("run", Some("Work"), UnitKind::Method, None, 2, 2, 0, 1, 0),
+                unit(
+                    "run",
+                    Some("Work"),
+                    UnitKind::Method,
+                    None,
+                    2,
+                    2,
+                    0,
+                    1,
+                    0,
+                    0,
+                    2,
+                ),
                 unit(
                     "run",
                     Some("Worker"),
@@ -197,6 +267,8 @@ fn every_supported_language_has_a_complete_ordered_truth_fixture() {
                     7,
                     4,
                     3,
+                    2,
+                    2,
                 ),
                 unit(
                     "<closure 7>",
@@ -208,6 +280,8 @@ fn every_supported_language_has_a_complete_ordered_truth_fixture() {
                     2,
                     2,
                     0,
+                    1,
+                    1,
                 ),
             ],
         ),
@@ -226,8 +300,22 @@ fn every_supported_language_has_a_complete_ordered_truth_fixture() {
                     1,
                     2,
                     0,
+                    1,
+                    1,
                 ),
-                unit("run", Some("Worker"), UnitKind::Method, None, 3, 6, 1, 2, 2),
+                unit(
+                    "run",
+                    Some("Worker"),
+                    UnitKind::Method,
+                    None,
+                    3,
+                    6,
+                    1,
+                    2,
+                    2,
+                    1,
+                    1,
+                ),
             ],
         ),
         file(
@@ -245,6 +333,8 @@ fn every_supported_language_has_a_complete_ordered_truth_fixture() {
                     1,
                     2,
                     2,
+                    0,
+                    0,
                 ),
                 unit(
                     "select",
@@ -256,6 +346,8 @@ fn every_supported_language_has_a_complete_ordered_truth_fixture() {
                     1,
                     2,
                     0,
+                    1,
+                    1,
                 ),
             ],
         ),
@@ -264,7 +356,19 @@ fn every_supported_language_has_a_complete_ordered_truth_fixture() {
             include_bytes!("fixtures/ruby.rb"),
             Language::Ruby,
             &[
-                unit("run", Some("Worker"), UnitKind::Method, None, 3, 9, 0, 1, 2),
+                unit(
+                    "run",
+                    Some("Worker"),
+                    UnitKind::Method,
+                    None,
+                    3,
+                    9,
+                    0,
+                    1,
+                    2,
+                    0,
+                    1,
+                ),
                 unit(
                     "<lambda 4>",
                     Some("Worker"),
@@ -275,6 +379,8 @@ fn every_supported_language_has_a_complete_ordered_truth_fixture() {
                     3,
                     4,
                     2,
+                    1,
+                    1,
                 ),
                 unit(
                     "<closure 5>",
@@ -286,6 +392,8 @@ fn every_supported_language_has_a_complete_ordered_truth_fixture() {
                     1,
                     2,
                     2,
+                    1,
+                    1,
                 ),
                 unit(
                     "self.empty",
@@ -296,6 +404,8 @@ fn every_supported_language_has_a_complete_ordered_truth_fixture() {
                     13,
                     0,
                     1,
+                    0,
+                    0,
                     0,
                 ),
             ],
@@ -347,6 +457,15 @@ fn every_supported_language_has_a_complete_ordered_truth_fixture() {
                     actual.measurements().logical_lines()
                 ),
                 (expected.cognitive, expected.cyclomatic, expected.logical),
+                "{}",
+                fixture.path
+            );
+            assert_eq!(
+                (
+                    actual.measurements().max_nesting(),
+                    actual.measurements().parameter_count()
+                ),
+                (expected.nesting, expected.parameters),
                 "{}",
                 fixture.path
             );
@@ -839,9 +958,21 @@ fn vue_fixture_keeps_script_and_template_facts_in_original_document_positions() 
     assert_eq!(result.language(), Language::Vue);
     assert_eq!(result.parse_status(), &ParseStatus::Parsed);
     let expected = [
-        unit("<template>", None, UnitKind::Template, None, 1, 6, 5, 6, 3),
-        unit("helper", None, UnitKind::Closure, None, 8, 8, 1, 2, 0),
-        unit("save", None, UnitKind::Function, None, 9, 12, 1, 2, 2),
+        unit(
+            "<template>",
+            None,
+            UnitKind::Template,
+            None,
+            1,
+            6,
+            5,
+            6,
+            3,
+            1,
+            0,
+        ),
+        unit("helper", None, UnitKind::Closure, None, 8, 8, 1, 2, 0, 1, 1),
+        unit("save", None, UnitKind::Function, None, 9, 12, 1, 2, 2, 1, 1),
     ];
     assert_eq!(result.units().len(), expected.len());
     for (actual, expected) in result.units().iter().zip(expected) {
@@ -861,7 +992,38 @@ fn vue_fixture_keeps_script_and_template_facts_in_original_document_positions() 
             ),
             (expected.cognitive, expected.cyclomatic, expected.logical)
         );
+        assert_eq!(
+            (
+                actual.measurements().max_nesting(),
+                actual.measurements().parameter_count()
+            ),
+            (expected.nesting, expected.parameters)
+        );
     }
+}
+
+#[test]
+fn a_plain_vue_script_region_reports_its_own_nesting_and_parameters() {
+    let result = Analyzer::default()
+        .analyze(
+            Path::new("vue-script.vue"),
+            include_bytes!("fixtures/vue-script.vue").to_vec(),
+        )
+        .unwrap();
+    assert_eq!(result.language(), Language::Vue);
+    assert_eq!(result.parse_status(), &ParseStatus::Parsed);
+    let shapes: Vec<_> = result
+        .units()
+        .iter()
+        .map(|unit| {
+            (
+                unit.identity().name(),
+                unit.measurements().max_nesting(),
+                unit.measurements().parameter_count(),
+            )
+        })
+        .collect();
+    assert_eq!(shapes, [("<template>", 1, 0), ("save", 2, 2)]);
 }
 
 #[test]
@@ -1070,6 +1232,8 @@ const fn unit<'a>(
     cognitive: u32,
     cyclomatic: u32,
     logical: u32,
+    nesting: u32,
+    parameters: u32,
 ) -> ExpectedUnit<'a> {
     ExpectedUnit {
         name,
@@ -1081,5 +1245,7 @@ const fn unit<'a>(
         cognitive,
         cyclomatic,
         logical,
+        nesting,
+        parameters,
     }
 }

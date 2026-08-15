@@ -26,6 +26,15 @@ pub(super) trait Language {
         None
     }
 
+    /// The number of parameters the rated unit at `node` declares.
+    ///
+    /// The shared default reads the declared parameter list, so a language
+    /// implements this only where its grammar names parameters differently. A
+    /// unit that cannot declare parameters reports zero.
+    fn parameter_count(node: Node<'_>, _source: &[u8]) -> u32 {
+        crate::language_common::declared_parameter_count(node)
+    }
+
     fn classify(node: Node<'_>, source: &[u8], include_dependency: bool) -> Classification {
         if !node.is_named() {
             return Classification::default();
