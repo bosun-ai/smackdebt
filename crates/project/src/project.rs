@@ -3977,6 +3977,71 @@ mod tests {
             (1, 10, 10)
         );
         assert!(report.evolutionary_findings().is_empty());
+        // No contributor identity reaches any retained report value.
+        let retained = format!("{report:?}");
+        assert!(!retained.contains("Sole Owner"));
+        assert!(!retained.contains("owner@example.invalid"));
+    }
+
+    #[test]
+    fn serial_and_parallel_runs_derive_identical_signal_tables() {
+        let root = tempfile::tempdir().unwrap();
+        let repository_path = root.path();
+        git(repository_path, ["init", "-q"]);
+        git(
+            repository_path,
+            ["config", "user.email", "test@example.invalid"],
+        );
+        git(repository_path, ["config", "user.name", "Smackdebt Test"]);
+        // More files than the parallel cutover, so the automatic run really
+        // splits the work across workers.
+        for index in 0..120 {
+            fs::write(
+                repository_path.join(format!("file{index}.rs")),
+                format!("pub fn work{index}(value: i32) -> i32 {{ value + {index} }}\n"),
+            )
+            .unwrap();
+        }
+        for revision in 0..6 {
+            fs::write(
+                repository_path.join("file0.rs"),
+                format!("pub fn work0(value: i32) -> i32 {{ value + {revision} }}\n"),
+            )
+            .unwrap();
+            git(repository_path, ["add", "."]);
+            git(repository_path, ["commit", "-qm", "change"]);
+        }
+
+        let request = CodebaseRequest::new(repository_path).with_size_thresholds((1, 2), (1, 2));
+        let serial = request
+            .clone()
+            .with_width(ExecutionWidth::fixed(1).unwrap())
+            .analyze()
+            .unwrap();
+        let parallel = request
+            .with_width(ExecutionWidth::Automatic)
+            .analyze()
+            .unwrap();
+        assert!(!serial.report().hotspots().is_empty());
+        assert!(!serial.report().size_findings().is_empty());
+        assert!(!serial.report().orphan_files().is_empty());
+        assert_eq!(serial.report().hotspots(), parallel.report().hotspots());
+        assert_eq!(
+            serial.report().size_findings(),
+            parallel.report().size_findings()
+        );
+        assert_eq!(
+            serial.report().orphan_files(),
+            parallel.report().orphan_files()
+        );
+        assert_eq!(
+            serial.report().stable_dependency_findings(),
+            parallel.report().stable_dependency_findings()
+        );
+        assert_eq!(
+            serial.report().knowledge_concentration_findings(),
+            parallel.report().knowledge_concentration_findings()
+        );
     }
 
     #[test]

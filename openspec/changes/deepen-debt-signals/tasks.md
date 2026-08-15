@@ -21,7 +21,7 @@
 
 - [x] 4.1 Emit a Watch evolutionary finding at 10 or more windowed commits with a top-contributor share of at least 90%, carrying package, contributor count, numerator, and denominator only.
 - [x] 4.2 Add a kind discriminator to evolutionary findings so unexplained coupling and knowledge concentration stay distinguishable.
-- [ ] 4.3 Prove no contributor name, address, raw author field, or internal identifier reaches the report, terminal, or JSON.
+- [x] 4.3 Prove no contributor name, address, raw author field, or internal identifier reaches the report, terminal, or JSON.
 - [x] 4.4 Add pure boundary tests at 9 and 10 commits and at 89% and 90% share using integer comparison.
 
 ## 5. Measurements
@@ -35,12 +35,12 @@
 
 ## 6. Flow, evidence, and gates
 
-- [ ] 6.1 Derive every new table inside existing passes with no new file read, traversal, or Git process.
-- [ ] 6.2 Order every new table by data-stable keys and re-prove serial and parallel byte equality.
-- [ ] 6.3 Prove work counts, allocation behavior, and performance gates stay inside their reviewed budgets.
+- [x] 6.1 Derive every new table inside existing passes with no new file read, traversal, or Git process.
+- [x] 6.2 Order every new table by data-stable keys and re-prove serial and parallel byte equality.
+- [x] 6.3 Prove work counts, allocation behavior, and performance gates stay inside their reviewed budgets.
 - [ ] 6.4 Add generated fixture evidence for hotspots, stable-dependency findings, knowledge concentration, size findings, orphan files, and window coverage fields.
 - [ ] 6.5 Prove JSON version 3 shape and terminal sections, labels, and vocabulary are unchanged and that every differing terminal byte is explained by the new rank keys.
-- [ ] 6.6 Update the documented rank sequence to include the hot and role class keys.
+- [x] 6.6 Update the documented rank sequence to include the hot and role class keys.
 - [ ] 6.7 Re-run the release binary on smackdebt, swiftide, and fluyt and record that production debt now outranks test debt and that hot files are identifiable.
 - [ ] 6.8 Pass formatting, Clippy, workspace tests, architecture checks, performance tests, acceptance evidence, strict OpenSpec validation, and the final diff check.
 - [ ] 6.9 Archive this change before implementing `add-verdict-policy`.

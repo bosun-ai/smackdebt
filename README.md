@@ -85,7 +85,8 @@ Use `--all` for all useful findings and relationships. It still omits healthy
 rows and processing detail. JSON is the complete report, so `--all --json` is
 rejected.
 
-The default history window is 90 days. It affects hotspot priority only:
+The default history window is 90 days. It governs every history-derived number,
+including activity, churn, change coupling, and contributor concentration:
 
 ```console
 smackdebt --history 180d
@@ -241,9 +242,10 @@ unsupported aliases can therefore remain unresolved.
 
 ## Read the evolution evidence
 
-The `EVOLUTION` section uses all locally available non-merge Git history. The
-`--history` option still limits only the recent activity used to order source
-findings. Evolution keeps its evidence separate from current code health and
+The `EVOLUTION` section uses locally available non-merge Git history inside the
+selected `--history` window. The window governs every history-derived number:
+activity, churn, change coupling, and contributor concentration all describe the
+same commits. Evolution keeps its evidence separate from current code health and
 the static dependency graph:
 
 - activity counts distinct commits that changed a current file or package;
@@ -382,8 +384,12 @@ Terminal limits never remove JSON facts. The checked schema is
 schema is emitted.
 
 Source findings are ordered by rating, count of signals at that rating, total
-triggered signals, cognitive complexity, cyclomatic complexity, statements,
-activity, path, and span. Findings show unit kind and any non-primary role.
+triggered signals, hot state, role class, cognitive complexity, cyclomatic
+complexity, statements, activity, path, and span. Hot means a rated file whose
+touch count inside the selected history window reaches the minimum touch count,
+five by default. Role class places primary source before non-primary source at
+equal rating, and non-primary source stays visible below it. Findings show unit
+kind and any non-primary role.
 Default architecture output shows rated cycle witnesses rather than arbitrary
 edge samples. Use `--all` or a path drill to inspect relevant resolved,
 unresolved, ambiguous, ownership, and advisory relations. Human output omits
