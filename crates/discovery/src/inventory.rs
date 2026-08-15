@@ -66,6 +66,49 @@ enum ManifestKind {
 }
 
 impl ManifestKind {
+    /// Whether this manifest kind declares a package name Smackdebt can read.
+    const fn declares_a_name(self) -> bool {
+        matches!(self, Self::Cargo | Self::Npm | Self::Python | Self::Gemspec)
+    }
+
+    /// Reads the declared package name from an already-recognized manifest.
+    fn declared_name(self, path: &Path, source: &str) -> Option<String> {
+        let name = match self {
+            Self::Cargo => {
+                let value = source.parse::<toml::Table>().ok()?;
+                value
+                    .get("lib")
+                    .and_then(|section| section.get("name"))
+                    .or_else(|| value.get("package").and_then(|section| section.get("name")))
+                    .and_then(toml::Value::as_str)
+                    .map(str::to_owned)
+            }
+            Self::Npm => serde_json::from_str::<serde_json::Value>(source)
+                .ok()?
+                .get("name")
+                .and_then(serde_json::Value::as_str)
+                .map(str::to_owned),
+            Self::Python
+                if path
+                    .file_name()
+                    .is_some_and(|name| name == "pyproject.toml") =>
+            {
+                source
+                    .parse::<toml::Table>()
+                    .ok()?
+                    .get("project")
+                    .and_then(|section| section.get("name"))
+                    .and_then(toml::Value::as_str)
+                    .map(str::to_owned)
+            }
+            Self::Python => None,
+            Self::Gemspec => gemspec_name(source),
+            _ => None,
+        }?;
+        let name = name.trim();
+        (!name.is_empty()).then(|| name.to_owned())
+    }
+
     fn for_file(path: &Path) -> Option<Self> {
         let name = path.file_name()?.to_str()?;
         match name {
@@ -82,6 +125,22 @@ impl ManifestKind {
             _ => None,
         }
     }
+}
+
+/// Reads `spec.name = "value"` from a gemspec without executing Ruby.
+fn gemspec_name(source: &str) -> Option<String> {
+    source.lines().find_map(|line| {
+        let (receiver, value) = line.split_once('=')?;
+        if !receiver.trim_end().ends_with(".name") {
+            return None;
+        }
+        let value = value.trim();
+        let quote = value
+            .chars()
+            .next()
+            .filter(|value| *value == '"' || *value == '\'')?;
+        value[1..].split(quote).next().map(str::to_owned)
+    })
 }
 
 /// The kind of filesystem file recorded by inventory.
@@ -123,6 +182,7 @@ pub struct Package {
     id: PackageId,
     root: RelativePath,
     manifests: Vec<ManifestKind>,
+    manifest_name: Option<String>,
 }
 
 impl Package {
@@ -134,6 +194,14 @@ impl Package {
     /// Returns the directory relative to the inventory root.
     pub fn root(&self) -> &RelativePath {
         &self.root
+    }
+
+    /// Returns the name this package declares for itself, when it declares one.
+    ///
+    /// The name comes from the manifest that was already read to recognize the
+    /// package root.  A manifest kind without a readable name leaves it absent.
+    pub fn manifest_name(&self) -> Option<&str> {
+        self.manifest_name.as_deref()
     }
 
     /// Returns all co-located recognized manifests.
@@ -301,6 +369,7 @@ struct Walker {
     options: InventoryOptions,
     files: Vec<RawFile>,
     manifest_dirs: BTreeMap<PathBuf, Vec<ManifestKind>>,
+    manifest_names: BTreeMap<PathBuf, Option<String>>,
     diagnostics: Vec<InventoryDiagnostic>,
     stats: InventoryStats,
 }
@@ -316,6 +385,7 @@ impl Walker {
             options,
             files: Vec::new(),
             manifest_dirs: BTreeMap::new(),
+            manifest_names: BTreeMap::new(),
             diagnostics: Vec::new(),
             stats: InventoryStats::default(),
         }
@@ -415,11 +485,29 @@ impl Walker {
                 .entry(parent.to_path_buf())
                 .or_default()
                 .push(manifest);
+            if manifest.declares_a_name() {
+                self.record_manifest_name(parent, manifest, &entry.path());
+            }
         }
         self.files.push(RawFile {
             path: relative,
             kind,
         });
+    }
+
+    /// Reads the declared name of one recognized manifest.
+    ///
+    /// The first manifest kind of a directory that declares a usable name owns
+    /// the package name.  An unreadable or nameless manifest is not an error.
+    fn record_manifest_name(&mut self, parent: &Path, manifest: ManifestKind, absolute: &Path) {
+        let entry = self.manifest_names.entry(parent.to_path_buf()).or_default();
+        if entry.is_some() {
+            return;
+        }
+        let Ok(source) = fs::read_to_string(absolute) else {
+            return;
+        };
+        *entry = manifest.declared_name(absolute, &source);
     }
 
     fn finish(mut self, root: PathBuf) -> io::Result<Inventory> {
@@ -435,6 +523,7 @@ impl Walker {
                 id: PackageId::from_index(index),
                 root: RelativePath::new(path.clone()).expect("package root is relative"),
                 manifests: self.manifest_dirs.get(path).cloned().unwrap_or_default(),
+                manifest_name: self.manifest_names.get(path).cloned().flatten(),
             })
             .collect();
 
@@ -627,6 +716,63 @@ mod tests {
         let inventory = Inventory::discover(directory.path()).unwrap();
         assert_eq!(inventory.packages().len(), 1);
         assert_eq!(inventory.packages()[0].root().as_path(), Path::new(""));
+    }
+
+    #[test]
+    fn every_manifest_kind_contributes_its_declared_name() {
+        let directory = tempfile::tempdir().unwrap();
+        let cases = [
+            (
+                "cargo",
+                "Cargo.toml",
+                "[package]\nname = \"cargo-package\"\n",
+                Some("cargo-package"),
+            ),
+            (
+                "cargo-lib",
+                "Cargo.toml",
+                "[package]\nname = \"cargo-package\"\n[lib]\nname = \"library_override\"\n",
+                Some("library_override"),
+            ),
+            (
+                "npm",
+                "package.json",
+                "{\"name\": \"@scope/name\", \"private\": true}\n",
+                Some("@scope/name"),
+            ),
+            (
+                "python",
+                "pyproject.toml",
+                "[project]\nname = \"python-package\"\n",
+                Some("python-package"),
+            ),
+            (
+                "ruby",
+                "ruby.gemspec",
+                "Gem::Specification.new do |spec|\n  spec.name = \"gem-package\"\nend\n",
+                Some("gem-package"),
+            ),
+            ("empty", "Cargo.toml", "[package]\nname = \"\"\n", None),
+            ("nameless", "package.json", "{\"private\": true}\n", None),
+            ("broken", "Cargo.toml", "[package\nname\n", None),
+            ("other", "pom.xml", "<project/>\n", None),
+        ];
+        for (root, manifest, source, _) in cases {
+            fs::create_dir_all(directory.path().join(root)).unwrap();
+            fs::write(directory.path().join(root).join(manifest), source).unwrap();
+        }
+        let inventory = Inventory::discover(directory.path()).unwrap();
+        let names: Vec<_> = inventory
+            .packages()
+            .iter()
+            .map(|package| (package.root().to_string(), package.manifest_name()))
+            .collect();
+        let mut expected: Vec<_> = cases
+            .iter()
+            .map(|(root, _, _, name)| ((*root).to_owned(), *name))
+            .collect();
+        expected.sort();
+        assert_eq!(names, expected);
     }
 
     #[test]

@@ -8,6 +8,8 @@ publish.workspace = true
 
 [dependencies]
 smackdebt-analysis = { path = "../analysis" }
+serde_json.workspace = true
+toml.workspace = true
 
 [dev-dependencies]
 tempfile.workspace = true

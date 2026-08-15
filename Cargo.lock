@@ -1018,8 +1018,10 @@ dependencies = [
 name = "smackdebt-discovery"
 version = "0.1.0"
 dependencies = [
+ "serde_json",
  "smackdebt-analysis",
  "tempfile",
+ "toml",
 ]
 
 [[package]]
