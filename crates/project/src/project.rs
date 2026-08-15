@@ -2120,7 +2120,8 @@ struct ReferenceTables {
     edge_values: BTreeMap<DependencyEdgeKey, DependencyEdgeValue>,
     external_values: BTreeMap<ExternalDependencyKey, DependencyEdgeValue>,
     diagnostic_values: BTreeMap<ResolutionDiagnosticKey, DependencyEdgeValue>,
-    manifest_package_values: BTreeMap<(PackageId, PackageId), (u32, u32)>,
+    manifest_package_values:
+        BTreeMap<(PackageId, PackageId), (std::collections::BTreeSet<FileId>, u32)>,
 }
 
 impl ReferenceTables {
@@ -2192,6 +2193,7 @@ impl ReferenceTables {
         reference: &DependencySyntax,
         dependencies: &SourceDependencies,
     ) {
+        let source_file = dependencies.file;
         self.coverage.record(
             reference.relation(),
             dependencies.role,
@@ -2209,7 +2211,7 @@ impl ReferenceTables {
             .manifest_package_values
             .entry((source, target))
             .or_default();
-        value.0 += 1;
+        value.0.insert(source_file);
         value.1 += 1;
     }
 
@@ -2612,9 +2614,9 @@ fn build_architecture(
             value.2.push(edge.id());
         }
     }
-    for ((source, target), (pairs, references)) in manifest_package_values {
+    for ((source, target), (files, references)) in manifest_package_values {
         let value = package_values.entry((source, target)).or_default();
-        value.0 += pairs;
+        value.0 += u32::try_from(files.len()).unwrap_or(u32::MAX);
         value.1 += references;
     }
     let package_edges: Vec<_> = package_values
