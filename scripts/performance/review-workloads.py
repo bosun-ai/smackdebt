@@ -411,7 +411,7 @@ def main() -> int:
     args = parser.parse_args()
 
     binary = args.binary.resolve()
-    schema = json.loads((ROOT / "schemas" / "report-v3.schema.json").read_text())
+    schema = json.loads((ROOT / "schemas" / "report-v4.schema.json").read_text())
     self_report, self_terminal = reviewed_report(binary, args.self_repository, schema)
     mixed_report, mixed_terminal = reviewed_report(binary, args.mixed, schema)
     rust_report, rust_terminal = reviewed_report(binary, args.rust, schema)

@@ -69,7 +69,7 @@ if serial != parallel:
     raise SystemExit("performance correctness: serial and automatic work totals differ")
 pathlib.Path(sys.argv[3]).write_text(json.dumps(serial, sort_keys=True) + "\n")
 PY
-    schema="$script_dir/../../schemas/report-v3.schema.json"
+    schema="$script_dir/../../schemas/report-v4.schema.json"
     digest_arguments=
     if [ -n "$expected_digest" ]; then
         digest_arguments="--expected-digest $expected_digest"

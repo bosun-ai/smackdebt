@@ -111,7 +111,7 @@ def main() -> int:
         EXPECTED_WORK[args.profile],
     ):
         require(work_evidence.get(field) == expected, f"{field} changed")
-    require(report.get("schema_version") == 3, "report is not schema version 3")
+    require(report.get("schema_version") == 4, "report is not schema version 4")
     require(report.get("mode") == expected_mode, "report mode does not match workload")
     for table in (
         "paths",
