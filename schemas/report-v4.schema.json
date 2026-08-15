@@ -1,0 +1,2082 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://smackdebt.dev/schema/report-v4.json",
+  "title": "Smackdebt report version 4",
+  "type": "object",
+  "required": [
+    "schema_version",
+    "mode",
+    "verdict",
+    "summary",
+    "root",
+    "selected_scope",
+    "paths",
+    "packages",
+    "scopes",
+    "files",
+    "findings",
+    "diagnostics",
+    "comparisons",
+    "health",
+    "activity",
+    "dependency_coverage",
+    "dependency_edges",
+    "package_edges",
+    "external_dependencies",
+    "resolution_diagnostics",
+    "package_graph",
+    "architecture_findings",
+    "architecture_comparisons",
+    "history_coverage",
+    "file_history",
+    "package_history",
+    "change_coupling",
+    "contributor_concentration",
+    "evolutionary_findings",
+    "evolutionary_comparisons",
+    "knowledge_concentration_findings",
+    "stable_dependency_findings",
+    "hotspots",
+    "size_findings",
+    "orphan_files"
+  ],
+  "properties": {
+    "schema_version": {
+      "const": 4
+    },
+    "mode": {
+      "enum": [
+        "codebase",
+        "diff"
+      ]
+    },
+    "verdict": {
+      "$ref": "#/$defs/verdict"
+    },
+    "summary": {
+      "$ref": "#/$defs/summary"
+    },
+    "root": {
+      "$ref": "#/$defs/nullable_index"
+    },
+    "selected_scope": {
+      "$ref": "#/$defs/nullable_index"
+    },
+    "paths": {
+      "type": "array",
+      "items": {
+        "type": "string"
+      }
+    },
+    "packages": {
+      "type": "array",
+      "items": {
+        "$ref": "#/$defs/package"
+      }
+    },
+    "scopes": {
+      "type": "array",
+      "items": {
+        "$ref": "#/$defs/scope"
+      }
+    },
+    "files": {
+      "type": "array",
+      "items": {
+        "$ref": "#/$defs/file"
+      }
+    },
+    "findings": {
+      "type": "array",
+      "items": {
+        "$ref": "#/$defs/finding"
+      }
+    },
+    "diagnostics": {
+      "type": "array",
+      "items": {
+        "$ref": "#/$defs/diagnostic"
+      }
+    },
+    "comparisons": {
+      "type": "array",
+      "items": {
+        "$ref": "#/$defs/comparison"
+      }
+    },
+    "health": {
+      "type": "array",
+      "items": {
+        "$ref": "#/$defs/health"
+      }
+    },
+    "activity": {
+      "type": "array",
+      "items": {
+        "$ref": "#/$defs/activity"
+      }
+    },
+    "dependency_coverage": {
+      "$ref": "#/$defs/dependency_coverage"
+    },
+    "dependency_edges": {
+      "type": "array",
+      "items": {
+        "$ref": "#/$defs/dependency_edge"
+      }
+    },
+    "package_edges": {
+      "type": "array",
+      "items": {
+        "$ref": "#/$defs/package_edge"
+      }
+    },
+    "external_dependencies": {
+      "type": "array",
+      "items": {
+        "$ref": "#/$defs/external_dependency"
+      }
+    },
+    "resolution_diagnostics": {
+      "type": "array",
+      "items": {
+        "$ref": "#/$defs/resolution_diagnostic"
+      }
+    },
+    "package_graph": {
+      "type": "array",
+      "items": {
+        "$ref": "#/$defs/package_graph"
+      }
+    },
+    "architecture_findings": {
+      "type": "array",
+      "items": {
+        "$ref": "#/$defs/architecture_finding"
+      }
+    },
+    "architecture_comparisons": {
+      "type": "array",
+      "items": {
+        "$ref": "#/$defs/architecture_comparison"
+      }
+    },
+    "history_coverage": {
+      "$ref": "#/$defs/history_coverage"
+    },
+    "file_history": {
+      "type": "array",
+      "items": {
+        "$ref": "#/$defs/file_history"
+      }
+    },
+    "package_history": {
+      "type": "array",
+      "items": {
+        "$ref": "#/$defs/package_history"
+      }
+    },
+    "change_coupling": {
+      "type": "array",
+      "items": {
+        "$ref": "#/$defs/change_coupling"
+      }
+    },
+    "contributor_concentration": {
+      "type": "array",
+      "items": {
+        "$ref": "#/$defs/contributor_concentration"
+      }
+    },
+    "evolutionary_findings": {
+      "type": "array",
+      "items": {
+        "$ref": "#/$defs/evolutionary_finding"
+      }
+    },
+    "evolutionary_comparisons": {
+      "type": "array",
+      "items": {
+        "$ref": "#/$defs/evolutionary_comparison"
+      }
+    },
+    "knowledge_concentration_findings": {
+      "type": "array",
+      "items": {
+        "$ref": "#/$defs/knowledge_concentration_finding"
+      }
+    },
+    "stable_dependency_findings": {
+      "type": "array",
+      "items": {
+        "$ref": "#/$defs/stable_dependency_finding"
+      }
+    },
+    "hotspots": {
+      "type": "array",
+      "items": {
+        "$ref": "#/$defs/hotspot"
+      }
+    },
+    "size_findings": {
+      "type": "array",
+      "items": {
+        "$ref": "#/$defs/size_finding"
+      }
+    },
+    "orphan_files": {
+      "type": "array",
+      "items": {
+        "$ref": "#/$defs/index"
+      },
+      "uniqueItems": true
+    }
+  },
+  "additionalProperties": false,
+  "$defs": {
+    "index": {
+      "type": "integer",
+      "minimum": 0
+    },
+    "nullable_index": {
+      "type": [
+        "integer",
+        "null"
+      ],
+      "minimum": 0
+    },
+    "rating": {
+      "enum": [
+        "healthy",
+        "watch",
+        "high"
+      ]
+    },
+    "nullable_rating": {
+      "type": [
+        "string",
+        "null"
+      ],
+      "enum": [
+        "healthy",
+        "watch",
+        "high",
+        null
+      ]
+    },
+    "unit_kind": {
+      "enum": [
+        "function",
+        "method",
+        "closure",
+        "lambda",
+        "synthetic_top_level",
+        "template"
+      ]
+    },
+    "package": {
+      "type": "object",
+      "required": [
+        "id",
+        "scope",
+        "path",
+        "presence"
+      ],
+      "properties": {
+        "id": {
+          "$ref": "#/$defs/index"
+        },
+        "scope": {
+          "$ref": "#/$defs/index"
+        },
+        "path": {
+          "type": "string"
+        },
+        "presence": {
+          "enum": [
+            "current",
+            "base_only"
+          ]
+        },
+        "manifest_name": {
+          "type": "string",
+          "minLength": 1
+        }
+      },
+      "additionalProperties": false
+    },
+    "coverage": {
+      "type": "object",
+      "required": [
+        "selected_files",
+        "analyzed_files",
+        "clean_files",
+        "recovered_files",
+        "unsupported_files",
+        "failed_files",
+        "context_files",
+        "source_lines",
+        "excluded_lines"
+      ],
+      "properties": {
+        "selected_files": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "analyzed_files": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "clean_files": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "recovered_files": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "unsupported_files": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "failed_files": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "context_files": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "source_lines": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "excluded_lines": {
+          "type": "integer",
+          "minimum": 0
+        }
+      },
+      "additionalProperties": false
+    },
+    "diff": {
+      "type": "object",
+      "required": [
+        "worse",
+        "better",
+        "changed",
+        "total"
+      ],
+      "properties": {
+        "worse": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "better": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "changed": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "total": {
+          "type": "integer",
+          "minimum": 0
+        }
+      },
+      "additionalProperties": false
+    },
+    "measurements": {
+      "type": "object",
+      "required": [
+        "cognitive_complexity",
+        "cyclomatic_complexity",
+        "logical_lines",
+        "max_nesting",
+        "parameter_count"
+      ],
+      "properties": {
+        "cognitive_complexity": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "cyclomatic_complexity": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "logical_lines": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "max_nesting": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "parameter_count": {
+          "type": "integer",
+          "minimum": 0
+        }
+      },
+      "additionalProperties": false
+    },
+    "scope": {
+      "type": "object",
+      "required": [
+        "id",
+        "kind",
+        "parent",
+        "children",
+        "path",
+        "findings",
+        "comparisons",
+        "architecture_findings",
+        "architecture_comparisons",
+        "evolutionary_findings",
+        "evolutionary_comparisons",
+        "coverage",
+        "health",
+        "diff"
+      ],
+      "properties": {
+        "id": {
+          "$ref": "#/$defs/index"
+        },
+        "kind": {
+          "enum": [
+            "repository",
+            "package",
+            "directory",
+            "file"
+          ]
+        },
+        "parent": {
+          "$ref": "#/$defs/nullable_index"
+        },
+        "children": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/index"
+          },
+          "uniqueItems": true
+        },
+        "path": {
+          "$ref": "#/$defs/nullable_index"
+        },
+        "findings": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/index"
+          },
+          "uniqueItems": true
+        },
+        "comparisons": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/index"
+          },
+          "uniqueItems": true
+        },
+        "architecture_findings": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/index"
+          },
+          "uniqueItems": true
+        },
+        "architecture_comparisons": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/index"
+          },
+          "uniqueItems": true
+        },
+        "evolutionary_findings": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/index"
+          },
+          "uniqueItems": true
+        },
+        "evolutionary_comparisons": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/index"
+          },
+          "uniqueItems": true
+        },
+        "coverage": {
+          "$ref": "#/$defs/coverage"
+        },
+        "health": {
+          "$ref": "#/$defs/index"
+        },
+        "diff": {
+          "$ref": "#/$defs/diff"
+        }
+      },
+      "additionalProperties": false
+    },
+    "file": {
+      "type": "object",
+      "required": [
+        "id",
+        "scope",
+        "path",
+        "language",
+        "coverage",
+        "health",
+        "activity",
+        "package",
+        "role",
+        "parse_outcome",
+        "trust"
+      ],
+      "properties": {
+        "id": {
+          "$ref": "#/$defs/index"
+        },
+        "scope": {
+          "$ref": "#/$defs/index"
+        },
+        "path": {
+          "$ref": "#/$defs/nullable_index"
+        },
+        "language": {
+          "type": [
+            "string",
+            "null"
+          ],
+          "enum": [
+            "c",
+            "cpp",
+            "java",
+            "javascript",
+            "jsx",
+            "python",
+            "rust",
+            "typescript",
+            "tsx",
+            "ruby",
+            "vue",
+            "kotlin",
+            "unknown",
+            null
+          ]
+        },
+        "coverage": {
+          "$ref": "#/$defs/coverage"
+        },
+        "health": {
+          "$ref": "#/$defs/index"
+        },
+        "activity": {
+          "$ref": "#/$defs/index"
+        },
+        "package": {
+          "$ref": "#/$defs/index"
+        },
+        "role": {
+          "enum": [
+            "primary",
+            "test",
+            "example",
+            "benchmark",
+            "fixture",
+            "generated"
+          ]
+        },
+        "parse_outcome": {
+          "type": [
+            "string",
+            "null"
+          ],
+          "enum": [
+            "parsed",
+            "recovered",
+            "failed",
+            null
+          ]
+        },
+        "trust": {
+          "enum": [
+            "trusted",
+            "advisory",
+            "failed"
+          ]
+        }
+      },
+      "additionalProperties": false
+    },
+    "finding": {
+      "type": "object",
+      "required": [
+        "id",
+        "file",
+        "name",
+        "container",
+        "kind",
+        "start_line",
+        "end_line",
+        "rating",
+        "measurements",
+        "role",
+        "trust"
+      ],
+      "properties": {
+        "id": {
+          "$ref": "#/$defs/index"
+        },
+        "file": {
+          "$ref": "#/$defs/index"
+        },
+        "name": {
+          "type": "string"
+        },
+        "container": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "kind": {
+          "$ref": "#/$defs/unit_kind"
+        },
+        "start_line": {
+          "type": "integer",
+          "minimum": 1
+        },
+        "end_line": {
+          "type": "integer",
+          "minimum": 1
+        },
+        "rating": {
+          "$ref": "#/$defs/rating"
+        },
+        "measurements": {
+          "$ref": "#/$defs/measurements"
+        },
+        "role": {
+          "enum": [
+            "primary",
+            "test",
+            "example",
+            "benchmark",
+            "fixture",
+            "generated"
+          ]
+        },
+        "trust": {
+          "enum": [
+            "trusted",
+            "advisory",
+            "failed"
+          ]
+        }
+      },
+      "additionalProperties": false
+    },
+    "diagnostic": {
+      "type": "object",
+      "required": [
+        "id",
+        "file",
+        "kind",
+        "message",
+        "excluded_lines"
+      ],
+      "properties": {
+        "id": {
+          "$ref": "#/$defs/index"
+        },
+        "file": {
+          "$ref": "#/$defs/nullable_index"
+        },
+        "kind": {
+          "enum": [
+            "unsupported_language",
+            "unreadable_file",
+            "oversized_file",
+            "parse_failure",
+            "ambiguous_identity",
+            "unsafe_reference",
+            "other"
+          ]
+        },
+        "message": {
+          "type": "string"
+        },
+        "excluded_lines": {
+          "type": "integer",
+          "minimum": 0
+        }
+      },
+      "additionalProperties": false
+    },
+    "ratings": {
+      "type": "object",
+      "required": [
+        "before",
+        "after"
+      ],
+      "properties": {
+        "before": {
+          "$ref": "#/$defs/nullable_rating"
+        },
+        "after": {
+          "$ref": "#/$defs/nullable_rating"
+        }
+      },
+      "additionalProperties": false
+    },
+    "comparison": {
+      "type": "object",
+      "required": [
+        "id",
+        "file",
+        "start_line",
+        "end_line",
+        "name",
+        "container",
+        "unit_kind",
+        "kind",
+        "direction",
+        "before",
+        "after",
+        "ratings"
+      ],
+      "properties": {
+        "id": {
+          "$ref": "#/$defs/index"
+        },
+        "file": {
+          "$ref": "#/$defs/nullable_index"
+        },
+        "name": {
+          "type": "string"
+        },
+        "container": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "unit_kind": {
+          "$ref": "#/$defs/unit_kind"
+        },
+        "kind": {
+          "enum": [
+            "added",
+            "removed",
+            "improved",
+            "regressed",
+            "metric_changed",
+            "ambiguous",
+            "unchanged"
+          ]
+        },
+        "direction": {
+          "enum": [
+            "worse",
+            "better",
+            "changed"
+          ]
+        },
+        "before": {
+          "oneOf": [
+            {
+              "$ref": "#/$defs/measurements"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "after": {
+          "oneOf": [
+            {
+              "$ref": "#/$defs/measurements"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "ratings": {
+          "$ref": "#/$defs/ratings"
+        },
+        "start_line": {
+          "type": [
+            "integer",
+            "null"
+          ],
+          "minimum": 1
+        },
+        "end_line": {
+          "type": [
+            "integer",
+            "null"
+          ],
+          "minimum": 1
+        }
+      },
+      "additionalProperties": false
+    },
+    "health": {
+      "type": "object",
+      "required": [
+        "id",
+        "healthy",
+        "watch",
+        "high"
+      ],
+      "properties": {
+        "id": {
+          "$ref": "#/$defs/index"
+        },
+        "healthy": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "watch": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "high": {
+          "type": "integer",
+          "minimum": 0
+        }
+      },
+      "additionalProperties": false
+    },
+    "activity": {
+      "type": "object",
+      "required": [
+        "id",
+        "file",
+        "touches"
+      ],
+      "properties": {
+        "id": {
+          "$ref": "#/$defs/index"
+        },
+        "file": {
+          "$ref": "#/$defs/index"
+        },
+        "touches": {
+          "type": [
+            "integer",
+            "null"
+          ],
+          "minimum": 0
+        }
+      },
+      "additionalProperties": false
+    },
+    "dependency_coverage": {
+      "type": "object",
+      "required": [
+        "internal",
+        "external",
+        "unresolved",
+        "ambiguous",
+        "resolved_internal_uses",
+        "unresolved_internal_uses",
+        "ambiguous_internal_uses",
+        "external_uses",
+        "unresolved_package_uses",
+        "module_ownership_relations",
+        "context_relations",
+        "total"
+      ],
+      "properties": {
+        "internal": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "external": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "unresolved": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "ambiguous": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "resolved_internal_uses": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "unresolved_internal_uses": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "ambiguous_internal_uses": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "external_uses": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "unresolved_package_uses": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "module_ownership_relations": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "context_relations": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "total": {
+          "type": "integer",
+          "minimum": 0
+        }
+      },
+      "additionalProperties": false
+    },
+    "dependency_edge": {
+      "type": "object",
+      "required": [
+        "id",
+        "source",
+        "target",
+        "references",
+        "locations",
+        "relation",
+        "role",
+        "trust"
+      ],
+      "properties": {
+        "id": {
+          "$ref": "#/$defs/index"
+        },
+        "source": {
+          "$ref": "#/$defs/index"
+        },
+        "target": {
+          "$ref": "#/$defs/index"
+        },
+        "references": {
+          "type": "integer",
+          "minimum": 1
+        },
+        "locations": {
+          "type": "array",
+          "items": {
+            "type": "array",
+            "items": {
+              "type": "integer",
+              "minimum": 1
+            },
+            "minItems": 2,
+            "maxItems": 2
+          }
+        },
+        "relation": {
+          "enum": [
+            "uses",
+            "module_ownership"
+          ]
+        },
+        "role": {
+          "enum": [
+            "primary",
+            "test",
+            "example",
+            "benchmark",
+            "fixture",
+            "generated"
+          ]
+        },
+        "trust": {
+          "enum": [
+            "trusted",
+            "advisory",
+            "failed"
+          ]
+        }
+      },
+      "additionalProperties": false
+    },
+    "package_edge": {
+      "type": "object",
+      "required": [
+        "id",
+        "source",
+        "target",
+        "file_pairs",
+        "references",
+        "file_edges"
+      ],
+      "properties": {
+        "id": {
+          "$ref": "#/$defs/index"
+        },
+        "source": {
+          "$ref": "#/$defs/index"
+        },
+        "target": {
+          "$ref": "#/$defs/index"
+        },
+        "file_pairs": {
+          "type": "integer",
+          "minimum": 1
+        },
+        "references": {
+          "type": "integer",
+          "minimum": 1
+        },
+        "file_edges": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/index"
+          },
+          "uniqueItems": true
+        }
+      },
+      "additionalProperties": false
+    },
+    "package_graph": {
+      "type": "object",
+      "required": [
+        "package",
+        "fan_in",
+        "fan_out",
+        "instability"
+      ],
+      "properties": {
+        "package": {
+          "$ref": "#/$defs/index"
+        },
+        "fan_in": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "fan_out": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "instability": {
+          "oneOf": [
+            {
+              "type": "array",
+              "items": {
+                "type": "integer",
+                "minimum": 0
+              },
+              "minItems": 2,
+              "maxItems": 2
+            },
+            {
+              "type": "null"
+            }
+          ]
+        }
+      },
+      "additionalProperties": false
+    },
+    "external_dependency": {
+      "type": "object",
+      "required": [
+        "file",
+        "target",
+        "references",
+        "locations",
+        "relation",
+        "role",
+        "trust"
+      ],
+      "properties": {
+        "file": {
+          "$ref": "#/$defs/index"
+        },
+        "target": {
+          "type": "string"
+        },
+        "references": {
+          "type": "integer",
+          "minimum": 1
+        },
+        "locations": {
+          "type": "array",
+          "items": {
+            "type": "array",
+            "items": {
+              "type": "integer",
+              "minimum": 1
+            },
+            "minItems": 2,
+            "maxItems": 2
+          }
+        },
+        "relation": {
+          "enum": [
+            "uses",
+            "module_ownership"
+          ]
+        },
+        "role": {
+          "enum": [
+            "primary",
+            "test",
+            "example",
+            "benchmark",
+            "fixture",
+            "generated"
+          ]
+        },
+        "trust": {
+          "enum": [
+            "trusted",
+            "advisory",
+            "failed"
+          ]
+        }
+      },
+      "additionalProperties": false
+    },
+    "resolution_diagnostic": {
+      "type": "object",
+      "required": [
+        "file",
+        "start_line",
+        "end_line",
+        "target",
+        "kind",
+        "reason",
+        "references",
+        "locations",
+        "relation",
+        "role",
+        "trust"
+      ],
+      "properties": {
+        "file": {
+          "$ref": "#/$defs/index"
+        },
+        "start_line": {
+          "type": "integer",
+          "minimum": 1
+        },
+        "end_line": {
+          "type": "integer",
+          "minimum": 1
+        },
+        "target": {
+          "type": "string"
+        },
+        "kind": {
+          "enum": [
+            "unresolved",
+            "ambiguous"
+          ]
+        },
+        "reason": {
+          "type": "string"
+        },
+        "references": {
+          "type": "integer",
+          "minimum": 1
+        },
+        "locations": {
+          "type": "array",
+          "items": {
+            "type": "array",
+            "items": {
+              "type": "integer",
+              "minimum": 1
+            },
+            "minItems": 2,
+            "maxItems": 2
+          }
+        },
+        "relation": {
+          "enum": [
+            "uses",
+            "module_ownership"
+          ]
+        },
+        "role": {
+          "enum": [
+            "primary",
+            "test",
+            "example",
+            "benchmark",
+            "fixture",
+            "generated"
+          ]
+        },
+        "trust": {
+          "enum": [
+            "trusted",
+            "advisory",
+            "failed"
+          ]
+        }
+      },
+      "additionalProperties": false
+    },
+    "architecture_finding": {
+      "type": "object",
+      "required": [
+        "id",
+        "kind",
+        "rating",
+        "packages",
+        "files",
+        "witness_edges"
+      ],
+      "properties": {
+        "id": {
+          "$ref": "#/$defs/index"
+        },
+        "kind": {
+          "enum": [
+            "package_cycle",
+            "file_cycle"
+          ]
+        },
+        "rating": {
+          "enum": [
+            "watch",
+            "high"
+          ]
+        },
+        "packages": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/index"
+          },
+          "uniqueItems": true
+        },
+        "files": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/index"
+          },
+          "uniqueItems": true
+        },
+        "witness_edges": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/index"
+          },
+          "uniqueItems": true
+        }
+      },
+      "additionalProperties": false
+    },
+    "architecture_comparison": {
+      "type": "object",
+      "required": [
+        "id",
+        "kind",
+        "direction",
+        "packages",
+        "witness",
+        "files",
+        "relation",
+        "role",
+        "trust",
+        "before_references",
+        "after_references"
+      ],
+      "properties": {
+        "id": {
+          "$ref": "#/$defs/index"
+        },
+        "kind": {
+          "enum": [
+            "edge_added",
+            "edge_removed",
+            "cycle_introduced",
+            "cycle_removed"
+          ]
+        },
+        "direction": {
+          "enum": [
+            "worse",
+            "better",
+            "changed"
+          ]
+        },
+        "packages": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/index"
+          },
+          "uniqueItems": true
+        },
+        "witness": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/index"
+          }
+        },
+        "files": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/index"
+          },
+          "uniqueItems": true
+        },
+        "relation": {
+          "type": [
+            "string",
+            "null"
+          ],
+          "enum": [
+            "uses",
+            "module_ownership",
+            null
+          ]
+        },
+        "role": {
+          "type": [
+            "string",
+            "null"
+          ],
+          "enum": [
+            "primary",
+            "test",
+            "example",
+            "benchmark",
+            "fixture",
+            "generated",
+            null
+          ]
+        },
+        "trust": {
+          "type": [
+            "string",
+            "null"
+          ],
+          "enum": [
+            "trusted",
+            "advisory",
+            "failed",
+            null
+          ]
+        },
+        "before_references": {
+          "type": [
+            "integer",
+            "null"
+          ],
+          "minimum": 0
+        },
+        "after_references": {
+          "type": [
+            "integer",
+            "null"
+          ],
+          "minimum": 0
+        }
+      },
+      "additionalProperties": false
+    },
+    "history_coverage": {
+      "type": "object",
+      "required": [
+        "availability",
+        "revision",
+        "commits",
+        "eligible_commits",
+        "mapped_eligible_changes",
+        "context_changes",
+        "newest_timestamp",
+        "oldest_timestamp",
+        "textual_changes",
+        "uncounted_changes",
+        "excluded_changes",
+        "rename_gaps",
+        "reason",
+        "window_days",
+        "window_excluded_commits"
+      ],
+      "properties": {
+        "availability": {
+          "enum": [
+            "complete",
+            "incomplete",
+            "unavailable"
+          ]
+        },
+        "revision": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "commits": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "eligible_commits": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "mapped_eligible_changes": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "context_changes": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "newest_timestamp": {
+          "type": [
+            "integer",
+            "null"
+          ]
+        },
+        "oldest_timestamp": {
+          "type": [
+            "integer",
+            "null"
+          ]
+        },
+        "textual_changes": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "uncounted_changes": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "excluded_changes": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "rename_gaps": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "reason": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "window_days": {
+          "type": [
+            "integer",
+            "null"
+          ],
+          "minimum": 0
+        },
+        "window_excluded_commits": {
+          "type": "integer",
+          "minimum": 0
+        }
+      },
+      "additionalProperties": false
+    },
+    "file_history": {
+      "type": "object",
+      "required": [
+        "file",
+        "role",
+        "trust",
+        "touches",
+        "added_lines",
+        "deleted_lines",
+        "uncounted_changes"
+      ],
+      "properties": {
+        "file": {
+          "$ref": "#/$defs/index"
+        },
+        "role": {
+          "enum": [
+            "primary",
+            "test",
+            "example",
+            "benchmark",
+            "fixture",
+            "generated"
+          ]
+        },
+        "trust": {
+          "enum": [
+            "trusted",
+            "advisory",
+            "failed"
+          ]
+        },
+        "touches": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "added_lines": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "deleted_lines": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "uncounted_changes": {
+          "type": "integer",
+          "minimum": 0
+        }
+      },
+      "additionalProperties": false
+    },
+    "package_history": {
+      "type": "object",
+      "required": [
+        "package",
+        "role",
+        "trust",
+        "touches",
+        "added_lines",
+        "deleted_lines",
+        "uncounted_changes"
+      ],
+      "properties": {
+        "package": {
+          "$ref": "#/$defs/index"
+        },
+        "role": {
+          "enum": [
+            "primary",
+            "test",
+            "example",
+            "benchmark",
+            "fixture",
+            "generated"
+          ]
+        },
+        "trust": {
+          "enum": [
+            "trusted",
+            "advisory",
+            "failed"
+          ]
+        },
+        "touches": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "added_lines": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "deleted_lines": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "uncounted_changes": {
+          "type": "integer",
+          "minimum": 0
+        }
+      },
+      "additionalProperties": false
+    },
+    "change_coupling": {
+      "type": "object",
+      "required": [
+        "left",
+        "right",
+        "left_role",
+        "left_trust",
+        "right_role",
+        "right_trust",
+        "shared_commits",
+        "union_commits"
+      ],
+      "properties": {
+        "left": {
+          "$ref": "#/$defs/index"
+        },
+        "right": {
+          "$ref": "#/$defs/index"
+        },
+        "left_role": {
+          "enum": [
+            "primary",
+            "test",
+            "example",
+            "benchmark",
+            "fixture",
+            "generated"
+          ]
+        },
+        "left_trust": {
+          "enum": [
+            "trusted",
+            "advisory",
+            "failed"
+          ]
+        },
+        "right_role": {
+          "enum": [
+            "primary",
+            "test",
+            "example",
+            "benchmark",
+            "fixture",
+            "generated"
+          ]
+        },
+        "right_trust": {
+          "enum": [
+            "trusted",
+            "advisory",
+            "failed"
+          ]
+        },
+        "shared_commits": {
+          "type": "integer",
+          "minimum": 2
+        },
+        "union_commits": {
+          "type": "integer",
+          "minimum": 2
+        }
+      },
+      "additionalProperties": false
+    },
+    "contributor_concentration": {
+      "type": "object",
+      "required": [
+        "package",
+        "role",
+        "trust",
+        "contributor_count",
+        "numerator",
+        "denominator"
+      ],
+      "properties": {
+        "package": {
+          "$ref": "#/$defs/index"
+        },
+        "role": {
+          "enum": [
+            "primary",
+            "test",
+            "example",
+            "benchmark",
+            "fixture",
+            "generated"
+          ]
+        },
+        "trust": {
+          "enum": [
+            "trusted",
+            "advisory",
+            "failed"
+          ]
+        },
+        "contributor_count": {
+          "type": "integer",
+          "minimum": 1
+        },
+        "numerator": {
+          "type": "integer",
+          "minimum": 1
+        },
+        "denominator": {
+          "type": "integer",
+          "minimum": 1
+        }
+      },
+      "additionalProperties": false
+    },
+    "evolutionary_finding": {
+      "type": "object",
+      "required": [
+        "id",
+        "kind",
+        "rating",
+        "left",
+        "right",
+        "shared_commits",
+        "union_commits"
+      ],
+      "properties": {
+        "id": {
+          "$ref": "#/$defs/index"
+        },
+        "kind": {
+          "const": "unexplained_coupling"
+        },
+        "rating": {
+          "const": "watch"
+        },
+        "left": {
+          "$ref": "#/$defs/index"
+        },
+        "right": {
+          "$ref": "#/$defs/index"
+        },
+        "shared_commits": {
+          "type": "integer",
+          "minimum": 3
+        },
+        "union_commits": {
+          "type": "integer",
+          "minimum": 3
+        }
+      },
+      "additionalProperties": false
+    },
+    "evolutionary_comparison": {
+      "type": "object",
+      "required": [
+        "id",
+        "kind",
+        "direction",
+        "left",
+        "right",
+        "shared_commits",
+        "union_commits"
+      ],
+      "properties": {
+        "id": {
+          "$ref": "#/$defs/index"
+        },
+        "kind": {
+          "enum": [
+            "finding_introduced",
+            "finding_removed"
+          ]
+        },
+        "direction": {
+          "enum": [
+            "worse",
+            "better"
+          ]
+        },
+        "left": {
+          "$ref": "#/$defs/index"
+        },
+        "right": {
+          "$ref": "#/$defs/index"
+        },
+        "shared_commits": {
+          "type": "integer",
+          "minimum": 3
+        },
+        "union_commits": {
+          "type": "integer",
+          "minimum": 3
+        }
+      },
+      "additionalProperties": false
+    },
+    "verdict": {
+      "type": "object",
+      "required": [
+        "tier",
+        "sentence",
+        "mode"
+      ],
+      "properties": {
+        "tier": {
+          "enum": [
+            "empty",
+            "clean",
+            "solid",
+            "worn",
+            "fights_back",
+            "lost",
+            "no_debt_change",
+            "better",
+            "worse",
+            "mixed"
+          ]
+        },
+        "sentence": {
+          "type": "string"
+        },
+        "mode": {
+          "enum": [
+            "codebase",
+            "diff"
+          ]
+        }
+      },
+      "additionalProperties": false
+    },
+    "worst_offender": {
+      "type": "object",
+      "required": [
+        "path",
+        "name",
+        "container",
+        "unit_kind",
+        "reason"
+      ],
+      "properties": {
+        "path": {
+          "type": "string"
+        },
+        "name": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "container": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "unit_kind": {
+          "oneOf": [
+            {
+              "$ref": "#/$defs/unit_kind"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "reason": {
+          "enum": [
+            "hot_and_complex",
+            "most_complex",
+            "package_dependency_cycle"
+          ]
+        }
+      },
+      "additionalProperties": false
+    },
+    "summary": {
+      "type": "object",
+      "required": [
+        "checked",
+        "high",
+        "watch",
+        "high_architecture",
+        "debt_diff",
+        "worst"
+      ],
+      "properties": {
+        "checked": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "high": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "watch": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "high_architecture": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "debt_diff": {
+          "$ref": "#/$defs/diff"
+        },
+        "worst": {
+          "type": "array",
+          "maxItems": 3,
+          "items": {
+            "$ref": "#/$defs/worst_offender"
+          }
+        }
+      },
+      "additionalProperties": false
+    },
+    "hotspot": {
+      "type": "object",
+      "required": [
+        "file",
+        "rating",
+        "touches"
+      ],
+      "properties": {
+        "file": {
+          "$ref": "#/$defs/index"
+        },
+        "rating": {
+          "enum": [
+            "watch",
+            "high"
+          ]
+        },
+        "touches": {
+          "type": "integer",
+          "minimum": 0
+        }
+      },
+      "additionalProperties": false
+    },
+    "size_finding": {
+      "type": "object",
+      "required": [
+        "file",
+        "subject",
+        "container",
+        "value",
+        "rating"
+      ],
+      "properties": {
+        "file": {
+          "$ref": "#/$defs/index"
+        },
+        "subject": {
+          "enum": [
+            "file",
+            "container"
+          ]
+        },
+        "container": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "value": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "rating": {
+          "enum": [
+            "watch",
+            "high"
+          ]
+        }
+      },
+      "additionalProperties": false
+    },
+    "stable_dependency_finding": {
+      "type": "object",
+      "required": [
+        "id",
+        "kind",
+        "rating",
+        "source",
+        "target",
+        "source_fan_in",
+        "source_fan_out",
+        "target_fan_in",
+        "target_fan_out",
+        "references",
+        "witness_edges"
+      ],
+      "properties": {
+        "id": {
+          "$ref": "#/$defs/index"
+        },
+        "kind": {
+          "const": "stable_dependency_violation"
+        },
+        "rating": {
+          "enum": [
+            "watch",
+            "high"
+          ]
+        },
+        "source": {
+          "$ref": "#/$defs/index"
+        },
+        "target": {
+          "$ref": "#/$defs/index"
+        },
+        "source_fan_in": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "source_fan_out": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "target_fan_in": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "target_fan_out": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "references": {
+          "type": "integer",
+          "minimum": 1
+        },
+        "witness_edges": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/index"
+          },
+          "uniqueItems": true
+        }
+      },
+      "additionalProperties": false
+    },
+    "knowledge_concentration_finding": {
+      "type": "object",
+      "required": [
+        "id",
+        "kind",
+        "rating",
+        "package",
+        "role",
+        "trust",
+        "contributor_count",
+        "numerator",
+        "denominator"
+      ],
+      "properties": {
+        "id": {
+          "$ref": "#/$defs/index"
+        },
+        "kind": {
+          "const": "knowledge_concentration"
+        },
+        "rating": {
+          "enum": [
+            "watch",
+            "high"
+          ]
+        },
+        "package": {
+          "$ref": "#/$defs/index"
+        },
+        "role": {
+          "enum": [
+            "primary",
+            "test",
+            "example",
+            "benchmark",
+            "fixture",
+            "generated"
+          ]
+        },
+        "trust": {
+          "enum": [
+            "trusted",
+            "advisory",
+            "failed"
+          ]
+        },
+        "contributor_count": {
+          "type": "integer",
+          "minimum": 1
+        },
+        "numerator": {
+          "type": "integer",
+          "minimum": 1
+        },
+        "denominator": {
+          "type": "integer",
+          "minimum": 1
+        }
+      },
+      "additionalProperties": false
+    }
+  }
+}

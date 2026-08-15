@@ -5,7 +5,7 @@ use crate::comparison::{Comparison, ComparisonKind};
 use crate::evolution::{EvolutionaryComparison, EvolutionaryComparisonId};
 use crate::health::{HealthCounts, Rating};
 use crate::report::{ComparisonId, DiffCounts};
-use crate::source::SourceRole;
+use crate::source::{SourceRole, UnitIdentity};
 
 /// The frozen codebase answer.
 ///
@@ -375,13 +375,15 @@ impl WorstOffenderReason {
     }
 }
 
-/// The single worst thing in one scope, named with a resolved path.
+/// One of the worst things in a scope, named with a resolved path.
 ///
-/// The path is resolved while the report is built so a consumer states the
-/// offender without joining index tables.
+/// The path and the unit identity are resolved while the report is built so a
+/// consumer states the offender without joining index tables. Structural debt
+/// has no unit, so its identity is absent rather than invented.
 #[derive(Clone, Debug, Eq, Hash, Ord, PartialEq, PartialOrd)]
 pub struct WorstOffender {
     path: String,
+    identity: Option<UnitIdentity>,
     reason: WorstOffenderReason,
 }
 
@@ -389,18 +391,35 @@ impl WorstOffender {
     pub fn new(path: impl Into<String>, reason: WorstOffenderReason) -> Self {
         Self {
             path: path.into(),
+            identity: None,
             reason,
         }
+    }
+
+    /// Names the unit this offender is, for source debt.
+    pub fn with_identity(mut self, identity: UnitIdentity) -> Self {
+        self.identity = Some(identity);
+        self
     }
 
     /// The repository-relative path of the offending source.
     pub fn path(&self) -> &str {
         &self.path
     }
+    /// The offending unit, absent for structural debt.
+    pub const fn identity(&self) -> Option<&UnitIdentity> {
+        self.identity.as_ref()
+    }
     pub const fn reason(&self) -> WorstOffenderReason {
         self.reason
     }
 }
+
+/// The most offenders one verdict names.
+///
+/// Three is enough for a reader and for a machine head, and it is bounded, so
+/// selecting them never sorts a whole finding table.
+pub const WORST_OFFENDER_LIMIT: usize = 3;
 
 /// One completed answer for one scope.
 #[derive(Clone, Debug, Default, Eq, PartialEq)]
@@ -409,18 +428,18 @@ pub struct Verdict {
     counts: VerdictCounts,
     diff: Option<DiffTier>,
     selection: DebtDiffSelection,
-    worst_offender: Option<WorstOffender>,
+    worst: Vec<WorstOffender>,
 }
 
 impl Verdict {
     /// Completes a codebase verdict, which reconciles no comparison.
-    pub fn codebase(counts: VerdictCounts, worst_offender: Option<WorstOffender>) -> Self {
+    pub fn codebase(counts: VerdictCounts, worst: Vec<WorstOffender>) -> Self {
         Self {
             tier: CodebaseTier::select(counts),
             counts,
             diff: None,
             selection: DebtDiffSelection::default(),
-            worst_offender,
+            worst,
         }
     }
 
@@ -428,14 +447,14 @@ impl Verdict {
     pub fn diff(
         counts: VerdictCounts,
         selection: DebtDiffSelection,
-        worst_offender: Option<WorstOffender>,
+        worst: Vec<WorstOffender>,
     ) -> Self {
         Self {
             tier: CodebaseTier::select(counts),
             counts,
             diff: Some(selection.tier()),
             selection,
-            worst_offender,
+            worst,
         }
     }
 
@@ -456,8 +475,13 @@ impl Verdict {
     pub const fn facts(&self) -> DebtDiffFacts {
         self.selection.facts()
     }
-    pub const fn worst_offender(&self) -> Option<&WorstOffender> {
-        self.worst_offender.as_ref()
+    /// The worst thing in this scope, which a human report names first.
+    pub fn worst_offender(&self) -> Option<&WorstOffender> {
+        self.worst.first()
+    }
+    /// Every named offender, worst first and at most `WORST_OFFENDER_LIMIT`.
+    pub fn worst(&self) -> &[WorstOffender] {
+        &self.worst
     }
     /// The exact sentence this verdict answers with.
     pub const fn sentence(&self) -> &'static str {
@@ -827,10 +851,13 @@ mod tests {
     fn a_codebase_verdict_states_its_tier_sentence_and_offender() {
         let verdict = Verdict::codebase(
             counts(1_000, 4, 10, 0),
-            Some(WorstOffender::new(
-                "crates/analysis/src/report.rs",
-                WorstOffenderReason::HotAndComplex,
-            )),
+            vec![
+                WorstOffender::new(
+                    "crates/analysis/src/report.rs",
+                    WorstOffenderReason::HotAndComplex,
+                )
+                .with_identity(UnitIdentity::new("aggregate", UnitKind::Function)),
+            ],
         );
         assert_eq!(verdict.tier(), CodebaseTier::Worn);
         assert_eq!(verdict.sentence(), "Worn in the usual places.");
@@ -839,6 +866,11 @@ mod tests {
         let offender = verdict.worst_offender().unwrap();
         assert_eq!(offender.path(), "crates/analysis/src/report.rs");
         assert_eq!(offender.reason(), WorstOffenderReason::HotAndComplex);
+        assert_eq!(
+            offender.identity().map(UnitIdentity::name),
+            Some("aggregate")
+        );
+        assert_eq!(verdict.worst().len(), 1);
         assert!(verdict.selection().is_empty());
     }
 
@@ -849,7 +881,7 @@ mod tests {
             0,
             ArchitectureComparisonKind::CycleIntroduced,
         ));
-        let verdict = Verdict::diff(counts(1_000, 0, 0, 1), selection, None);
+        let verdict = Verdict::diff(counts(1_000, 0, 0, 1), selection, Vec::new());
         assert_eq!(verdict.diff_tier(), Some(DiffTier::Worse));
         assert_eq!(verdict.sentence(), "You made it worse.");
         assert_eq!(verdict.tier(), CodebaseTier::Worn);

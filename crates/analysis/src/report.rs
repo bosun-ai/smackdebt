@@ -5,7 +5,8 @@ use crate::orphan::OrphanFile;
 use crate::size::SizeFinding;
 use crate::source::{Language, ParseStatus, SourceRole, SourceSpan, SourceTrust, UnitIdentity};
 use crate::verdict::{
-    DebtDiffSelection, Verdict, VerdictCounts, WorstOffender, WorstOffenderReason,
+    DebtDiffSelection, Verdict, VerdictCounts, WORST_OFFENDER_LIMIT, WorstOffender,
+    WorstOffenderReason,
 };
 use crate::{
     ArchitectureComparison, ArchitectureComparisonId, ArchitectureFinding, ArchitectureFindingId,
@@ -20,7 +21,7 @@ use crate::{
 };
 #[cfg(test)]
 use crate::{HealthPolicy, LocalUnitId, Signal, Thresholds, compare_units};
-use std::cmp::Reverse;
+use std::cmp::{Ordering, Reverse};
 
 macro_rules! index_type {
     ($name:ident) => {
@@ -66,6 +67,7 @@ pub struct PackageRecord {
     scope: ScopeId,
     path: String,
     presence: PackagePresence,
+    manifest_name: Option<String>,
 }
 
 impl PackageRecord {
@@ -75,6 +77,7 @@ impl PackageRecord {
             scope,
             path: path.into(),
             presence: PackagePresence::Current,
+            manifest_name: None,
         }
     }
     pub fn base_only(id: PackageId, scope: ScopeId, path: impl Into<String>) -> Self {
@@ -83,7 +86,20 @@ impl PackageRecord {
             scope,
             path: path.into(),
             presence: PackagePresence::BaseOnly,
+            manifest_name: None,
         }
+    }
+    /// Records the name a manifest declares for this package.
+    ///
+    /// A package root without a manifest, or with a manifest that declares no
+    /// name, keeps no name rather than borrowing its directory name.
+    pub fn with_manifest_name(mut self, name: Option<String>) -> Self {
+        self.manifest_name = name;
+        self
+    }
+    /// The name this package's manifest declares, when it declares one.
+    pub fn manifest_name(&self) -> Option<&str> {
+        self.manifest_name.as_deref()
     }
     pub const fn id(&self) -> PackageId {
         self.id
@@ -909,7 +925,7 @@ impl Report {
         comparisons: usize,
     ) -> Self {
         Self {
-            schema_version: 3,
+            schema_version: 4,
             mode,
             root: None,
             scopes: Vec::with_capacity(scopes),
@@ -1054,10 +1070,10 @@ impl Report {
     pub fn scope_verdict(&self, scope: ScopeId) -> Verdict {
         let scope = &self.scopes[scope.index()];
         let counts = VerdictCounts::new(scope.health(), self.high_architecture_findings(scope));
-        let worst_offender = self.worst_offender(scope);
+        let worst = self.worst_offenders(scope);
         match self.mode {
-            ReportMode::Codebase => Verdict::codebase(counts, worst_offender),
-            ReportMode::Diff => Verdict::diff(counts, self.debt_diff(scope), worst_offender),
+            ReportMode::Codebase => Verdict::codebase(counts, worst),
+            ReportMode::Diff => Verdict::diff(counts, self.debt_diff(scope), worst),
         }
     }
 
@@ -1090,39 +1106,56 @@ impl Report {
         selection
     }
 
-    /// Names the single worst thing in a scope with its resolved path.
+    /// Names the worst things in a scope with their resolved paths.
     ///
-    /// Fixture and generated debt never moves a verdict, so it can never be
-    /// the worst offender either. A scope whose only debt is structural falls
-    /// back to the first witness of its first package dependency cycle.
-    fn worst_offender(&self, scope: &Scope) -> Option<WorstOffender> {
-        let ranked = scope
+    /// Fixture and generated debt never moves a verdict, so it can never be a
+    /// worst offender either. A scope whose only debt is structural falls back
+    /// to the witnesses of its package dependency cycles.
+    ///
+    /// At most `WORST_OFFENDER_LIMIT` offenders are kept, and they are kept by
+    /// bounded insertion rather than by sorting, so naming them costs one pass
+    /// over the scope's findings however large the scope is.
+    fn worst_offenders(&self, scope: &Scope) -> Vec<WorstOffender> {
+        let mut best: Vec<(FindingRank<'_>, &Finding)> = Vec::with_capacity(WORST_OFFENDER_LIMIT);
+        for finding in scope
             .findings()
             .iter()
             .map(|id| &self.findings[id.index()])
             .filter(|finding| finding.affects_verdict())
-            .map(|finding| (self.rank(finding), finding))
-            .min_by(|left, right| left.0.cmp(&right.0));
-        if let Some((_, finding)) = ranked {
-            let reason = if self.is_hotspot(finding.file()) {
-                WorstOffenderReason::HotAndComplex
-            } else {
-                WorstOffenderReason::MostComplex
-            };
-            return Some(WorstOffender::new(
-                self.files[finding.file().index()].path(),
-                reason,
-            ));
+        {
+            let rank = self.rank(finding);
+            if best.len() == WORST_OFFENDER_LIMIT
+                && best[WORST_OFFENDER_LIMIT - 1].0.cmp(&rank) != Ordering::Greater
+            {
+                continue;
+            }
+            let position = best.partition_point(|(kept, _)| kept.cmp(&rank) != Ordering::Greater);
+            best.insert(position, (rank, finding));
+            best.truncate(WORST_OFFENDER_LIMIT);
         }
-        let cycle = scope
+        if !best.is_empty() {
+            return best
+                .into_iter()
+                .map(|(_, finding)| {
+                    let reason = if self.is_hotspot(finding.file()) {
+                        WorstOffenderReason::HotAndComplex
+                    } else {
+                        WorstOffenderReason::MostComplex
+                    };
+                    WorstOffender::new(self.files[finding.file().index()].path(), reason)
+                        .with_identity(finding.identity().clone())
+                })
+                .collect();
+        }
+        scope
             .architecture_findings()
             .iter()
             .map(|id| &self.architecture_findings[id.index()])
-            .find(|finding| finding.kind() == ArchitectureFindingKind::PackageCycle)?;
-        Some(WorstOffender::new(
-            self.cycle_witness_path(cycle)?,
-            WorstOffenderReason::PackageDependencyCycle,
-        ))
+            .filter(|finding| finding.kind() == ArchitectureFindingKind::PackageCycle)
+            .filter_map(|cycle| self.cycle_witness_path(cycle))
+            .take(WORST_OFFENDER_LIMIT)
+            .map(|path| WorstOffender::new(path, WorstOffenderReason::PackageDependencyCycle))
+            .collect()
     }
 
     fn rank(&self, finding: &Finding) -> FindingRank<'_> {

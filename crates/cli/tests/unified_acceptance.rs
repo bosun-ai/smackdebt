@@ -13,8 +13,9 @@ use unicode_width::UnicodeWidthStr;
 use support::coverage_failure_repository;
 use support::{
     GeneratedRepository, Invocation, copy_language_truth_files, deepened_signal_repository,
-    evolution_repository, ref_diff_repository, shallow_clone, source_role_repository,
-    static_architecture_repository, workspace_manifest_repository, worktree_change_repository,
+    evolution_repository, ref_diff_repository, shallow_clone, signal_table_repository,
+    source_role_repository, static_architecture_repository, workspace_manifest_repository,
+    worktree_change_repository,
 };
 
 #[derive(Debug, Deserialize)]
@@ -1420,17 +1421,304 @@ fn declared_manifest_names_make_the_workspace_graph_and_coupling_true() {
     );
 }
 
+#[test]
+fn every_derived_signal_table_carries_its_exact_rows() {
+    let repository = signal_table_repository();
+    let result = Invocation::new(["--json", "--history", "36500d"]).run(repository.path());
+    result.success();
+    let parallel = Invocation::new(["--json", "--history", "36500d"])
+        .automatic_workers()
+        .run(repository.path());
+    assert_eq!(result, parallel, "serial and parallel runs must agree");
+    let report = checked_json(&result.stdout);
+    let path = |index: &Value| {
+        report["paths"][index.as_u64().unwrap() as usize]
+            .as_str()
+            .unwrap()
+            .to_owned()
+    };
+    let file_path = |file: u64| path(&report["files"][file as usize]["path"]);
+    let package_path = |package: u64| {
+        report["packages"][package as usize]["path"]
+            .as_str()
+            .unwrap()
+            .to_owned()
+    };
+
+    let hot: Vec<_> = report["hotspots"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .map(|hotspot| {
+            (
+                file_path(hotspot["file"].as_u64().unwrap()),
+                hotspot["touches"].as_u64().unwrap(),
+            )
+        })
+        .collect();
+    assert_eq!(hot, [("core/main.js".to_owned(), 13)]);
+
+    let sizes: HashSet<(String, &str, u64)> = report["size_findings"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .map(|finding| {
+            (
+                file_path(finding["file"].as_u64().unwrap()),
+                finding["subject"].as_str().unwrap(),
+                finding["value"].as_u64().unwrap(),
+            )
+        })
+        .collect();
+    assert!(
+        sizes
+            .iter()
+            .any(|(path, subject, _)| path == "core/oversized.js" && *subject == "file"),
+        "{sizes:?}"
+    );
+    assert!(
+        sizes
+            .iter()
+            .any(|(path, subject, _)| path == "core/container.js" && *subject == "container"),
+        "{sizes:?}"
+    );
+
+    let orphans: HashSet<String> = report["orphan_files"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .map(|file| file_path(file.as_u64().unwrap()))
+        .collect();
+    assert!(orphans.contains("core/unused.js"), "{orphans:?}");
+
+    let violations: Vec<_> = report["stable_dependency_findings"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .map(|finding| {
+            (
+                package_path(finding["source"].as_u64().unwrap()),
+                package_path(finding["target"].as_u64().unwrap()),
+                finding["source_fan_in"].as_u64().unwrap(),
+                finding["source_fan_out"].as_u64().unwrap(),
+                finding["target_fan_in"].as_u64().unwrap(),
+                finding["target_fan_out"].as_u64().unwrap(),
+                finding["references"].as_u64().unwrap(),
+            )
+        })
+        .collect();
+    assert_eq!(
+        violations,
+        [("core".to_owned(), "util".to_owned(), 2, 1, 1, 1, 2)]
+    );
+
+    let concentration: Vec<_> = report["knowledge_concentration_findings"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .map(|finding| {
+            (
+                package_path(finding["package"].as_u64().unwrap()),
+                finding["contributor_count"].as_u64().unwrap(),
+                finding["numerator"].as_u64().unwrap(),
+                finding["denominator"].as_u64().unwrap(),
+            )
+        })
+        .collect();
+    assert!(
+        concentration
+            .iter()
+            .any(
+                |(package, contributors, numerator, denominator)| package == "core"
+                    && *contributors == 1
+                    && numerator == denominator
+                    && *denominator >= 10
+            ),
+        "{concentration:?}"
+    );
+    // The finding states counts alone; the contributor never reaches output.
+    for private in ["Solo Fixture", "solo@example.invalid"] {
+        assert!(
+            !result
+                .stdout
+                .windows(private.len())
+                .any(|window| window == private.as_bytes())
+        );
+    }
+}
+
 fn checked_json(bytes: &[u8]) -> Value {
     let report: Value = serde_json::from_slice(bytes).unwrap();
     let schema: Value =
-        serde_json::from_str(include_str!("../../../schemas/report-v3.schema.json")).unwrap();
+        serde_json::from_str(include_str!("../../../schemas/report-v4.schema.json")).unwrap();
     jsonschema::validator_for(&schema)
         .unwrap()
         .validate(&report)
         .unwrap();
     assert_index_integrity(&report);
     assert_recursive_privacy(&report);
+    assert_no_floating_point_value(&report, "$");
+    assert_head_agrees_with_tables(&report);
     report
+}
+
+/// Version 4 serializes integers and strings only, so any floating-point value
+/// anywhere in the object is a contract failure.
+fn assert_no_floating_point_value(value: &Value, path: &str) {
+    match value {
+        Value::Object(fields) => {
+            for (name, value) in fields {
+                assert_no_floating_point_value(value, &format!("{path}.{name}"));
+            }
+        }
+        Value::Array(values) => {
+            for (index, value) in values.iter().enumerate() {
+                assert_no_floating_point_value(value, &format!("{path}[{index}]"));
+            }
+        }
+        Value::Number(number) => assert!(
+            number.is_i64() || number.is_u64(),
+            "floating-point value at {path}: {number}"
+        ),
+        _ => {}
+    }
+}
+
+/// The denormalized head duplicates table facts on purpose, so acceptance
+/// rebuilds every head value from the tables and compares them.
+fn assert_head_agrees_with_tables(report: &Value) {
+    assert_eq!(report["verdict"]["mode"], report["mode"]);
+    assert!(
+        report["verdict"]["sentence"]
+            .as_str()
+            .unwrap()
+            .ends_with('.')
+    );
+    let summary = &report["summary"];
+    let Some(root) = report["root"].as_u64().map(|root| root as usize) else {
+        assert_eq!(summary["checked"], 0);
+        assert!(summary["worst"].as_array().unwrap().is_empty());
+        return;
+    };
+    let scope = &report["scopes"][root];
+    let counts = &report["health"][scope["health"].as_u64().unwrap() as usize];
+    assert_eq!(summary["high"], counts["high"]);
+    assert_eq!(summary["watch"], counts["watch"]);
+    assert_eq!(
+        summary["checked"].as_u64().unwrap(),
+        counts["healthy"].as_u64().unwrap()
+            + counts["watch"].as_u64().unwrap()
+            + counts["high"].as_u64().unwrap()
+    );
+    let architecture = scope["architecture_findings"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .filter(|id| {
+            report["architecture_findings"][id.as_u64().unwrap() as usize]["rating"] == "high"
+        })
+        .count() as u64;
+    assert_eq!(summary["high_architecture"].as_u64(), Some(architecture));
+
+    let paths: HashSet<&str> = report["paths"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .map(|path| path.as_str().unwrap())
+        .collect();
+    let worst = summary["worst"].as_array().unwrap();
+    assert!(worst.len() <= 3, "the head names at most three offenders");
+    for offender in worst {
+        let path = offender["path"].as_str().unwrap();
+        assert!(paths.contains(path), "worst path {path} is not a real path");
+        if offender["name"].is_null() {
+            assert_eq!(offender["reason"], "package_dependency_cycle");
+        }
+    }
+    assert_debt_diff_selection(report);
+}
+
+/// Rebuilds the debt-diff selection from the serialized tables.
+///
+/// This proves two things at once: that the head's counts are the counts the
+/// tables imply, and that no comparison identity is selected twice, which
+/// would count one movement as two.
+fn assert_debt_diff_selection(report: &Value) {
+    let root = report["root"].as_u64().unwrap() as usize;
+    let scope = &report["scopes"][root];
+    let rated = |value: &Value| value == "watch" || value == "high";
+    let mut counts = (0_u64, 0_u64, 0_u64);
+    let mut selected = HashSet::new();
+    let count =
+        |direction: &Value, counts: &mut (u64, u64, u64)| match direction.as_str().unwrap() {
+            "worse" => counts.0 += 1,
+            "better" => counts.1 += 1,
+            other => {
+                assert_eq!(other, "changed");
+                counts.2 += 1;
+            }
+        };
+    for id in scope["comparisons"].as_array().unwrap() {
+        let id = id.as_u64().unwrap() as usize;
+        let comparison = &report["comparisons"][id];
+        let role = comparison["file"].as_u64().map_or("primary", |file| {
+            report["files"][file as usize]["role"].as_str().unwrap()
+        });
+        if role == "fixture" || role == "generated" {
+            continue;
+        }
+        let before = &comparison["ratings"]["before"];
+        let after = &comparison["ratings"]["after"];
+        let moves = match comparison["kind"].as_str().unwrap() {
+            "regressed" | "improved" => true,
+            "added" => rated(after),
+            "removed" => rated(before),
+            "metric_changed" => rated(before) || rated(after),
+            _ => false,
+        };
+        if !moves {
+            continue;
+        }
+        assert!(
+            selected.insert(("source", id)),
+            "comparison {id} selected twice"
+        );
+        count(&comparison["direction"], &mut counts);
+    }
+    for id in scope["architecture_comparisons"].as_array().unwrap() {
+        let id = id.as_u64().unwrap() as usize;
+        let comparison = &report["architecture_comparisons"][id];
+        if !matches!(
+            comparison["kind"].as_str().unwrap(),
+            "cycle_introduced" | "cycle_removed"
+        ) {
+            continue;
+        }
+        assert!(
+            selected.insert(("architecture", id)),
+            "architecture comparison {id} selected twice"
+        );
+        count(&comparison["direction"], &mut counts);
+    }
+    for id in scope["evolutionary_comparisons"].as_array().unwrap() {
+        let id = id.as_u64().unwrap() as usize;
+        assert!(
+            selected.insert(("evolutionary", id)),
+            "evolutionary comparison {id} selected twice"
+        );
+        count(
+            &report["evolutionary_comparisons"][id]["direction"],
+            &mut counts,
+        );
+    }
+    let debt_diff = &report["summary"]["debt_diff"];
+    assert_eq!(debt_diff["worse"].as_u64(), Some(counts.0));
+    assert_eq!(debt_diff["better"].as_u64(), Some(counts.1));
+    assert_eq!(debt_diff["changed"].as_u64(), Some(counts.2));
+    assert_eq!(
+        debt_diff["total"].as_u64(),
+        Some(counts.0 + counts.1 + counts.2)
+    );
 }
 
 fn assert_recursive_privacy(value: &Value) {
@@ -1512,6 +1800,8 @@ fn assert_index_integrity(report: &Value) {
     }
     for table in [
         "packages",
+        "stable_dependency_findings",
+        "knowledge_concentration_findings",
         "scopes",
         "files",
         "findings",
@@ -1693,7 +1983,7 @@ fn assert_index_integrity(report: &Value) {
         assert!((right as usize) < packages);
         assert!(left < right);
         assert!(finding["shared_commits"].as_u64().unwrap() >= 3);
-        assert!(finding["similarity"].as_f64().unwrap() >= 0.2);
+        assert_eq!(finding["kind"], "unexplained_coupling");
         assert!(
             finding["shared_commits"].as_u64().unwrap()
                 <= finding["union_commits"].as_u64().unwrap()
@@ -1706,11 +1996,51 @@ fn assert_index_integrity(report: &Value) {
         assert!((right as usize) < packages);
         assert!(left < right);
         assert!(comparison["shared_commits"].as_u64().unwrap() >= 3);
-        assert!(comparison["similarity"].as_f64().unwrap() >= 0.2);
         assert!(
             comparison["shared_commits"].as_u64().unwrap()
                 <= comparison["union_commits"].as_u64().unwrap()
         );
+    }
+    let mut hot_files = HashSet::new();
+    for hotspot in report["hotspots"].as_array().unwrap() {
+        let file = hotspot["file"].as_u64().unwrap() as usize;
+        assert!(file < files);
+        assert!(hotspot["touches"].as_u64().unwrap() > 0);
+        assert!(hot_files.insert(file), "one hotspot row per file");
+    }
+    for finding in report["size_findings"].as_array().unwrap() {
+        assert!((finding["file"].as_u64().unwrap() as usize) < files);
+        match finding["subject"].as_str().unwrap() {
+            "file" => assert!(finding["container"].is_null()),
+            _ => assert!(finding["container"].as_str().is_some_and(|c| !c.is_empty())),
+        }
+    }
+    let mut orphans = HashSet::new();
+    for orphan in report["orphan_files"].as_array().unwrap() {
+        let file = orphan.as_u64().unwrap() as usize;
+        assert!(file < files);
+        assert!(orphans.insert(file), "one orphan row per file");
+        assert_eq!(report["files"][file]["role"], "primary");
+    }
+    for finding in report["stable_dependency_findings"].as_array().unwrap() {
+        assert!((finding["source"].as_u64().unwrap() as usize) < packages);
+        assert!((finding["target"].as_u64().unwrap() as usize) < packages);
+        assert_ne!(finding["source"], finding["target"]);
+        for edge in finding["witness_edges"].as_array().unwrap() {
+            assert!((edge.as_u64().unwrap() as usize) < file_edges);
+        }
+    }
+    for finding in report["knowledge_concentration_findings"]
+        .as_array()
+        .unwrap()
+    {
+        assert!((finding["package"].as_u64().unwrap() as usize) < packages);
+        assert!(finding["numerator"].as_u64().unwrap() <= finding["denominator"].as_u64().unwrap());
+    }
+    for package in report["packages"].as_array().unwrap() {
+        if let Some(name) = package.get("manifest_name") {
+            assert!(!name.as_str().unwrap().is_empty());
+        }
     }
 }
 

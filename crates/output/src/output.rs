@@ -2077,7 +2077,7 @@ mod tests {
         let mut json = Vec::new();
         write_json(&mut json, &report, report.root()).unwrap();
         let value: serde_json::Value = serde_json::from_slice(&json).unwrap();
-        assert_eq!(value["schema_version"], 3);
+        assert_eq!(value["schema_version"], 4);
         assert_eq!(value["mode"], "codebase");
     }
 

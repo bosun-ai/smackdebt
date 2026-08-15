@@ -209,11 +209,12 @@ pub(super) fn analyze_diff(request: &DiffRequest) -> Result<ProjectReport, Proje
             let id = PackageId::from_index(index);
             let scope = hierarchy.package_scopes[index];
             let path = report_package_path(root);
-            if index < current_package_roots.len() {
+            let record = if index < current_package_roots.len() {
                 PackageRecord::current(id, scope, path)
             } else {
                 PackageRecord::base_only(id, scope, path)
-            }
+            };
+            record.with_manifest_name(declared_manifest_name(&inventory, root))
         })
         .collect();
     let changed_paths_for_hierarchy: std::collections::BTreeSet<_> = changed
@@ -1816,6 +1817,7 @@ impl<'a> CodebaseReportBuilder<'a> {
                     hierarchy.package_scopes[index],
                     report_package_path(root),
                 )
+                .with_manifest_name(manifest_names[index].clone())
             })
             .collect();
         let mut package_ids = Vec::with_capacity(candidates.len());
@@ -2398,6 +2400,18 @@ fn resolve_manifest_name(
             )
         }
     }
+}
+
+/// The name the current inventory declares for one package root.
+///
+/// A base-only package root the working tree no longer has declares nothing,
+/// which is exactly what the report states for it.
+fn declared_manifest_name(inventory: &Inventory, root: &Path) -> Option<String> {
+    inventory
+        .packages()
+        .iter()
+        .find(|package| package.root().as_path() == root)
+        .and_then(|package| package.manifest_name().map(str::to_owned))
 }
 
 /// Aligns discovered manifest names with the report's package positions.

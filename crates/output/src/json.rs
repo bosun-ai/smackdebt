@@ -14,8 +14,12 @@ use crate::output::{
     comparison_name, diagnostic_name, direction_name, language_name, mode_name, rating_name,
     scope_kind,
 };
+use smackdebt_analysis::{
+    Hotspot, KnowledgeConcentrationFinding, OrphanFile, SizeFinding, SizeSubject,
+    StableDependencyFinding, Verdict, WorstOffender,
+};
 
-/// Streams JSON schema version 3 without cloning report strings or arrays.
+/// Streams JSON schema version 4 without cloning report strings or arrays.
 pub fn write_json(
     writer: &mut impl Write,
     report: &Report,
@@ -35,9 +39,14 @@ impl Serialize for ReportView<'_> {
         S: Serializer,
     {
         let report = self.0;
-        let mut map = serializer.serialize_map(Some(28))?;
+        let verdict = report.verdict().cloned().unwrap_or_default();
+        let mut map = serializer.serialize_map(Some(35))?;
         map.serialize_entry("schema_version", &report.schema_version())?;
         map.serialize_entry("mode", mode_name(report.mode()))?;
+        // The head is written before every table so `--json | head` answers the
+        // question the tool exists to answer without one index lookup.
+        map.serialize_entry("verdict", &VerdictView(&verdict, report.mode()))?;
+        map.serialize_entry("summary", &SummaryView(&verdict))?;
         map.serialize_entry("root", &report.root().map(|root| root.get()))?;
         map.serialize_entry("selected_scope", &self.1.map(|id| id.get()))?;
         map.serialize_entry("paths", &report.paths())?;
@@ -100,6 +109,17 @@ impl Serialize for ReportView<'_> {
             "evolutionary_comparisons",
             &EvolutionaryComparisons(report.evolutionary_comparisons()),
         )?;
+        map.serialize_entry(
+            "knowledge_concentration_findings",
+            &KnowledgeConcentrationFindings(report.knowledge_concentration_findings()),
+        )?;
+        map.serialize_entry(
+            "stable_dependency_findings",
+            &StableDependencyFindings(report.stable_dependency_findings()),
+        )?;
+        map.serialize_entry("hotspots", &Hotspots(report.hotspots()))?;
+        map.serialize_entry("size_findings", &SizeFindings(report.size_findings()))?;
+        map.serialize_entry("orphan_files", &OrphanFiles(report.orphan_files()))?;
         map.end()
     }
 }
@@ -118,7 +138,7 @@ impl Serialize for Packages<'_> {
 struct PackageView<'a>(&'a PackageRecord);
 impl Serialize for PackageView<'_> {
     fn serialize<S: Serializer>(&self, serializer: S) -> Result<S::Ok, S::Error> {
-        let mut map = serializer.serialize_map(Some(4))?;
+        let mut map = serializer.serialize_map(Some(5))?;
         map.serialize_entry("id", &self.0.id().get())?;
         map.serialize_entry("scope", &self.0.scope().get())?;
         map.serialize_entry("path", self.0.path())?;
@@ -129,6 +149,11 @@ impl Serialize for PackageView<'_> {
                 PackagePresence::BaseOnly => "base_only",
             },
         )?;
+        // A package whose manifest declares no name carries no key rather than
+        // an empty string a consumer could mistake for a declared name.
+        if let Some(name) = self.0.manifest_name() {
+            map.serialize_entry("manifest_name", name)?;
+        }
         map.end()
     }
 }
@@ -532,6 +557,8 @@ impl Serialize for HistoryCoverageView<'_> {
         map.serialize_entry("excluded_changes", &value.excluded_changes())?;
         map.serialize_entry("rename_gaps", &value.rename_gaps())?;
         map.serialize_entry("reason", &value.reason())?;
+        map.serialize_entry("window_days", &value.window_days())?;
+        map.serialize_entry("window_excluded_commits", &value.window_excluded_commits())?;
         map.end()
     }
 }
@@ -610,7 +637,6 @@ impl Serialize for ChangeCouplingView {
         map.serialize_entry("right_trust", source_trust_name(evidence.right_trust()))?;
         map.serialize_entry("shared_commits", &self.0.shared_commits())?;
         map.serialize_entry("union_commits", &self.0.union_commits())?;
-        map.serialize_entry("similarity", &self.0.similarity())?;
         map.end()
     }
 }
@@ -634,7 +660,6 @@ impl Serialize for ConcentrationView {
         map.serialize_entry("contributor_count", &self.0.contributor_count())?;
         map.serialize_entry("numerator", &self.0.numerator())?;
         map.serialize_entry("denominator", &self.0.denominator())?;
-        map.serialize_entry("ratio", &self.0.ratio())?;
         map.end()
     }
 }
@@ -654,12 +679,12 @@ impl Serialize for EvolutionaryFindingView {
         let pair = self.0.coupling();
         let mut map = serializer.serialize_map(Some(7))?;
         map.serialize_entry("id", &self.0.id().get())?;
-        map.serialize_entry("rating", "watch")?;
+        map.serialize_entry("kind", "unexplained_coupling")?;
+        map.serialize_entry("rating", rating_name(self.0.rating()))?;
         map.serialize_entry("left", &pair.left().get())?;
         map.serialize_entry("right", &pair.right().get())?;
         map.serialize_entry("shared_commits", &pair.shared_commits())?;
         map.serialize_entry("union_commits", &pair.union_commits())?;
-        map.serialize_entry("similarity", &pair.similarity())?;
         map.end()
     }
 }
@@ -691,7 +716,6 @@ impl Serialize for EvolutionaryComparisonView {
         map.serialize_entry("right", &pair.right().get())?;
         map.serialize_entry("shared_commits", &pair.shared_commits())?;
         map.serialize_entry("union_commits", &pair.union_commits())?;
-        map.serialize_entry("similarity", &pair.similarity())?;
         map.end()
     }
 }
@@ -971,9 +995,12 @@ impl Serialize for ComparisonView<'_> {
         S: Serializer,
     {
         let comparison = self.0;
-        let mut map = serializer.serialize_map(Some(10))?;
+        let span = comparison.span();
+        let mut map = serializer.serialize_map(Some(12))?;
         map.serialize_entry("id", &comparison.id().get())?;
         map.serialize_entry("file", &comparison.file().map(|id| id.get()))?;
+        map.serialize_entry("start_line", &span.map(|span| span.start_line()))?;
+        map.serialize_entry("end_line", &span.map(|span| span.end_line()))?;
         map.serialize_entry("name", comparison.identity().name())?;
         map.serialize_entry("container", &comparison.identity().container())?;
         map.serialize_entry("unit_kind", unit_kind_name(comparison.identity().kind()))?;
@@ -1036,10 +1063,231 @@ impl Serialize for MeasurementsView {
     where
         S: Serializer,
     {
-        let mut map = serializer.serialize_map(Some(3))?;
+        let mut map = serializer.serialize_map(Some(5))?;
         map.serialize_entry("cognitive_complexity", &self.0.cognitive_complexity())?;
         map.serialize_entry("cyclomatic_complexity", &self.0.cyclomatic_complexity())?;
         map.serialize_entry("logical_lines", &self.0.logical_lines())?;
+        map.serialize_entry("max_nesting", &self.0.max_nesting())?;
+        map.serialize_entry("parameter_count", &self.0.parameter_count())?;
+        map.end()
+    }
+}
+
+/// The denormalized verdict head.
+///
+/// The tier id and its sentence are analysis-owned bytes, so a machine
+/// consumer and the terminal state the same answer for the same report.
+struct VerdictView<'a>(&'a Verdict, smackdebt_analysis::ReportMode);
+impl Serialize for VerdictView<'_> {
+    fn serialize<S: Serializer>(&self, serializer: S) -> Result<S::Ok, S::Error> {
+        let mut map = serializer.serialize_map(Some(3))?;
+        let tier = match self.0.diff_tier() {
+            Some(tier) => tier.id(),
+            None => self.0.tier().id(),
+        };
+        map.serialize_entry("tier", tier)?;
+        map.serialize_entry("sentence", self.0.sentence())?;
+        map.serialize_entry("mode", mode_name(self.1))?;
+        map.end()
+    }
+}
+
+/// The denormalized summary head.
+///
+/// Every value here also exists in a table. The duplication is bounded, it is
+/// produced from the same completed verdict, and it is what lets a consumer
+/// answer the common question without a join.
+struct SummaryView<'a>(&'a Verdict);
+impl Serialize for SummaryView<'_> {
+    fn serialize<S: Serializer>(&self, serializer: S) -> Result<S::Ok, S::Error> {
+        let counts = self.0.counts();
+        let mut map = serializer.serialize_map(Some(6))?;
+        map.serialize_entry("checked", &counts.checked())?;
+        map.serialize_entry("high", &counts.high())?;
+        map.serialize_entry("watch", &counts.watch())?;
+        map.serialize_entry("high_architecture", &counts.high_architecture_findings())?;
+        map.serialize_entry("debt_diff", &DebtDiffView(self.0))?;
+        map.serialize_entry("worst", &WorstOffenders(self.0.worst()))?;
+        map.end()
+    }
+}
+
+/// The reconciled debt-diff counts, each labeled by its word and printed even
+/// when it is zero.
+struct DebtDiffView<'a>(&'a Verdict);
+impl Serialize for DebtDiffView<'_> {
+    fn serialize<S: Serializer>(&self, serializer: S) -> Result<S::Ok, S::Error> {
+        let total = self.0.facts().total();
+        let mut map = serializer.serialize_map(Some(4))?;
+        map.serialize_entry("worse", &total.worse())?;
+        map.serialize_entry("better", &total.better())?;
+        map.serialize_entry("changed", &total.changed())?;
+        map.serialize_entry("total", &total.total())?;
+        map.end()
+    }
+}
+
+struct WorstOffenders<'a>(&'a [WorstOffender]);
+impl Serialize for WorstOffenders<'_> {
+    fn serialize<S: Serializer>(&self, serializer: S) -> Result<S::Ok, S::Error> {
+        let mut sequence = serializer.serialize_seq(Some(self.0.len()))?;
+        for offender in self.0 {
+            sequence.serialize_element(&WorstOffenderView(offender))?;
+        }
+        sequence.end()
+    }
+}
+struct WorstOffenderView<'a>(&'a WorstOffender);
+impl Serialize for WorstOffenderView<'_> {
+    fn serialize<S: Serializer>(&self, serializer: S) -> Result<S::Ok, S::Error> {
+        let identity = self.0.identity();
+        let mut map = serializer.serialize_map(Some(5))?;
+        map.serialize_entry("path", self.0.path())?;
+        map.serialize_entry(
+            "name",
+            &identity.map(smackdebt_analysis::UnitIdentity::name),
+        )?;
+        map.serialize_entry(
+            "container",
+            &identity.and_then(smackdebt_analysis::UnitIdentity::container),
+        )?;
+        map.serialize_entry(
+            "unit_kind",
+            &identity.map(|identity| unit_kind_name(identity.kind())),
+        )?;
+        map.serialize_entry("reason", worst_offender_reason_name(self.0.reason()))?;
+        map.end()
+    }
+}
+
+fn worst_offender_reason_name(reason: smackdebt_analysis::WorstOffenderReason) -> &'static str {
+    match reason {
+        smackdebt_analysis::WorstOffenderReason::HotAndComplex => "hot_and_complex",
+        smackdebt_analysis::WorstOffenderReason::MostComplex => "most_complex",
+        smackdebt_analysis::WorstOffenderReason::PackageDependencyCycle => {
+            "package_dependency_cycle"
+        }
+    }
+}
+
+struct Hotspots<'a>(&'a [Hotspot]);
+impl Serialize for Hotspots<'_> {
+    fn serialize<S: Serializer>(&self, serializer: S) -> Result<S::Ok, S::Error> {
+        let mut sequence = serializer.serialize_seq(Some(self.0.len()))?;
+        for hotspot in self.0 {
+            sequence.serialize_element(&HotspotView(*hotspot))?;
+        }
+        sequence.end()
+    }
+}
+struct HotspotView(Hotspot);
+impl Serialize for HotspotView {
+    fn serialize<S: Serializer>(&self, serializer: S) -> Result<S::Ok, S::Error> {
+        let mut map = serializer.serialize_map(Some(3))?;
+        map.serialize_entry("file", &self.0.file().get())?;
+        map.serialize_entry("rating", rating_name(self.0.rating()))?;
+        map.serialize_entry("touches", &self.0.touches())?;
+        map.end()
+    }
+}
+
+struct SizeFindings<'a>(&'a [SizeFinding]);
+impl Serialize for SizeFindings<'_> {
+    fn serialize<S: Serializer>(&self, serializer: S) -> Result<S::Ok, S::Error> {
+        let mut sequence = serializer.serialize_seq(Some(self.0.len()))?;
+        for finding in self.0 {
+            sequence.serialize_element(&SizeFindingView(finding))?;
+        }
+        sequence.end()
+    }
+}
+struct SizeFindingView<'a>(&'a SizeFinding);
+impl Serialize for SizeFindingView<'_> {
+    fn serialize<S: Serializer>(&self, serializer: S) -> Result<S::Ok, S::Error> {
+        let mut map = serializer.serialize_map(Some(5))?;
+        map.serialize_entry("file", &self.0.file().get())?;
+        map.serialize_entry(
+            "subject",
+            match self.0.subject() {
+                SizeSubject::File => "file",
+                SizeSubject::Container => "container",
+            },
+        )?;
+        map.serialize_entry("container", &self.0.container())?;
+        map.serialize_entry("value", &self.0.value())?;
+        map.serialize_entry("rating", rating_name(self.0.rating()))?;
+        map.end()
+    }
+}
+
+/// The descriptive orphan table, which is file indexes and nothing else.
+struct OrphanFiles<'a>(&'a [OrphanFile]);
+impl Serialize for OrphanFiles<'_> {
+    fn serialize<S: Serializer>(&self, serializer: S) -> Result<S::Ok, S::Error> {
+        let mut sequence = serializer.serialize_seq(Some(self.0.len()))?;
+        for orphan in self.0 {
+            sequence.serialize_element(&orphan.file().get())?;
+        }
+        sequence.end()
+    }
+}
+
+struct StableDependencyFindings<'a>(&'a [StableDependencyFinding]);
+impl Serialize for StableDependencyFindings<'_> {
+    fn serialize<S: Serializer>(&self, serializer: S) -> Result<S::Ok, S::Error> {
+        let mut sequence = serializer.serialize_seq(Some(self.0.len()))?;
+        for finding in self.0 {
+            sequence.serialize_element(&StableDependencyFindingView(finding))?;
+        }
+        sequence.end()
+    }
+}
+struct StableDependencyFindingView<'a>(&'a StableDependencyFinding);
+impl Serialize for StableDependencyFindingView<'_> {
+    fn serialize<S: Serializer>(&self, serializer: S) -> Result<S::Ok, S::Error> {
+        let evidence = self.0.evidence();
+        let mut map = serializer.serialize_map(Some(11))?;
+        map.serialize_entry("id", &self.0.id().get())?;
+        map.serialize_entry("kind", "stable_dependency_violation")?;
+        map.serialize_entry("rating", rating_name(self.0.rating()))?;
+        map.serialize_entry("source", &self.0.source().get())?;
+        map.serialize_entry("target", &self.0.target().get())?;
+        // The degree operands are published instead of an instability ratio, so
+        // a consumer compares stability at whatever precision it chooses.
+        map.serialize_entry("source_fan_in", &evidence.source().fan_in())?;
+        map.serialize_entry("source_fan_out", &evidence.source().fan_out())?;
+        map.serialize_entry("target_fan_in", &evidence.target().fan_in())?;
+        map.serialize_entry("target_fan_out", &evidence.target().fan_out())?;
+        map.serialize_entry("references", &evidence.references())?;
+        map.serialize_entry("witness_edges", &DependencyEdgeIds(self.0.witness_edges()))?;
+        map.end()
+    }
+}
+
+struct KnowledgeConcentrationFindings<'a>(&'a [KnowledgeConcentrationFinding]);
+impl Serialize for KnowledgeConcentrationFindings<'_> {
+    fn serialize<S: Serializer>(&self, serializer: S) -> Result<S::Ok, S::Error> {
+        let mut sequence = serializer.serialize_seq(Some(self.0.len()))?;
+        for finding in self.0 {
+            sequence.serialize_element(&KnowledgeConcentrationFindingView(*finding))?;
+        }
+        sequence.end()
+    }
+}
+struct KnowledgeConcentrationFindingView(KnowledgeConcentrationFinding);
+impl Serialize for KnowledgeConcentrationFindingView {
+    fn serialize<S: Serializer>(&self, serializer: S) -> Result<S::Ok, S::Error> {
+        let concentration = self.0.concentration();
+        let mut map = serializer.serialize_map(Some(9))?;
+        map.serialize_entry("id", &self.0.id().get())?;
+        map.serialize_entry("kind", "knowledge_concentration")?;
+        map.serialize_entry("rating", rating_name(self.0.rating()))?;
+        map.serialize_entry("package", &concentration.package().get())?;
+        map.serialize_entry("role", source_role_name(concentration.role()))?;
+        map.serialize_entry("trust", source_trust_name(concentration.trust()))?;
+        map.serialize_entry("contributor_count", &concentration.contributor_count())?;
+        map.serialize_entry("numerator", &concentration.numerator())?;
+        map.serialize_entry("denominator", &concentration.denominator())?;
         map.end()
     }
 }

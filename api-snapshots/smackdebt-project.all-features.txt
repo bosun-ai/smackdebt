@@ -26,7 +26,7 @@ pub fn smackdebt_project::CodebaseRequest::with_history_days(self, u32) -> Self
 pub fn smackdebt_project::CodebaseRequest::with_minimum_hotspot_touches(self, u32) -> Self
 pub fn smackdebt_project::CodebaseRequest::with_role_rules(self, alloc::vec::Vec<smackdebt_project::SourceRoleRule>) -> Self
 pub fn smackdebt_project::CodebaseRequest::with_size_thresholds(self, (u32, u32), (u32, u32)) -> Self
-pub fn smackdebt_project::CodebaseRequest::with_thresholds(self, (u32, u32), (u32, u32), (u32, u32)) -> Self
+pub fn smackdebt_project::CodebaseRequest::with_thresholds(self, (u32, u32), (u32, u32), (u32, u32), (u32, u32), (u32, u32)) -> Self
 pub fn smackdebt_project::CodebaseRequest::with_width(self, smackdebt_project::ExecutionWidth) -> Self
 pub struct smackdebt_project::DiffRequest
 impl smackdebt_project::DiffRequest
@@ -36,7 +36,7 @@ pub fn smackdebt_project::DiffRequest::new(impl core::convert::Into<std::path::P
 pub fn smackdebt_project::DiffRequest::with_history_days(self, u32) -> Self
 pub fn smackdebt_project::DiffRequest::with_reference(self, impl core::convert::Into<alloc::string::String>) -> Self
 pub fn smackdebt_project::DiffRequest::with_role_rules(self, alloc::vec::Vec<smackdebt_project::SourceRoleRule>) -> Self
-pub fn smackdebt_project::DiffRequest::with_thresholds(self, (u32, u32), (u32, u32), (u32, u32)) -> Self
+pub fn smackdebt_project::DiffRequest::with_thresholds(self, (u32, u32), (u32, u32), (u32, u32), (u32, u32), (u32, u32)) -> Self
 pub fn smackdebt_project::DiffRequest::with_width(self, smackdebt_project::ExecutionWidth) -> Self
 pub struct smackdebt_project::EvidenceSnapshot
 impl smackdebt_project::EvidenceSnapshot

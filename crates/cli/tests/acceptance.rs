@@ -27,14 +27,14 @@ fn serial_and_parallel_codebase_output_match() {
 }
 
 #[test]
-fn serial_and_parallel_json_match_and_follow_schema_three() {
+fn serial_and_parallel_json_match_and_follow_schema_four() {
     let project = fixture();
     let path = project.path().to_str().unwrap();
     let serial = run(["--json", "--jobs", "1", path]);
     let parallel = run(["--json", "--jobs", "4", path]);
     assert_eq!(serial, parallel);
     let report: serde_json::Value = serde_json::from_slice(&serial).unwrap();
-    assert_eq!(report["schema_version"], 3);
+    assert_eq!(report["schema_version"], 4);
     assert_eq!(report["mode"], "codebase");
     assert!(report["findings"].is_array());
     validate_schema(&report);
@@ -786,7 +786,9 @@ fn evolutionary_analysis_is_exact_private_and_deterministic() {
     assert_eq!(report["history_coverage"]["commits"], 6);
     assert_eq!(report["change_coupling"][0]["shared_commits"], 3);
     assert_eq!(report["change_coupling"][0]["union_commits"], 6);
-    assert_eq!(report["change_coupling"][0]["similarity"], 0.5);
+    // The operands are published; a consumer derives 3/6 at its own precision.
+    assert_eq!(report["change_coupling"][0]["shared_commits"], 3);
+    assert_eq!(report["change_coupling"][0]["union_commits"], 6);
     assert_eq!(report["change_coupling"].as_array().unwrap().len(), 1);
     assert_eq!(report["evolutionary_findings"].as_array().unwrap().len(), 1);
     let terminal_text = String::from_utf8(serial_terminal.clone()).unwrap();
@@ -1422,11 +1424,64 @@ fn assert_snapshot(name: &str, actual: &[u8], expected: &[u8]) {
 
 fn validate_schema(report: &serde_json::Value) {
     let schema: serde_json::Value =
-        serde_json::from_str(include_str!("../../../schemas/report-v3.schema.json")).unwrap();
+        serde_json::from_str(include_str!("../../../schemas/report-v4.schema.json")).unwrap();
     jsonschema::validator_for(&schema)
         .unwrap()
         .validate(report)
         .unwrap();
+}
+
+/// The denormalized head duplicates table facts on purpose, so every value in
+/// it is compared with the table it came from.
+fn assert_head_agrees_with_tables(report: &serde_json::Value) {
+    let mode = report["mode"].as_str().unwrap();
+    assert_eq!(report["verdict"]["mode"], mode);
+    assert!(!report["verdict"]["tier"].as_str().unwrap().is_empty());
+    assert!(
+        report["verdict"]["sentence"]
+            .as_str()
+            .unwrap()
+            .ends_with('.')
+    );
+    let summary = &report["summary"];
+    let Some(root) = report["root"].as_u64() else {
+        assert_eq!(summary["checked"], 0);
+        return;
+    };
+    let health = report["scopes"][root as usize]["health"].as_u64().unwrap() as usize;
+    let counts = &report["health"][health];
+    assert_eq!(summary["high"], counts["high"]);
+    assert_eq!(summary["watch"], counts["watch"]);
+    assert_eq!(
+        summary["checked"].as_u64().unwrap(),
+        counts["healthy"].as_u64().unwrap()
+            + counts["watch"].as_u64().unwrap()
+            + counts["high"].as_u64().unwrap()
+    );
+    let architecture = report["scopes"][root as usize]["architecture_findings"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .filter(|id| {
+            report["architecture_findings"][id.as_u64().unwrap() as usize]["rating"] == "high"
+        })
+        .count() as u64;
+    assert_eq!(summary["high_architecture"].as_u64(), Some(architecture));
+    let paths: Vec<&str> = report["paths"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .map(|path| path.as_str().unwrap())
+        .collect();
+    let worst = summary["worst"].as_array().unwrap();
+    assert!(worst.len() <= 3);
+    for offender in worst {
+        let path = offender["path"].as_str().unwrap();
+        assert!(
+            paths.contains(&path),
+            "worst path {path} is not a real path"
+        );
+    }
 }
 
 fn assert_index_integrity(report: &serde_json::Value) {
@@ -1451,7 +1506,7 @@ fn assert_index_integrity(report: &serde_json::Value) {
     let external_dependencies = report["external_dependencies"].as_array().unwrap();
     let resolution_diagnostics = report["resolution_diagnostics"].as_array().unwrap();
 
-    assert!(report.get("summary").is_none());
+    assert_head_agrees_with_tables(report);
     for field in ["root", "selected_scope"] {
         if let Some(index) = report[field].as_u64() {
             assert!(
@@ -1639,7 +1694,7 @@ fn assert_index_integrity(report: &serde_json::Value) {
         assert!(right < package_graph.len());
         assert!(left < right);
         assert!(finding["shared_commits"].as_u64().unwrap() >= 3);
-        assert!(finding["similarity"].as_f64().unwrap() >= 0.2);
+        assert_eq!(finding["kind"], "unexplained_coupling");
     }
     for (index, comparison) in evolutionary_comparisons.iter().enumerate() {
         assert_eq!(comparison["id"], index);
@@ -1649,7 +1704,6 @@ fn assert_index_integrity(report: &serde_json::Value) {
         assert!(right < package_graph.len());
         assert!(left < right);
         assert!(comparison["shared_commits"].as_u64().unwrap() >= 3);
-        assert!(comparison["similarity"].as_f64().unwrap() >= 0.2);
     }
     for dependency in external_dependencies {
         assert!((dependency["file"].as_u64().unwrap() as usize) < files.len());
@@ -1703,7 +1757,7 @@ fn index_audit_rejects_a_nested_evolution_reference() {
 #[test]
 fn report_schema_has_no_contributor_identity_fields_or_tables() {
     let schema: serde_json::Value =
-        serde_json::from_str(include_str!("../../../schemas/report-v3.schema.json")).unwrap();
+        serde_json::from_str(include_str!("../../../schemas/report-v4.schema.json")).unwrap();
     assert_schema_omits_identity_keys(&schema);
 }
 
@@ -1758,7 +1812,7 @@ fn json_schema_rejects_nested_field_type_drift() {
     let mut report: serde_json::Value = serde_json::from_slice(&bytes).unwrap();
     report["scopes"][0]["coverage"]["selected_files"] = "one".into();
     let schema: serde_json::Value =
-        serde_json::from_str(include_str!("../../../schemas/report-v3.schema.json")).unwrap();
+        serde_json::from_str(include_str!("../../../schemas/report-v4.schema.json")).unwrap();
     assert!(
         jsonschema::validator_for(&schema)
             .unwrap()
@@ -1797,7 +1851,7 @@ fn json_schema_rejects_weak_evolution_verdict_thresholds() {
     );
 
     let schema: serde_json::Value =
-        serde_json::from_str(include_str!("../../../schemas/report-v3.schema.json")).unwrap();
+        serde_json::from_str(include_str!("../../../schemas/report-v4.schema.json")).unwrap();
     let validator = jsonschema::validator_for(&schema).unwrap();
     for (table, report) in [
         ("evolutionary_findings", finding_report),
@@ -1807,9 +1861,10 @@ fn json_schema_rejects_weak_evolution_verdict_thresholds() {
         weak_commits[table][0]["shared_commits"] = 2.into();
         assert!(validator.validate(&weak_commits).is_err(), "{table}");
 
-        let mut weak_similarity = report;
-        weak_similarity[table][0]["similarity"] = 0.19.into();
-        assert!(validator.validate(&weak_similarity).is_err(), "{table}");
+        // Version 4 publishes operands only, so a re-added float is rejected.
+        let mut float_operand = report;
+        float_operand[table][0]["similarity"] = 0.19.into();
+        assert!(validator.validate(&float_operand).is_err(), "{table}");
     }
 }
 

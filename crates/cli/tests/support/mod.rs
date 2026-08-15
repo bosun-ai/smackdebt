@@ -306,6 +306,93 @@ pub(crate) fn deepened_signal_repository() -> GeneratedRepository {
     repository
 }
 
+/// A repository that produces every derived signal table at once.
+///
+/// It carries a stable package that depends on a less stable one through two
+/// references, an oversized file and container, a file nothing depends on, a
+/// rated file touched often enough to be hot, and a package whose commits all
+/// come from one contributor.
+pub(crate) fn signal_table_repository() -> GeneratedRepository {
+    let repository = GeneratedRepository::new("main");
+    repository.write(
+        ".smackdebt.toml",
+        b"[thresholds]\ncognitive = { watch = 1, high = 2 }\ncyclomatic = { watch = 2, high = 4 }\nfunction_lines = { watch = 4, high = 8 }\nfile_lines = { watch = 30, high = 60 }\ncontainer_lines = { watch = 5, high = 10 }\n",
+    );
+    for package in ["core", "util", "helper", "app", "web"] {
+        repository.write(
+            &format!("{package}/package.json"),
+            format!("{{\"name\":\"{package}\",\"private\":true}}\n").as_bytes(),
+        );
+    }
+    let mut oversized = String::from("export function wide(value) {\n");
+    for index in 0..40 {
+        oversized.push_str(&format!("  const step{index} = value + {index};\n"));
+    }
+    oversized.push_str("  return 0;\n}\n");
+    let mut container = String::from("export class Wide {\n  work(value) {\n");
+    for index in 0..12 {
+        container.push_str(&format!("    const step{index} = value + {index};\n"));
+    }
+    container.push_str("    return 0;\n  }\n}\n");
+    repository.apply(&[
+        // Two references make the core → util direction count.
+        WorktreeEdit::Write(
+            "core/main.js",
+            b"import one from '../util/one';\nimport two from '../util/two';\nexport default function core(value) { return value ? one(value) : two(value); }\n",
+        ),
+        WorktreeEdit::Write("core/oversized.js", oversized.as_bytes()),
+        WorktreeEdit::Write("core/container.js", container.as_bytes()),
+        // Nothing imports this file and it is not a conventional entry file.
+        WorktreeEdit::Write(
+            "core/unused.js",
+            b"export function unused(value) { return value; }\n",
+        ),
+        WorktreeEdit::Write(
+            "util/one.js",
+            b"import small from '../helper/small';\nexport default function one(value) { return small(value); }\n",
+        ),
+        WorktreeEdit::Write(
+            "util/two.js",
+            b"export default function two(value) { return value; }\n",
+        ),
+        WorktreeEdit::Write(
+            "helper/small.js",
+            b"export default function small(value) { return value; }\n",
+        ),
+        WorktreeEdit::Write(
+            "app/main.js",
+            b"import core from '../core/main';\nexport const app = core;\n",
+        ),
+        WorktreeEdit::Write(
+            "web/main.js",
+            b"import core from '../core/main';\nexport const web = core;\n",
+        ),
+    ]);
+    repository.commit(commit(
+        "signal tables",
+        "Solo Fixture",
+        "solo@example.invalid",
+        "2026-05-01T12:00:00Z",
+    ));
+    // Twelve commits from one contributor make `core` both hot and concentrated.
+    for revision in 1..=12 {
+        repository.write(
+            "core/main.js",
+            format!(
+                "import one from '../util/one';\nimport two from '../util/two';\nexport default function core(value) {{ if (value > {revision}) {{ return one(value); }} return two(value); }}\n"
+            )
+            .as_bytes(),
+        );
+        repository.commit(commit(
+            "change the hot package",
+            "Solo Fixture",
+            "solo@example.invalid",
+            "2026-05-02T12:00:00Z",
+        ));
+    }
+    repository
+}
+
 pub(crate) fn static_architecture_repository() -> GeneratedRepository {
     let repository = GeneratedRepository::new("main");
     let fixture_root =

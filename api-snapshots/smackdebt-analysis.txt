@@ -118,6 +118,8 @@ pub enum smackdebt_analysis::Signal
 pub smackdebt_analysis::Signal::CognitiveComplexity
 pub smackdebt_analysis::Signal::CyclomaticComplexity
 pub smackdebt_analysis::Signal::LogicalLines
+pub smackdebt_analysis::Signal::MaxNesting
+pub smackdebt_analysis::Signal::ParameterCount
 pub enum smackdebt_analysis::SizeSubject
 pub smackdebt_analysis::SizeSubject::Container
 pub smackdebt_analysis::SizeSubject::File
@@ -482,7 +484,7 @@ pub struct smackdebt_analysis::HealthAssessment
 impl smackdebt_analysis::HealthAssessment
 pub const fn smackdebt_analysis::HealthAssessment::rating(self) -> smackdebt_analysis::Rating
 pub const fn smackdebt_analysis::HealthAssessment::signal(self, smackdebt_analysis::Signal) -> smackdebt_analysis::SignalAssessment
-pub const fn smackdebt_analysis::HealthAssessment::signals(self) -> [smackdebt_analysis::SignalAssessment; 3]
+pub const fn smackdebt_analysis::HealthAssessment::signals(self) -> [smackdebt_analysis::SignalAssessment; 5]
 pub struct smackdebt_analysis::HealthCounts
 impl smackdebt_analysis::HealthCounts
 pub fn smackdebt_analysis::HealthCounts::add_counts(&mut self, Self)
@@ -499,7 +501,9 @@ pub const fn smackdebt_analysis::HealthPolicy::assess(self, smackdebt_analysis::
 pub const fn smackdebt_analysis::HealthPolicy::cognitive(self) -> smackdebt_analysis::Thresholds
 pub const fn smackdebt_analysis::HealthPolicy::cyclomatic(self) -> smackdebt_analysis::Thresholds
 pub const fn smackdebt_analysis::HealthPolicy::logical_lines(self) -> smackdebt_analysis::Thresholds
-pub const fn smackdebt_analysis::HealthPolicy::new(smackdebt_analysis::Thresholds, smackdebt_analysis::Thresholds, smackdebt_analysis::Thresholds) -> Self
+pub const fn smackdebt_analysis::HealthPolicy::nesting(self) -> smackdebt_analysis::Thresholds
+pub const fn smackdebt_analysis::HealthPolicy::new(smackdebt_analysis::Thresholds, smackdebt_analysis::Thresholds, smackdebt_analysis::Thresholds, smackdebt_analysis::Thresholds, smackdebt_analysis::Thresholds) -> Self
+pub const fn smackdebt_analysis::HealthPolicy::parameters(self) -> smackdebt_analysis::Thresholds
 impl core::default::Default for smackdebt_analysis::HealthPolicy
 pub fn smackdebt_analysis::HealthPolicy::default() -> Self
 pub struct smackdebt_analysis::HistoryChangeFact
@@ -594,7 +598,7 @@ pub const fn smackdebt_analysis::Measurements::logical_lines(self) -> u32
 pub const fn smackdebt_analysis::Measurements::max_nesting(self) -> u32
 pub const fn smackdebt_analysis::Measurements::new(u32, u32, u32) -> Self
 pub const fn smackdebt_analysis::Measurements::parameter_count(self) -> u32
-pub const fn smackdebt_analysis::Measurements::rated(self) -> (u32, u32, u32)
+pub const fn smackdebt_analysis::Measurements::rated(self) -> (u32, u32, u32, u32, u32)
 pub const fn smackdebt_analysis::Measurements::with_shape(self, u32, u32) -> Self
 pub struct smackdebt_analysis::OrphanCandidate<'a>
 impl<'a> smackdebt_analysis::OrphanCandidate<'a>
@@ -650,9 +654,11 @@ impl smackdebt_analysis::PackageRecord
 pub fn smackdebt_analysis::PackageRecord::base_only(smackdebt_analysis::PackageId, smackdebt_analysis::ScopeId, impl core::convert::Into<alloc::string::String>) -> Self
 pub fn smackdebt_analysis::PackageRecord::current(smackdebt_analysis::PackageId, smackdebt_analysis::ScopeId, impl core::convert::Into<alloc::string::String>) -> Self
 pub const fn smackdebt_analysis::PackageRecord::id(&self) -> smackdebt_analysis::PackageId
+pub fn smackdebt_analysis::PackageRecord::manifest_name(&self) -> core::option::Option<&str>
 pub fn smackdebt_analysis::PackageRecord::path(&self) -> &str
 pub const fn smackdebt_analysis::PackageRecord::presence(&self) -> smackdebt_analysis::PackagePresence
 pub const fn smackdebt_analysis::PackageRecord::scope(&self) -> smackdebt_analysis::ScopeId
+pub fn smackdebt_analysis::PackageRecord::with_manifest_name(self, core::option::Option<alloc::string::String>) -> Self
 pub struct smackdebt_analysis::PathId(_)
 impl smackdebt_analysis::PathId
 pub const fn smackdebt_analysis::PathId::from_index(usize) -> Self
@@ -837,15 +843,16 @@ pub fn smackdebt_analysis::UnitIdentity::name(&self) -> &str
 pub fn smackdebt_analysis::UnitIdentity::new(impl core::convert::Into<alloc::string::String>, smackdebt_analysis::UnitKind) -> Self
 pub struct smackdebt_analysis::Verdict
 impl smackdebt_analysis::Verdict
-pub fn smackdebt_analysis::Verdict::codebase(smackdebt_analysis::VerdictCounts, core::option::Option<smackdebt_analysis::WorstOffender>) -> Self
+pub fn smackdebt_analysis::Verdict::codebase(smackdebt_analysis::VerdictCounts, alloc::vec::Vec<smackdebt_analysis::WorstOffender>) -> Self
 pub const fn smackdebt_analysis::Verdict::counts(&self) -> smackdebt_analysis::VerdictCounts
-pub fn smackdebt_analysis::Verdict::diff(smackdebt_analysis::VerdictCounts, smackdebt_analysis::DebtDiffSelection, core::option::Option<smackdebt_analysis::WorstOffender>) -> Self
+pub fn smackdebt_analysis::Verdict::diff(smackdebt_analysis::VerdictCounts, smackdebt_analysis::DebtDiffSelection, alloc::vec::Vec<smackdebt_analysis::WorstOffender>) -> Self
 pub const fn smackdebt_analysis::Verdict::diff_tier(&self) -> core::option::Option<smackdebt_analysis::DiffTier>
 pub const fn smackdebt_analysis::Verdict::facts(&self) -> smackdebt_analysis::DebtDiffFacts
 pub const fn smackdebt_analysis::Verdict::selection(&self) -> &smackdebt_analysis::DebtDiffSelection
 pub const fn smackdebt_analysis::Verdict::sentence(&self) -> &'static str
 pub const fn smackdebt_analysis::Verdict::tier(&self) -> smackdebt_analysis::CodebaseTier
-pub const fn smackdebt_analysis::Verdict::worst_offender(&self) -> core::option::Option<&smackdebt_analysis::WorstOffender>
+pub fn smackdebt_analysis::Verdict::worst(&self) -> &[smackdebt_analysis::WorstOffender]
+pub fn smackdebt_analysis::Verdict::worst_offender(&self) -> core::option::Option<&smackdebt_analysis::WorstOffender>
 pub struct smackdebt_analysis::VerdictCounts
 impl smackdebt_analysis::VerdictCounts
 pub const fn smackdebt_analysis::VerdictCounts::checked(self) -> u32
@@ -856,9 +863,11 @@ pub const fn smackdebt_analysis::VerdictCounts::new(smackdebt_analysis::HealthCo
 pub const fn smackdebt_analysis::VerdictCounts::watch(self) -> u32
 pub struct smackdebt_analysis::WorstOffender
 impl smackdebt_analysis::WorstOffender
+pub const fn smackdebt_analysis::WorstOffender::identity(&self) -> core::option::Option<&smackdebt_analysis::UnitIdentity>
 pub fn smackdebt_analysis::WorstOffender::new(impl core::convert::Into<alloc::string::String>, smackdebt_analysis::WorstOffenderReason) -> Self
 pub fn smackdebt_analysis::WorstOffender::path(&self) -> &str
 pub const fn smackdebt_analysis::WorstOffender::reason(&self) -> smackdebt_analysis::WorstOffenderReason
+pub fn smackdebt_analysis::WorstOffender::with_identity(self, smackdebt_analysis::UnitIdentity) -> Self
 pub const smackdebt_analysis::CRATE_ROOT_CANDIDATE: &str
 pub const smackdebt_analysis::DECLARING_FILE_CANDIDATE: &str
 pub const smackdebt_analysis::DEFAULT_MINIMUM_TOUCHES: u32
@@ -868,6 +877,7 @@ pub const smackdebt_analysis::MINIMUM_CONCENTRATION_COMMITS: u32
 pub const smackdebt_analysis::MINIMUM_CONCENTRATION_PERCENT: u32
 pub const smackdebt_analysis::MINIMUM_STABLE_DEPENDENCY_REFERENCES: u32
 pub const smackdebt_analysis::WORN_PERMILLE: u32
+pub const smackdebt_analysis::WORST_OFFENDER_LIMIT: usize
 pub fn smackdebt_analysis::aggregate_comparisons(&mut [smackdebt_analysis::Scope], &[smackdebt_analysis::Comparison], smackdebt_analysis::ScopeId)
 pub fn smackdebt_analysis::aggregate_scopes(&mut [smackdebt_analysis::Scope], &[smackdebt_analysis::FileRecord], smackdebt_analysis::ScopeId)
 pub fn smackdebt_analysis::change_coupling(&[smackdebt_analysis::HistoryCommitFact], &smackdebt_analysis::PackageContainment) -> alloc::vec::Vec<smackdebt_analysis::ChangeCoupling>
