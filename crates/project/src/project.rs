@@ -3320,6 +3320,75 @@ mod tests {
     }
 
     #[test]
+    fn symbolic_candidates_are_the_last_resort_of_one_reference() {
+        let root = tempfile::tempdir().unwrap();
+        for (path, source) in [
+            (
+                "Cargo.toml",
+                "[package]\nname='symbolic'\nversion='0.1.0'\n",
+            ),
+            (
+                "src/lib.rs",
+                "mod deep;\nmod helper;\nmod report;\npub struct Item;\n",
+            ),
+            (
+                "src/report.rs",
+                "use crate::Item;\nmod tests {\n    use super::*;\n}\n",
+            ),
+            ("src/deep/mod.rs", "mod inner;\n"),
+            (
+                "src/deep/inner.rs",
+                "mod tests {\n    use super::helper::work;\n}\n",
+            ),
+            ("src/helper.rs", "pub fn work() -> i32 { 1 }\n"),
+            ("standalone/loose.rs", "use crate::Missing;\n"),
+        ] {
+            let file = root.path().join(path);
+            fs::create_dir_all(file.parent().unwrap()).unwrap();
+            fs::write(file, source).unwrap();
+        }
+
+        let result = analyze_codebase(&CodebaseRequest::new(root.path())).unwrap();
+        let report = result.report();
+        let edges: Vec<_> = report
+            .dependency_edges()
+            .iter()
+            .filter(|edge| edge.relation() == smackdebt_analysis::StaticRelationKind::Uses)
+            .map(|edge| {
+                (
+                    report.files()[edge.source().index()].path(),
+                    report.files()[edge.target().index()].path(),
+                )
+            })
+            .collect();
+        assert!(
+            edges.contains(&("src/report.rs", "src/lib.rs")),
+            "a crate-root item resolves to the crate root: {edges:?}"
+        );
+        assert!(
+            edges.contains(&("src/deep/inner.rs", "src/helper.rs")),
+            "a matching module path wins over the declaring file: {edges:?}"
+        );
+        assert!(
+            !edges
+                .iter()
+                .any(|(source, target)| source == target || *target == "src/deep/inner.rs"),
+            "a reference to the declaring file creates no edge: {edges:?}"
+        );
+        let unresolved: Vec<_> = report
+            .resolution_diagnostics()
+            .iter()
+            .filter(|value| value.kind() == ResolutionIssueKind::Unresolved)
+            .map(ResolutionDiagnostic::target)
+            .collect();
+        assert_eq!(
+            unresolved,
+            ["crate::Missing"],
+            "a symbolic candidate that matches nothing stays unresolved"
+        );
+    }
+
+    #[test]
     fn a_package_without_an_entry_file_keeps_a_package_scoped_edge() {
         let root = tempfile::tempdir().unwrap();
         for (path, source) in [

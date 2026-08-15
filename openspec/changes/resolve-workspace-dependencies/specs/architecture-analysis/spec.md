@@ -52,6 +52,39 @@ candidate resolution SHALL keep precedence over manifest-name resolution.
 - **WHEN** a reference resolves through an existing path candidate
 - **THEN** the manifest-name index is not consulted for that reference
 
+### Requirement: Symbolic candidates resolve a role, not a path
+A symbolic candidate SHALL name a file by its role in the declaring file's own
+package instead of by a repository path, and a language MAY emit one where no
+repository path can express the reference. Two symbolic candidates SHALL exist:
+the declaring file itself, and the module root of the declaring file's package.
+Project resolution SHALL resolve the declaring-file candidate to the file that
+declares the reference, and SHALL resolve the crate-root candidate to that
+package's module root file, preferring `lib.rs` over `main.rs` when both exist.
+
+A symbolic candidate SHALL be consulted only when no path candidate of the same
+reference matched a discovered file, so path resolution and its
+exactly-one-match rule keep precedence and their ambiguity outcomes are
+unchanged. A symbolic candidate that resolves to the declaring file SHALL count
+as resolved-internal coverage without creating a self edge. A symbolic candidate
+that resolves to no discovered file SHALL leave the reference unresolved with
+its diagnostic.
+
+#### Scenario: A relative reference names an item of the declaring file
+- **WHEN** an inline test module contains `use super::*;` and no sibling module path matches
+- **THEN** the reference resolves to the declaring file, counts as resolved-internal, and creates no edge
+
+#### Scenario: A sibling module path still wins
+- **WHEN** a reference inside an inline module offers both a path candidate that matches a discovered file and the declaring-file candidate
+- **THEN** the path candidate resolves the reference and the declaring-file candidate is not consulted
+
+#### Scenario: A crate-rooted reference names a crate-root item
+- **WHEN** a Rust file contains `use crate::Item;` and no module file named `Item` exists
+- **THEN** the reference resolves to the crate root file of its own package instead of staying unresolved
+
+#### Scenario: A symbolic candidate matches nothing
+- **WHEN** a crate-rooted reference has no discoverable crate root file
+- **THEN** the reference stays unresolved and keeps its diagnostic and source location
+
 ## MODIFIED Requirements
 
 ### Requirement: Static dependency coverage is visible
