@@ -809,7 +809,11 @@ fn rust_super_inside_an_inline_module_targets_the_declaring_file() {
             ),
             (
                 "super::Item",
-                DependencySyntaxState::Candidates(vec![".".to_owned()])
+                DependencySyntaxState::Candidates(vec![
+                    "../Item.rs".to_owned(),
+                    "../Item/mod.rs".to_owned(),
+                    ".".to_owned(),
+                ])
             ),
             (
                 "super::sibling::work",

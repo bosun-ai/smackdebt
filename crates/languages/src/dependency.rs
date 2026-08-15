@@ -124,32 +124,23 @@ pub(super) fn rust(node: Node<'_>, source: &[u8]) -> Option<DependencySyntax> {
     if !internal {
         return Some(external(node, kind, target));
     }
-    if node.kind() != "mod_item"
-        && matches!(root, "self" | "super")
-        && (target == root || inline_module_depth(node) > 0)
-    {
-        return Some(
-            candidates(
-                node,
-                kind,
-                target,
-                vec![DECLARING_FILE_CANDIDATE.to_owned()],
-            )
-            .with_internal_intent(),
-        );
+    // A glob import names the module itself, not a child of it.
+    let path = target.strip_suffix("::*").unwrap_or(target);
+    if node.kind() != "mod_item" && path == root {
+        let value = match root {
+            "crate" => CRATE_ROOT_CANDIDATE,
+            "self" => DECLARING_FILE_CANDIDATE,
+            _ if inline_module_depth(node) > 0 => DECLARING_FILE_CANDIDATE,
+            _ => "./mod.rs",
+        };
+        return Some(candidates(node, kind, target, vec![value.to_owned()]).with_internal_intent());
     }
-    if target == "crate" {
-        return Some(
-            candidates(node, kind, target, vec![CRATE_ROOT_CANDIDATE.to_owned()])
-                .with_internal_intent(),
-        );
-    }
-    let (prefix, value) = if node.kind() == "mod_item" || target.starts_with("self::") {
-        ("./", target.trim_start_matches("self::"))
-    } else if target.starts_with("super::") {
-        ("../", target.trim_start_matches("super::"))
+    let (prefix, value) = if node.kind() == "mod_item" || path.starts_with("self::") {
+        ("./", path.trim_start_matches("self::"))
+    } else if path.starts_with("super::") {
+        ("../", path.trim_start_matches("super::"))
     } else {
-        ("", target.trim_start_matches("crate::"))
+        ("", path.trim_start_matches("crate::"))
     };
     let normalized = format!("{prefix}{}", value.replace("::", "/"));
     let mut values = vec![format!("{normalized}.rs"), format!("{normalized}/mod.rs")];
@@ -166,6 +157,8 @@ pub(super) fn rust(node: Node<'_>, source: &[u8]) -> Option<DependencySyntax> {
     }
     if root == "crate" {
         values.push(CRATE_ROOT_CANDIDATE.to_owned());
+    } else if node.kind() != "mod_item" && inline_module_depth(node) > 0 {
+        values.push(DECLARING_FILE_CANDIDATE.to_owned());
     }
     let dependency = candidates(node, kind, target, values).with_internal_intent();
     Some(if node.kind() == "mod_item" {
