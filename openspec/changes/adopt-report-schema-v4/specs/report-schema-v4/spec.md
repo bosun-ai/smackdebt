@@ -4,7 +4,8 @@
 `--json` SHALL emit one object with `schema_version: 4`, report mode, selected scope, the
 denormalized head defined below, and flat indexed tables for packages, files,
 source facts, static relations, history, findings, hotspots, size findings,
-orphan files, comparisons, health, coverage, and diagnostics. It SHALL NOT emit
+orphan files, stable-dependency findings, knowledge-concentration findings,
+comparisons, health, coverage, and diagnostics. It SHALL NOT emit
 a version-3 or version-2 compatibility object, and the CLI SHALL NOT expose a
 schema selector before release.
 
@@ -36,14 +37,23 @@ tables they duplicate and SHALL agree with them.
 
 ### Requirement: Version 4 exposes the new signal tables
 The report SHALL serialize a `hotspots` table with file index, maximum unit rating, and
-touch count; a `size_findings` table with scope index, file or container kind,
-measured value, and triggered threshold; and an `orphan_files` table of file
-indexes. Architecture findings SHALL expose a `kind` including
-`stable_dependency_violation`, which SHALL carry both packages' integer degree
-operands and the reference count. Evolutionary findings SHALL expose a `kind`
-distinguishing unexplained coupling from knowledge concentration. History
-coverage SHALL expose the selected window length in days and the count of
-streamed commits excluded by the window. Package records SHALL expose
+touch count; a `size_findings` table with file index, file or container subject,
+container name when the subject is a container, measured value, and triggered
+rating; and an `orphan_files` table of file indexes.
+
+Each finding family that owns its own identity type in analysis SHALL own its
+own serialized table, so a row's position can never be mistaken for a position
+in another family's table. A `stable_dependency_findings` table SHALL carry
+`stable_dependency_violation` as its kind together with both packages' integer
+degree operands, the reference count, and its witness edges. A
+`knowledge_concentration_findings` table SHALL carry `knowledge_concentration`
+as its kind together with the package index, SourceRole, trust, contributor
+count, numerator, and denominator without identity. `evolutionary_findings`
+SHALL carry `unexplained_coupling` as its kind, and `architecture_findings`
+SHALL keep `package_cycle` and `file_cycle` as theirs.
+
+History coverage SHALL expose the selected window length in days and the count
+of streamed commits excluded by the window. Package records SHALL expose
 `manifest_name`, absent when no manifest declares one.
 
 #### Scenario: A hot file is emitted
@@ -51,12 +61,30 @@ streamed commits excluded by the window. Package records SHALL expose
 - **THEN** its row exposes the file index, its maximum unit rating, and its exact touch count
 
 #### Scenario: A stable dependency violation is emitted
-- **WHEN** an architecture finding is a stable-dependency violation
-- **THEN** its kind names it and its integer degree operands and reference count are present
+- **WHEN** a stable-dependency violation is serialized
+- **THEN** it is a row of the stable-dependency table whose kind names it and whose integer degree operands and reference count are present
+
+#### Scenario: A knowledge concentration finding is emitted
+- **WHEN** a knowledge-concentration finding is serialized
+- **THEN** it is a row of its own table whose kind names it and whose counts carry no contributor identity
 
 #### Scenario: A package declares no manifest name
 - **WHEN** its record is serialized
 - **THEN** `manifest_name` is absent rather than empty or invented
+
+### Requirement: Version 4 locates every retained comparison
+Each comparison SHALL expose the source location of the side that still has one, as a
+nullable start and end line, so a machine consumer states the same
+`path:line` the terminal prints. A comparison that retains no located side
+SHALL expose null lines rather than an invented span.
+
+#### Scenario: A regressed unit is serialized
+- **WHEN** its comparison row is read
+- **THEN** its file index and its start and end lines locate the unit the terminal printed
+
+#### Scenario: A comparison retains no located side
+- **WHEN** neither side carries a source span
+- **THEN** the row's start and end lines are null
 
 ### Requirement: Version 4 serializes exact values only
 Serialized values SHALL be integers or strings. `similarity` and `ratio` SHALL NOT be

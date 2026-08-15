@@ -70,3 +70,49 @@ healthy rows, or internal processing facts at any width.
 #### Scenario: A cycle witness is long
 - **WHEN** a cycle witness does not fit the resolved width
 - **THEN** the witness stacks across lines and is never shortened with an ellipsis
+
+### Requirement: Codebase scopes expose debt distribution
+Each non-file codebase scope SHALL expose exact High and Watch counts for its children.
+Terminal area rows SHALL state those counts in words and SHALL NOT add a share
+percentage, an attention rate, or a rate bar, because a bar used as data and a
+ratio the reader cannot check were removed from human output. A machine
+consumer SHALL derive any share from the exact counts the report already
+serializes.
+
+#### Scenario: Debt is spread across child directories
+- **WHEN** the selected scope contains several child areas with rated units
+- **THEN** each debt-bearing row shows its exact High and Watch counts labeled by their words and no share, rate, or bar
+
+#### Scenario: Selected scope has no debt
+- **WHEN** the selected scope has zero High and zero Watch units
+- **THEN** no area section is written
+
+### Requirement: Diff scopes expose change distribution
+Each diff scope SHALL expose exact Worse, Better, and Changed counts. Terminal area rows
+SHALL state those counts in words and SHALL NOT add a share percentage or a
+share bar, for the same reason the codebase area rows do not. A machine
+consumer SHALL derive any share from the exact counts the report already
+serializes.
+
+#### Scenario: Changed units span several directories
+- **WHEN** the selected diff scope has changes in several child areas
+- **THEN** each row shows its exact direction counts labeled by their words and no share or bar
+
+#### Scenario: Diff selection has no retained comparisons
+- **WHEN** the selected scope moved no debt
+- **THEN** no area section is written
+
+### Requirement: Explore points to the next debt-bearing area
+The terminal discover line SHALL target the first displayed debt-bearing child after
+display filtering and sorting, using its repository-relative path. The line
+SHALL be the word `next:` followed by `smackdebt <path>`, decorated with U+F46B
+before the word when decoration is enabled, so the line reads without its
+glyph.
+
+#### Scenario: A deeper debt-bearing child exists
+- **WHEN** the selected codebase scope has a displayed debt-bearing child
+- **THEN** the report prints `next: smackdebt <path>` for that first row
+
+#### Scenario: No deeper debt-bearing child exists
+- **WHEN** the selected scope is a file or all deeper children are healthy
+- **THEN** the report omits the discover line

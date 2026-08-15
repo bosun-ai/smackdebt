@@ -9,12 +9,13 @@
 ## 2. New tables and fields
 
 - [ ] 2.1 Add the `hotspots` table with file index, maximum unit rating, and touch count.
-- [ ] 2.2 Add the `size_findings` table with scope index, file or container kind, measured value, and triggered threshold.
+- [ ] 2.2 Add the `size_findings` table with file index, file or container subject, container name, measured value, and triggered rating.
 - [ ] 2.3 Add the `orphan_files` table as a descriptive file-index table.
-- [ ] 2.4 Add the `kind` discriminator to architecture findings including `stable_dependency_violation` with both packages' integer degree operands and the reference count.
-- [ ] 2.5 Add the `kind` discriminator to evolutionary findings for unexplained coupling and knowledge concentration.
+- [ ] 2.4 Add the `stable_dependency_findings` table with kind `stable_dependency_violation`, both packages' integer degree operands, the reference count, and witness edges.
+- [ ] 2.5 Add the `knowledge_concentration_findings` table with kind `knowledge_concentration` and counts without identity, and state each finding family's `kind` on its own table.
 - [ ] 2.6 Add the history window length in days and the window-excluded commit count to `history_coverage`.
 - [ ] 2.7 Add `manifest_name` to package records, absent when no manifest declares one.
+- [ ] 2.8 Serialize each comparison's nullable source location so JSON states the `path:line` the terminal prints.
 
 ## 3. Integer-only serialization
 

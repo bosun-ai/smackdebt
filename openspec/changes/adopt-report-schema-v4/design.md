@@ -49,13 +49,19 @@ so a consumer knows it can trust either source.
 ### New tables and discriminators
 
 - `hotspots`: file index, maximum unit rating, touch count.
-- `size_findings`: scope index, kind (file or container), measured value, and
-  the threshold that triggered.
+- `size_findings`: file index, subject (file or container), container name for a
+  container finding, measured value, and the rating that triggered.
 - `orphan_files`: file index only, as a descriptive table.
-- `architecture_findings[].kind`: gains `stable_dependency_violation` carrying
-  both packages' integer degree operands and the reference count.
-- `evolutionary_findings[].kind`: distinguishes unexplained coupling from
-  knowledge concentration.
+- `stable_dependency_findings`: its own table, because Tasks 2-4 gave the family
+  its own identity type. It carries kind `stable_dependency_violation`, both
+  packages' integer degree operands, the reference count, and witness edges.
+- `knowledge_concentration_findings`: its own table for the same reason,
+  carrying kind `knowledge_concentration` and counts without identity.
+- `evolutionary_findings[].kind` and `architecture_findings[].kind`: each names
+  its own family, so a consumer merging the four finding tables keeps them
+  apart.
+- `comparisons[].start_line` and `[].end_line`: the located side of a
+  comparison, nullable, so JSON states the `path:line` the terminal prints.
 - `history_coverage`: gains the window length in days and the count of streamed
   commits excluded by the window.
 - Package records: gain `manifest_name`, absent when a manifest declares none.

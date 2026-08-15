@@ -27,11 +27,12 @@ four earlier v-next changes produce.
   `sentence`, and `mode`, and `summary` with checked, high, and watch counts,
   the debt-diff counts, and up to three fully resolved worst entries carrying
   path strings — the common question answered with zero joins.
-- New tables `hotspots`, `size_findings`, and `orphan_files` are added.
-  `architecture_findings` gain a `kind` discriminator including
-  `stable_dependency_violation` with its integer operands,
-  `evolutionary_findings` gain a `kind`, `history_coverage` gains the window
-  fields, and package records gain `manifest_name`.
+- New tables `hotspots`, `size_findings`, `orphan_files`,
+  `stable_dependency_findings`, and `knowledge_concentration_findings` are
+  added. Every finding family that owns an identity type in analysis owns its
+  own table and states its `kind`, `history_coverage` gains the window fields,
+  comparisons gain their nullable source location, and package records gain
+  `manifest_name`.
 - Serialized `similarity` and `ratio` floating-point values are removed; their
   integer operands remain, so every serialized value is an integer or a string.
 - Maximum nesting depth and parameter count are promoted to rated signals with
