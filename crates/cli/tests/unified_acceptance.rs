@@ -1649,15 +1649,15 @@ fn assert_debt_diff_selection(report: &Value) {
     let rated = |value: &Value| value == "watch" || value == "high";
     let mut counts = (0_u64, 0_u64, 0_u64);
     let mut selected = HashSet::new();
-    let count =
-        |direction: &Value, counts: &mut (u64, u64, u64)| match direction.as_str().unwrap() {
-            "worse" => counts.0 += 1,
-            "better" => counts.1 += 1,
-            other => {
-                assert_eq!(other, "changed");
-                counts.2 += 1;
-            }
-        };
+    let count = |direction: &Value, counts: &mut (u64, u64, u64)| match direction.as_str().unwrap()
+    {
+        "worse" => counts.0 += 1,
+        "better" => counts.1 += 1,
+        other => {
+            assert_eq!(other, "changed");
+            counts.2 += 1;
+        }
+    };
     for id in scope["comparisons"].as_array().unwrap() {
         let id = id.as_u64().unwrap() as usize;
         let comparison = &report["comparisons"][id];

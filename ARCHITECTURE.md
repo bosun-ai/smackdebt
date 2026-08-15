@@ -6,7 +6,7 @@ Smackdebt answers two questions:
 2. Did this worktree improve or worsen that debt compared with a Git ref?
 
 The implementation favors small crates, inward dependencies, stable output,
-and predictable memory use. Command behavior and JSON schema version 3 are the
+and predictable memory use. Command behavior and JSON schema version 4 are the
 product interfaces. Rust crate APIs remain private implementation seams.
 
 ## Crates and dependency direction
@@ -310,7 +310,7 @@ or interrupted streams are marked incomplete, and unavailable history leaves
 source and static architecture analysis intact.
 
 Activity orders existing debt using visible inputs: health, distinct commit count, the
-three measurements, path, and span. It never changes a health rating and does
+rated measurements, path, and span. It never changes a health rating and does
 not hide a numeric score. Diff analysis attaches the same retained history to
 changed files and packages as context. Only a worktree static edge can add or
 remove an unexplained-coupling finding; history itself has no before and after
@@ -413,17 +413,31 @@ each file. The three common input failures — a missing path, a missing Git ref
 and `--all --json` — write one exact line to standard error with no usage tail,
 no absolute path, and no operating-system or Git text.
 
-JSON starts with `schema_version: 3`. One package table owns stable package IDs,
-repository-relative paths, scope links, and current or base-only presence.
+JSON starts with `schema_version: 4` and then answers the common question
+before any table. `verdict` states the frozen tier id, its analysis-owned
+sentence, and the mode; `summary` states the checked, high, watch, and
+High-architecture counts, the word-labeled debt-diff totals, and up to three
+fully resolved worst offenders carrying path strings. The head is a bounded
+denormalization of facts the tables also carry, produced from the same
+completed verdict, and acceptance rebuilds it from those tables.
+
+One package table owns stable package IDs,
+repository-relative paths, scope links, current or base-only presence, and the
+name a manifest declares.
 Files expose SourceRole, parse outcome, and trust. Findings retain unit kind,
 role, trust, measurements, and spans, including recovered advisory facts that
 do not enter health or diff verdicts. Static relations expose `uses` or
 `module_ownership` separately from role, trust, resolution, and locations.
 History keeps eligible and context mappings separate and exposes exact churn,
-coupling, and concentration operands. The output crate streams this model from
-borrowed report facts, and `schemas/report-v3.schema.json` plus black-box
-snapshots check it. There is no older serializer or command-line version
-selector.
+coupling, and concentration operands, plus the selected window. Hotspots, size
+findings, orphan files, stable-dependency findings, and knowledge-concentration
+findings each own their table, and each finding family states its own `kind`,
+because each owns its own identity type in analysis. Every serialized value is
+an integer or a string: similarity and concentration ratios are derived from
+serialized operands rather than published as floats. The output crate streams
+this model from borrowed report facts, and `schemas/report-v4.schema.json` plus
+black-box snapshots check it. There is no older serializer or command-line
+version selector.
 
 Static architecture adds dependency coverage, file relations, package edges,
 external summaries, resolution diagnostics, package measurements, architecture

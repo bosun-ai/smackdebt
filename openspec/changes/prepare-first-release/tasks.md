@@ -1,7 +1,7 @@
 ## 1. Release evidence
 
 - [ ] 1.0 Confirm `resolve-workspace-dependencies`, `deepen-debt-signals`, `add-verdict-policy`, `redesign-terminal-report`, and `adopt-report-schema-v4` are implemented, reviewed, and archived in that order before any release-evidence task starts
-- [ ] 1.1 Freeze the first command and JSON compatibility notes
+- [ ] 1.1 Freeze the first command and JSON compatibility notes against schema version 4, which `adopt-report-schema-v4` made the only machine contract; version 2 and version 3 are retired and neither their schemas nor their documentation remain
 - [ ] 1.2 Run installation, provenance, license, and package-content checks
 - [ ] 1.3 Record release workload results from a clean revision
 

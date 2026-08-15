@@ -72,8 +72,9 @@ to external consumers, but their checked snapshots must change intentionally.
   manifests. Assign each source file once to its nearest package root.
 - Keep the progressive hierarchy repository, package, directory, file,
   container, then code unit.
-- Retain cognitive complexity, cyclomatic complexity, and exclusive logical
-  lines as the rated measurements.
+- Retain cognitive complexity, cyclomatic complexity, exclusive logical lines,
+  maximum nesting depth, and parameter count as the rated measurements. A unit's
+  rating must be explainable from those five serialized values alone.
 - Apply metric-specific extraction rules. Direct complexity and additive lines
   do not share one generic child-subtraction rule.
 - Full codebase reports retain every Watch and High finding plus aggregate

@@ -231,6 +231,8 @@ Smackdebt reports separate signals instead of hiding them in one score.
 | Cognitive complexity | 15 | 25 |
 | Cyclomatic complexity | 11 | 21 |
 | Statements in a function | 50 | 100 |
+| Maximum nesting depth | 4 | 7 |
+| Declared parameters | 6 | 9 |
 
 A function takes its highest signal rating. Terminal views focus on functions
 that need attention. JSON retains healthy, watch, and high counts for every
@@ -241,6 +243,11 @@ nesting depth. Alternatives and labeled jumps add one. A run of `&&` or `and`
 adds one, and changing that run to `||` or `or` adds another. A separately
 rated closure or nested function does not increase its parent's value.
 Recursion is not inferred from syntax alone.
+
+Maximum nesting depth is the deepest level reached inside one rated unit,
+counted from the same nesting events cognitive complexity uses. Parameter count
+is the number of parameters a unit declares. A separately rated closure reports
+its own depth and does not deepen its parent.
 
 Cyclomatic complexity starts at one and adds one for each independent decision.
 Because it starts at one, a cyclomatic value of one is never printed.
@@ -455,11 +462,38 @@ smackdebt --json
 smackdebt diff main --json
 ```
 
-JSON contains the complete report behind the terminal view, including
-everything the terminal now leaves out: raw dependency edges, references outside
-the repository, churn totals, weak coupling, and healthy counts. The top-level
-object starts with `schema_version: 3`. One package table owns stable package
-IDs, repository-relative paths, and current or base-only presence; machine path
+The object answers the common question first, so `smackdebt --json | head`
+is useful on its own and no consumer joins a table to learn whether the code is
+in trouble:
+
+```json
+{
+  "schema_version": 4,
+  "mode": "codebase",
+  "verdict": { "tier": "worn", "sentence": "Worn in the usual places.", "mode": "codebase" },
+  "summary": {
+    "checked": 2166, "high": 17, "watch": 58, "high_architecture": 0,
+    "debt_diff": { "worse": 0, "better": 0, "changed": 0, "total": 0 },
+    "worst": [
+      { "path": "crates/project/src/project.rs", "name": "analyze_diff",
+        "container": null, "unit_kind": "function", "reason": "hot_and_complex" }
+    ]
+  }
+}
+```
+
+`verdict.tier` is the frozen id and `verdict.sentence` is the exact sentence the
+terminal prints for it. In a diff the tier and sentence are the diff answer and
+`summary.debt_diff` states each count with its word, including zero counts.
+`summary.worst` names at most three offenders with real repository-relative
+path strings. Every value in the head also exists in a table, and both come from
+the same completed report.
+
+Behind the head, JSON contains the complete report, including everything the
+terminal leaves out: raw dependency edges, references outside the repository,
+churn totals, weak coupling, hotspots, size findings, orphan files, and healthy
+counts. One package table owns stable package IDs, repository-relative paths,
+current or base-only presence, and the name a manifest declares; machine path
 `.` stays unchanged even though terminal output calls it `repository root`.
 Files expose SourceRole, parse outcome, and trust. Recovered Watch and High
 facts remain advisory in JSON and `--all` without entering health, default
@@ -468,8 +502,17 @@ findings, architecture verdicts, coupling, or diff verdicts.
 Static relations identify `uses` or `module_ownership` independently from
 role, trust, resolution, and source spans. History rows expose role-aware churn,
 coupling operands, and contributor concentration without contributor identity.
+Hotspots, size findings, orphan files, stable-dependency findings, and
+knowledge-concentration findings each own a table and state their own `kind`.
+
+Every serialized value is an integer or a string. Coupling similarity and
+concentration share are published as their integer operands — shared and union
+commits, numerator and denominator — rather than as ratios, so a consumer
+derives any ratio at whatever precision it wants and no floating-point value
+appears anywhere in the object.
+
 Terminal limits never remove JSON facts. The checked schema is
-[`schemas/report-v3.schema.json`](schemas/report-v3.schema.json); no earlier
+[`schemas/report-v4.schema.json`](schemas/report-v4.schema.json); no earlier
 schema is emitted.
 
 Source findings are ordered by rating, count of signals at that rating, total
@@ -535,6 +578,14 @@ high = 800
 [thresholds.container_lines]
 watch = 300
 high = 600
+
+[thresholds.nesting]
+watch = 4
+high = 7
+
+[thresholds.parameters]
+watch = 6
+high = 9
 
 [hotspots]
 minimum_touches = 5
