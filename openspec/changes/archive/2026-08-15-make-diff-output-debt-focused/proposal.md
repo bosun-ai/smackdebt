@@ -1,3 +1,5 @@
+> Superseded on 2026-08-15 by the v-next change set (`resolve-workspace-dependencies`, `deepen-debt-signals`, `add-verdict-policy`, `redesign-terminal-report`, `adopt-report-schema-v4`); archived with `--skip-specs` at 0% implementation, so none of its deltas entered accepted specs.
+
 ## Why
 
 After the verdict and detail changes, diff output still treats every retained

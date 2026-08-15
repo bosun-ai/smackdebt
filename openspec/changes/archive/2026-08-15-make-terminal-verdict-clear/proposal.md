@@ -1,3 +1,5 @@
+> Superseded on 2026-08-15 by the v-next change set (`resolve-workspace-dependencies`, `deepen-debt-signals`, `add-verdict-policy`, `redesign-terminal-report`, `adopt-report-schema-v4`); archived with `--skip-specs` at 0% implementation, so none of its deltas entered accepted specs.
+
 ## Why
 
 The short terminal report still makes users calculate the overall result. Its
