@@ -14,7 +14,7 @@ use support::coverage_failure_repository;
 use support::{
     GeneratedRepository, Invocation, copy_language_truth_files, evolution_repository,
     ref_diff_repository, shallow_clone, source_role_repository, static_architecture_repository,
-    worktree_change_repository,
+    workspace_manifest_repository, worktree_change_repository,
 };
 
 #[derive(Debug, Deserialize)]
@@ -984,6 +984,147 @@ fn installed_command_runs_outside_the_workspace() {
             checked_json(&output.stdout);
         }
     }
+}
+
+#[test]
+fn declared_manifest_names_make_the_workspace_graph_and_coupling_true() {
+    let repository = workspace_manifest_repository();
+    let result = Invocation::new(["--json", "--history", "36500d"]).run(repository.path());
+    result.success();
+    let automatic = Invocation::new(["--json", "--history", "36500d"])
+        .automatic_workers()
+        .run(repository.path());
+    assert_eq!(result, automatic, "serial and parallel runs must agree");
+    let report = checked_json(&result.stdout);
+
+    let package = |path: &str| {
+        report["packages"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .find(|value| value["path"] == path)
+            .unwrap_or_else(|| panic!("missing package {path}"))["id"]
+            .as_u64()
+            .unwrap()
+    };
+    let edges: HashSet<(u64, u64)> = report["package_edges"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .map(|edge| {
+            (
+                edge["source"].as_u64().unwrap(),
+                edge["target"].as_u64().unwrap(),
+            )
+        })
+        .collect();
+    for (source, target) in [
+        ("crates/core", "crates/renamed"),
+        ("crates/renamed", "crates/core"),
+        ("web", "ui"),
+        ("pyapp", "py"),
+        ("rbapp", "rb"),
+    ] {
+        assert!(
+            edges.contains(&(package(source), package(target))),
+            "{source} -> {target} missing from {edges:?}"
+        );
+    }
+    let core = report["package_graph"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .find(|value| value["package"].as_u64() == Some(package("crates/core")))
+        .unwrap();
+    assert_eq!(core["fan_in"], 1);
+    assert_eq!(core["fan_out"], 1);
+    let cycle = report["architecture_findings"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .find(|finding| finding["kind"] == "package_cycle")
+        .expect("manifest names reveal the package cycle");
+    let cycle_packages: HashSet<u64> = cycle["packages"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .map(|value| value.as_u64().unwrap())
+        .collect();
+    assert_eq!(
+        cycle_packages,
+        HashSet::from([package("crates/core"), package("crates/renamed")])
+    );
+
+    let external = strings(&report["external_dependencies"], "target");
+    for absent in [
+        "pub",
+        "acme_core",
+        "acme_core::core",
+        "renamed_lib",
+        "renamed_lib::renamed",
+        "@acme/ui/button",
+        "acme_py",
+        "acme_rb",
+    ] {
+        assert!(!external.contains(absent), "{absent} is not external");
+    }
+    let ambiguous: Vec<_> = report["resolution_diagnostics"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .filter(|value| value["kind"] == "ambiguous")
+        .map(|value| value["target"].as_str().unwrap())
+        .collect();
+    assert_eq!(ambiguous, ["acme_dup::thing"]);
+    assert!(
+        report["resolution_diagnostics"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .all(|value| value["target"] != "pub")
+    );
+
+    let mut pairs = Vec::new();
+    for row in report["change_coupling"].as_array().unwrap() {
+        let left = row["left"].as_u64().unwrap();
+        let right = row["right"].as_u64().unwrap();
+        assert_ne!(
+            left,
+            package("."),
+            "a scope cannot couple with its own tree"
+        );
+        assert_ne!(right, package("."));
+        pairs.push((left.min(right), left.max(right)));
+    }
+    let unique: HashSet<_> = pairs.iter().copied().collect();
+    assert_eq!(pairs.len(), unique.len(), "one row per package pair");
+    assert!(unique.contains(&(
+        package("crates/core").min(package("crates/renamed")),
+        package("crates/core").max(package("crates/renamed"))
+    )));
+
+    let terminal = Invocation::new(["--all", "--history", "36500d"]).run(repository.path());
+    terminal.success();
+    let text = String::from_utf8(terminal.stdout).unwrap();
+    let coupling_lines: Vec<_> = text.lines().filter(|line| line.contains(" ↔ ")).collect();
+    assert_eq!(
+        coupling_lines.len(),
+        unique.len(),
+        "{coupling_lines:?} must render each retained pair once"
+    );
+    assert!(
+        coupling_lines
+            .iter()
+            .any(|line| line.contains("crates/core ↔ crates/renamed")
+                && line.contains("code dependency exists")),
+        "{coupling_lines:?}"
+    );
+    assert!(
+        coupling_lines
+            .iter()
+            .any(|line| line.contains("rb ↔ ui") && line.contains("no code dependency")),
+        "{coupling_lines:?}"
+    );
 }
 
 fn checked_json(bytes: &[u8]) -> Value {

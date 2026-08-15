@@ -300,6 +300,128 @@ pub(crate) fn static_architecture_repository() -> GeneratedRepository {
     repository
 }
 
+/// A workspace whose packages import each other by declared manifest name.
+pub(crate) fn workspace_manifest_repository() -> GeneratedRepository {
+    let repository = GeneratedRepository::new("main");
+    repository.apply(&[
+        WorktreeEdit::Write("package.json", b"{\"name\":\"@acme/workspace\"}\n"),
+        WorktreeEdit::Write("index.js", b"export const workspace = 1;\n"),
+        WorktreeEdit::Write(
+            "crates/core/Cargo.toml",
+            b"[package]\nname = \"acme-core\"\nversion = \"0.1.0\"\n",
+        ),
+        WorktreeEdit::Write(
+            "crates/core/src/lib.rs",
+            b"mod helper;\npub use crate::helper::value;\nuse renamed_lib::renamed;\npub fn core(input: i32) -> i32 { renamed(value(input)) }\n",
+        ),
+        WorktreeEdit::Write(
+            "crates/core/src/helper.rs",
+            b"pub fn value(input: i32) -> i32 { input + 1 }\n",
+        ),
+        WorktreeEdit::Write(
+            "crates/renamed/Cargo.toml",
+            b"[package]\nname = \"acme-renamed\"\nversion = \"0.1.0\"\n\n[lib]\nname = \"renamed_lib\"\n",
+        ),
+        WorktreeEdit::Write(
+            "crates/renamed/src/lib.rs",
+            b"use acme_core::core;\npub fn renamed(input: i32) -> i32 { if input > 1 { core(0) } else { input } }\n",
+        ),
+        WorktreeEdit::Write("ui/package.json", b"{\"name\":\"@acme/ui\"}\n"),
+        WorktreeEdit::Write("ui/index.js", b"export const button = 1;\n"),
+        WorktreeEdit::Write("web/package.json", b"{\"name\":\"@acme/web\"}\n"),
+        WorktreeEdit::Write(
+            "web/index.js",
+            b"import { button } from '@acme/ui/button';\nexport const web = button;\n",
+        ),
+        WorktreeEdit::Write(
+            "py/pyproject.toml",
+            b"[project]\nname = \"acme_py\"\nversion = \"0.1.0\"\n",
+        ),
+        WorktreeEdit::Write("py/acme_py/__init__.py", b"def value():\n    return 1\n"),
+        WorktreeEdit::Write(
+            "pyapp/pyproject.toml",
+            b"[project]\nname = \"acme-pyapp\"\nversion = \"0.1.0\"\n",
+        ),
+        WorktreeEdit::Write(
+            "pyapp/app.py",
+            b"import acme_py\n\n\ndef app():\n    return acme_py.value()\n",
+        ),
+        WorktreeEdit::Write(
+            "rb/acme.gemspec",
+            b"Gem::Specification.new do |spec|\n  spec.name = \"acme_rb\"\nend\n",
+        ),
+        WorktreeEdit::Write("rb/lib/acme_rb.rb", b"def value\n  1\nend\n"),
+        WorktreeEdit::Write(
+            "rbapp/acme_rbapp.gemspec",
+            b"Gem::Specification.new do |spec|\n  spec.name = \"acme_rbapp\"\nend\n",
+        ),
+        WorktreeEdit::Write("rbapp/lib/app.rb", b"require 'acme_rb'\n\ndef app\n  value\nend\n"),
+        WorktreeEdit::Write(
+            "dup/one/Cargo.toml",
+            b"[package]\nname = \"acme-dup\"\nversion = \"0.1.0\"\n",
+        ),
+        WorktreeEdit::Write("dup/one/src/lib.rs", b"pub fn thing() -> i32 { 1 }\n"),
+        WorktreeEdit::Write(
+            "dup/two/Cargo.toml",
+            b"[package]\nname = \"acme-dup\"\nversion = \"0.1.0\"\n",
+        ),
+        WorktreeEdit::Write("dup/two/src/lib.rs", b"pub fn thing() -> i32 { 2 }\n"),
+        WorktreeEdit::Write(
+            "dupuser/Cargo.toml",
+            b"[package]\nname = \"acme-dupuser\"\nversion = \"0.1.0\"\n",
+        ),
+        WorktreeEdit::Write(
+            "dupuser/src/lib.rs",
+            b"use acme_dup::thing;\npub fn user() -> i32 { thing() }\n",
+        ),
+    ]);
+    repository.commit(commit(
+        "workspace packages",
+        "Workspace Fixture",
+        "workspace@example.invalid",
+        "2026-04-01T12:00:00Z",
+    ));
+    for version in 2..=3 {
+        repository.apply(&[
+            WorktreeEdit::Write(
+                "crates/core/src/helper.rs",
+                format!("pub fn value(input: i32) -> i32 {{ input + {version} }}\n").as_bytes(),
+            ),
+            WorktreeEdit::Write(
+                "crates/renamed/src/lib.rs",
+                format!("use acme_core::core;\npub fn renamed(input: i32) -> i32 {{ if input > {version} {{ core(0) }} else {{ input }} }}\n").as_bytes(),
+            ),
+            WorktreeEdit::Write(
+                "index.js",
+                format!("export const workspace = {version};\n").as_bytes(),
+            ),
+        ]);
+        repository.commit(commit(
+            "compiled packages change together",
+            "Workspace Fixture",
+            "workspace@example.invalid",
+            "2026-04-02T12:00:00Z",
+        ));
+        repository.apply(&[
+            WorktreeEdit::Write(
+                "ui/index.js",
+                format!("export const button = {version};\n").as_bytes(),
+            ),
+            WorktreeEdit::Write(
+                "rb/lib/acme_rb.rb",
+                format!("def value\n  {version}\nend\n").as_bytes(),
+            ),
+        ]);
+        repository.commit(commit(
+            "unrelated packages change together",
+            "Workspace Fixture",
+            "workspace@example.invalid",
+            "2026-04-03T12:00:00Z",
+        ));
+    }
+    repository
+}
+
 pub(crate) fn evolution_repository() -> GeneratedRepository {
     let repository = GeneratedRepository::new("main");
     for package in ["a", "b", "c"] {
