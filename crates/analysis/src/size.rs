@@ -12,7 +12,8 @@ pub enum SizeSubject {
 ///
 /// Size findings are rated but stay out of the unit health counts: they measure
 /// a file or a container, not a unit, so adding them would double-count debt
-/// the unit signals already carry.
+/// the unit signals already carry. Only trusted parsed source in a verdict role
+/// is sized, so advisory and context source produces no size finding.
 #[derive(Clone, Debug, Eq, Hash, Ord, PartialEq, PartialOrd)]
 pub struct SizeFinding {
     file: FileId,

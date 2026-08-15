@@ -318,7 +318,9 @@ rating, total triggered signals, hot state, role class, cognitive complexity,
 cyclomatic complexity, logical lines, activity, path, then span. Hot state comes
 from the hotspot table, which crosses a file's rated units with its windowed
 touch count; role class keeps primary source above non-primary source at equal
-rating without removing it. Terminal output builds private
+rating without removing it. Hotspot and size input comes only from trusted
+parsed source in a verdict role, so advisory recovered facts and context fixture
+or generated files stay descriptive however often they change. Terminal output builds private
 borrowed presentation rows for the selected quality result, affected areas,
 ranked findings, relevant relationships, warnings, and next command. Selection
 and navigation happen once. Aligned and stacked writers consume those rows

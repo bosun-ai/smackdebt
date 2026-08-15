@@ -1595,6 +1595,13 @@ struct RatedFile {
     role: SourceRole,
     health: HealthCounts,
     debt: Vec<(usize, HealthAssessment)>,
+    /// Whether this file's facts may produce default signals.
+    ///
+    /// Only trusted source in a verdict role feeds the hotspot and size
+    /// tables: recovered facts stay advisory, and fixture or generated source
+    /// stays context. Retained findings are unaffected, so advisory and context
+    /// debt remains visible.
+    signals_verdict: bool,
     rated_units: u32,
     max_rating: Rating,
     container_statements: Vec<(String, u32)>,
@@ -1607,16 +1614,18 @@ fn rate_file(analysis: FileAnalysis, role: SourceRole, policy: HealthPolicy) -> 
     // Container totals accumulate while units are rated, so no healthy unit is
     // retained to compute container size later.
     let mut container_statements: Vec<(String, u32)> = Vec::new();
+    let signals_verdict = verdict_eligible(&analysis, role);
     for (index, unit) in analysis.units().iter().enumerate() {
         let assessment = policy.assess(unit.measurements());
-        if verdict_eligible(&analysis, role) {
-            health.add_rating(assessment.rating());
-        }
-        if assessment.rating() > max_rating {
-            max_rating = assessment.rating();
-        }
         if assessment.rating() != Rating::Healthy {
             debt.push((index, assessment));
+        }
+        if !signals_verdict {
+            continue;
+        }
+        health.add_rating(assessment.rating());
+        if assessment.rating() > max_rating {
+            max_rating = assessment.rating();
         }
         if let Some(container) = unit.identity().container() {
             let statements = unit.measurements().logical_lines();
@@ -1629,12 +1638,17 @@ fn rate_file(analysis: FileAnalysis, role: SourceRole, policy: HealthPolicy) -> 
             }
         }
     }
-    let rated_units = u32::try_from(analysis.units().len()).unwrap_or(u32::MAX);
+    let rated_units = if signals_verdict {
+        u32::try_from(analysis.units().len()).unwrap_or(u32::MAX)
+    } else {
+        0
+    };
     RatedFile {
         analysis,
         role,
         health,
         debt,
+        signals_verdict,
         rated_units,
         max_rating,
         container_statements,
@@ -1838,11 +1852,13 @@ impl<'a> CodebaseReportBuilder<'a> {
                 health = rated.health;
                 rated_units = rated.rated_units;
                 max_rating = rated.max_rating;
-                self.size_findings.extend(
-                    self.policies
-                        .size
-                        .rate_file(file_id, rated.analysis.source_lines()),
-                );
+                if rated.signals_verdict {
+                    self.size_findings.extend(
+                        self.policies
+                            .size
+                            .rate_file(file_id, rated.analysis.source_lines()),
+                    );
+                }
                 let mut containers = std::mem::take(&mut rated.container_statements);
                 containers.sort_by(|left, right| left.0.cmp(&right.0));
                 for (container, statements) in containers {
@@ -4121,6 +4137,101 @@ mod tests {
             .map(|orphan| report.files()[orphan.file().index()].path().to_owned())
             .collect();
         assert_eq!(orphans, ["a/orphan.js".to_owned()]);
+    }
+
+    #[test]
+    fn advisory_and_context_source_produce_no_size_finding_or_hotspot() {
+        let root = tempfile::tempdir().unwrap();
+        let repository_path = root.path();
+        git(repository_path, ["init", "-q"]);
+        git(
+            repository_path,
+            ["config", "user.email", "test@example.invalid"],
+        );
+        git(repository_path, ["config", "user.name", "Smackdebt Test"]);
+        fs::write(
+            repository_path.join("trusted.rs"),
+            "struct Worker;\nimpl Worker {\n    fn work(&self) {\n        let a = 1;\n        let b = 2;\n    }\n}\n",
+        )
+        .unwrap();
+        // Recovered source is advisory, so it contributes no default finding.
+        fs::write(
+            repository_path.join("recovered.rs"),
+            "struct Broken;\nimpl Broken {\n    fn work(&self) {\n        let a = 1;\n        let b = 2;\n    }\n}\nfn unterminated(\n",
+        )
+        .unwrap();
+        // Generated source is context, so it never affects a verdict.
+        fs::write(
+            repository_path.join("generated.rs"),
+            "// @generated\nstruct Made;\nimpl Made {\n    fn work(&self) {\n        let a = 1;\n        let b = 2;\n    }\n}\n",
+        )
+        .unwrap();
+        for revision in 0..5 {
+            fs::write(
+                repository_path.join("touch.txt"),
+                format!("change {revision}\n"),
+            )
+            .unwrap();
+            fs::write(
+                repository_path.join("recovered.rs"),
+                format!(
+                    "struct Broken;\nimpl Broken {{\n    fn work(&self) {{\n        let a = {revision};\n        let b = 2;\n    }}\n}}\nfn unterminated(\n"
+                ),
+            )
+            .unwrap();
+            fs::write(
+                repository_path.join("generated.rs"),
+                format!(
+                    "// @generated\nstruct Made;\nimpl Made {{\n    fn work(&self) {{\n        let a = {revision};\n        let b = 2;\n    }}\n}}\n"
+                ),
+            )
+            .unwrap();
+            fs::write(
+                repository_path.join("trusted.rs"),
+                format!(
+                    "struct Worker;\nimpl Worker {{\n    fn work(&self) {{\n        let a = {revision};\n        let b = 2;\n    }}\n}}\n"
+                ),
+            )
+            .unwrap();
+            git(repository_path, ["add", "."]);
+            git(repository_path, ["commit", "-qm", "change"]);
+        }
+
+        let analyzed = analyze_codebase(
+            &CodebaseRequest::new(repository_path).with_size_thresholds((5, 10), (1, 2)),
+        )
+        .unwrap();
+        let report = analyzed.report();
+        let path = |file: FileId| report.files()[file.index()].path().to_owned();
+        let sized: Vec<_> = report
+            .size_findings()
+            .iter()
+            .map(|finding| path(finding.file()))
+            .collect();
+        assert_eq!(
+            sized,
+            ["trusted.rs".to_owned(), "trusted.rs".to_owned()],
+            "only trusted verdict source is sized"
+        );
+        let hot: Vec<_> = report
+            .hotspots()
+            .iter()
+            .map(|hotspot| path(hotspot.file()))
+            .collect();
+        assert_eq!(hot, ["trusted.rs".to_owned()]);
+        // Every file was touched five times, so activity alone did not decide.
+        for name in ["recovered.rs", "generated.rs"] {
+            let file = report
+                .files()
+                .iter()
+                .find(|file| file.path() == name)
+                .expect("selected file");
+            assert_eq!(
+                file.activity().map(FileActivity::touches),
+                Some(5),
+                "{name} still records its activity"
+            );
+        }
     }
 
     #[test]

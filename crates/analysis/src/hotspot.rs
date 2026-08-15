@@ -5,6 +5,11 @@ use crate::report::FileId;
 ///
 /// Both operands stay integers: no combined score, floating-point value, or
 /// invented weight is produced anywhere in hotspot policy.
+///
+/// A file contributes rated units only when its facts may produce default
+/// signals: trusted parsed source in a verdict role. Recovered source is
+/// advisory and fixture or generated source is context, so both report zero
+/// rated units and can never be hot however often they change.
 #[derive(Clone, Copy, Debug, Eq, Hash, PartialEq)]
 pub struct FileDebt {
     file: FileId,
