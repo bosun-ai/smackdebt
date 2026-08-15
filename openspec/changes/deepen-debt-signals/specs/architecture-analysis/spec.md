@@ -3,11 +3,13 @@
 ### Requirement: Stable dependency violations are Watch findings
 Analysis SHALL create a Watch architecture finding when a package depends on a
 package that is less stable than itself and the depending package has at least 2
-references into the depended-on package. Comparison SHALL use integer
+references into the depended-on package. A package is less stable than another
+when its instability, unique fan-out over unique neighbor total, is greater.
+Comparison SHALL use integer
 cross-multiplication of the degree operands and SHALL NOT compare floating-point
 instability values: for a depending package with unique fan-out `outA` and
 neighbor total `totalA` and a depended-on package with `outB` and `totalB`, a
-violation exists only when `outA * totalB` is greater than `outB * totalA`.
+violation exists only when `outB * totalA` is greater than `outA * totalB`.
 Equal cross products SHALL NOT be a violation. A package with no neighbors SHALL
 NOT participate. The finding SHALL retain both packages' exact degree operands
 and the reference count. Degree and instability SHALL remain descriptive facts

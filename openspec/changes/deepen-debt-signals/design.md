@@ -81,12 +81,13 @@ test debt stays visible below production debt rather than disappearing.
 
 ### Stable-dependency violations use integer cross-multiplication
 
-Instability is a ratio of unique fan-out to unique fan-in plus fan-out. A
-package that depends on a package with a lower instability is depending on
-something less stable than itself. Comparison uses cross-multiplication over the
-integer degree operands, never a float: for packages A and B with `outA`,
-`totalA`, `outB`, `totalB`, the violation condition is `outA * totalB > outB *
-totalA`. A violation is a Watch architecture finding only when the depending
+Instability is a ratio of unique fan-out to unique fan-in plus fan-out, so a
+higher instability means a less stable package. A package that depends on a
+package with a higher instability is depending on something less stable than
+itself, which reverses the direction dependencies should take. Comparison uses
+cross-multiplication over the integer degree operands, never a float: for a
+depending package A and a depended-on package B with `outA`, `totalA`, `outB`,
+`totalB`, the violation condition is `outB * totalA > outA * totalB`. A violation is a Watch architecture finding only when the depending
 package has at least 2 references into the depended-on package, which keeps
 single incidental imports out of the report. Both packages' exact degree
 operands are retained on the finding.

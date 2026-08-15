@@ -7,7 +7,10 @@ result, stable-dependency violations at the reference minimum and at equal
 integer cross products, knowledge concentration at the 10-commit and 90%-share
 boundaries, file and container size at their exact thresholds, orphan files
 including an exempt entry file, and history coverage window fields for a
-windowed and an unwindowed run. Evidence SHALL prove that no contributor
+windowed and an unwindowed run. Facts a version 3 document and the terminal
+cannot express SHALL be proven against the composed report from the crate that
+owns composition, and SHALL move to command evidence when
+`adopt-report-schema-v4` serializes those tables. Evidence SHALL prove that no contributor
 identity appears in any output, that terminal sections, labels, and vocabulary
 are unchanged and terminal bytes differ only where the new rank keys reorder
 findings, that JSON version 3 shape is unchanged, and that serial and parallel
@@ -16,7 +19,11 @@ with unchanged inventory, read, parser, and Git process totals.
 
 #### Scenario: Signal fixtures run
 - **WHEN** the real CLI analyzes the deepened-signal fixtures
-- **THEN** every expected hotspot, rank order, stable-dependency finding, concentration finding, size finding, orphan fact, and window coverage field matches its hand-calculated value
+- **THEN** every expected rank order, windowed history value, and privacy result matches its hand-calculated value
+
+#### Scenario: A signal reaches no serialized surface
+- **WHEN** hotspots, stable-dependency findings, knowledge concentration, size findings, orphan facts, or window coverage fields cannot appear in a version 3 document or the terminal
+- **THEN** generated repositories prove each expected value against the composed report until a later change serializes the table
 
 #### Scenario: Privacy is audited
 - **WHEN** output is scanned for the fixtures' known author names and addresses
