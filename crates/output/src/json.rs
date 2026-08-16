@@ -39,7 +39,16 @@ impl Serialize for ReportView<'_> {
         S: Serializer,
     {
         let report = self.0;
-        let verdict = report.verdict().cloned().unwrap_or_default();
+        // The head answers the scope that was asked about, which is the same
+        // verdict the terminal renders for the same invocation. Analysis owns
+        // the policy; this only selects the scope.
+        let verdict = match self.1 {
+            Some(scope) => report.scope_verdict(scope),
+            None => report
+                .verdict()
+                .cloned()
+                .expect("a built report always carries a root verdict"),
+        };
         let mut map = serializer.serialize_map(Some(35))?;
         map.serialize_entry("schema_version", &report.schema_version())?;
         map.serialize_entry("mode", mode_name(report.mode()))?;

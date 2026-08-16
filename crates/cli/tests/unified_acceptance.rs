@@ -1604,12 +1604,12 @@ fn assert_head_agrees_with_tables(report: &Value) {
             .ends_with('.')
     );
     let summary = &report["summary"];
-    let Some(root) = report["root"].as_u64().map(|root| root as usize) else {
+    let Some(answered) = answered_scope(report) else {
         assert_eq!(summary["checked"], 0);
         assert!(summary["worst"].as_array().unwrap().is_empty());
         return;
     };
-    let scope = &report["scopes"][root];
+    let scope = &report["scopes"][answered];
     let counts = &report["health"][scope["health"].as_u64().unwrap() as usize];
     assert_eq!(summary["high"], counts["high"]);
     assert_eq!(summary["watch"], counts["watch"]);
@@ -1647,14 +1647,23 @@ fn assert_head_agrees_with_tables(report: &Value) {
     assert_debt_diff_selection(report);
 }
 
+/// The scope the head answers, which is the selected scope when a path was
+/// asked about and the repository otherwise.
+fn answered_scope(report: &Value) -> Option<usize> {
+    report["selected_scope"]
+        .as_u64()
+        .or_else(|| report["root"].as_u64())
+        .map(|scope| scope as usize)
+}
+
 /// Rebuilds the debt-diff selection from the serialized tables.
 ///
 /// This proves two things at once: that the head's counts are the counts the
 /// tables imply, and that no comparison identity is selected twice, which
 /// would count one movement as two.
 fn assert_debt_diff_selection(report: &Value) {
-    let root = report["root"].as_u64().unwrap() as usize;
-    let scope = &report["scopes"][root];
+    let answered = answered_scope(report).unwrap();
+    let scope = &report["scopes"][answered];
     let rated = |value: &Value| value == "watch" || value == "high";
     let mut counts = (0_u64, 0_u64, 0_u64);
     let mut selected = HashSet::new();

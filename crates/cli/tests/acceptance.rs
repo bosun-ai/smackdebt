@@ -1403,6 +1403,46 @@ fn shallow_history_is_reported_as_incomplete() {
     assert!(!report["files"].as_array().unwrap().is_empty());
 }
 
+/// A path-selected machine head answers the question the terminal answers for
+/// the same invocation, so `--json | head` and the human report never
+/// disagree about which scope was asked about.
+#[test]
+fn a_path_selected_json_head_answers_the_selected_scope_like_the_terminal() {
+    let project = split_debt_fixture();
+    let clean = project.path().join("clean");
+    let clean = clean.to_str().unwrap();
+    let repository: serde_json::Value =
+        serde_json::from_slice(&run(["--json", project.path().to_str().unwrap()])).unwrap();
+    let selected: serde_json::Value = serde_json::from_slice(&run(["--json", clean])).unwrap();
+    let terminal = String::from_utf8(run(["--color", "never", "--all", clean])).unwrap();
+
+    assert_ne!(
+        selected["verdict"]["tier"], repository["verdict"]["tier"],
+        "the head answers the selected scope, not the repository"
+    );
+    assert!(
+        terminal.contains(selected["verdict"]["sentence"].as_str().unwrap()),
+        "{terminal}"
+    );
+    let summary = &selected["summary"];
+    let counts = format!(
+        "{} high · {} watch · {} checked",
+        summary["high"].as_u64().unwrap(),
+        summary["watch"].as_u64().unwrap(),
+        summary["checked"].as_u64().unwrap()
+    );
+    assert!(terminal.contains(&counts), "{terminal}");
+    match summary["worst"].as_array().unwrap().first() {
+        Some(worst) => assert!(
+            terminal.contains(&format!("worst: {}", worst["path"].as_str().unwrap())),
+            "{terminal}"
+        ),
+        None => assert!(!terminal.contains("worst: "), "{terminal}"),
+    }
+    validate_schema(&selected);
+    assert_index_integrity(&selected);
+}
+
 fn assert_snapshot(name: &str, actual: &[u8], expected: &[u8]) {
     if std::env::var_os("SMACKDEBT_UPDATE_SNAPSHOTS").is_some() {
         assert_eq!(
@@ -1444,11 +1484,17 @@ fn assert_head_agrees_with_tables(report: &serde_json::Value) {
             .ends_with('.')
     );
     let summary = &report["summary"];
-    let Some(root) = report["root"].as_u64() else {
+    // The head answers the selected scope, which is the repository unless a
+    // path was asked about.
+    let Some(answered) = report["selected_scope"]
+        .as_u64()
+        .or_else(|| report["root"].as_u64())
+        .map(|scope| scope as usize)
+    else {
         assert_eq!(summary["checked"], 0);
         return;
     };
-    let health = report["scopes"][root as usize]["health"].as_u64().unwrap() as usize;
+    let health = report["scopes"][answered]["health"].as_u64().unwrap() as usize;
     let counts = &report["health"][health];
     assert_eq!(summary["high"], counts["high"]);
     assert_eq!(summary["watch"], counts["watch"]);
@@ -1458,7 +1504,7 @@ fn assert_head_agrees_with_tables(report: &serde_json::Value) {
             + counts["watch"].as_u64().unwrap()
             + counts["high"].as_u64().unwrap()
     );
-    let architecture = report["scopes"][root as usize]["architecture_findings"]
+    let architecture = report["scopes"][answered]["architecture_findings"]
         .as_array()
         .unwrap()
         .iter()
@@ -2438,6 +2484,84 @@ fn fixture() -> tempfile::TempDir {
     )
     .unwrap();
     project
+}
+
+/// A repository whose debt lives in one area, so a selected clean area and the
+/// repository answer differently.
+fn split_debt_fixture() -> tempfile::TempDir {
+    let project = tempfile::tempdir().unwrap();
+    fs::write(
+        project.path().join("Gemfile"),
+        "source 'https://example.invalid'\n",
+    )
+    .unwrap();
+    fs::create_dir(project.path().join("clean")).unwrap();
+    fs::create_dir(project.path().join("messy")).unwrap();
+    fs::write(
+        project.path().join("clean/ship.rb"),
+        "def ship(item)\n  item.ship\nend\n",
+    )
+    .unwrap();
+    fs::write(
+        project.path().join("clean/ready.rb"),
+        "def ready?(item)\n  item.ready\nend\n",
+    )
+    .unwrap();
+    for index in 0..4 {
+        fs::write(
+            project.path().join(format!("messy/tangle{index}.rb")),
+            tangled_source(index),
+        )
+        .unwrap();
+    }
+    // A repository root is what makes a path selection a drill-down into one
+    // report rather than a separate walk of a smaller tree.
+    git(project.path(), ["init", "-b", "main"]);
+    git(project.path(), ["config", "user.name", "Smackdebt Test"]);
+    git(
+        project.path(),
+        ["config", "user.email", "smackdebt@example.invalid"],
+    );
+    git(project.path(), ["add", "."]);
+    git(project.path(), ["commit", "-m", "test: split debt"]);
+    project
+}
+
+/// A repository whose report outgrows one buffered write, so a reader that
+/// stops reading has already left before the last write happens.
+fn tangled_fixture(files: usize) -> tempfile::TempDir {
+    let project = tempfile::tempdir().unwrap();
+    fs::write(
+        project.path().join("Gemfile"),
+        "source 'https://example.invalid'\n",
+    )
+    .unwrap();
+    fs::create_dir(project.path().join("src")).unwrap();
+    for index in 0..files {
+        fs::write(
+            project.path().join(format!("src/tangle{index}.rb")),
+            tangled_source(index),
+        )
+        .unwrap();
+    }
+    project
+}
+
+/// One deeply nested Ruby function, which every rated measurement objects to.
+fn tangled_source(index: usize) -> String {
+    let mut source = format!("def tangle{index}(items)\n");
+    for depth in 0..8 {
+        source.push_str(&"  ".repeat(depth + 1));
+        source.push_str(&format!("if items[{depth}] && items[{depth}].ready?\n"));
+    }
+    source.push_str(&"  ".repeat(9));
+    source.push_str("ship(items)\n");
+    for depth in (0..8).rev() {
+        source.push_str(&"  ".repeat(depth + 1));
+        source.push_str("end\n");
+    }
+    source.push_str("end\n");
+    source
 }
 
 fn mixed_fixture(files: usize) -> tempfile::TempDir {

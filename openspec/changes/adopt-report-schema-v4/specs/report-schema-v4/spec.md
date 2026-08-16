@@ -20,8 +20,10 @@ expose the frozen tier `tier`, its analysis-owned `sentence`, and the report
 counts each labeled by its word, and `worst` as at most three fully resolved
 entries carrying a repository-relative path string, identity, and reason. A
 consumer SHALL be able to read the verdict and the summary without joining any
-table. Head values SHALL be produced from the same completed report as the
-tables they duplicate and SHALL agree with them.
+table. The head SHALL answer the selected scope, which is the scope the human
+report answers for the same invocation and the repository when no path was
+selected. Head values SHALL be produced from the same completed report as the
+tables they duplicate and SHALL agree with the selected scope's tables.
 
 #### Scenario: A consumer reads only the head
 - **WHEN** the first object members are parsed
@@ -29,7 +31,11 @@ tables they duplicate and SHALL agree with them.
 
 #### Scenario: Head and tables are compared
 - **WHEN** acceptance validates a result
-- **THEN** every head count and worst entry matches the table facts it duplicates
+- **THEN** every head count and worst entry matches the selected scope's table facts it duplicates
+
+#### Scenario: A path is selected
+- **WHEN** the same path selection is rendered as JSON and as the human report
+- **THEN** the head states the same tier id, sentence, counts, and worst entries the human verdict states, and not the repository's
 
 #### Scenario: A diff result is emitted
 - **WHEN** the report mode is a diff
