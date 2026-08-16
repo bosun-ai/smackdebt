@@ -22,14 +22,20 @@ node or metric type SHALL cross the language crate boundary.
 - **THEN** project orchestration receives the same Smackdebt file-analysis type from both
 
 ### Requirement: Units expose only rated measurements
-Each unit SHALL expose its name, container identity, kind, original source span,
-cognitive complexity, cyclomatic complexity, and exclusive logical lines.
-Smackdebt SHALL NOT carry upstream Halstead or maintainability structures into
-analysis policy or reports.
+Each unit SHALL expose its name, container identity, kind, original source span, cognitive
+complexity, cyclomatic complexity, exclusive logical lines, maximum nesting
+depth, and parameter count. All five measurements SHALL be rated measurements
+from this change onward, so a unit's rating SHALL be explainable entirely from
+the five serialized measurements. Smackdebt SHALL NOT carry upstream Halstead or
+maintainability structures into analysis policy or reports.
 
 #### Scenario: Health policy rates a unit
-- **WHEN** a language analyzer produces a unit
-- **THEN** health policy can explain its rating entirely from the three retained measurements
+- **WHEN** a language implementation produces a unit
+- **THEN** health policy can explain its rating entirely from the five rated measurements
+
+#### Scenario: A unit is rated for nesting alone
+- **WHEN** a unit's cognitive, cyclomatic, and statement values are healthy and its maximum nesting depth is 7
+- **THEN** its rating is High and the serialized measurements explain why
 
 ### Requirement: Upstream support is pinned and verified
 The temporary adapter SHALL pin `rust-code-analysis` revision
@@ -114,3 +120,62 @@ files as healthy source.
 - **WHEN** one selected file is unsupported or fails analysis
 - **THEN** a codebase report still succeeds with that path, reason, and excluded coverage recorded
 
+### Requirement: Dependency extraction emits dependency targets only
+A language implementation SHALL emit only the referenced target text of a
+dependency form. Visibility, modifier, attribute, and re-export keywords SHALL
+be treated as properties of the declaring item and SHALL NOT become a dependency
+target or a first path segment. Rust `pub`, `pub(crate)`, `pub(super)`,
+`pub(in path)`, and equivalent forms SHALL therefore never appear as a
+dependency target.
+
+#### Scenario: Rust re-exports a module path
+- **WHEN** a Rust file contains `pub use a::b;`
+- **THEN** extraction emits the dependency target `a::b` and emits no target `pub`
+
+#### Scenario: A visibility keyword leads a declaration
+- **WHEN** a Rust file contains `pub mod child;`
+- **THEN** extraction emits one module-ownership relation for `child` and no dependency target derived from the visibility keyword
+
+### Requirement: A repository-relative reference is never an external package
+A reference rooted at `crate`, `self`, or `super` SHALL name a module inside
+the declaring file's own package and SHALL never be classified as an external
+package, including when the root segment carries no further path because a
+brace list or a glob follows it. `use crate::{A, B};` SHALL be an internal
+crate-root reference rather than an external package named `crate`.
+
+A glob import SHALL name the module it globs, not a child named `*`. A
+reference whose remaining path cannot be expressed as a repository path — the
+module of an inline module, or an item declared at the crate root — SHALL emit
+the matching symbolic candidate for that role in addition to any path
+candidates it can express, so path candidates keep precedence. Rust extraction
+SHALL NOT read the filesystem to decide any of this.
+
+#### Scenario: A brace list follows the crate root
+- **WHEN** a Rust file contains `use crate::{First, Second};`
+- **THEN** the reference is internal and names the crate root, and no external package named `crate` is counted
+
+#### Scenario: A glob import names its module
+- **WHEN** a Rust file contains `use super::*;` inside an inline module
+- **THEN** extraction emits the declaring-file candidate rather than a candidate for a child named `*`
+
+#### Scenario: An inline module reference keeps its path candidates
+- **WHEN** a Rust file contains `use super::sibling::work;` inside an inline module
+- **THEN** extraction emits the sibling module path candidates first and the declaring-file candidate last
+
+#### Scenario: A crate-rooted path keeps its module candidates
+- **WHEN** a Rust file contains `use crate::core::work;`
+- **THEN** extraction emits the module path candidates for `core::work` first and the crate-root candidate last
+
+### Requirement: Every language provides nesting and parameter fixtures
+Every supported language SHALL have exact fixtures for maximum nesting depth and
+parameter count before those measurements are consumed. Vue fixtures SHALL cover
+script, script-setup, and template regions. A language whose units cannot
+declare parameters SHALL have a fixture proving the value is zero.
+
+#### Scenario: A supported language is verified
+- **WHEN** its fixture suite runs
+- **THEN** exact maximum nesting and parameter values are asserted for representative nested and parameterized units
+
+#### Scenario: A Vue component is verified
+- **WHEN** its fixtures run
+- **THEN** script, script-setup, and template regions each assert exact nesting and parameter values

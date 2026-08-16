@@ -60,29 +60,44 @@ partial-coverage, and fatal outcomes.
 - **AND** analysis is not rerun for rendering
 
 ### Requirement: Terminal evidence is exact and stable
-The system SHALL compare committed exact terminal bytes for codebase, diff,
-package, directory, and file views at widths 120, 80, and 50. It SHALL prove
-exact glyph code points and one-cell width, rejection of U+EC3F, alignment and
-truncation, `--color always`, `--color never`, `NO_COLOR`, redirect behavior,
-glyph-only ANSI placement, and equality after ANSI stripping.
+The system SHALL compare committed exact terminal bytes for codebase, diff, package,
+directory, and file views at widths 120, 100, 80, and 50, and SHALL compare
+piped bytes with terminal bytes for the same invocation. Evidence SHALL cover a
+verdict block per codebase tier and per diff tier, word-labeled counts including
+zero counts, a clean diff that prints the verdict line only, hot findings with
+their commit counts, stacked cycle witnesses, stable-dependency rows, grouped
+warnings, and diff findings with `path:line`, before-and-after measurements, and
+human identities.
+
+It SHALL prove that piped output contains no codepoint in the range
+U+E000–U+F8FF, that decorated output uses exact glyph code points of one display
+cell placed adjacent to their words, that U+EC3F is absent, that `--color
+always`, `--color never`, `NO_COLOR`, and redirect behavior are exact, and that
+stripping ANSI reproduces the plain words. Every ANSI-stripped line SHALL fit
+its requested Unicode display width, and no measurement, count, cycle witness,
+history evidence value, dependency state, command, or identity SHALL be silently
+clipped at any required width.
 
 #### Scenario: Terminal width changes
-- **WHEN** each named report view is rendered at each required width
-- **THEN** every result exactly matches reviewed bytes, preserves relevant facts, recognizable locations, glyphs, and commands, and every ANSI-stripped line fits the requested Unicode display width
-- **AND** direct writer instrumentation records zero unexpected-line safety shortenings for the reviewed 50-column reports and deliberate long-identity fixture, while a synthetic overflow records use of that safety path
+- **WHEN** each named report view is rendered at every required width
+- **THEN** every result exactly matches reviewed bytes, stacks rows that do not fit, and loses no fact
 
-#### Scenario: Styling policy changes
-- **WHEN** forced, disabled, automatic, `NO_COLOR`, and redirected modes are compared
-- **THEN** only the required glyphs receive the exact colors and stripping ANSI reproduces plain bytes
+#### Scenario: Output is piped
+- **WHEN** the same command is captured through a pipe and through a terminal
+- **THEN** the piped bytes state every meaning in words, contain no codepoint in U+E000–U+F8FF, and differ from the terminal bytes only by decoration and ANSI
 
-#### Scenario: Glyph vocabulary is audited
-- **WHEN** public results are scanned by scalar value and display width
-- **THEN** every required glyph is exact and one cell, U+EC3F and redundant status words are absent, and Changed text stays normal
+#### Scenario: A cycle witness does not fit
+- **WHEN** a cycle finding is rendered at 50 columns
+- **THEN** its witness stacks across lines with no ellipsis and the full closure remains readable
 
 ### Requirement: JSON evidence validates structure and meaning
-Every acceptance JSON result SHALL validate against the version-3 schema and
-pass semantic, index, privacy, and exact-byte checks from the same invocation
-before its performance sample is accepted.
+Every acceptance JSON result SHALL validate against the version-4 schema and pass semantic,
+index, privacy, and exact-byte checks from the same invocation before its
+performance sample is accepted. Validation SHALL prove that the denormalized
+head agrees with the tables it duplicates, that hotspots, size findings, orphan
+files, finding kind discriminators, history window fields, and `manifest_name`
+are present and consistent, and that no floating-point number appears anywhere
+in the object.
 
 #### Scenario: A recovered High fact is emitted
 - **WHEN** JSON validation runs
@@ -91,6 +106,14 @@ before its performance sample is accepted.
 #### Scenario: A private value reaches output
 - **WHEN** output contains source, an absolute private path, Git identity, or private history detail
 - **THEN** privacy validation fails before evidence approval
+
+#### Scenario: The head disagrees with a table
+- **WHEN** a summary count or worst entry differs from the table facts it duplicates
+- **THEN** validation fails before exact-byte approval
+
+#### Scenario: A float is serialized
+- **WHEN** any value in the object is a floating-point number
+- **THEN** validation fails before exact-byte approval
 
 ### Requirement: Serial and parallel public output is identical
 
@@ -140,24 +163,37 @@ installed command from a generated repository outside the source workspace.
   semantic assertions
 
 ### Requirement: Public command evidence covers every revised decision
-Exact acceptance SHALL cover codebase, diff, package, directory, and file flows
-for section relevance, five-area and three-finding limits, rank, architecture
-witnesses, actionable history, detailed and path relationships, grouped
-warnings, simple help and errors, commit singular/plural labels, direct
-relationship wording, closed diff cycle paths, readable edge changes, and the
-glyph-plus-command discover line. It SHALL also cover explained and weak
-coupling evidence in detailed and path views plus direct introduced and removed
-coupling outcomes in diff output.
-JSON, status, stderr, ranking, serial/automatic bytes, work totals, analysis,
-allocation, and performance evidence SHALL prove unchanged behavior.
+Exact acceptance SHALL cover codebase, diff, package, directory, and file flows for the
+verdict block, the frozen tier sentences, word-labeled counts including zero
+counts, the family named in a diff verdict, the clean-diff verdict-only view,
+five-area and three-finding limits, hot annotations, ranked order, stacked cycle
+witnesses, stable-dependency rows, one row per coupling pair,
+knowledge-concentration rows, grouped warnings, actionable diff findings, the
+`next: smackdebt <path>` discover line, and `--all` as all useful debt without
+raw edges, standard-library externals, churn dumps, cyclomatic-1 rows, weak
+coupling, or healthy rows.
+
+It SHALL cover full exact stderr bytes including one newline, required status,
+and empty stdout for `smackdebt: path not found: <user-path>`, `smackdebt: Git
+ref not found: <ref>`, and `smackdebt: --all cannot be used with --json`, with
+no usage or help tail and no leaked absolute path, operating-system code, Git
+command, status, fatal output, parser text, or process text.
+
+The current JSON contract's bytes, report facts, status classes, stream placement, rank,
+serial and automatic bytes, work totals, analysis, allocation, and performance
+evidence SHALL prove unchanged behavior.
 
 #### Scenario: Human output is audited
 - **WHEN** snapshots, help, errors, warnings, and README examples are checked
-- **THEN** required sections and simple phrases appear while removed labels, severity words, processing facts, and forbidden phrases do not
+- **THEN** the word vocabulary, verdict block, and labeled counts appear while positional counts, omitted zero counts, ellipsis-truncated witnesses, generated internal identities, raw edges, and leaked implementation diagnostics do not
+
+#### Scenario: An input failure occurs
+- **WHEN** each of the three failures is invoked
+- **THEN** status, empty stdout, and one exact newline-terminated stderr line match the required bytes with no usage or help tail
 
 #### Scenario: Machine and analysis output is audited
-- **WHEN** revised terminal flows run through the complete public matrix
-- **THEN** JSON bytes, exit behavior, rank, work counts, analysis facts, allocations, and resource evidence remain unchanged
+- **WHEN** redesigned terminal flows run through the complete public matrix
+- **THEN** JSON bytes, report facts, exit classes, streams, rank, work counts, allocations, and resource evidence remain unchanged
 
 ### Requirement: Serial and automatic flows preserve bytes and work
 Every named public flow SHALL run with one worker and automatic parallelism.
@@ -186,3 +222,86 @@ private path, source, Git identity, history, or raw terminal output.
 - **WHEN** default output is inspected
 - **THEN** it leads with useful Rust findings and weak history and graph facts are absent
 
+### Requirement: Workspace resolution has generated fixture evidence
+Public generated repositories SHALL include a workspace fixture per supported
+manifest kind — Cargo with a `[lib] name` override, npm with a scoped name,
+Python `pyproject.toml`, and a gemspec — whose cross-package references are
+written against declared names rather than paths. Exact acceptance SHALL prove
+that those references become internal package `uses` edges, that package degree
+and at least one package cycle appear only because of manifest-name resolution,
+that a shadowed duplicate manifest name stays ambiguous with its diagnostic,
+that a Rust `pub use a::b;` yields no `pub` dependency target, that one package
+pair yields exactly one coupling row, that no ancestor-descendant pair exists,
+and that no output claims `no code dependency` for a pair connected by a
+manifest-name edge. JSON version 3 structure SHALL be proven unchanged while its
+values move, and serial and parallel runs SHALL remain byte-identical.
+
+#### Scenario: A workspace fixture is analyzed
+- **WHEN** the real CLI analyzes a workspace fixture whose packages import each other by declared name
+- **THEN** the result contains internal package edges, exact degree facts, and no external classification for those references
+
+#### Scenario: A duplicate manifest name is present
+- **WHEN** two fixture packages declare the same name and a third imports it
+- **THEN** the reference is ambiguous with a retained diagnostic and no internal edge is created
+
+#### Scenario: Coupling evidence is audited
+- **WHEN** a fixture produces coupling for a package pair and for a scope pair where one contains the other
+- **THEN** exactly one row exists for the package pair and no row exists for the containing pair
+
+### Requirement: New debt signals have generated fixture evidence
+Public generated repositories SHALL provide hand-calculated facts for hotspots
+at the minimum-touch boundary, rank ordering where hot and role class decide the
+result, stable-dependency violations at the reference minimum and at equal
+integer cross products, knowledge concentration at the 10-commit and 90%-share
+boundaries, file and container size at their exact thresholds, orphan files
+including an exempt entry file, and history coverage window fields for a
+windowed and an unwindowed run. Facts a version 3 document and the terminal
+cannot express SHALL be proven against the composed report from the crate that
+owns composition, and SHALL move to command evidence when
+`adopt-report-schema-v4` serializes those tables. Evidence SHALL prove that no contributor
+identity appears in any output, that terminal sections, labels, and vocabulary
+are unchanged and terminal bytes differ only where the new rank keys reorder
+findings, that JSON version 3 shape is unchanged, and that serial and parallel
+runs stay byte-identical
+with unchanged inventory, read, parser, and Git process totals.
+
+#### Scenario: Signal fixtures run
+- **WHEN** the real CLI analyzes the deepened-signal fixtures
+- **THEN** every expected rank order, windowed history value, and privacy result matches its hand-calculated value
+
+#### Scenario: A signal reaches no serialized surface
+- **WHEN** hotspots, stable-dependency findings, knowledge concentration, size findings, orphan facts, or window coverage fields cannot appear in a version 3 document or the terminal
+- **THEN** generated repositories prove each expected value against the composed report until a later change serializes the table
+
+#### Scenario: Privacy is audited
+- **WHEN** output is scanned for the fixtures' known author names and addresses
+- **THEN** none appear and concentration evidence contains counts only
+
+#### Scenario: Unchanged interfaces are audited
+- **WHEN** the same fixtures render terminal and JSON output before and after this change
+- **THEN** terminal sections, labels, and vocabulary are unchanged, JSON version 3 structure is unchanged, and every differing terminal byte is explained by the new rank keys
+
+### Requirement: Verdict policy has exact boundary evidence
+Public generated repositories SHALL provide hand-calculated facts for every
+codebase tier including both permille boundaries at exactly 1% and exactly 5%,
+both architecture escalation floors, a floor that must not lower an already
+higher tier, all four diff tiers, the contradiction case where no source
+comparison moves debt and a package cycle is introduced, a diff whose only
+changes are healthy additions, and worst-offender selection for the hotspot
+reason, the complexity reason, the cycle fallback, and the absent case. Evidence
+SHALL prove that scope verdicts differ from the root verdict where the facts
+differ, that a duplicate debt-diff identity fails index integrity, that no
+floating-point value participates in tier selection, and that serial and
+parallel runs produce identical verdicts and selections.
+
+#### Scenario: Tier fixtures run
+- **WHEN** the real CLI analyzes the verdict fixtures
+- **THEN** every tier id, sentence, count, and worst offender matches its hand-calculated value
+
+#### Scenario: The contradiction case runs
+- **WHEN** a diff introduces a package cycle without moving any source comparison
+- **THEN** the diff verdict is `worse` and its facts name the architecture family
+
+#### Scenario: Index integrity is audited
+- **WHEN** a scope's debt-diff selection contains a duplicate identity
+- **THEN** acceptance fails before exact-byte approval

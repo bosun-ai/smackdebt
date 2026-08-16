@@ -36,4 +36,4 @@
 - [x] 5.5 Prove serial and parallel runs stay byte-identical and Git work stays at one streamed history process plus one batch object process.
 - [x] 5.6 Re-run the release binary on smackdebt, swiftide, and fluyt and record that the false `crates/analysis ↔ crates/project · no code dependency` claim is gone and unmatched imports on smackdebt fall from 29 to near zero.
 - [x] 5.7 Pass formatting, Clippy, workspace tests, architecture checks, performance tests, acceptance evidence, strict OpenSpec validation, and the final diff check.
-- [ ] 5.8 Archive this change before implementing `deepen-debt-signals`.
+- [x] 5.8 Archive this change before implementing `deepen-debt-signals`.

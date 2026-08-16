@@ -1,4 +1,4 @@
-## ADDED Requirements
+## MODIFIED Requirements
 
 ### Requirement: README presents JSON version 4 and exact examples
 The README SHALL identify version 4 as the machine contract, link its checked schema, and
@@ -19,8 +19,6 @@ order.
 - **WHEN** they read the JSON section
 - **THEN** it states that shared and union commit counts are published and that any ratio is derived by the consumer
 
-## MODIFIED Requirements
-
 ### Requirement: README states JSON detail retention
 The README SHALL state that JSON retains every Watch and High finding and all scope
 summaries, while healthy units are represented through aggregate counts. It
@@ -35,9 +33,3 @@ coupling, hotspots, size findings, and orphan files.
 #### Scenario: A user misses a row the terminal removed
 - **WHEN** they look for a row that human output no longer prints
 - **THEN** the README directs them to the version-4 JSON table that retains it
-
-## REMOVED Requirements
-
-### Requirement: README presents JSON version 3 and exact examples
-**Reason**: Version 3 is retired by this change.
-**Migration**: Replaced by `README presents JSON version 4 and exact examples`.

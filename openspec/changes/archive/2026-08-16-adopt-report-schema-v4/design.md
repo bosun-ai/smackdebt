@@ -128,3 +128,78 @@ exists. Archived changes keep their history.
 
 Rollback restores version 3 and its schema. No published consumer exists, so no
 compatibility shim is required.
+
+
+## Capability retirement record
+
+The `report-schema-v2` and `report-schema-v3` capabilities are retired in
+full by this change. The openspec tool cannot rebuild an empty spec, so
+their accepted spec directories are deleted directly at archive time and
+the REMOVED deltas are recorded here verbatim.
+
+### report-schema-v2 deltas
+
+## REMOVED Requirements
+
+### Requirement: JSON version 2 includes evolutionary tables
+**Reason**: The CLI has not presented version 2 since version 3; the capability
+is stale.
+**Migration**: `report-schema-v4` owns the evolutionary tables.
+
+### Requirement: JSON records the history window and coverage
+**Reason**: Stale version-2 statement of a contract version 4 now owns.
+**Migration**: `report-schema-v4` requires coverage fields including the
+selected window length and window-excluded commit count.
+
+### Requirement: Version-2 examples are executable evidence
+**Reason**: No version-2 example remains; version-4 examples are the evidence.
+**Migration**: `report-schema-v4` requires checked version-4 examples.
+
+### Requirement: JSON and terminal consume the same analysis result
+**Reason**: Stated for version 2; the rule itself survives in workspace and
+performance capabilities that require renderers to perform presentation work
+only.
+**Migration**: No behavior is lost; `analysis-performance` and
+`architecture-documentation` retain the one-analysis, two-renderer rule.
+
+
+### report-schema-v3 deltas
+
+## REMOVED Requirements
+
+### Requirement: JSON version 3 is the machine report contract
+**Reason**: Version 4 replaces it as the only machine contract.
+**Migration**: `report-schema-v4` restates the contract with `schema_version: 4`
+and the denormalized verdict and summary head.
+
+### Requirement: Version 3 exposes SourceRole and trust
+**Reason**: Superseded by version 4.
+**Migration**: Restated in `report-schema-v4` under role, trust, and identity
+contracts.
+
+### Requirement: Version 3 owns stable package identity
+**Reason**: Superseded by version 4.
+**Migration**: Restated in `report-schema-v4`, which also adds `manifest_name`.
+
+### Requirement: Version 3 separates relation kind from evidence
+**Reason**: Superseded by version 4.
+**Migration**: Restated in `report-schema-v4` under role, trust, and identity
+contracts.
+
+### Requirement: Version 3 exposes exact history fields
+**Reason**: Superseded by version 4, which adds window fields and removes
+serialized similarity and ratio floats.
+**Migration**: Restated in `report-schema-v4` under role, trust, and identity
+contracts and under exact-value serialization.
+
+### Requirement: Version 3 has an executable schema and exact examples
+**Reason**: The version-3 schema is retired with the version.
+**Migration**: `report-schema-v4` requires a checked version-4 schema and exact
+examples.
+
+### Requirement: Version 2 is retired before first release
+**Reason**: Satisfied and superseded; version 2 and version 3 are both removed
+by this change and version 4 is the only documented contract.
+**Migration**: `report-schema-v4` requires documentation and examples to
+describe version 4 only.
+

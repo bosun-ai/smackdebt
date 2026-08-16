@@ -22,22 +22,20 @@ work again.
 - **THEN** Smackdebt produces a successful zero-total selected scope instead of replacing it with another scope
 
 ### Requirement: Codebase scopes expose debt distribution
-Each non-file codebase scope SHALL expose exact High and Watch counts for its
-children. Each displayed child SHALL expose both its share of selected-scope
-debt and its local attention rate across all rated units in that child. Terminal
-area views SHALL add a rate bar whose non-zero value remains visible.
+Each non-file codebase scope SHALL expose exact High and Watch counts for its children.
+Terminal area rows SHALL state those counts in words and SHALL NOT add a share
+percentage, an attention rate, or a rate bar, because a bar used as data and a
+ratio the reader cannot check were removed from human output. A machine
+consumer SHALL derive any share from the exact counts the report already
+serializes.
 
 #### Scenario: Debt is spread across child directories
 - **WHEN** the selected scope contains several child areas with rated units
-- **THEN** each debt-bearing row shows exact High and Watch counts, selected-scope debt share, local attention rate, and a rate bar
+- **THEN** each debt-bearing row shows its exact High and Watch counts labeled by their words and no share, rate, or bar
 
 #### Scenario: Selected scope has no debt
 - **WHEN** the selected scope has zero High and zero Watch units
-- **THEN** the terminal states that no child areas need attention and shows no empty distribution table
-
-#### Scenario: Small non-zero rate is rendered
-- **WHEN** a child attention rate is greater than zero but smaller than one whole bar cell
-- **THEN** the rate bar contains a fractional filled block
+- **THEN** no area section is written
 
 ### Requirement: Codebase child order is severity-led
 Default codebase rows SHALL use the exact finding rank: rating, count of signals
@@ -68,10 +66,16 @@ children. It SHALL show the passed repository-relative path as a breadcrumb.
 - **THEN** JSON still contains every original scope and parent-child link
 
 ### Requirement: Default terminal detail stays concise
-The default terminal view SHALL show `AREAS` only when several affected child
-areas exist and SHALL show at most five such rows. It SHALL show the first three
-ranked findings or comparisons within the selected scope. Zero-value optional
-facts and empty optional sections SHALL be omitted.
+The default terminal view SHALL open with the verdict block, SHALL show `AREAS` only when
+several debt-bearing child areas exist, and SHALL show at most five such rows.
+It SHALL show the first three ranked findings or comparisons within the selected
+scope. Zero-value optional facts and empty optional sections SHALL be omitted,
+except that a verdict count SHALL always be printed with its word even when it
+is zero. When a diff moves no debt, the view SHALL be the verdict line only.
+
+`--all` SHALL show all useful debt without count limits and SHALL NOT show raw
+dependency edges, standard-library externals, churn dumps, cyclomatic-1 rows,
+weak coupling, or healthy rows; JSON remains the complete view of those facts.
 
 #### Scenario: Selected scope has more than five affected children
 - **WHEN** the default terminal report omits child rows
@@ -79,11 +83,15 @@ facts and empty optional sections SHALL be omitted.
 
 #### Scenario: User requests complete useful terminal detail
 - **WHEN** the user supplies `--all`
-- **THEN** terminal output shows all useful affected rows, findings, comparisons, and relevant relationships without healthy rows or internal processing facts
+- **THEN** terminal output shows all useful debt rows, findings, comparisons, and debt-bearing relationships without raw edges, standard-library externals, churn dumps, cyclomatic-1 rows, weak coupling, or healthy rows
 
 #### Scenario: Optional section has no finding
 - **WHEN** architecture or history has no actionable finding
 - **THEN** the terminal omits that section
+
+#### Scenario: A diff moves no debt
+- **WHEN** no comparison or finding counts as debt movement
+- **THEN** the view is the verdict line only, with no trailing history, warning, or context section
 
 ### Requirement: Codebase detail follows existing hotspot priority
 Every displayed finding SHALL show unit kind and SHALL show SourceRole whenever
@@ -99,13 +107,15 @@ inside `--all` but SHALL remain absent from default detail.
 - **THEN** its unit kind, role when non-primary, and advisory trust are visible
 
 ### Requirement: Explore points to the next debt-bearing area
-The terminal discover command SHALL target the first displayed debt-bearing
-child after display filtering and sorting, using its repository-relative path.
-The line SHALL contain only U+F46B and `smackdebt <path>`.
+The terminal discover line SHALL target the first displayed debt-bearing child after
+display filtering and sorting, using its repository-relative path. The line
+SHALL be the word `next:` followed by `smackdebt <path>`, decorated with U+F46B
+before the word when decoration is enabled, so the line reads without its
+glyph.
 
 #### Scenario: A deeper debt-bearing child exists
 - **WHEN** the selected codebase scope has a displayed debt-bearing child
-- **THEN** the report prints one valid glyph-plus-command line for that first row
+- **THEN** the report prints `next: smackdebt <path>` for that first row
 
 #### Scenario: No deeper debt-bearing child exists
 - **WHEN** the selected scope is a file or all deeper children are healthy
@@ -134,17 +144,19 @@ retained comparisons SHALL be Changed.
 - **THEN** it contributes once to Changed while retaining its detailed kind and measurements
 
 ### Requirement: Diff scopes expose change distribution
-Each diff scope SHALL expose exact Worse, Better, and Changed counts. A child's
-share SHALL equal its sum of those counts divided by the selected scope's sum.
-Terminal area views SHALL visualize that share without replacing exact counts.
+Each diff scope SHALL expose exact Worse, Better, and Changed counts. Terminal area rows
+SHALL state those counts in words and SHALL NOT add a share percentage or a
+share bar, for the same reason the codebase area rows do not. A machine
+consumer SHALL derive any share from the exact counts the report already
+serializes.
 
 #### Scenario: Changed units span several directories
 - **WHEN** the selected diff scope has changes in several child areas
-- **THEN** each row shows exact direction counts, its nearest-whole-percent share of selected changed units, and a share bar
+- **THEN** each row shows its exact direction counts labeled by their words and no share or bar
 
 #### Scenario: Diff selection has no retained comparisons
-- **WHEN** the selected scope has a zero change-count denominator
-- **THEN** every child share is `0%` and its bar is empty
+- **WHEN** the selected scope moved no debt
+- **THEN** no area section is written
 
 ### Requirement: Diff child and detail order is deterministic
 Diff child rows SHALL sort by Worse descending, Better descending, Changed
@@ -160,37 +172,25 @@ within each direction.
 - **WHEN** the selected file has several detailed comparison kinds
 - **THEN** the terminal view shows every comparison in stable direction, path, and source order
 
-### Requirement: JSON version 1 exposes progressive links additively
-JSON schema version 1 SHALL add the initial selected scope, indexed report paths,
-scope finding and comparison links, scope diff counts, comparison file ownership,
-and comparison direction. Existing fields, types, and meanings SHALL remain
-unchanged.
-
-#### Scenario: Integration reads a codebase report
-- **WHEN** JSON schema version 1 contains progressive fields
-- **THEN** the integration can traverse from the selected scope to children and retained findings using indexes
-
-#### Scenario: Integration reads a diff report
-- **WHEN** JSON schema version 1 contains comparisons
-- **THEN** each comparison identifies its file, detailed kind, derived direction, measurements, and rating transition
-
-#### Scenario: Terminal output is truncated
-- **WHEN** terminal row or detail limits apply
-- **THEN** JSON still serializes the complete retained report
-
 ### Requirement: Codebase summary states rated quality and coverage
-The terminal `QUALITY` section SHALL state rated units and the count needing
-attention. It SHALL use exact High and Watch glyphs without severity words and
-SHALL omit healthy counts, repeated summary ratios, and decorative quality bars.
-Coverage gaps SHALL use a grouped Warning line only when a gap exists.
+The terminal SHALL open with a verdict block stating the selected scope, the analysis-owned
+tier sentence, and the counts behind it with every count labeled by its word,
+followed by the worst offender with its resolved path and reason when one
+exists. It SHALL omit healthy counts, summary ratios, and decorative quality
+bars used as data. Coverage gaps SHALL use one grouped warning sentence only
+when a gap exists.
 
 #### Scenario: Selection is fully analyzed
 - **WHEN** every selected source file is analyzed
-- **THEN** `QUALITY` omits healthy and coverage-success text
+- **THEN** the verdict block omits coverage-success text and no warning appears
 
 #### Scenario: Some selected source is excluded
 - **WHEN** unsupported or failed files exist
 - **THEN** one grouped warning states the gap without treating those files as healthy
+
+#### Scenario: A scope has nothing to check
+- **WHEN** the selected scope has zero checked units
+- **THEN** the verdict block states the `empty` tier sentence and its zero counts with their words
 
 ### Requirement: Coverage notes describe source-analysis gaps
 Coverage notes SHALL report selected source files that could not be analyzed.
@@ -202,38 +202,52 @@ coverage problem.
 - **THEN** the diff analyzes source changes without a coverage note for routine non-source changes
 
 ### Requirement: Terminal layout responds to available width
-Terminal rendering SHALL use aligned layouts appropriate to widths 120, 80,
-and 50 while preserving the same relevant facts, exact glyphs, recognizable
-source locations, and drill commands. Every ANSI-stripped line SHALL have
-Unicode display width less than or equal to the requested width. Layout SHALL NOT add bars, summary ratios, healthy rows,
-or internal processing facts at any width.
+Terminal rendering SHALL choose each row's shape from that row's own content rather than
+from report-level width tiers. A row SHALL stay aligned when its content fits
+the resolved width and SHALL otherwise stack its facts on indented lines. Every
+ANSI-stripped line SHALL have Unicode display width less than or equal to the
+requested width. Measurements, exact counts, cycle witnesses, history commit
+evidence, dependency state, commands, finding identity, and comparison identity
+SHALL never be silently clipped, and a cycle witness SHALL never be shortened
+with an ellipsis. Layout SHALL NOT add bars used as data, summary ratios,
+healthy rows, or internal processing facts at any width.
 
-#### Scenario: Wide terminal renders relevant areas
+#### Scenario: Wide terminal renders relevant rows
 - **WHEN** the resolved width is 120 columns
-- **THEN** area rows and findings align without repeated status labels
+- **THEN** rows that fit stay aligned and every fact remains visible
 
-#### Scenario: Medium terminal renders relevant areas
-- **WHEN** the resolved width is 80 columns
-- **THEN** the same facts remain aligned and readable
-
-#### Scenario: Narrow terminal renders relevant areas
+#### Scenario: Narrow terminal renders relevant rows
 - **WHEN** the resolved width is 50 columns
-- **THEN** changed metrics; relationship identities, counts, statuses, and evidence; closed cycle witnesses; finding identity, kind, role, location, and measurements; coupling identity, commit evidence, dependency state, and diff outcome; and activity identity, commit count, and churn use short indented lines
-- **AND** each long identity shortens in the middle while every fact remains visible, no line exceeds 50 display cells or breaks a glyph, and the reviewed flows record zero unexpected-line safety shortenings
+- **THEN** rows that do not fit stack their facts on indented lines, no line exceeds 50 display cells or breaks a glyph, and no measurement, count, witness, evidence value, command, or identity is lost
+
+#### Scenario: A cycle witness is long
+- **WHEN** a cycle witness does not fit the resolved width
+- **THEN** the witness stacks across lines and is never shortened with an ellipsis
 
 ### Requirement: Terminal styling is optional and semantic
 Terminal styling SHALL use ANSI sequences only when the CLI resolves color as
-enabled. It SHALL color only status glyphs: High and Worse red, Watch and
-Warning ANSI-256 208 orange, Discover cyan, Better green, and Changed normal.
-Symbols SHALL remain in plain redirected output.
+enabled. It SHALL color only decorations: High and Worse red, Watch and Warning
+ANSI-256 208 orange, Discover cyan, Better green, Changed normal, and the
+verdict bar in its tier color.
+
+Decoration SHALL be resolved beside color from terminal detection. Glyphs and
+the tier bar SHALL NOT remain in redirected or undecorated output; every
+severity, direction, and diagnostic SHALL be readable from its word alone, so
+undecorated output SHALL contain no codepoint in U+E000–U+F8FF. This supersedes
+the earlier rule that symbols remain in plain redirected output, which assumed
+glyphs carried meaning that words did not.
 
 #### Scenario: Styled and plain output are compared
 - **WHEN** the same report, width, and detail choice are rendered with color on and off
 - **THEN** removing ANSI sequences from styled output produces the plain output byte for byte and adjacent text is unstyled
 
+#### Scenario: Output is redirected
+- **WHEN** standard output is not a terminal
+- **THEN** no ANSI sequence and no glyph appear and every meaning is stated in words
+
 #### Scenario: JSON is requested
 - **WHEN** a user selects JSON output
-- **THEN** JSON contains no ANSI styling and its version-3 bytes remain unchanged
+- **THEN** JSON contains no ANSI styling and no decoration, and the machine contract changes only through its own change
 
 ### Requirement: Terminal counts and labels are easy to scan
 Terminal rendering SHALL group large integer digits, use correct singular or
@@ -307,8 +321,11 @@ commits, union commits, similarity, and the absent code dependency.
 
 ### Requirement: Architecture default shows witnesses rather than edge samples
 Default `ARCHITECTURE` output SHALL appear only when an architecture finding
-exists and SHALL show rated cycle witnesses without severity words, arbitrary
-edge rows, or edge totals. `--all` and path drill SHALL expose relevant
+exists and SHALL show rated cycle witnesses without arbitrary edge rows or edge
+totals. Each shown witness SHALL state its severity in the word vocabulary,
+`high` or `watch`, optionally decorated with its glyph when decoration is
+enabled. This supersedes the earlier rule that witnesses appear without severity
+words and with a status glyph. `--all` and path drill SHALL expose relevant
 relationship detail.
 
 #### Scenario: An acyclic graph has many edges
@@ -317,7 +334,7 @@ relationship detail.
 
 #### Scenario: A rated cycle exists
 - **WHEN** default output is rendered
-- **THEN** `ARCHITECTURE` shows the cycle witness once with its status glyph
+- **THEN** `ARCHITECTURE` shows the cycle witness once with its severity word, decorated only when decoration is enabled
 
 ### Requirement: Default terminal sections do not duplicate evidence
 A retained fact SHALL appear once in the nearest useful default terminal
@@ -338,3 +355,23 @@ reclassification, trust policy, filesystem, Git, parser, or analysis work.
 - **WHEN** terminal and JSON output are selected in separate runs
 - **THEN** role, trust, package, relation, history, and finding facts agree
 
+### Requirement: Every selected scope has its own verdict
+Analysis SHALL complete the root verdict while the report is built and SHALL
+expose a pure function that produces the verdict for any other selected scope
+from the completed report. A scope verdict SHALL use only that scope's counts,
+findings, comparisons, and worst offender, so a package, directory, or file view
+answers about that scope rather than the repository. Producing a scope verdict
+SHALL perform no filesystem, Git, parser, or analysis work, and renderers SHALL
+consume the completed verdict rather than deriving one.
+
+#### Scenario: A user drills into a package
+- **WHEN** a package scope is selected and its debt differs from the repository's
+- **THEN** its verdict tier and counts describe that package
+
+#### Scenario: A scope has no checked units
+- **WHEN** a selected scope contains no rated units
+- **THEN** its verdict tier is `empty`
+
+#### Scenario: A scope verdict is requested for rendering
+- **WHEN** a renderer needs the verdict for the selected scope
+- **THEN** it reads completed facts and performs no analysis work

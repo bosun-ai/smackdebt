@@ -51,26 +51,45 @@ eligible parsed source and context source instead of merging their operands.
 - **THEN** the package gains one touch, exact textual lines, and one uncounted change
 
 ### Requirement: Package change coupling is explainable
-The system SHALL retain left and right package IDs, `shared_commits`,
-`union_commits`, and Jaccard similarity for each retained unordered pair. Each
-descriptive source-derived pair SHALL retain the left and right SourceRole and
-trust. Eligible parsed roles SHALL also feed one package-pair aggregate used
-only for findings, so fixture, generated, recovered, and failed history cannot
-change finding operands.
+The system SHALL retain left and right package IDs, `shared_commits`, and `union_commits`
+for each retained unordered pair, and SHALL derive Jaccard similarity from those
+operands for threshold evaluation and human presentation. Similarity SHALL NOT
+be serialized in the machine report; a consumer SHALL derive it from the
+operands at its own precision. Each unordered package pair SHALL produce exactly
+one retained coupling row; SourceRole and trust variants SHALL be aggregated
+into that row rather than emitted as sibling rows, and per-role evidence SHALL
+remain in package history rows. Eligible parsed roles SHALL feed one
+package-pair aggregate used for findings, so fixture, generated, recovered, and
+failed history cannot change finding operands.
+
+A pair SHALL be excluded before similarity is derived when one endpoint scope is
+an ancestor of the other, because shared commits between a scope and its own
+descendant are structural rather than evidence of hidden coupling.
 
 #### Scenario: Two packages change together
 - **WHEN** packages share three commits and fifteen commits touch either package
-- **THEN** the row exposes shared count 3, union count 15, and similarity 0.20
+- **THEN** the row exposes shared count 3 and union count 15 and human output can state 20%
 
 #### Scenario: One commit changes several files per package
 - **WHEN** the same pair occurs several times inside one commit
 - **THEN** that commit adds one shared change to the pair
 
+#### Scenario: One pair has several role and trust variants
+- **WHEN** a package pair is touched by primary, test, and generated source
+- **THEN** exactly one coupling row exists for that pair with one set of operands, and no view can print the same pair with different numbers
+
+#### Scenario: One scope contains the other
+- **WHEN** the repository root scope and one of its packages change in the same commits
+- **THEN** no coupling row and no coupling finding exists for that pair
+
 ### Requirement: Unexplained recurring coupling is a Watch finding
 The system SHALL create a Watch finding only when a pair has at least three
-shared commits, Jaccard similarity of at least 0.20, sufficient history, and no
-trusted eligible `uses` relation in either direction. Weaker observations SHALL
-remain visible in JSON and `--all` and SHALL NOT appear as default findings.
+shared commits, Jaccard similarity of at least 0.20, sufficient history, no
+ancestor-descendant relationship between its endpoints, and no trusted eligible
+`uses` relation in either direction. A `uses` relation resolved through a unique
+manifest-name match SHALL explain a pair exactly as a path-resolved relation
+does. Weaker observations SHALL remain visible in JSON and `--all` and SHALL NOT
+appear as default findings.
 
 #### Scenario: A pair meets both thresholds
 - **WHEN** a pair has 3 shared commits, 15 union commits, sufficient history, and no explaining use
@@ -83,6 +102,10 @@ remain visible in JSON and `--all` and SHALL NOT appear as default findings.
 #### Scenario: Trusted uses explain the pair
 - **WHEN** an eligible parsed uses relation exists in either direction
 - **THEN** coupling remains descriptive and creates no finding
+
+#### Scenario: A manifest-name edge explains the pair
+- **WHEN** two workspace packages import each other only by declared manifest name
+- **THEN** their coupling is explained, no Watch finding is created, and no output claims `no code dependency` for that pair
 
 ### Requirement: Contributor concentration protects identity
 
@@ -134,18 +157,23 @@ without treating those facts as before-and-after measurements.
 - **AND** the historical coupling values remain unchanged
 
 ### Requirement: History coverage and concentration fields are exact
-History coverage SHALL expose stream availability, revision, total streamed
-commits, commits containing eligible current source, mapped eligible changes,
-mapped context changes, newest and oldest timestamps, textual changes,
-uncounted changes, excluded changes, rename gaps, and reason. A mapped fixture,
-generated, recovered, or failed change is context rather than excluded.
-Textual plus uncounted changes SHALL equal mapped eligible plus context changes,
-and eligible commits SHALL NOT exceed streamed commits.
+History coverage SHALL expose stream availability, revision, total streamed commits,
+commits containing eligible current source, mapped eligible changes, mapped
+context changes, newest and oldest timestamps, textual changes, uncounted
+changes, excluded changes, rename gaps, reason, the selected history window
+length in days when a window is selected, and the number of streamed commits
+excluded by that window. Commits excluded by the window SHALL be counted
+separately from changes excluded for other reasons. A mapped fixture, generated,
+recovered, or failed change is context rather than excluded. Textual plus
+uncounted changes SHALL equal mapped eligible plus context changes, and eligible
+commits SHALL NOT exceed streamed commits.
 
 Contributor concentration SHALL expose package ID, SourceRole, trust,
-contributor count, numerator, denominator, and ratio without identity. Eligible
-and context contributors SHALL remain in separate rows so context contributors
-cannot alter eligible top share.
+contributor count, numerator, and denominator without identity. The
+concentration ratio SHALL be derived from the numerator and denominator for
+threshold evaluation and human presentation and SHALL NOT be serialized in the
+machine report. Eligible and context contributors SHALL remain in separate rows
+so context contributors cannot alter eligible top share.
 
 #### Scenario: History is shallow
 - **WHEN** only part of repository history is locally available
@@ -158,6 +186,14 @@ cannot alter eligible top share.
 #### Scenario: Generated history dominates a package
 - **WHEN** many generated contributors touch a package and few eligible parsed commits touch it
 - **THEN** JSON and `--all` retain both evidence rows while default churn and top share use only the eligible row
+
+#### Scenario: A window excludes older commits
+- **WHEN** a report is requested with a history window
+- **THEN** coverage states the window length in days and the exact number of streamed commits the window excluded
+
+#### Scenario: Concentration is serialized
+- **WHEN** a concentration row is emitted in the machine report
+- **THEN** its numerator and denominator are present and no ratio value is serialized
 
 ### Requirement: Stream and mapping evidence are presented separately
 Terminal history coverage SHALL state stream completeness separately from
@@ -178,3 +214,41 @@ one rendered view.
 - **WHEN** default output includes both sections
 - **THEN** its shared and union operands are printed once rather than repeated in summary and detail
 
+### Requirement: The history window governs every history signal
+When a history window is selected, the window SHALL be applied when streamed
+history records become facts, so touches, churn, package change coupling, and
+contributor concentration all describe the same window. No history-derived value
+SHALL be computed over commits outside the selected window. The window SHALL
+still be read from one streamed history process per report.
+
+#### Scenario: A window is selected
+- **WHEN** a report is requested with a history window that excludes older commits
+- **THEN** touches, churn, coupling operands, and concentration operands all exclude those commits
+
+#### Scenario: No window is selected
+- **WHEN** no history window is requested
+- **THEN** every history signal uses all locally available non-merge history
+
+### Requirement: Concentrated knowledge is a Watch finding
+The system SHALL create a Watch evolutionary finding for a package when it has
+at least 10 commits within the analyzed window and its top contributor share is
+at least 90%. The share comparison SHALL use integer numerator and denominator
+operands. The finding SHALL retain package identity, contributor count,
+numerator, and denominator only, and SHALL NOT retain or emit any contributor
+name, address, raw author field, or internal contributor identifier. Weaker
+observations SHALL remain descriptive.
+
+Evolutionary findings SHALL carry a kind that distinguishes unexplained coupling
+from knowledge concentration.
+
+#### Scenario: One contributor owns a package
+- **WHEN** a package has 20 windowed commits and one contributor accounts for 19 of them
+- **THEN** one Watch finding retains contributor count, numerator 19, and denominator 20 without any identity
+
+#### Scenario: A package is just below the thresholds
+- **WHEN** a package has 9 windowed commits, or a top share of 89%
+- **THEN** no knowledge-concentration finding is created and the observation stays descriptive
+
+#### Scenario: Finding kinds are inspected
+- **WHEN** a report contains both an unexplained coupling finding and a knowledge-concentration finding
+- **THEN** each finding states its kind and the two remain distinguishable

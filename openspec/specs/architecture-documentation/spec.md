@@ -109,13 +109,20 @@ assignment and hierarchy construction consumes that identity.
 - **THEN** the guide makes the single package-assignment owner explicit
 
 ### Requirement: Architecture documents the terminal presentation boundary
-`ARCHITECTURE.md` SHALL describe borrowed presentation rows, CLI-owned width and
-color resolution, width-specific renderers, semantic styling, and unchanged JSON
-serialization.
+`ARCHITECTURE.md` SHALL describe borrowed presentation rows, CLI-owned width, color, and
+decoration resolution, per-row content-aware writing, semantic styling, and
+unchanged JSON serialization. It SHALL state that the verdict, its sentence, its
+counts, and the worst offender are completed analysis facts that the renderer
+prints without deriving, and that the renderer performs no filesystem, Git,
+parser, or analysis work.
 
 #### Scenario: Engineer changes terminal layout
 - **WHEN** rendering or display policy changes
-- **THEN** the architecture guide identifies whether the change belongs in report facts, presentation selection, CLI policy, or width-specific writing
+- **THEN** the architecture guide identifies whether the change belongs in report facts, verdict policy, presentation selection, CLI policy, or per-row writing
+
+#### Scenario: Engineer adds a decorated element
+- **WHEN** a new glyph or bar is proposed
+- **THEN** the guide requires an adjacent word that carries the meaning and undecorated output that remains complete
 
 ### Requirement: Architecture documents module placement
 `ARCHITECTURE.md` SHALL describe entry-module restrictions, private module
@@ -214,4 +221,3 @@ parser, analysis, classification, and trust work out of output code.
 #### Scenario: Default terminal removes an edge row
 - **WHEN** presentation policy changes
 - **THEN** retained JSON relations and analysis facts remain unchanged
-

@@ -61,12 +61,19 @@ upstream-backed set and SHALL NOT list Kotlin as supported.
 - **THEN** Kotlin is absent and unsupported files are described as visible coverage gaps
 
 ### Requirement: README states JSON detail retention
-The README SHALL state that JSON retains every Watch and High finding and all
-scope summaries, while healthy units are represented through aggregate counts.
+The README SHALL state that JSON retains every Watch and High finding and all scope
+summaries, while healthy units are represented through aggregate counts. It
+SHALL also state that JSON is the complete view of every fact the terminal
+omits, including raw dependency edges, external references, churn detail, weak
+coupling, hotspots, size findings, and orphan files.
 
 #### Scenario: Integration author chooses JSON output
 - **WHEN** an integration needs all debt findings
 - **THEN** the README makes clear that JSON is complete for Watch and High findings but not a full healthy-unit index
+
+#### Scenario: A user misses a row the terminal removed
+- **WHEN** they look for a row that human output no longer prints
+- **THEN** the README directs them to the version-4 JSON table that retains it
 
 ### Requirement: README explains package-root grouping
 The README SHALL state that co-located manifests form one report package and
@@ -114,14 +121,25 @@ area's share of selected debt from its local attention rate.
 - **THEN** it explains how contribution and concentration support the next drill decision
 
 ### Requirement: README documents terminal presentation controls
-Product documentation SHALL explain the Nerd Font glyph requirement,
-`--color`, `NO_COLOR`, width behavior, Unicode redirected output, `--all`, and
-JSON as the complete machine-readable view. It SHALL state that there is no
-icon option, emoji mode, or ASCII fallback.
+Product documentation SHALL explain that severity, direction, and diagnostics are stated in
+words, that glyphs and the tier bar are optional decoration resolved from
+terminal detection, and that piped output is the same report in words with no
+private-use codepoint. It SHALL explain `--color`, `NO_COLOR`, width behavior,
+content-aware row stacking, `--all` as all useful debt, and JSON as the complete
+machine-readable view of everything the terminal omits. It SHALL state that
+there is no icon option, emoji mode, or theme setting.
+
+The previously documented commitment that there is no ASCII fallback SHALL be
+removed, because undecorated words-only output is now the defined behavior for
+non-terminal and color-disabled output.
 
 #### Scenario: User runs Smackdebt in automation
 - **WHEN** the user reads output guidance
-- **THEN** the README explains how to force or disable ANSI glyph styling and that JSON remains unstyled
+- **THEN** the README explains word-only piped output, how to force or disable decoration and ANSI styling, and that JSON remains unstyled and complete
+
+#### Scenario: User looks for the fallback statement
+- **WHEN** the user reads presentation documentation
+- **THEN** no claim that ASCII or plain fallback is unavailable appears
 
 ### Requirement: Product documentation explains evolutionary signals
 
@@ -156,13 +174,21 @@ public generated fixture, expected status, and exact relevant output fragments.
 - **THEN** it executes them through the built CLI and matches status, sections, glyphs, commands, stdout, and stderr in order
 
 ### Requirement: Documentation covers the unified result
-The README SHALL show how one command answers code and architecture questions
-through separate `QUALITY`, `FINDINGS`, `ARCHITECTURE`, and `HISTORY` sections,
-with empty optional sections omitted.
+The README SHALL show how one command answers code and architecture questions, opening
+with the verdict block — scope, tier sentence, word-labeled counts, and worst
+offender — followed by `AREAS`, `FINDINGS`, `ARCHITECTURE`, `HISTORY`, and
+`WARNINGS` sections, with empty optional sections omitted. It SHALL list the
+frozen codebase and diff tier ids with their sentences, state that a clean diff
+prints the verdict line only, and state that every count is labeled with its
+word including zero counts.
 
 #### Scenario: A user reads the main examples
 - **WHEN** the user follows documented default, path, and diff examples
-- **THEN** the examples lead with relevant findings, omit empty sections and internal processing facts, and do not present a combined score
+- **THEN** the examples lead with the verdict, label every count, omit empty sections, and do not present a combined score
+
+#### Scenario: A machine consumer reads the documentation
+- **WHEN** an integration author decides what to key on
+- **THEN** the README names the tier ids as the stable vocabulary and points to JSON for complete data
 
 ### Requirement: README explains role classification and conflicts
 The README SHALL name all six SourceRole values, which roles affect default
@@ -187,29 +213,56 @@ architecture verdicts, coupling, or diff verdicts.
 The README SHALL distinguish `uses` from `module_ownership`, keep role and trust
 separate, state that default architecture shows rated witnesses rather than
 arbitrary edges, and document the three-shared-commit and 20% Jaccard coupling
-threshold plus weak-observation visibility.
+threshold plus weak-observation visibility. It SHALL explain that a
+cross-package reference written against a package's declared manifest name
+resolves internally when exactly one package in the repository declares that
+name, that a duplicate declared name stays unresolved with a diagnostic, and
+that Smackdebt reads declared names only and never executes build
+configuration. It SHALL state that `no code dependency` means no trusted
+eligible `uses` relation exists in either direction, including relations
+resolved by manifest name, and that a coupling pair is reported once and never
+between a scope and its own ancestor.
 
 #### Scenario: Rust ownership no longer creates a cycle
 - **WHEN** a user reads the architecture section
 - **THEN** it explains why ownership is context rather than a dependency verdict edge
 
+#### Scenario: A user analyzes a workspace
+- **WHEN** the user reads how cross-package imports are resolved
+- **THEN** the README explains declared-name matching, the unique-match rule, the retained diagnostic for duplicates, and what `no code dependency` claims
+
 ### Requirement: README documents exact rank and labels
 The README SHALL list the rank sequence exactly as rating, signals at that
-rating, total triggered signals, cognitive complexity, cyclomatic complexity,
-logical lines, activity, path, and span. It SHALL state that unit kind and
-non-primary role are shown and that terminal `repository root` maps to machine
-path `.`.
+rating, total triggered signals, hot state, role class, cognitive complexity,
+cyclomatic complexity, logical lines, activity, path, and span. It SHALL state
+that hot means a rated file whose windowed touch count reaches the minimum touch
+count, that primary source precedes non-primary source at equal rating while
+non-primary source remains visible, that unit kind and non-primary role are
+shown, and that terminal `repository root` maps to machine path `.`.
 
 #### Scenario: Two findings have the same rating
 - **WHEN** a user wants to understand their order
 - **THEN** documentation provides every comparison key in order
 
-### Requirement: README presents JSON version 3 and exact examples
-The README SHALL identify version 3 as the machine contract, link its checked
-schema, and use executable examples that assert exact status, stderr, and all
-declared stdout fragments in order.
+#### Scenario: Test debt appears below production debt
+- **WHEN** a user compares a primary and a test finding with the same rating
+- **THEN** documentation explains the role class key and states that test debt stays visible
+
+### Requirement: README presents JSON version 4 and exact examples
+The README SHALL identify version 4 as the machine contract, link its checked schema, and
+describe the denormalized head — `verdict` with tier, sentence, and mode, and
+`summary` with counts and up to three fully resolved worst entries — as the way
+to answer the common question without joining tables. It SHALL state that every
+serialized value is an integer or a string, that similarity and concentration
+are published as their integer operands rather than as ratios, and that no
+documented text promises a serialized similarity or ratio value. Its executable
+examples SHALL assert exact status, stderr, and all declared stdout fragments in
+order.
 
 #### Scenario: A documented example changes
 - **WHEN** its result no longer matches the declared behavior
 - **THEN** documentation acceptance fails with a reviewable difference
 
+#### Scenario: A user looks for coupling ratios in JSON
+- **WHEN** they read the JSON section
+- **THEN** it states that shared and union commit counts are published and that any ratio is derived by the consumer

@@ -51,4 +51,4 @@
 - [x] 6.8 Prove report facts, rank, analysis, exit classes, stream placement, work counts, and JSON version 3 bytes are unchanged.
 - [x] 6.9 Re-run the release binary on smackdebt, swiftide, and fluyt and record that swiftide `diff HEAD~15` leads with a one-line verdict instead of 204 changed rows.
 - [x] 6.10 Pass formatting, Clippy, workspace tests, architecture checks, performance tests, acceptance evidence, strict OpenSpec validation, and the final diff check.
-- [ ] 6.11 Archive this change before implementing `adopt-report-schema-v4`.
+- [x] 6.11 Archive this change before implementing `adopt-report-schema-v4`.

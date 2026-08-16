@@ -37,7 +37,7 @@
 - [x] 5.2 Update `ARCHITECTURE.md` version-3 references.
 - [x] 5.3 Amend the `AGENTS.md` three-rated-measurements rule to five rated measurements.
 - [x] 5.4 Rewrite the README JSON section for version 4, its head, and the removal of serialized similarity and ratio floats, ensuring no documented text still promises those floats.
-- [ ] 5.5 Remove the `report-schema-v3` and `report-schema-v2` capabilities from accepted specs through this change's archival.
+- [x] 5.5 Remove the `report-schema-v3` and `report-schema-v2` capabilities from accepted specs through this change's archival.
 
 ## 6. Evidence and gates
 

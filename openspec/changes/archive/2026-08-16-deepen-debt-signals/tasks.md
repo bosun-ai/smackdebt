@@ -43,4 +43,4 @@
 - [x] 6.6 Update the documented rank sequence to include the hot and role class keys.
 - [x] 6.7 Re-run the release binary on smackdebt, swiftide, and fluyt and record that production debt now outranks test debt and that hot files are identifiable.
 - [x] 6.8 Pass formatting, Clippy, workspace tests, architecture checks, performance tests, acceptance evidence, strict OpenSpec validation, and the final diff check.
-- [ ] 6.9 Archive this change before implementing `add-verdict-policy`.
+- [x] 6.9 Archive this change before implementing `add-verdict-policy`.

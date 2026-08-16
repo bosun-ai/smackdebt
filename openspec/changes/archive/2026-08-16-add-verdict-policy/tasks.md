@@ -34,4 +34,4 @@
 - [x] 5.3 Prove no renderer computes a verdict and no configuration surface is introduced.
 - [x] 5.4 Prove terminal bytes and JSON version 3 bytes are unchanged by this change, since rendering and serialization land in the two following changes.
 - [x] 5.5 Pass formatting, Clippy, workspace tests, architecture checks, performance tests, acceptance evidence, strict OpenSpec validation, and the final diff check.
-- [ ] 5.6 Archive this change before implementing `redesign-terminal-report`.
+- [x] 5.6 Archive this change before implementing `redesign-terminal-report`.
