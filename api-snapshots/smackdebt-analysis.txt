@@ -157,6 +157,7 @@ pub smackdebt_analysis::WorstOffenderReason::HotAndComplex
 pub smackdebt_analysis::WorstOffenderReason::MostComplex
 pub smackdebt_analysis::WorstOffenderReason::PackageDependencyCycle
 impl smackdebt_analysis::WorstOffenderReason
+pub const fn smackdebt_analysis::WorstOffenderReason::id(self) -> &'static str
 pub const fn smackdebt_analysis::WorstOffenderReason::text(self) -> &'static str
 pub struct smackdebt_analysis::ArchitectureComparison
 impl smackdebt_analysis::ArchitectureComparison

@@ -1155,18 +1155,8 @@ impl Serialize for WorstOffenderView<'_> {
             "unit_kind",
             &identity.map(|identity| unit_kind_name(identity.kind())),
         )?;
-        map.serialize_entry("reason", worst_offender_reason_name(self.0.reason()))?;
+        map.serialize_entry("reason", self.0.reason().id())?;
         map.end()
-    }
-}
-
-fn worst_offender_reason_name(reason: smackdebt_analysis::WorstOffenderReason) -> &'static str {
-    match reason {
-        smackdebt_analysis::WorstOffenderReason::HotAndComplex => "hot_and_complex",
-        smackdebt_analysis::WorstOffenderReason::MostComplex => "most_complex",
-        smackdebt_analysis::WorstOffenderReason::PackageDependencyCycle => {
-            "package_dependency_cycle"
-        }
     }
 }
 

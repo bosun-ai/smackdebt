@@ -134,6 +134,12 @@ a package dependency cycle, the worst offender SHALL be that cycle's first
 witness with reason `package dependency cycle`. When neither exists, the scope
 SHALL have no worst offender.
 
+Each reason SHALL carry a frozen machine identifier owned by analysis beside its
+words, exactly: `hot_and_complex`, `most_complex`, and
+`package_dependency_cycle`. These identifiers are the stable contract for
+machine consumers the way tier ids are, and no renderer SHALL invent, rename, or
+compose one.
+
 #### Scenario: The top finding is in a hotspot file
 - **WHEN** the first ranked finding's file is a hotspot
 - **THEN** the worst offender carries that finding's resolved path and reason `hot AND complex`
@@ -149,3 +155,7 @@ SHALL have no worst offender.
 #### Scenario: Nothing is wrong
 - **WHEN** a scope has no ranked finding and no cycle
 - **THEN** no worst offender exists
+
+#### Scenario: A machine consumer reads a reason
+- **WHEN** a worst offender is serialized
+- **THEN** its reason is one of the three frozen identifiers, taken from analysis rather than composed by the renderer

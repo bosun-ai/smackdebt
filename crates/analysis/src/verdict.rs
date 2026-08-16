@@ -365,6 +365,18 @@ pub enum WorstOffenderReason {
 }
 
 impl WorstOffenderReason {
+    /// The frozen machine identifier of this reason.
+    ///
+    /// A machine consumer reads these, so they are owned here beside the tier
+    /// identifiers rather than invented by a renderer.
+    pub const fn id(self) -> &'static str {
+        match self {
+            Self::HotAndComplex => "hot_and_complex",
+            Self::MostComplex => "most_complex",
+            Self::PackageDependencyCycle => "package_dependency_cycle",
+        }
+    }
+
     /// The exact words every consumer prints for this reason.
     pub const fn text(self) -> &'static str {
         match self {
@@ -833,17 +845,27 @@ mod tests {
     }
 
     #[test]
-    fn every_worst_offender_reason_keeps_its_exact_words() {
+    fn every_worst_offender_reason_keeps_its_exact_words_and_identifier() {
         let vocabulary = [
-            (WorstOffenderReason::HotAndComplex, "hot AND complex"),
-            (WorstOffenderReason::MostComplex, "most complex"),
+            (
+                WorstOffenderReason::HotAndComplex,
+                "hot AND complex",
+                "hot_and_complex",
+            ),
+            (
+                WorstOffenderReason::MostComplex,
+                "most complex",
+                "most_complex",
+            ),
             (
                 WorstOffenderReason::PackageDependencyCycle,
                 "package dependency cycle",
+                "package_dependency_cycle",
             ),
         ];
-        for (reason, words) in vocabulary {
+        for (reason, words, id) in vocabulary {
             assert_eq!(reason.text(), words);
+            assert_eq!(reason.id(), id);
         }
     }
 
