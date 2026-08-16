@@ -116,3 +116,45 @@ glyph.
 #### Scenario: No deeper debt-bearing child exists
 - **WHEN** the selected scope is a file or all deeper children are healthy
 - **THEN** the report omits the discover line
+
+### Requirement: Terminal styling is optional and semantic
+Terminal styling SHALL use ANSI sequences only when the CLI resolves color as
+enabled. It SHALL color only decorations: High and Worse red, Watch and Warning
+ANSI-256 208 orange, Discover cyan, Better green, Changed normal, and the
+verdict bar in its tier color.
+
+Decoration SHALL be resolved beside color from terminal detection. Glyphs and
+the tier bar SHALL NOT remain in redirected or undecorated output; every
+severity, direction, and diagnostic SHALL be readable from its word alone, so
+undecorated output SHALL contain no codepoint in U+E000–U+F8FF. This supersedes
+the earlier rule that symbols remain in plain redirected output, which assumed
+glyphs carried meaning that words did not.
+
+#### Scenario: Styled and plain output are compared
+- **WHEN** the same report, width, and detail choice are rendered with color on and off
+- **THEN** removing ANSI sequences from styled output produces the plain output byte for byte and adjacent text is unstyled
+
+#### Scenario: Output is redirected
+- **WHEN** standard output is not a terminal
+- **THEN** no ANSI sequence and no glyph appear and every meaning is stated in words
+
+#### Scenario: JSON is requested
+- **WHEN** a user selects JSON output
+- **THEN** JSON contains no ANSI styling and no decoration, and the machine contract changes only through its own change
+
+### Requirement: Architecture default shows witnesses rather than edge samples
+Default `ARCHITECTURE` output SHALL appear only when an architecture finding
+exists and SHALL show rated cycle witnesses without arbitrary edge rows or edge
+totals. Each shown witness SHALL state its severity in the word vocabulary,
+`high` or `watch`, optionally decorated with its glyph when decoration is
+enabled. This supersedes the earlier rule that witnesses appear without severity
+words and with a status glyph. `--all` and path drill SHALL expose relevant
+relationship detail.
+
+#### Scenario: An acyclic graph has many edges
+- **WHEN** default output is rendered
+- **THEN** `ARCHITECTURE` and arbitrary edge totals are absent while detailed path output can still inspect relevant relationships
+
+#### Scenario: A rated cycle exists
+- **WHEN** default output is rendered
+- **THEN** `ARCHITECTURE` shows the cycle witness once with its severity word, decorated only when decoration is enabled

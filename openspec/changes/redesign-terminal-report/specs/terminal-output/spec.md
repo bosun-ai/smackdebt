@@ -187,7 +187,7 @@ stdout, and write exact stderr bytes `smackdebt: --all cannot be used with
 - **THEN** status is 2, stdout is empty, and stderr is exactly `smackdebt: --all cannot be used with --json\n` with no usage or help tail
 
 ### Requirement: Machine and analysis interfaces do not change
-The system SHALL preserve JSON version 3 bytes, report facts, finding rank, analysis
+The system SHALL preserve the current JSON contract's bytes, report facts, finding rank, analysis
 policy, exit classes, serial and automatic behavior, live work counts,
 allocations, and measured resource behavior unchanged through this terminal
 redesign. The renderer SHALL perform no analysis and SHALL consume completed

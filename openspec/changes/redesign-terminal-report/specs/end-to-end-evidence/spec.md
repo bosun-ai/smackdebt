@@ -48,7 +48,7 @@ ref not found: <ref>`, and `smackdebt: --all cannot be used with --json`, with
 no usage or help tail and no leaked absolute path, operating-system code, Git
 command, status, fatal output, parser text, or process text.
 
-JSON version-3 bytes, report facts, status classes, stream placement, rank,
+The current JSON contract's bytes, report facts, status classes, stream placement, rank,
 serial and automatic bytes, work totals, analysis, allocation, and performance
 evidence SHALL prove unchanged behavior.
 

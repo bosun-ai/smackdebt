@@ -107,7 +107,7 @@ analysis family) and `crates/cli/tests/unified_acceptance.rs` (generated
 repository domain and the release matrix), with committed bytes in
 `crates/cli/tests/snapshots/`. See `crates/cli/tests/README.md`. A policy
 change belongs first in a pure test; a public behavior change also needs schema
-review (`schemas/report-v3.schema.json`) and updated black-box evidence.
+review (`schemas/report-v4.schema.json`) and updated black-box evidence.
 
 ## Conventions
 
