@@ -1443,6 +1443,32 @@ fn a_path_selected_json_head_answers_the_selected_scope_like_the_terminal() {
     assert_index_integrity(&selected);
 }
 
+/// A reader that stops reading, which is what `| head` is, ends the run
+/// quietly the way every other Unix tool ends it.
+#[test]
+fn a_report_piped_into_head_is_quiet_and_successful() {
+    // The report has to outgrow one buffered write, which is when the reader
+    // has already left by the time the next write happens.
+    let project = tangled_fixture(400);
+    let binary = assert_cmd::cargo::cargo_bin("smackdebt");
+    let output = Command::new("sh")
+        .arg("-c")
+        .arg(format!(
+            "'{}' --all '{}' | head -1",
+            binary.display(),
+            project.path().display()
+        ))
+        .output()
+        .unwrap();
+    assert_eq!(String::from_utf8_lossy(&output.stderr), "");
+    assert!(output.status.success());
+    assert!(
+        String::from_utf8_lossy(&output.stdout).starts_with("smackdebt · "),
+        "{}",
+        String::from_utf8_lossy(&output.stdout)
+    );
+}
+
 fn assert_snapshot(name: &str, actual: &[u8], expected: &[u8]) {
     if std::env::var_os("SMACKDEBT_UPDATE_SNAPSHOTS").is_some() {
         assert_eq!(

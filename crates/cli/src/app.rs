@@ -161,7 +161,7 @@ fn run(arguments: impl IntoIterator<Item = OsString>) -> ExitCode {
                     TerminalOptions::new(width, common.all, color).with_decorations(decorations),
                 )
             };
-            match rendered {
+            match rendered.and_then(|()| stdout.flush()) {
                 Ok(()) => {
                     #[cfg(feature = "evidence-stats")]
                     if evidence_enabled {
@@ -190,10 +190,15 @@ fn run(arguments: impl IntoIterator<Item = OsString>) -> ExitCode {
                     }
                     ExitCode::SUCCESS
                 }
-                Err(error) => fail(&ProjectError::Inspect {
-                    path: PathBuf::from("standard output"),
-                    source: error,
-                }),
+                Err(error) => match stdout_failure(&error) {
+                    // A reader that stopped reading, such as `smackdebt | head`,
+                    // is not an error the user has to see.
+                    StdoutFailure::ReaderLeft => ExitCode::SUCCESS,
+                    StdoutFailure::Reportable => fail(&ProjectError::Inspect {
+                        path: PathBuf::from("standard output"),
+                        source: error,
+                    }),
+                },
             }
         }
         Err(error) => fail(&error),
@@ -277,4 +282,45 @@ fn fail(error: &ProjectError) -> ExitCode {
 fn fail_with(message: &str, status: u8) -> ExitCode {
     let _ = writeln!(io::stderr().lock(), "smackdebt: {message}");
     ExitCode::from(status)
+}
+
+/// How a failed standard-output write is answered.
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+enum StdoutFailure {
+    /// The reader closed the pipe, which every Unix tool exits quietly on.
+    ReaderLeft,
+    /// Any other IO failure, which the user has to see.
+    Reportable,
+}
+
+fn stdout_failure(error: &io::Error) -> StdoutFailure {
+    match error.kind() {
+        io::ErrorKind::BrokenPipe => StdoutFailure::ReaderLeft,
+        _ => StdoutFailure::Reportable,
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn a_closed_reader_is_quiet_and_every_other_write_failure_is_reported() {
+        assert_eq!(
+            stdout_failure(&io::Error::from(io::ErrorKind::BrokenPipe)),
+            StdoutFailure::ReaderLeft
+        );
+        for kind in [
+            io::ErrorKind::PermissionDenied,
+            io::ErrorKind::StorageFull,
+            io::ErrorKind::InvalidData,
+            io::ErrorKind::Other,
+        ] {
+            assert_eq!(
+                stdout_failure(&io::Error::from(kind)),
+                StdoutFailure::Reportable,
+                "{kind:?}"
+            );
+        }
+    }
 }
