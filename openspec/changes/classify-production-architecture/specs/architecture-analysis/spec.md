@@ -1,5 +1,26 @@
 ## ADDED Requirements
 
+### Requirement: A Rust module file owns the directory named after it
+Project resolution SHALL read a relative candidate of a Rust source file against
+the directory that file's own modules live in: the file's own directory when the
+file is `mod.rs`, `lib.rs`, or `main.rs`, and a directory named after the file
+otherwise. That reading SHALL take precedence over the sibling reading of the
+same candidate wherever it matches a discovered file, and the sibling reading
+SHALL remain for every candidate it does not. Resolution SHALL still link an
+internal edge only when exactly one file matches.
+
+#### Scenario: A module declared inside a plain module file
+- **WHEN** `a.rs` declares `mod child;` and the repository contains `a/child.rs`
+- **THEN** the declaration resolves to `a/child.rs` rather than to a sibling `child.rs`
+
+#### Scenario: A parent reference inside a plain module file
+- **WHEN** `a/child.rs` contains `use super::sibling::work;`
+- **THEN** the reference resolves against `a`'s own parent module rather than one directory higher
+
+#### Scenario: A module declared inside a directory module file
+- **WHEN** `a/mod.rs`, `lib.rs`, or `main.rs` declares `mod child;`
+- **THEN** the declaration resolves beside the declaring file, unchanged
+
 ### Requirement: Rust cfg(test) scope assigns test role to references
 Rust dependency extraction SHALL record whether a reference is declared in a
 test-only scope. A reference SHALL be test-scoped when the item that declares it,

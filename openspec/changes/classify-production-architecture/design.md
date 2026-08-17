@@ -129,6 +129,23 @@ change to `dependency_edges`, not a shape change, so report schema v4 needs no
 delta — but every consumer that assumes `(source, target)` uniqueness must be
 audited, `crates/analysis/src/architecture_comparison.rs` first.
 
+### A Rust module file owns a directory, and resolution has to know it
+
+The rule below cannot fire without this one. `tokio/src/fs/file.rs` declares
+`#[cfg(test)] mod tests;` and the declared file is `tokio/src/fs/file/tests.rs`,
+but resolution read `./tests.rs` against the declaring file's *directory* and
+looked for `tokio/src/fs/tests.rs`. The declaration resolved to nothing, so no
+`module_ownership` relation existed to carry the scope.
+
+Resolution now reads a relative Rust candidate against the module directory the
+declaring file owns — its own directory for `mod.rs`, `lib.rs`, and `main.rs`,
+and a directory named after the file otherwise — and keeps the sibling reading
+where that does not match. The same correction fixes `super::` inside a plain
+module file, which previously climbed one directory too far. Field effect on the
+five repositories: kwaak's unfollowed imports fall from 31 to 24, tokio's orphan
+list loses 15 files that something does import, and fluyt gains one genuine file
+cycle that was invisible while its `super::` references went unresolved.
+
 ### A file declared only under `#[cfg(test)]` is test source
 
 Scope detection reads the item that declares a reference, so `#[cfg(test)] mod

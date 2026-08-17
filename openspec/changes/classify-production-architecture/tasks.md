@@ -20,14 +20,14 @@
 - [x] 2.7 Add a fixture where a test-role relation would close a package cycle: no finding is created, the relations appear in JSON, and the pair's coupling stays explained.
 - [x] 2.8 Add a primary stable-dependency fixture that authors the product's first committed terminal and JSON evidence for an SDP finding.
 - [x] 2.9 Audit consumers that assume `(source, target)` uniqueness in `dependency_edges`, starting with the architecture comparison.
-- [ ] 2.10 Verify on the field repositories that tokio reports no package cycle and no stable-dependency finding while the other four repositories' package graphs and orphan lists are unchanged.
+- [x] 2.10 Verify on the field repositories that tokio reports no package cycle and no stable-dependency finding while the other four repositories' package graphs and orphan lists are unchanged.
 
 ## 3. Test-declared module files
 
-- [ ] 3.1 Add project tests for a `#[cfg(test)] mod name;` declaration: the declared file is test source, its relations leave the verdict graphs, a file also declared outside a test scope stays primary, a transitively declared file is test source, and an explicitly configured role wins.
-- [ ] 3.2 Resolve module declarations to files and classify a file as test when it has at least one declaration and every declaration is test-scoped, by a deterministic fixpoint over ordered structures.
-- [ ] 3.3 Apply the classification before findings, ratings, coverage, and history evidence read a role, on the codebase path and on both sides of a diff.
-- [ ] 3.4 Verify on the field repositories that tokio reports no package dependency cycle and that scikit-learn, opencode, kwaak, and fluyt keep their verdicts.
+- [x] 3.1 Add project tests for a `#[cfg(test)] mod name;` declaration: the declared file is test source, its relations leave the verdict graphs, a file also declared outside a test scope stays primary, a transitively declared file is test source, and an explicitly configured role wins.
+- [x] 3.2 Read a Rust relative candidate against the module directory the declaring file owns, then resolve module declarations to files and classify a file as test when it has at least one declaration and every declaration is test-scoped, by a deterministic fixpoint over ordered structures.
+- [x] 3.3 Apply the classification before findings, ratings, coverage, and history evidence read a role, on the codebase path and on both sides of a diff.
+- [x] 3.4 Verify on the field repositories that tokio reports no package dependency cycle and that scikit-learn, opencode, kwaak, and fluyt keep their verdicts.
 
 ## 4. Module-wiring cycle exclusion
 

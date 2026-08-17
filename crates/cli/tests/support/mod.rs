@@ -469,7 +469,8 @@ pub(crate) fn static_architecture_repository() -> GeneratedRepository {
 /// Verdict graphs are primary-only, so the test-role relations below are
 /// context: `src/only_tests.rs` is outside the cycle graph while staying a used
 /// file for orphan purposes. The repository holds one package, so no package
-/// graph value depends on them.
+/// graph value depends on them. `src/only_tests.rs` also carries the test role
+/// itself, because `#[cfg(test)] mod only_tests;` is its only declaration.
 pub(crate) fn rust_test_scope_repository() -> GeneratedRepository {
     let repository = GeneratedRepository::new("main");
     repository.apply(&[

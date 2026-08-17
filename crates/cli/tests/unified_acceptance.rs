@@ -205,6 +205,22 @@ fn a_rust_test_scope_publishes_test_relations_beside_the_primary_ones() {
         ]
     );
     assert!(report["orphan_files"].as_array().unwrap().is_empty());
+    // The build compiles `src/only_tests.rs` only under `test`, so the file
+    // itself is test source while its siblings ship.
+    let role_of = |path: &str| {
+        report["files"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .find(|file| report["paths"][file["path"].as_u64().unwrap() as usize] == path)
+            .unwrap_or_else(|| panic!("missing {path}"))["role"]
+            .as_str()
+            .unwrap()
+            .to_owned()
+    };
+    assert_eq!(role_of("src/only_tests.rs"), "test");
+    assert_eq!(role_of("src/shipped.rs"), "primary");
+    assert_eq!(role_of("src/lib.rs"), "primary");
     assert_golden("unified-rust-test-scope.json", &result.stdout);
 }
 

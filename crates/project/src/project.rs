@@ -50,7 +50,7 @@ pub(super) fn analyze_codebase(request: &CodebaseRequest) -> Result<ProjectRepor
     let aliases = load_resolution_aliases(&selection.inventory_root);
     let candidates: Vec<&DiscoveredFile> = inventory.source_files().collect();
     let work = AnalysisWork::default();
-    let analyses = analyze_current_files(
+    let mut analyses = analyze_current_files(
         &inventory,
         &candidates,
         request.width,
@@ -58,6 +58,16 @@ pub(super) fn analyze_codebase(request: &CodebaseRequest) -> Result<ProjectRepor
         &request.role_rules,
         &work,
     )?;
+    let candidate_paths: Vec<_> = candidates
+        .iter()
+        .map(|file| file.path().as_path())
+        .collect();
+    demote_test_declared_roles(
+        &candidate_paths,
+        &mut analyses,
+        &aliases,
+        &request.role_rules,
+    );
 
     let history_files = candidates
         .iter()
@@ -268,7 +278,7 @@ pub(super) fn analyze_diff(request: &DiffRequest) -> Result<ProjectReport, Proje
                 && Analyzer::language(file.path().as_path()) != Language::Unknown
         })
         .collect();
-    let unchanged = analyze_current_files(
+    let mut unchanged = analyze_current_files(
         &inventory,
         &unchanged_candidates,
         request.width,
@@ -276,6 +286,20 @@ pub(super) fn analyze_diff(request: &DiffRequest) -> Result<ProjectReport, Proje
         &request.role_rules,
         &work,
     )?;
+    let mut results = results;
+    for side in [DiffSideSelector::Current, DiffSideSelector::Before] {
+        demote_test_declared_diff_roles(
+            side,
+            changed_count,
+            &mut results,
+            &unchanged_candidates,
+            &mut unchanged,
+            &aliases,
+            &request.role_rules,
+        );
+    }
+    let results = results;
+    let unchanged = unchanged;
     let root = ScopeId::from_index(0);
     let mut builder = AnalysisReportBuilder::with_capacity(
         ReportMode::Diff,
@@ -1324,6 +1348,85 @@ fn role_results(results: Vec<FileResult>) -> Result<Vec<FileResult>, ProjectErro
     }
 }
 
+/// One file bringing another into the build, and whether it does so only under
+/// a test configuration.
+type ModuleDeclaration = (FileId, FileId, bool);
+
+/// The module declarations one side of an analysis states.
+///
+/// A declaration is a `module_ownership` relation, so this reads the same
+/// references the architecture pass resolves later, before any role is read.
+fn module_declarations<'a>(
+    sources: impl Iterator<Item = (FileId, &'a Path, &'a [DependencySyntax])>,
+    index: &BTreeMap<PathBuf, FileId>,
+    aliases: &[ResolutionAlias],
+) -> BTreeSet<ModuleDeclaration> {
+    let mut declarations = BTreeSet::new();
+    for (declarer, path, references) in sources {
+        for reference in references {
+            if reference.relation() != smackdebt_analysis::StaticRelationKind::ModuleOwnership {
+                continue;
+            }
+            let DependencySyntaxState::Candidates(candidates) = reference.state() else {
+                continue;
+            };
+            let test_scoped = reference.scope() == smackdebt_analysis::DependencyScope::Test;
+            for target in resolve_candidates(path, candidates, index, aliases) {
+                if target != declarer {
+                    declarations.insert((declarer, target, test_scoped));
+                }
+            }
+        }
+    }
+    declarations
+}
+
+/// The files a build compiles only when `test` is set.
+///
+/// A file qualifies when it is declared at least once and every declaration of
+/// it is test-scoped, where a declaration is test-scoped if its reference is or
+/// if the declaring file already qualifies. The set only grows, so iterating to
+/// a fixpoint over ordered structures terminates and is deterministic.
+fn test_declared_files(declarations: &BTreeSet<ModuleDeclaration>) -> BTreeSet<FileId> {
+    let mut declared: BTreeMap<FileId, Vec<(FileId, bool)>> = BTreeMap::new();
+    for &(declarer, target, test_scoped) in declarations {
+        declared
+            .entry(target)
+            .or_default()
+            .push((declarer, test_scoped));
+    }
+    let mut test_declared: BTreeSet<FileId> = BTreeSet::new();
+    loop {
+        let mut added = false;
+        for (target, sources) in &declared {
+            if test_declared.contains(target) {
+                continue;
+            }
+            if sources
+                .iter()
+                .all(|(declarer, test_scoped)| *test_scoped || test_declared.contains(declarer))
+            {
+                test_declared.insert(*target);
+                added = true;
+            }
+        }
+        if !added {
+            return test_declared;
+        }
+    }
+}
+
+/// Whether explicit configuration already claims this path.
+///
+/// Configuration keeps precedence over every later rule, so a declared file it
+/// names is never reclassified.
+fn has_explicit_role_rule(path: &Path, rules: &[SourceRoleRule]) -> bool {
+    let normalized = path.to_string_lossy().replace('\\', "/");
+    rules
+        .iter()
+        .any(|rule| glob_matches(rule.pattern(), &normalized))
+}
+
 fn classify_source_role(
     path: &Path,
     source: &[u8],
@@ -1680,6 +1783,157 @@ enum FileResult {
         path: PathBuf,
         roles: String,
     },
+}
+
+impl FileResult {
+    fn references(&self) -> &[DependencySyntax] {
+        match self {
+            Self::Analyzed(rated) => rated.analysis.dependencies(),
+            _ => &[],
+        }
+    }
+
+    /// Reclassifies a file the build compiles only under `test`.
+    ///
+    /// Rating never changes: a test file is still verdict eligible, so the
+    /// health and debt already computed for it stay correct.
+    fn demote_to_test(&mut self) {
+        let role = match self {
+            Self::Analyzed(rated) => &mut rated.role,
+            Self::Unsupported { role, .. } | Self::Failed { role, .. } => role,
+            Self::RoleConflict { .. } => return,
+        };
+        if *role == SourceRole::Primary {
+            *role = SourceRole::Test;
+        }
+    }
+}
+
+/// Reclassifies every file the build compiles only when `test` is set.
+///
+/// This runs before any role reaches the report builder, so findings, ratings,
+/// coverage, history evidence, and the architecture graphs all read one role
+/// per file.
+fn demote_test_declared_roles(
+    paths: &[&Path],
+    results: &mut [FileResult],
+    aliases: &[ResolutionAlias],
+    rules: &[SourceRoleRule],
+) {
+    let index: BTreeMap<PathBuf, FileId> = paths
+        .iter()
+        .enumerate()
+        .map(|(index, path)| ((*path).to_path_buf(), FileId::from_index(index)))
+        .collect();
+    let declarations = module_declarations(
+        results
+            .iter()
+            .enumerate()
+            .map(|(index, result)| (FileId::from_index(index), paths[index], result.references())),
+        &index,
+        aliases,
+    );
+    for file in test_declared_files(&declarations) {
+        if !has_explicit_role_rule(paths[file.index()], rules) {
+            results[file.index()].demote_to_test();
+        }
+    }
+}
+
+/// Which side of a diff a classification pass reads.
+#[derive(Clone, Copy, Eq, PartialEq)]
+enum DiffSideSelector {
+    Current,
+    Before,
+}
+
+impl DiffSide {
+    fn references(&self) -> &[DependencySyntax] {
+        match self {
+            Self::Analyzed { analysis, .. } => analysis.dependencies(),
+            _ => &[],
+        }
+    }
+
+    fn demote_to_test(&mut self) {
+        let role = match self {
+            Self::Analyzed { role, .. }
+            | Self::Unsupported { role, .. }
+            | Self::Failed { role, .. } => role,
+            Self::Missing | Self::RoleConflict { .. } => return,
+        };
+        if *role == SourceRole::Primary {
+            *role = SourceRole::Test;
+        }
+    }
+}
+
+/// Reclassifies test-declared files on one side of a diff.
+///
+/// An unchanged file has one record for both sides, so only the current side
+/// may reclassify it; the before side reclassifies the changed files it reads.
+fn demote_test_declared_diff_roles(
+    side: DiffSideSelector,
+    changed_count: usize,
+    results: &mut [DiffResult],
+    unchanged_candidates: &[&DiscoveredFile],
+    unchanged: &mut [FileResult],
+    aliases: &[ResolutionAlias],
+    rules: &[SourceRoleRule],
+) {
+    let mut paths: Vec<PathBuf> = vec![PathBuf::new(); changed_count + unchanged.len()];
+    let mut references: Vec<&[DependencySyntax]> = vec![&[][..]; changed_count + unchanged.len()];
+    for result in results.iter() {
+        let file = match side {
+            DiffSideSelector::Current => &result.current,
+            DiffSideSelector::Before => &result.before,
+        };
+        paths[result.index] = match side {
+            DiffSideSelector::Current => result.change.current_path().to_path_buf(),
+            DiffSideSelector::Before => result.change.base_path().to_path_buf(),
+        };
+        references[result.index] = file.references();
+    }
+    for (offset, file) in unchanged_candidates.iter().enumerate() {
+        paths[changed_count + offset] = file.path().as_path().to_path_buf();
+        references[changed_count + offset] = unchanged[offset].references();
+    }
+    let index: BTreeMap<PathBuf, FileId> = paths
+        .iter()
+        .enumerate()
+        .filter(|(_, path)| !path.as_os_str().is_empty())
+        .map(|(index, path)| (path.clone(), FileId::from_index(index)))
+        .collect();
+    let declarations = module_declarations(
+        paths
+            .iter()
+            .zip(&references)
+            .enumerate()
+            .map(|(index, (path, references))| {
+                (FileId::from_index(index), path.as_path(), *references)
+            }),
+        &index,
+        aliases,
+    );
+    let declared = test_declared_files(&declarations);
+    for file in declared {
+        if has_explicit_role_rule(&paths[file.index()], rules) {
+            continue;
+        }
+        if file.index() < changed_count {
+            if let Some(result) = results
+                .iter_mut()
+                .find(|result| result.index == file.index())
+            {
+                match side {
+                    DiffSideSelector::Current => result.current.demote_to_test(),
+                    DiffSideSelector::Before => result.before.demote_to_test(),
+                }
+            }
+        } else if side == DiffSideSelector::Current {
+            unchanged[file.index() - changed_count].demote_to_test();
+        }
+    }
 }
 
 fn verdict_eligible(analysis: &FileAnalysis, role: SourceRole) -> bool {
@@ -3106,16 +3360,28 @@ fn resolve_candidates(
         expanded.extend(aliases.iter().filter_map(|alias| alias.expand(candidate)));
         for candidate in expanded {
             let path = Path::new(&candidate);
-            let mut joined = if candidate.starts_with("./") || candidate.starts_with("../") {
-                vec![parent.join(path)]
-            } else {
-                vec![path.to_path_buf()]
-            };
-            if source
+            let relative = candidate.starts_with("./") || candidate.starts_with("../");
+            let rust = source
                 .extension()
-                .is_some_and(|extension| extension == "rs")
-                && !candidate.starts_with("./")
-                && !candidate.starts_with("../")
+                .is_some_and(|extension| extension == "rs");
+            // A Rust file that is not `mod.rs`, `lib.rs`, or `main.rs` owns a
+            // directory of its own name, so `mod child;` in `a.rs` names
+            // `a/child.rs` rather than a sibling. That reading wins where it
+            // resolves; the sibling reading stays for every other layout.
+            let module = (rust && relative)
+                .then(|| rust_module_directory(source))
+                .flatten()
+                .map(|directory| directory.join(path))
+                .filter(|joined| {
+                    clean_relative(joined).is_some_and(|clean| index.contains_key(&clean))
+                });
+            let mut joined = match module {
+                Some(joined) => vec![joined],
+                None if relative => vec![parent.join(path)],
+                None => vec![path.to_path_buf()],
+            };
+            if rust
+                && !relative
                 && let Some(source_root) = rust_source_root(source)
             {
                 joined.push(source_root.join(path));
@@ -3160,6 +3426,20 @@ fn resolve_symbolic_candidates(
         }
     }
     matches
+}
+
+/// The directory a Rust file's own modules live in.
+///
+/// `mod.rs`, `lib.rs`, and `main.rs` are the module of their directory; every
+/// other file is a module that owns a directory named after it.
+fn rust_module_directory(source: &Path) -> Option<PathBuf> {
+    let parent = source.parent()?;
+    let stem = source.file_stem()?.to_str()?;
+    Some(if matches!(stem, "mod" | "lib" | "main") {
+        parent.to_path_buf()
+    } else {
+        parent.join(stem)
+    })
 }
 
 fn rust_source_root(source: &Path) -> Option<PathBuf> {
@@ -5109,6 +5389,190 @@ mod tests {
                 .all(|finding| finding.kind() != ArchitectureFindingKind::PackageCycle)
         );
         assert!(report.stable_dependency_findings().is_empty());
+    }
+
+    #[test]
+    fn a_rust_module_file_owns_a_directory_named_after_it() {
+        let root = tempfile::tempdir().unwrap();
+        fs::create_dir_all(root.path().join("src/outer")).unwrap();
+        fs::write(
+            root.path().join("Cargo.toml"),
+            "[package]\nname='modules'\nversion='0.1.0'\n",
+        )
+        .unwrap();
+        fs::write(root.path().join("src/lib.rs"), "mod outer;\nmod sibling;\n").unwrap();
+        fs::write(root.path().join("src/outer.rs"), "mod inner;\n").unwrap();
+        fs::write(
+            root.path().join("src/outer/inner.rs"),
+            "use super::super::sibling::shared;\npub fn work() -> u32 { shared() }\n",
+        )
+        .unwrap();
+        fs::write(
+            root.path().join("src/sibling.rs"),
+            "pub fn shared() -> u32 { 1 }\n",
+        )
+        .unwrap();
+
+        let result = analyze_codebase(&CodebaseRequest::new(root.path())).unwrap();
+        let report = result.report();
+        let mut edges: Vec<_> = report
+            .dependency_edges()
+            .iter()
+            .map(|edge| {
+                (
+                    report.files()[edge.source().index()].path().to_owned(),
+                    report.files()[edge.target().index()].path().to_owned(),
+                    edge.relation(),
+                )
+            })
+            .collect();
+        edges.sort();
+        let ownership = smackdebt_analysis::StaticRelationKind::ModuleOwnership;
+        let uses = smackdebt_analysis::StaticRelationKind::Uses;
+        assert_eq!(
+            edges,
+            [
+                (
+                    "src/lib.rs".to_owned(),
+                    "src/outer.rs".to_owned(),
+                    ownership
+                ),
+                (
+                    "src/lib.rs".to_owned(),
+                    "src/sibling.rs".to_owned(),
+                    ownership
+                ),
+                // `mod inner;` in `outer.rs` names `outer/inner.rs`.
+                (
+                    "src/outer.rs".to_owned(),
+                    "src/outer/inner.rs".to_owned(),
+                    ownership
+                ),
+                // `super::super` from `outer/inner.rs` is the crate root's module.
+                (
+                    "src/outer/inner.rs".to_owned(),
+                    "src/sibling.rs".to_owned(),
+                    uses
+                ),
+            ]
+        );
+        assert_eq!(report.resolution_diagnostics().len(), 0);
+    }
+
+    #[test]
+    fn a_module_declared_only_under_a_test_configuration_is_test_source() {
+        let root = tempfile::tempdir().unwrap();
+        fs::create_dir_all(root.path().join("crates/main/src/worker")).unwrap();
+        fs::write(
+            root.path().join("crates/main/Cargo.toml"),
+            "[package]\nname='main'\nversion='0.1.0'\n",
+        )
+        .unwrap();
+        fs::write(
+            root.path().join("crates/main/src/lib.rs"),
+            "mod worker;\npub fn run() -> u32 { worker::work() }\n",
+        )
+        .unwrap();
+        fs::write(
+            root.path().join("crates/main/src/worker.rs"),
+            "#[cfg(test)]\nmod tests;\npub fn work() -> u32 { 1 }\n",
+        )
+        .unwrap();
+        fs::write(
+            root.path().join("crates/main/src/worker/tests.rs"),
+            "use support::probe;\n#[test]\nfn covers() { assert_eq!(probe(), 1); }\n",
+        )
+        .unwrap();
+        write_crate(
+            root.path(),
+            "support",
+            "use main::run;\npub fn probe() -> u32 { run() }\n",
+        );
+
+        let result = analyze_codebase(&CodebaseRequest::new(root.path())).unwrap();
+        let report = result.report();
+        let declared = file_id(report, "crates/main/src/worker/tests.rs");
+        assert_eq!(
+            report.files()[declared.index()].role(),
+            SourceRole::Test,
+            "rustc compiles a cfg(test) module file only under test"
+        );
+        assert!(
+            report
+                .dependency_edges()
+                .iter()
+                .filter(|edge| edge.source() == declared)
+                .all(|edge| edge.role() == SourceRole::Test && !edge.enters_verdict_graph())
+        );
+        let package_edges: Vec<_> = report
+            .package_edges()
+            .iter()
+            .map(|edge| {
+                (
+                    report.packages()[edge.source().index()].path().to_owned(),
+                    report.packages()[edge.target().index()].path().to_owned(),
+                )
+            })
+            .collect();
+        assert_eq!(
+            package_edges,
+            [("crates/support".to_owned(), "crates/main".to_owned())]
+        );
+        assert!(
+            report
+                .architecture_findings()
+                .iter()
+                .all(|finding| finding.kind() != ArchitectureFindingKind::PackageCycle)
+        );
+    }
+
+    #[test]
+    fn a_test_declaration_demotes_only_a_file_no_other_rule_and_no_other_declaration_claims() {
+        let root = tempfile::tempdir().unwrap();
+        fs::create_dir_all(root.path().join("src/harness")).unwrap();
+        fs::write(
+            root.path().join("Cargo.toml"),
+            "[package]\nname='declared'\nversion='0.1.0'\n",
+        )
+        .unwrap();
+        // `shared` is declared twice, once outside the test scope.
+        fs::write(
+            root.path().join("src/lib.rs"),
+            "#[cfg(test)]\nmod shared;\n#[cfg(test)]\nmod harness;\n#[cfg(test)]\nmod kept;\n",
+        )
+        .unwrap();
+        fs::write(
+            root.path().join("src/main.rs"),
+            "mod shared;\nfn main() {}\n",
+        )
+        .unwrap();
+        fs::write(root.path().join("src/shared.rs"), "pub fn shared() {}\n").unwrap();
+        // `harness` inherits the test scope and passes it to its own module.
+        fs::write(
+            root.path().join("src/harness.rs"),
+            "mod helpers;\npub fn harness() {}\n",
+        )
+        .unwrap();
+        fs::write(
+            root.path().join("src/harness/helpers.rs"),
+            "pub fn helper() {}\n",
+        )
+        .unwrap();
+        // `kept` is claimed by configuration, which keeps precedence.
+        fs::write(root.path().join("src/kept.rs"), "pub fn kept() {}\n").unwrap();
+
+        let result = analyze_codebase(
+            &CodebaseRequest::new(root.path())
+                .with_role_rules(vec![SourceRoleRule::primary("src/kept.rs")]),
+        )
+        .unwrap();
+        let report = result.report();
+        let role = |path: &str| report.files()[file_id(report, path).index()].role();
+        assert_eq!(role("src/shared.rs"), SourceRole::Primary);
+        assert_eq!(role("src/harness.rs"), SourceRole::Test);
+        assert_eq!(role("src/harness/helpers.rs"), SourceRole::Test);
+        assert_eq!(role("src/kept.rs"), SourceRole::Primary);
+        assert_eq!(role("src/lib.rs"), SourceRole::Primary);
     }
 
     #[test]
