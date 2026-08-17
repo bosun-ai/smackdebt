@@ -45,6 +45,9 @@ pub smackdebt_analysis::DependencyKind::Import
 pub smackdebt_analysis::DependencyKind::Include
 pub smackdebt_analysis::DependencyKind::Module
 pub smackdebt_analysis::DependencyKind::Require
+pub enum smackdebt_analysis::DependencyScope
+pub smackdebt_analysis::DependencyScope::Default
+pub smackdebt_analysis::DependencyScope::Test
 pub enum smackdebt_analysis::DependencySyntaxState
 pub smackdebt_analysis::DependencySyntaxState::Candidates(alloc::vec::Vec<alloc::string::String>)
 pub smackdebt_analysis::DependencySyntaxState::External
@@ -330,11 +333,13 @@ pub const fn smackdebt_analysis::DependencySyntax::intent(&self) -> smackdebt_an
 pub const fn smackdebt_analysis::DependencySyntax::kind(&self) -> smackdebt_analysis::DependencyKind
 pub fn smackdebt_analysis::DependencySyntax::new(smackdebt_analysis::DependencyKind, impl core::convert::Into<alloc::string::String>, smackdebt_analysis::SourceSpan, smackdebt_analysis::DependencySyntaxState) -> Self
 pub const fn smackdebt_analysis::DependencySyntax::relation(&self) -> smackdebt_analysis::StaticRelationKind
+pub const fn smackdebt_analysis::DependencySyntax::scope(&self) -> smackdebt_analysis::DependencyScope
 pub const fn smackdebt_analysis::DependencySyntax::span(&self) -> smackdebt_analysis::SourceSpan
 pub const fn smackdebt_analysis::DependencySyntax::state(&self) -> &smackdebt_analysis::DependencySyntaxState
 pub fn smackdebt_analysis::DependencySyntax::target(&self) -> &str
 pub fn smackdebt_analysis::DependencySyntax::with_internal_intent(self) -> Self
 pub fn smackdebt_analysis::DependencySyntax::with_relation(self, smackdebt_analysis::StaticRelationKind) -> Self
+pub fn smackdebt_analysis::DependencySyntax::with_test_scope(self) -> Self
 pub struct smackdebt_analysis::Diagnostic
 impl smackdebt_analysis::Diagnostic
 pub const fn smackdebt_analysis::Diagnostic::excluded_lines(&self) -> u32

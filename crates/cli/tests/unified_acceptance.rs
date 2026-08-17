@@ -13,9 +13,9 @@ use unicode_width::UnicodeWidthStr;
 use support::coverage_failure_repository;
 use support::{
     GeneratedRepository, Invocation, copy_language_truth_files, deepened_signal_repository,
-    evolution_repository, ref_diff_repository, shallow_clone, signal_table_repository,
-    source_role_repository, static_architecture_repository, workspace_manifest_repository,
-    worktree_change_repository,
+    evolution_repository, ref_diff_repository, rust_test_scope_repository, shallow_clone,
+    signal_table_repository, source_role_repository, static_architecture_repository,
+    workspace_manifest_repository, worktree_change_repository,
 };
 
 #[derive(Debug, Deserialize)]
@@ -123,6 +123,88 @@ fn every_source_role_matches_the_public_fact_manifest() {
     assert_eq!(report["health"][health]["high"], facts["verdict_findings"]);
     assert_eq!(report["findings"].as_array().unwrap().len(), 6);
     assert_golden("unified-source-roles.json", &result.stdout);
+}
+
+#[test]
+fn a_rust_test_scope_publishes_test_relations_beside_the_primary_ones() {
+    let repository = rust_test_scope_repository();
+    let result = Invocation::new(["--json"]).run(repository.path());
+    result.success();
+    let automatic = Invocation::new(["--json"])
+        .automatic_workers()
+        .run(repository.path());
+    assert_eq!(result, automatic);
+    let report = checked_json(&result.stdout);
+    let path_of = |file: u64| {
+        let file = &report["files"][file as usize];
+        report["paths"][file["path"].as_u64().unwrap() as usize]
+            .as_str()
+            .unwrap()
+            .to_owned()
+    };
+    let mut relations: Vec<_> = report["dependency_edges"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .map(|edge| {
+            (
+                path_of(edge["source"].as_u64().unwrap()),
+                path_of(edge["target"].as_u64().unwrap()),
+                edge["relation"].as_str().unwrap().to_owned(),
+                edge["role"].as_str().unwrap().to_owned(),
+            )
+        })
+        .collect();
+    relations.sort();
+    assert_eq!(
+        relations,
+        [
+            (
+                "src/lib.rs".to_owned(),
+                "src/helper.rs".to_owned(),
+                "module_ownership".to_owned(),
+                "primary".to_owned()
+            ),
+            (
+                "src/lib.rs".to_owned(),
+                "src/helper.rs".to_owned(),
+                "uses".to_owned(),
+                "primary".to_owned()
+            ),
+            (
+                "src/lib.rs".to_owned(),
+                "src/helper.rs".to_owned(),
+                "uses".to_owned(),
+                "test".to_owned()
+            ),
+            (
+                "src/lib.rs".to_owned(),
+                "src/only_tests.rs".to_owned(),
+                "module_ownership".to_owned(),
+                "test".to_owned()
+            ),
+            (
+                "src/lib.rs".to_owned(),
+                "src/only_tests.rs".to_owned(),
+                "uses".to_owned(),
+                "test".to_owned()
+            ),
+            (
+                "src/lib.rs".to_owned(),
+                "src/shipped.rs".to_owned(),
+                "module_ownership".to_owned(),
+                "primary".to_owned()
+            ),
+            (
+                "src/lib.rs".to_owned(),
+                "src/shipped.rs".to_owned(),
+                "uses".to_owned(),
+                "primary".to_owned()
+            ),
+        ]
+    );
+    assert!(report["orphan_files"].as_array().unwrap().is_empty());
+    assert_golden("unified-rust-test-scope.json", &result.stdout);
 }
 
 #[test]
@@ -1973,19 +2055,19 @@ fn assert_index_integrity(report: &Value) {
         let source = edge["source"].as_u64().unwrap() as usize;
         assert!(source < files);
         assert!((edge["target"].as_u64().unwrap() as usize) < files);
-        assert_eq!(edge["role"], report["files"][source]["role"]);
+        assert_evidence_role(&edge["role"], &report["files"][source]["role"]);
         assert_eq!(edge["trust"], report["files"][source]["trust"]);
     }
     for dependency in report["external_dependencies"].as_array().unwrap() {
         let file = dependency["file"].as_u64().unwrap() as usize;
         assert!(file < files);
-        assert_eq!(dependency["role"], report["files"][file]["role"]);
+        assert_evidence_role(&dependency["role"], &report["files"][file]["role"]);
         assert_eq!(dependency["trust"], report["files"][file]["trust"]);
     }
     for diagnostic in report["resolution_diagnostics"].as_array().unwrap() {
         let file = diagnostic["file"].as_u64().unwrap() as usize;
         assert!(file < files);
-        assert_eq!(diagnostic["role"], report["files"][file]["role"]);
+        assert_evidence_role(&diagnostic["role"], &report["files"][file]["role"]);
         assert_eq!(diagnostic["trust"], report["files"][file]["trust"]);
     }
     for finding in report["architecture_findings"].as_array().unwrap() {
@@ -2131,6 +2213,22 @@ fn strings<'a>(values: &'a Value, field: &str) -> HashSet<&'a str> {
         .iter()
         .filter_map(|value| value[field].as_str())
         .collect()
+}
+
+/// A relation's role is its file's role unless a test scope demoted it.
+///
+/// A reference declared under a Rust `#[cfg(test)]` scope is test evidence even
+/// though the file that declares it ships, so a primary file may publish test
+/// relations. No other demotion exists.
+fn assert_evidence_role(relation: &Value, file: &Value) {
+    if relation == file {
+        return;
+    }
+    assert_eq!(
+        (file.as_str().unwrap(), relation.as_str().unwrap()),
+        ("primary", "test"),
+        "relation role must be the file's role or a test-scoped demotion"
+    );
 }
 
 fn assert_golden(name: &str, actual: &[u8]) {

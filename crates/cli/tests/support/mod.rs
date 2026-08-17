@@ -458,6 +458,44 @@ pub(crate) fn static_architecture_repository() -> GeneratedRepository {
     repository
 }
 
+/// A Rust package whose shipped source also declares an inline test module.
+///
+/// `src/lib.rs` imports `src/helper.rs` twice: once for the code that ships and
+/// once inside `#[cfg(test)] mod tests`, so the report keeps a primary relation
+/// and a test relation for one file pair. `src/only_tests.rs` is reached from
+/// the test module alone, and `src/shipped.rs` is reached only from production
+/// code, so the two roles stay separable in the committed JSON.
+///
+/// A later change makes verdict graphs primary-only. When it lands, the
+/// relation rows below stay as they are and the package graph's counts move:
+/// `src/only_tests.rs` leaves the verdict graph's fan-in while remaining a used
+/// file for orphan purposes.
+pub(crate) fn rust_test_scope_repository() -> GeneratedRepository {
+    let repository = GeneratedRepository::new("main");
+    repository.apply(&[
+        WorktreeEdit::Write(
+            "Cargo.toml",
+            b"[package]\nname = \"scoped\"\nversion = \"0.1.0\"\nedition = \"2024\"\n",
+        ),
+        WorktreeEdit::Write(
+            "src/lib.rs",
+            b"mod helper;\nmod shipped;\n#[cfg(test)]\nmod only_tests;\n\nuse crate::helper::ready;\nuse crate::shipped::ship;\n\npub fn run() -> bool {\n    ready() && ship()\n}\n\n#[cfg(test)]\nmod tests {\n    use crate::helper::ready;\n    use crate::only_tests::sample;\n\n    #[test]\n    fn runs() {\n        assert!(ready() && sample());\n    }\n}\n",
+        ),
+        WorktreeEdit::Write("src/helper.rs", b"pub fn ready() -> bool {\n    true\n}\n"),
+        WorktreeEdit::Write("src/shipped.rs", b"pub fn ship() -> bool {\n    true\n}\n"),
+        WorktreeEdit::Write("src/only_tests.rs", b"pub fn sample() -> bool {\n    true\n}\n"),
+    ]);
+    repository.commit(Commit {
+        message: "test: rust test scope",
+        identity: Identity {
+            name: "Scope Fixture",
+            address: "scope@example.invalid",
+        },
+        date: "2026-01-01T12:00:00Z",
+    });
+    repository
+}
+
 /// A workspace whose packages import each other by declared manifest name.
 pub(crate) fn workspace_manifest_repository() -> GeneratedRepository {
     let repository = GeneratedRepository::new("main");
