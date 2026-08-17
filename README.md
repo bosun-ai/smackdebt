@@ -519,7 +519,9 @@ Source findings are ordered by rating, role class, hot state, count of signals
 at that rating, total triggered signals, cognitive complexity, cyclomatic
 complexity, logical lines, activity, path, and span. Role class places primary
 source before non-primary source at equal rating, and non-primary source stays
-visible below it rather than being removed. Hot state decides next, so among
+visible below it rather than being removed. Nothing is filtered on role, so a
+repository whose only rated debt is non-primary still names it as the worst
+offender rather than reporting nothing. Hot state decides next, so among
 production findings of the same rating the file being edited comes first. Hot
 means a rated file whose touch count inside the selected history window reaches
 the minimum touch count, five by default. Findings show unit kind and any
