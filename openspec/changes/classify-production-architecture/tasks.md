@@ -41,17 +41,17 @@
 
 ## 5. Documentation
 
-- [ ] 5.1 Explain in the README that verdict graphs use primary-role relations only and that test, example, and benchmark relations stay complete as context.
-- [ ] 5.2 Explain in the README that a Rust reference under a `#[cfg(test)]` scope carries the test role by a syntactic rule, and that `no code dependency` still accounts for those relations.
-- [ ] 5.3 Explain in the README that imports between a Rust module-owning file pair are excluded from the file cycle graph, and that the exclusion is limited to that pair.
-- [ ] 5.4 Update `ARCHITECTURE.md` for the predicate split, the scope field, and the cycle-graph exclusion.
-- [ ] 5.5 Grep the README and `ARCHITECTURE.md` for stale `trusted eligible uses` wording that now means the verdict graph.
+- [x] 5.1 Explain in the README that verdict graphs use primary-role relations only and that test, example, and benchmark relations stay complete as context.
+- [x] 5.2 Explain in the README that a Rust reference under a `#[cfg(test)]` scope carries the test role by a syntactic rule, and that `no code dependency` still accounts for those relations.
+- [x] 5.3 Explain in the README that imports between a Rust module-owning file pair are excluded from the file cycle graph, and that the exclusion is limited to that pair.
+- [x] 5.4 Update `ARCHITECTURE.md` for the predicate split, the scope field, and the cycle-graph exclusion.
+- [x] 5.5 Grep the README and `ARCHITECTURE.md` for stale `trusted eligible uses` wording that now means the verdict graph.
 
 ## 6. Evidence and close
 
-- [ ] 6.1 Review every newly authored fixture and golden file as a product artifact rather than as regenerated output.
-- [ ] 6.2 Confirm ratings, signals, unit measurements, exit codes, work counts, and the JSON schema shape are unchanged, and that no report-schema delta is required.
-- [ ] 6.3 Run the five-repository matrix and record that every previously validated true positive survives.
-- [ ] 6.4 Spot-check serial and parallel runs for byte-identical terminal and JSON output on tokio.
-- [ ] 6.5 Pass formatting, Clippy, workspace tests, architecture checks, performance tests, acceptance evidence, strict OpenSpec validation, and the final diff check.
+- [x] 6.1 Review every newly authored fixture and golden file as a product artifact rather than as regenerated output.
+- [x] 6.2 Confirm ratings, signals, unit measurements, exit codes, work counts, and the JSON schema shape are unchanged, and that no report-schema delta is required.
+- [x] 6.3 Run the five-repository matrix and record that every previously validated true positive survives.
+- [x] 6.4 Spot-check serial and parallel runs for byte-identical terminal and JSON output on tokio.
+- [x] 6.5 Pass formatting, Clippy, workspace tests, architecture checks, performance tests, acceptance evidence, strict OpenSpec validation, and the final diff check.
 - [ ] 6.6 Archive this change.
