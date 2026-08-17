@@ -11,15 +11,15 @@
 
 ## 2. Primary-only verdict graphs
 
-- [ ] 2.1 Add `DependencyEdge::enters_verdict_graph()` as `uses && trusted && primary`, keeping `affects_verdict()` unchanged for evidence eligibility.
-- [ ] 2.2 Build package dependency edges, the package cycle graph, the file cycle graph, the package graph's fan-in, fan-out, and instability, and the stable-dependency comparison from `enters_verdict_graph()` only.
-- [ ] 2.3 Keep coverage partitioning on `affects_verdict()` and prove coverage counts, external dependency counts, and resolution diagnostics are unchanged.
-- [ ] 2.4 Thread `explanation_pairs` — file-edge pairs satisfying `affects_verdict()` that cross packages, unioned with manifest-name explanation pairs — through the architecture build into coupling explanation and comparison.
-- [ ] 2.5 Supply `explanation_pairs` at both call sites including the diff before side, and add a diff expectation proving no spurious Worse finding row appears for a dev-dependency repository.
-- [ ] 2.6 Reword orphan fan-in to trusted eligible uses and add a test proving a primary file imported only by tests is not an orphan.
-- [ ] 2.7 Add a fixture where a test-role relation would close a package cycle: no finding is created, the relations appear in JSON, and the pair's coupling stays explained.
-- [ ] 2.8 Add a primary stable-dependency fixture that authors the product's first committed terminal and JSON evidence for an SDP finding.
-- [ ] 2.9 Audit consumers that assume `(source, target)` uniqueness in `dependency_edges`, starting with the architecture comparison.
+- [x] 2.1 Add `DependencyEdge::enters_verdict_graph()` as `uses && trusted && primary`, keeping `affects_verdict()` unchanged for evidence eligibility.
+- [x] 2.2 Build package dependency edges, the package cycle graph, the file cycle graph, the package graph's fan-in, fan-out, and instability, and the stable-dependency comparison from `enters_verdict_graph()` only.
+- [x] 2.3 Keep coverage partitioning on `affects_verdict()` and prove coverage counts, external dependency counts, and resolution diagnostics are unchanged.
+- [x] 2.4 Thread `explanation_pairs` — file-edge pairs satisfying `affects_verdict()` that cross packages, unioned with manifest-name explanation pairs — through the architecture build into coupling explanation and comparison.
+- [x] 2.5 Supply `explanation_pairs` at both call sites including the diff before side, and add a diff expectation proving no spurious Worse finding row appears for a dev-dependency repository.
+- [x] 2.6 Reword orphan fan-in to trusted eligible uses and add a test proving a primary file imported only by tests is not an orphan.
+- [x] 2.7 Add a fixture where a test-role relation would close a package cycle: no finding is created, the relations appear in JSON, and the pair's coupling stays explained.
+- [x] 2.8 Add a primary stable-dependency fixture that authors the product's first committed terminal and JSON evidence for an SDP finding.
+- [x] 2.9 Audit consumers that assume `(source, target)` uniqueness in `dependency_edges`, starting with the architecture comparison.
 - [ ] 2.10 Verify on the field repositories that tokio reports no package cycle and no stable-dependency finding while the other four repositories' package graphs and orphan lists are unchanged.
 
 ## 3. Module-wiring cycle exclusion
