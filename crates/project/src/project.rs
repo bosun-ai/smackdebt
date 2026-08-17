@@ -3113,9 +3113,25 @@ fn build_architecture(
         .filter(|edge| edge.affects_verdict())
         .map(|edge| (edge.source().index(), edge.target().index()))
         .collect();
+    // A Rust `mod` declaration and the imports that accompany it are one wiring
+    // relationship rather than a cycle, so the cycle graph drops the uses
+    // between an owning pair. The exclusion is pairwise: every other relation of
+    // the same component stays, and only this graph sees it.
+    let ownership_pairs: BTreeSet<(usize, usize)> = file_edges
+        .iter()
+        .filter(|edge| edge.relation() == smackdebt_analysis::StaticRelationKind::ModuleOwnership)
+        .map(|edge| unordered_pair(edge.source().index(), edge.target().index()))
+        .collect();
+    let enters_cycle_graph = |edge: &DependencyEdge| {
+        edge.enters_verdict_graph()
+            && !ownership_pairs.contains(&unordered_pair(
+                edge.source().index(),
+                edge.target().index(),
+            ))
+    };
     let file_pairs: Vec<_> = file_edges
         .iter()
-        .filter(|edge| edge.enters_verdict_graph())
+        .filter(|edge| enters_cycle_graph(edge))
         .map(|edge| (edge.source().index(), edge.target().index()))
         .collect();
     let orphans = derive_orphans(
@@ -3144,7 +3160,7 @@ fn build_architecture(
                 file_edges
                     .iter()
                     .find(|edge| {
-                        edge.enters_verdict_graph()
+                        enters_cycle_graph(edge)
                             && edge.source().index() == source
                             && edge.target().index() == target
                     })
@@ -3177,6 +3193,15 @@ fn build_architecture(
         finding_links,
         cycles,
         explanation_pairs,
+    }
+}
+
+/// Orders one file pair so a relation and its reverse read as the same pair.
+const fn unordered_pair(source: usize, target: usize) -> (usize, usize) {
+    if source <= target {
+        (source, target)
+    } else {
+        (target, source)
     }
 }
 
@@ -5734,6 +5759,229 @@ mod tests {
         );
         assert_eq!(report.dependency_coverage().resolved_internal_uses(), 2);
         assert_eq!(report.dependency_coverage().total(), 2);
+
+        let wiring = tempfile::tempdir().unwrap();
+        fs::write(
+            wiring.path().join("Cargo.toml"),
+            "[package]\nname='wiring'\nversion='0.1.0'\n",
+        )
+        .unwrap();
+        fs::create_dir_all(wiring.path().join("thing")).unwrap();
+        fs::write(
+            wiring.path().join("thing/mod.rs"),
+            "mod child;\npub use self::child::x;\npub fn y() {}\n",
+        )
+        .unwrap();
+        fs::write(
+            wiring.path().join("thing/child.rs"),
+            "use super::*;\npub fn x() { y(); }\n",
+        )
+        .unwrap();
+        let result = analyze_codebase(&CodebaseRequest::new(wiring.path())).unwrap();
+        let report = result.report();
+        let relations: Vec<_> = report
+            .dependency_edges()
+            .iter()
+            .map(|edge| {
+                (
+                    report.files()[edge.source().index()].path().to_owned(),
+                    report.files()[edge.target().index()].path().to_owned(),
+                    edge.relation(),
+                )
+            })
+            .collect();
+        let uses = smackdebt_analysis::StaticRelationKind::Uses;
+        let owns = smackdebt_analysis::StaticRelationKind::ModuleOwnership;
+        assert_eq!(
+            relations,
+            [
+                ("thing/child.rs".to_owned(), "thing/mod.rs".to_owned(), uses),
+                ("thing/mod.rs".to_owned(), "thing/child.rs".to_owned(), uses),
+                ("thing/mod.rs".to_owned(), "thing/child.rs".to_owned(), owns),
+            ],
+            "the wiring relations stay complete in the machine report"
+        );
+        assert!(
+            report.architecture_findings().is_empty(),
+            "module wiring between an owning pair is not a file cycle"
+        );
+        assert!(
+            report.orphan_files().is_empty(),
+            "the exclusion is scoped to the cycle graph, so orphan facts are unchanged"
+        );
+
+        let siblings = tempfile::tempdir().unwrap();
+        fs::write(
+            siblings.path().join("Cargo.toml"),
+            "[package]\nname='siblings'\nversion='0.1.0'\n",
+        )
+        .unwrap();
+        fs::create_dir_all(siblings.path().join("thing")).unwrap();
+        fs::write(
+            siblings.path().join("thing/mod.rs"),
+            "mod one;\nmod two;\nmod three;\n",
+        )
+        .unwrap();
+        fs::write(
+            siblings.path().join("thing/one.rs"),
+            "use super::two::two;\npub fn one() { two() }\n",
+        )
+        .unwrap();
+        fs::write(
+            siblings.path().join("thing/two.rs"),
+            "use super::three::three;\npub fn two() { three() }\n",
+        )
+        .unwrap();
+        fs::write(
+            siblings.path().join("thing/three.rs"),
+            "use super::one::one;\npub fn three() { one() }\n",
+        )
+        .unwrap();
+        let result = analyze_codebase(&CodebaseRequest::new(siblings.path())).unwrap();
+        let report = result.report();
+        let cycles: Vec<_> = report
+            .architecture_findings()
+            .iter()
+            .filter(|finding| finding.kind() == ArchitectureFindingKind::FileCycle)
+            .map(|finding| {
+                let mut files: Vec<_> = finding
+                    .files()
+                    .iter()
+                    .map(|file| report.files()[file.index()].path().to_owned())
+                    .collect();
+                files.sort();
+                files
+            })
+            .collect();
+        assert_eq!(
+            cycles,
+            [vec![
+                "thing/one.rs".to_owned(),
+                "thing/three.rs".to_owned(),
+                "thing/two.rs".to_owned(),
+            ]],
+            "a cycle between owned siblings is not wiring and survives"
+        );
+        assert!(
+            report
+                .architecture_findings()
+                .iter()
+                .find(|finding| finding.kind() == ArchitectureFindingKind::FileCycle)
+                .is_some_and(|finding| !finding.witness_edges().is_empty()),
+            "a surviving cycle still names the relations that remain in the graph"
+        );
+    }
+
+    #[test]
+    fn a_module_component_collapses_while_a_cycle_between_its_children_survives() {
+        let collapsing = tempfile::tempdir().unwrap();
+        write_module_component(collapsing.path(), "");
+        let result = analyze_codebase(&CodebaseRequest::new(collapsing.path())).unwrap();
+        let report = result.report();
+        assert_eq!(
+            report
+                .dependency_edges()
+                .iter()
+                .filter(|edge| edge.enters_verdict_graph())
+                .count(),
+            4,
+            "every wiring relation stays eligible evidence"
+        );
+        assert!(
+            report.architecture_findings().is_empty(),
+            "a parent and its children are one wiring relationship, not a cycle"
+        );
+
+        let surviving = tempfile::tempdir().unwrap();
+        write_module_component(surviving.path(), "use super::second::second;\n");
+        fs::write(
+            surviving.path().join("thing/second.rs"),
+            "use super::*;\nuse super::first::first;\npub fn second() { y(); first() }\n",
+        )
+        .unwrap();
+        let result = analyze_codebase(&CodebaseRequest::new(surviving.path())).unwrap();
+        let report = result.report();
+        let cycles: Vec<_> = report
+            .architecture_findings()
+            .iter()
+            .filter(|finding| finding.kind() == ArchitectureFindingKind::FileCycle)
+            .map(|finding| {
+                let mut files: Vec<_> = finding
+                    .files()
+                    .iter()
+                    .map(|file| report.files()[file.index()].path().to_owned())
+                    .collect();
+                files.sort();
+                files
+            })
+            .collect();
+        assert_eq!(
+            cycles,
+            [vec![
+                "thing/first.rs".to_owned(),
+                "thing/second.rs".to_owned()
+            ]],
+            "the sibling cycle survives while the parent's wiring is excluded"
+        );
+    }
+
+    /// A `mod.rs` that re-exports two children which import it back.
+    fn write_module_component(root: &Path, first_extra: &str) {
+        fs::write(
+            root.join("Cargo.toml"),
+            "[package]\nname='component'\nversion='0.1.0'\n",
+        )
+        .unwrap();
+        fs::create_dir_all(root.join("thing")).unwrap();
+        fs::write(
+            root.join("thing/mod.rs"),
+            "mod first;\nmod second;\npub use self::first::first;\npub use self::second::second;\npub fn y() {}\n",
+        )
+        .unwrap();
+        fs::write(
+            root.join("thing/first.rs"),
+            format!("use super::*;\n{first_extra}pub fn first() {{ y() }}\n"),
+        )
+        .unwrap();
+        fs::write(
+            root.join("thing/second.rs"),
+            "use super::*;\npub fn second() { y() }\n",
+        )
+        .unwrap();
+    }
+
+    #[test]
+    fn a_module_declaration_reads_the_module_directory_before_a_sibling_file() {
+        let root = tempfile::tempdir().unwrap();
+        fs::write(
+            root.path().join("Cargo.toml"),
+            "[package]\nname='precedence'\nversion='0.1.0'\n",
+        )
+        .unwrap();
+        fs::create_dir_all(root.path().join("a")).unwrap();
+        fs::write(root.path().join("a.rs"), "mod child;\npub fn a() {}\n").unwrap();
+        fs::write(root.path().join("a/child.rs"), "pub fn owned() {}\n").unwrap();
+        fs::write(root.path().join("child.rs"), "pub fn sibling() {}\n").unwrap();
+        let result = analyze_codebase(&CodebaseRequest::new(root.path())).unwrap();
+        let report = result.report();
+        let declarations: Vec<_> = report
+            .dependency_edges()
+            .iter()
+            .filter(|edge| {
+                edge.relation() == smackdebt_analysis::StaticRelationKind::ModuleOwnership
+            })
+            .map(|edge| {
+                (
+                    report.files()[edge.source().index()].path().to_owned(),
+                    report.files()[edge.target().index()].path().to_owned(),
+                )
+            })
+            .collect();
+        assert_eq!(
+            declarations,
+            [("a.rs".to_owned(), "a/child.rs".to_owned())],
+            "the module directory a file owns wins over a sibling of the same name"
+        );
     }
 
     #[test]

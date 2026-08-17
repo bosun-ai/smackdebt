@@ -13,9 +13,9 @@ use unicode_width::UnicodeWidthStr;
 use support::coverage_failure_repository;
 use support::{
     GeneratedRepository, Invocation, copy_language_truth_files, deepened_signal_repository,
-    evolution_repository, ref_diff_repository, rust_test_scope_repository, shallow_clone,
-    signal_table_repository, source_role_repository, stable_dependency_repository,
-    static_architecture_repository, test_scoped_workspace_repository,
+    evolution_repository, module_wiring_repository, ref_diff_repository,
+    rust_test_scope_repository, shallow_clone, signal_table_repository, source_role_repository,
+    stable_dependency_repository, static_architecture_repository, test_scoped_workspace_repository,
     workspace_manifest_repository, worktree_change_repository,
 };
 
@@ -222,6 +222,85 @@ fn a_rust_test_scope_publishes_test_relations_beside_the_primary_ones() {
     assert_eq!(role_of("src/shipped.rs"), "primary");
     assert_eq!(role_of("src/lib.rs"), "primary");
     assert_golden("unified-rust-test-scope.json", &result.stdout);
+}
+
+#[test]
+fn rust_module_wiring_publishes_its_relations_without_a_file_cycle() {
+    let repository = module_wiring_repository();
+    let result = Invocation::new(["--json"]).run(repository.path());
+    result.success();
+    let automatic = Invocation::new(["--json"])
+        .automatic_workers()
+        .run(repository.path());
+    assert_eq!(result, automatic);
+    let report = checked_json(&result.stdout);
+    let path_of = |file: u64| {
+        let file = &report["files"][file as usize];
+        report["paths"][file["path"].as_u64().unwrap() as usize]
+            .as_str()
+            .unwrap()
+            .to_owned()
+    };
+    let mut relations: Vec<_> = report["dependency_edges"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .map(|edge| {
+            (
+                path_of(edge["source"].as_u64().unwrap()),
+                path_of(edge["target"].as_u64().unwrap()),
+                edge["relation"].as_str().unwrap().to_owned(),
+            )
+        })
+        .collect();
+    relations.sort();
+    assert_eq!(
+        relations,
+        [
+            (
+                "src/lib.rs".to_owned(),
+                "src/thing/mod.rs".to_owned(),
+                "module_ownership".to_owned()
+            ),
+            (
+                "src/lib.rs".to_owned(),
+                "src/thing/mod.rs".to_owned(),
+                "uses".to_owned()
+            ),
+            (
+                "src/thing/child.rs".to_owned(),
+                "src/thing/mod.rs".to_owned(),
+                "uses".to_owned()
+            ),
+            (
+                "src/thing/mod.rs".to_owned(),
+                "src/thing/child.rs".to_owned(),
+                "module_ownership".to_owned()
+            ),
+            (
+                "src/thing/mod.rs".to_owned(),
+                "src/thing/child.rs".to_owned(),
+                "uses".to_owned()
+            ),
+        ],
+        "the imports that wire a module stay complete in the machine report"
+    );
+    assert!(
+        report["architecture_findings"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .all(|finding| finding["kind"] != "file_cycle"),
+        "imports between a module-owning pair are wiring, not a cycle"
+    );
+    assert!(report["orphan_files"].as_array().unwrap().is_empty());
+    assert_golden("unified-module-wiring.json", &result.stdout);
+
+    let terminal = Invocation::new(["--all"]).run(repository.path());
+    terminal.success();
+    let text = String::from_utf8(terminal.stdout.clone()).unwrap();
+    assert!(!text.contains("cycle"), "{text}");
+    assert_golden("unified-module-wiring.terminal.txt", &terminal.stdout);
 }
 
 #[test]

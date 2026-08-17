@@ -497,6 +497,44 @@ pub(crate) fn rust_test_scope_repository() -> GeneratedRepository {
     repository
 }
 
+/// A Rust package wired the way the language asks for.
+///
+/// `src/thing/mod.rs` declares `mod child;` and re-exports from it, and
+/// `src/thing/child.rs` imports its parent back with `use super::*`. The two
+/// imports run in opposite directions between a pair that also carries a module
+/// declaration, so they are one wiring relationship rather than a file cycle:
+/// the committed terminal reports no cycle while the JSON keeps every relation.
+pub(crate) fn module_wiring_repository() -> GeneratedRepository {
+    let repository = GeneratedRepository::new("main");
+    repository.apply(&[
+        WorktreeEdit::Write(
+            "Cargo.toml",
+            b"[package]\nname = \"wiring\"\nversion = \"0.1.0\"\nedition = \"2024\"\n",
+        ),
+        WorktreeEdit::Write(
+            "src/lib.rs",
+            b"mod thing;\n\npub use crate::thing::run;\n",
+        ),
+        WorktreeEdit::Write(
+            "src/thing/mod.rs",
+            b"mod child;\n\npub use self::child::step;\n\npub fn base() -> u32 {\n    1\n}\n\npub fn run() -> u32 {\n    step()\n}\n",
+        ),
+        WorktreeEdit::Write(
+            "src/thing/child.rs",
+            b"use super::*;\n\npub fn step() -> u32 {\n    base() + 1\n}\n",
+        ),
+    ]);
+    repository.commit(Commit {
+        message: "test: module wiring",
+        identity: Identity {
+            name: "Wiring Fixture",
+            address: "wiring@example.invalid",
+        },
+        date: "2026-01-01T12:00:00Z",
+    });
+    repository
+}
+
 /// A Rust workspace whose only return dependencies are test code.
 ///
 /// `alpha` ships a dependency on `beta`; `beta` depends back on `alpha` only
