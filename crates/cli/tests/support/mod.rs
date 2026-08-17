@@ -268,11 +268,16 @@ pub(crate) fn source_role_repository() -> GeneratedRepository {
     repository
 }
 
-/// A repository whose findings tie until the hot and role class rank keys.
+/// A repository whose findings tie until the role class and hot rank keys.
 ///
 /// `src/hot.js` carries fewer statements than `src/cold.js` but changes in five
 /// commits, and `spec/cold.js` repeats the cold file under a test role whose
 /// path sorts before the primary one.
+///
+/// `src/rich.js` and `spec/rich.js` are the cold, signal-heavy counterweights:
+/// each carries three signals at the watch rating where every other file
+/// carries one, so a rank that read the signal counts before role class and hot
+/// state would list them above the production debt a reader came for.
 pub(crate) fn deepened_signal_repository() -> GeneratedRepository {
     fn statements(name: &str, count: usize) -> Vec<u8> {
         let mut source = format!("export function {name}() {{\n");
@@ -283,10 +288,30 @@ pub(crate) fn deepened_signal_repository() -> GeneratedRepository {
         source.into_bytes()
     }
 
+    /// Source reaching the watch threshold of cognitive complexity, cyclomatic
+    /// complexity, and logical lines at once, without reaching any high one.
+    fn three_signals(name: &str) -> Vec<u8> {
+        let mut source = format!("export function {name}(value) {{\n  let total = 0;\n");
+        for index in 0..16 {
+            source.push_str(&format!(
+                "  if (value === {index}) {{\n    total = total + {index};\n  }}\n"
+            ));
+        }
+        for index in 0..16 {
+            source.push_str(&format!(
+                "  const step{index} = total + {index};\n  total = step{index};\n"
+            ));
+        }
+        source.push_str("  return total;\n}\n");
+        source.into_bytes()
+    }
+
     let repository = GeneratedRepository::new("main");
     repository.write("package.json", b"{\"name\":\"deepened\"}\n");
     repository.write("src/cold.js", &statements("cold", 59));
     repository.write("spec/cold.js", &statements("covered", 59));
+    repository.write("src/rich.js", &three_signals("rich"));
+    repository.write("spec/rich.js", &three_signals("coveredRich"));
     repository.write("src/hot.js", &statements("hot", 54));
     repository.commit(commit(
         "test: deepened signals",

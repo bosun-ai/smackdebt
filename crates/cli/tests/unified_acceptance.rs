@@ -238,11 +238,23 @@ fn hot_production_debt_outranks_equally_rated_cold_and_test_debt() {
             .find(needle)
             .unwrap_or_else(|| panic!("missing {needle} in\n{terminal}"))
     };
-    // The hot file carries fewer statements than the cold file, so only the hot
-    // rank key can place it first; the test file stays visible below both.
+    // Every file is rated watch, so rating decides nothing here.
+    //
+    // Role class first: the signal-heavy test file carries three signals at the
+    // watch rating where the production files carry one, and its path sorts
+    // before theirs, so only the role class key can keep production debt above
+    // it. A rank that read the signal counts first would list it at the top.
+    assert!(position("src/cold.js") < position("spec/rich.js"));
+    assert!(position("src/hot.js") < position("spec/rich.js"));
+    // Hot second: `src/rich.js` is production too, so role class ties, and it
+    // carries three signals at the watch rating against the hot file's one.
+    // Only the hot key can place the hot file first.
+    assert!(position("src/hot.js") < position("src/rich.js"));
+    // The hot file also carries fewer statements than the cold file, so only
+    // the hot rank key can place it first.
     assert!(position("src/hot.js") < position("src/cold.js"));
-    // The test file sorts before the primary file by path, so only the role
-    // class key can keep production debt above it.
+    // Non-primary debt stays visible below production rather than being
+    // removed, in both its signal-heavy and its plain form.
     assert!(position("src/cold.js") < position("spec/cold.js"));
 
     let json = Invocation::new(["--json", "--history", "36500d"]).run(repository.path());
@@ -255,6 +267,41 @@ fn hot_production_debt_outranks_equally_rated_cold_and_test_debt() {
         .map(|finding| finding["rating"].as_str().unwrap())
         .collect();
     assert_eq!(ratings, HashSet::from(["watch"]));
+    // The counterweight really is signal-heavier than the production debt that
+    // now outranks it, so the ordering above cannot be an accident of ties.
+    // The default watch thresholds, as documented in the README.
+    let watch_thresholds = [
+        ("cognitive_complexity", 15),
+        ("cyclomatic_complexity", 11),
+        ("logical_lines", 50),
+    ];
+    let signals_at_watch = |path: &str| {
+        let file = report["files"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .position(|file| report["paths"][file["path"].as_u64().unwrap() as usize] == path)
+            .unwrap();
+        report["findings"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .filter(|finding| finding["file"].as_u64().unwrap() as usize == file)
+            .map(|finding| {
+                watch_thresholds
+                    .iter()
+                    .filter(|(name, watch)| {
+                        finding["measurements"][name].as_u64().unwrap() >= *watch
+                    })
+                    .count()
+            })
+            .max()
+            .unwrap()
+    };
+    assert_eq!(signals_at_watch("src/rich.js"), 3);
+    assert_eq!(signals_at_watch("spec/rich.js"), 3);
+    assert_eq!(signals_at_watch("src/hot.js"), 1);
+    assert_eq!(signals_at_watch("src/cold.js"), 1);
     let hot = report["files"]
         .as_array()
         .unwrap()
