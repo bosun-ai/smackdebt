@@ -256,6 +256,7 @@ fn offset_dependency(dependency: DependencySyntax, line_offset: u32) -> Dependen
     let span = dependency.span();
     let internal = dependency.intent() == smackdebt_analysis::DependencyIntent::Internal;
     let relation = dependency.relation();
+    let test_scope = dependency.scope() == smackdebt_analysis::DependencyScope::Test;
     let dependency = DependencySyntax::new(
         dependency.kind(),
         dependency.target(),
@@ -266,6 +267,11 @@ fn offset_dependency(dependency: DependencySyntax, line_offset: u32) -> Dependen
         dependency.state().clone(),
     );
     let dependency = dependency.with_relation(relation);
+    let dependency = if test_scope {
+        dependency.with_test_scope()
+    } else {
+        dependency
+    };
     if internal {
         dependency.with_internal_intent()
     } else {
@@ -398,6 +404,33 @@ mod tests {
         assert!(scratch.observations.capacity() >= observation_capacity);
         assert!(scratch.unit_drafts.capacity() >= result_capacity);
         assert!(!scratch.nesting_by_depth.is_empty());
+    }
+
+    #[test]
+    fn moving_a_reference_to_its_document_position_keeps_every_evidence_field() {
+        let dependency = DependencySyntax::new(
+            smackdebt_analysis::DependencyKind::Import,
+            "crate::helper",
+            SourceSpan::new(2, 2),
+            smackdebt_analysis::DependencySyntaxState::Candidates(vec!["helper.rs".to_owned()]),
+        )
+        .with_internal_intent()
+        .with_relation(smackdebt_analysis::StaticRelationKind::ModuleOwnership)
+        .with_test_scope();
+
+        let moved = offset_dependency(dependency.clone(), 3);
+
+        assert_eq!(moved.span(), SourceSpan::new(5, 5));
+        assert_eq!(moved.scope(), smackdebt_analysis::DependencyScope::Test);
+        assert_eq!(
+            moved.intent(),
+            smackdebt_analysis::DependencyIntent::Internal
+        );
+        assert_eq!(
+            moved.relation(),
+            smackdebt_analysis::StaticRelationKind::ModuleOwnership
+        );
+        assert_eq!(offset_dependency(dependency.clone(), 0), dependency);
     }
 
     fn shapes(source: &str) -> Vec<(u32, u32)> {

@@ -69,6 +69,18 @@ pub enum DependencySyntaxState {
     Unresolved(String),
 }
 
+/// The configuration scope a reference is declared under.
+///
+/// A test scope means the reference only exists when the language's test
+/// configuration is active, so it describes test code even when the file that
+/// declares it ships in production.
+#[derive(Clone, Copy, Debug, Default, Eq, Hash, Ord, PartialEq, PartialOrd)]
+pub enum DependencyScope {
+    #[default]
+    Default,
+    Test,
+}
+
 /// A grammar-owned dependency reference before repository resolution.
 #[derive(Clone, Debug, Eq, Hash, Ord, PartialEq, PartialOrd)]
 pub struct DependencySyntax {
@@ -78,6 +90,7 @@ pub struct DependencySyntax {
     state: DependencySyntaxState,
     intent: DependencyIntent,
     relation: StaticRelationKind,
+    scope: DependencyScope,
 }
 
 impl DependencySyntax {
@@ -94,6 +107,7 @@ impl DependencySyntax {
             state,
             intent: DependencyIntent::Package,
             relation: StaticRelationKind::Uses,
+            scope: DependencyScope::Default,
         }
     }
 
@@ -119,6 +133,9 @@ impl DependencySyntax {
     pub const fn relation(&self) -> StaticRelationKind {
         self.relation
     }
+    pub const fn scope(&self) -> DependencyScope {
+        self.scope
+    }
 
     pub fn with_internal_intent(mut self) -> Self {
         self.intent = DependencyIntent::Internal;
@@ -126,6 +143,10 @@ impl DependencySyntax {
     }
     pub fn with_relation(mut self, relation: StaticRelationKind) -> Self {
         self.relation = relation;
+        self
+    }
+    pub fn with_test_scope(mut self) -> Self {
+        self.scope = DependencyScope::Test;
         self
     }
 }

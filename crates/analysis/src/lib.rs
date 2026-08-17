@@ -71,9 +71,9 @@ pub use report::{
 };
 pub use source::{
     CRATE_ROOT_CANDIDATE, DECLARING_FILE_CANDIDATE, DependencyIntent, DependencyKind,
-    DependencySyntax, DependencySyntaxState, FileAnalysis, Language, LocalUnitId, ParseStatus,
-    SourceRole, SourceSpan, SourceTrust, StaticRelationKind, UnitFact, UnitIdentity, UnitKind,
-    is_symbolic_candidate,
+    DependencyScope, DependencySyntax, DependencySyntaxState, FileAnalysis, Language, LocalUnitId,
+    ParseStatus, SourceRole, SourceSpan, SourceTrust, StaticRelationKind, UnitFact, UnitIdentity,
+    UnitKind, is_symbolic_candidate,
 };
 pub use verdict::{
     CodebaseTier, DebtDiffFacts, DebtDiffSelection, DebtFamily, DiffTier, FIGHTS_BACK_PERMILLE,

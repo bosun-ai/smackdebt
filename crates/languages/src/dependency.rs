@@ -28,6 +28,97 @@ pub(super) fn quoted(
 }
 
 pub(super) fn rust(node: Node<'_>, source: &[u8]) -> Option<DependencySyntax> {
+    let dependency = rust_reference(node, source)?;
+    Some(if declared_in_test_scope(node, source) {
+        dependency.with_test_scope()
+    } else {
+        dependency
+    })
+}
+
+/// Whether the item declaring this reference only exists under `cfg(test)`.
+///
+/// The rule is syntactic: it reads the outer attributes of the declaring item
+/// and of every module that contains it, and never evaluates a configuration
+/// predicate or consults enabled features.
+fn declared_in_test_scope(node: Node<'_>, source: &[u8]) -> bool {
+    let mut item = Some(node);
+    while let Some(current) = item {
+        if (current.id() == node.id() || current.kind() == "mod_item")
+            && outer_attributes_select_test(current, source)
+        {
+            return true;
+        }
+        item = current.parent();
+    }
+    false
+}
+
+/// Reads the run of attributes that immediately precedes an item.
+fn outer_attributes_select_test(item: Node<'_>, source: &[u8]) -> bool {
+    let mut sibling = item.prev_named_sibling();
+    while let Some(current) = sibling {
+        match current.kind() {
+            "attribute_item" => {
+                if attribute_selects_test(current, source) {
+                    return true;
+                }
+            }
+            "line_comment" | "block_comment" => {}
+            _ => return false,
+        }
+        sibling = current.prev_named_sibling();
+    }
+    false
+}
+
+/// Whether one attribute is a `cfg` predicate that selects the test configuration.
+fn attribute_selects_test(attribute_item: Node<'_>, source: &[u8]) -> bool {
+    let Some(attribute) = attribute_item.named_child(0) else {
+        return false;
+    };
+    if attribute.kind() != "attribute" {
+        return false;
+    }
+    let Some(path) = attribute.named_child(0) else {
+        return false;
+    };
+    if path.kind() != "identifier" || path.utf8_text(source).ok() != Some("cfg") {
+        return false;
+    }
+    attribute
+        .named_child(1)
+        .filter(|arguments| arguments.kind() == "token_tree")
+        .is_some_and(|arguments| token_tree_selects_test(arguments, source))
+}
+
+/// Whether a `cfg` token tree names `test` outside a negated predicate.
+fn token_tree_selects_test(tree: Node<'_>, source: &[u8]) -> bool {
+    let mut cursor = tree.walk();
+    let mut previous_identifier = None;
+    for child in tree.children(&mut cursor) {
+        match child.kind() {
+            "identifier" => {
+                let text = child.utf8_text(source).ok();
+                if text == Some("test") {
+                    return true;
+                }
+                previous_identifier = text;
+            }
+            "token_tree" => {
+                if previous_identifier != Some("not") && token_tree_selects_test(child, source) {
+                    return true;
+                }
+                previous_identifier = None;
+            }
+            "(" | ")" | "," => {}
+            _ => previous_identifier = None,
+        }
+    }
+    false
+}
+
+fn rust_reference(node: Node<'_>, source: &[u8]) -> Option<DependencySyntax> {
     let kind = match node.kind() {
         "use_declaration" | "extern_crate_declaration" | "scoped_identifier" => {
             DependencyKind::Import

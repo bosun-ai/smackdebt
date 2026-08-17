@@ -1,8 +1,8 @@
 use std::path::Path;
 
 use smackdebt_analysis::{
-    DependencyIntent, DependencyKind, DependencySyntax, DependencySyntaxState, Language,
-    ParseStatus, SourceSpan, StaticRelationKind, UnitKind,
+    DependencyIntent, DependencyKind, DependencyScope, DependencySyntax, DependencySyntaxState,
+    Language, ParseStatus, SourceSpan, StaticRelationKind, UnitKind,
 };
 use smackdebt_languages::Analyzer;
 
@@ -944,6 +944,87 @@ fn rust_super_inside_an_inline_module_targets_the_declaring_file() {
                 ])
             ),
         ]
+    );
+}
+
+fn rust_scopes(source: &str) -> Vec<(String, DependencyScope)> {
+    Analyzer::default()
+        .analyze(Path::new("src/lib.rs"), source.as_bytes().to_vec())
+        .unwrap()
+        .dependencies()
+        .iter()
+        .map(|dependency| (dependency.target().to_owned(), dependency.scope()))
+        .collect()
+}
+
+#[test]
+fn only_a_cfg_attribute_that_selects_test_scopes_a_rust_reference() {
+    for attribute in [
+        "#[cfg(test)]",
+        "#[cfg(all(test, not(loom)))]",
+        "#[cfg(any(test, fuzzing))]",
+    ] {
+        assert_eq!(
+            rust_scopes(&format!("{attribute}\nuse crate::helper;\n")),
+            [("crate::helper".to_owned(), DependencyScope::Test)],
+            "{attribute}"
+        );
+    }
+    for attribute in [
+        "#[cfg(not(test))]",
+        "#[cfg(feature = \"test\")]",
+        "#[cfg_attr(test, derive(Debug))]",
+    ] {
+        assert_eq!(
+            rust_scopes(&format!("{attribute}\nuse crate::helper;\n")),
+            [("crate::helper".to_owned(), DependencyScope::Default)],
+            "{attribute}"
+        );
+    }
+    assert_eq!(
+        rust_scopes("use crate::helper;\n"),
+        [("crate::helper".to_owned(), DependencyScope::Default)]
+    );
+}
+
+#[test]
+fn an_ancestor_test_module_scopes_every_reference_declared_inside_it() {
+    assert_eq!(
+        rust_scopes(concat!(
+            "use crate::shipped;\n",
+            "#[cfg(test)]\n",
+            "mod tests {\n",
+            "    // a comment between the attribute and the item\n",
+            "    mod inner {\n",
+            "        mod child;\n",
+            "        use crate::helper;\n",
+            "        include!(\"generated.rs\");\n",
+            "        fn run() { crate::qualified::call(); }\n",
+            "    }\n",
+            "}\n",
+        )),
+        [
+            ("crate::shipped".to_owned(), DependencyScope::Default),
+            ("child".to_owned(), DependencyScope::Test),
+            ("crate::helper".to_owned(), DependencyScope::Test),
+            ("generated.rs".to_owned(), DependencyScope::Test),
+            ("crate::qualified::call".to_owned(), DependencyScope::Test),
+        ]
+    );
+}
+
+#[test]
+fn a_comment_between_a_test_attribute_and_its_item_keeps_the_scope() {
+    assert_eq!(
+        rust_scopes(concat!(
+            "#[cfg(test)]\n",
+            "// why the module is test only\n",
+            "#[allow(unused)]\n",
+            "mod tests {\n",
+            "    use crate::helper;\n",
+            "}\n",
+        )),
+        [("crate::helper".to_owned(), DependencyScope::Test)]
     );
 }
 
