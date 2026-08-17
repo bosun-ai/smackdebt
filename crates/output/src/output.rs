@@ -1482,14 +1482,31 @@ fn same_pair(
         || (left.left(), left.right()) == (right.right(), right.left())
 }
 
+/// Whether a code dependency explains why two packages change together.
+///
+/// The claim is about the repository, not about the code that ships, so it
+/// reads the trusted eligible relations rather than the verdict graph: a
+/// dev-dependency import in a test file is still a code dependency even though
+/// it never becomes a package edge.
 fn coupling_has_code_dependency(
     report: &Report,
     coupling: smackdebt_analysis::ChangeCoupling,
 ) -> bool {
-    report.package_edges().iter().any(|edge| {
-        (edge.source() == coupling.left() && edge.target() == coupling.right())
-            || (edge.source() == coupling.right() && edge.target() == coupling.left())
-    })
+    let joins = |left, right| {
+        (left == Some(coupling.left()) && right == Some(coupling.right()))
+            || (left == Some(coupling.right()) && right == Some(coupling.left()))
+    };
+    report
+        .package_edges()
+        .iter()
+        .any(|edge| joins(Some(edge.source()), Some(edge.target())))
+        || report.dependency_edges().iter().any(|edge| {
+            edge.affects_verdict()
+                && joins(
+                    report.files()[edge.source().index()].package(),
+                    report.files()[edge.target().index()].package(),
+                )
+        })
 }
 
 fn history_role_name(role: SourceRole) -> &'static str {
