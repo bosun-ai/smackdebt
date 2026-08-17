@@ -10,10 +10,10 @@
 
 ## 2. Added and removed diff cards
 
-- [ ] 2.1 Add acceptance expectations for an added card showing the after-side measurements and a removed card showing the before-side measurements, each with its direction word first.
-- [ ] 2.2 Add an acceptance expectation that an added unit whose measurements are all zero renders the bare direction word.
-- [ ] 2.3 Render the present side's nonzero absolute measurements on added and removed comparison cards without adding arithmetic to the renderer.
-- [ ] 2.4 Keep the unsafe-to-match card as its direct explanatory sentence alone.
+- [x] 2.1 Add acceptance expectations for an added card showing the after-side measurements and a removed card showing the before-side measurements, each with its direction word first.
+- [x] 2.2 Add an acceptance expectation that an added unit whose measurements are all zero renders the bare direction word.
+- [x] 2.3 Render the present side's nonzero absolute measurements on added and removed comparison cards without adding arithmetic to the renderer.
+- [x] 2.4 Keep the unsafe-to-match card as its direct explanatory sentence alone.
 
 ## 3. Documentation
 
@@ -25,7 +25,7 @@
 ## 4. Evidence
 
 - [x] 4.1 Regenerate the affected unified and acceptance snapshots and review each file for ordering-only movement, with no row added, removed, or recounted.
-- [ ] 4.2 Regenerate the diff terminal snapshots carrying added or removed cards and confirm changed cards stay byte-identical.
+- [x] 4.2 Regenerate the diff terminal snapshots carrying added or removed cards and confirm changed cards stay byte-identical.
 - [x] 4.3 Confirm ratings, signals, measurements, verdict tiers, counts, exit codes, work counts, and the JSON schema shape are unchanged.
 
 ## 5. Field verification
@@ -33,9 +33,9 @@
 - [x] 5.1 Build the release binary and run it on tokio, scikit-learn, opencode, kwaak, and fluyt.
 - [x] 5.2 Record that every `worst:` line names production code: fluyt names `bow/src/views/ConfigureTaskRun.vue` (hot production; the cold `npm/resolver.rs` predicted while drafting stays below it because hot outranks cognitive complexity in the accepted order, unchanged by this proposal), kwaak names `src/frontend/app.rs` rather than a benchmark, and tokio names `tokio/src/sync/notify.rs` `poll_notified`.
 - [x] 5.3 Record that benchmark and test findings rank below production findings everywhere while remaining visible.
-- [ ] 5.4 Record that fluyt's diff added cards show measurements and that its changed cards are byte-identical to the previous run.
+- [x] 5.4 Record that fluyt's diff added cards show measurements and that its changed cards are byte-identical to the previous run: `diff HEAD~50 --all` against fluyt moves 47 lines against the previous binary, every one of them an added or removed card line, and the report keeps its 874 lines with no changed, metric, architecture, history, or summary line touched.
 
 ## 6. Close
 
-- [ ] 6.1 Pass formatting, Clippy, workspace tests, architecture checks, performance tests, acceptance evidence, strict OpenSpec validation, and the final diff check.
+- [x] 6.1 Pass formatting, Clippy, workspace tests, architecture checks, performance tests, acceptance evidence, strict OpenSpec validation, and the final diff check.
 - [ ] 6.2 Archive this change before authoring `classify-production-architecture`.
