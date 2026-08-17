@@ -14,7 +14,8 @@ use support::coverage_failure_repository;
 use support::{
     GeneratedRepository, Invocation, copy_language_truth_files, deepened_signal_repository,
     evolution_repository, ref_diff_repository, rust_test_scope_repository, shallow_clone,
-    signal_table_repository, source_role_repository, static_architecture_repository,
+    signal_table_repository, source_role_repository, stable_dependency_repository,
+    static_architecture_repository, test_scoped_workspace_repository,
     workspace_manifest_repository, worktree_change_repository,
 };
 
@@ -205,6 +206,207 @@ fn a_rust_test_scope_publishes_test_relations_beside_the_primary_ones() {
     );
     assert!(report["orphan_files"].as_array().unwrap().is_empty());
     assert_golden("unified-rust-test-scope.json", &result.stdout);
+}
+
+#[test]
+fn test_only_return_dependencies_are_context_and_still_explain_coupling() {
+    let repository = test_scoped_workspace_repository();
+    let result = Invocation::new(["--json", "--history", "36500d"]).run(repository.path());
+    result.success();
+    let automatic = Invocation::new(["--json", "--history", "36500d"])
+        .automatic_workers()
+        .run(repository.path());
+    assert_eq!(result, automatic);
+    let report = checked_json(&result.stdout);
+    let package_name = |package: u64| {
+        report["packages"][package as usize]["path"]
+            .as_str()
+            .unwrap()
+            .to_owned()
+    };
+    let path_of = |file: u64| {
+        let file = &report["files"][file as usize];
+        report["paths"][file["path"].as_u64().unwrap() as usize]
+            .as_str()
+            .unwrap()
+            .to_owned()
+    };
+
+    // The verdict graph carries the shipped direction only.
+    let mut package_edges: Vec<_> = report["package_edges"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .map(|edge| {
+            (
+                package_name(edge["source"].as_u64().unwrap()),
+                package_name(edge["target"].as_u64().unwrap()),
+            )
+        })
+        .collect();
+    package_edges.sort();
+    assert_eq!(
+        package_edges,
+        [("crates/alpha".to_owned(), "crates/beta".to_owned())]
+    );
+    assert!(
+        report["architecture_findings"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .all(|finding| finding["kind"] != "package_cycle"),
+        "test code cannot close a package cycle"
+    );
+    assert!(
+        report["stable_dependency_findings"]
+            .as_array()
+            .unwrap()
+            .is_empty()
+    );
+
+    // The return dependencies stay complete as evidence.
+    let mut returns: Vec<_> = report["dependency_edges"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .filter(|edge| path_of(edge["target"].as_u64().unwrap()) == "crates/alpha/src/lib.rs")
+        .map(|edge| {
+            (
+                path_of(edge["source"].as_u64().unwrap()),
+                edge["role"].as_str().unwrap().to_owned(),
+            )
+        })
+        .collect();
+    returns.sort();
+    assert_eq!(
+        returns,
+        [
+            ("crates/beta/src/lib.rs".to_owned(), "test".to_owned()),
+            (
+                "crates/beta/tests/integration.rs".to_owned(),
+                "test".to_owned()
+            ),
+            (
+                "crates/gamma/tests/integration.rs".to_owned(),
+                "test".to_owned()
+            ),
+        ]
+    );
+
+    // Every qualifying coupling pair has a code dependency to explain it,
+    // including the two that never enter a verdict graph.
+    let coupling: Vec<_> = report["change_coupling"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .filter(|pair| pair["shared_commits"].as_u64().unwrap() >= 3)
+        .map(|pair| {
+            (
+                package_name(pair["left"].as_u64().unwrap()),
+                package_name(pair["right"].as_u64().unwrap()),
+            )
+        })
+        .collect();
+    assert_eq!(
+        coupling,
+        [
+            ("crates/alpha".to_owned(), "crates/beta".to_owned()),
+            ("crates/alpha".to_owned(), "crates/gamma".to_owned()),
+        ]
+    );
+    assert!(
+        report["evolutionary_findings"]
+            .as_array()
+            .unwrap()
+            .is_empty(),
+        "a dev-dependency import is still a code dependency"
+    );
+    assert_golden("unified-test-scoped-workspace.json", &result.stdout);
+
+    let terminal = Invocation::new(["--all", "--history", "36500d"]).run(repository.path());
+    terminal.success();
+    let text = String::from_utf8(terminal.stdout.clone()).unwrap();
+    assert!(!text.contains("package dependency cycle"), "{text}");
+    assert!(!text.contains("no code dependency"), "{text}");
+    assert_golden(
+        "unified-test-scoped-workspace.terminal.txt",
+        &terminal.stdout,
+    );
+}
+
+#[test]
+fn a_diff_over_test_explained_coupling_reports_no_evolutionary_change() {
+    let repository = test_scoped_workspace_repository();
+    let result =
+        Invocation::new(["diff", "main~1", "--json", "--history", "36500d"]).run(repository.path());
+    result.success();
+    let report = checked_json(&result.stdout);
+    assert_eq!(report["mode"], "diff");
+    assert!(
+        report["evolutionary_comparisons"]
+            .as_array()
+            .unwrap()
+            .is_empty(),
+        "coupling explained on both sides cannot change"
+    );
+    let terminal =
+        Invocation::new(["diff", "main~1", "--all", "--history", "36500d"]).run(repository.path());
+    terminal.success();
+    let text = String::from_utf8(terminal.stdout).unwrap();
+    assert!(!text.contains("no code dependency"), "{text}");
+}
+
+#[test]
+fn a_primary_dependency_direction_publishes_a_stable_dependency_finding() {
+    let repository = stable_dependency_repository(false);
+    let result = Invocation::new(["--json"]).run(repository.path());
+    result.success();
+    let automatic = Invocation::new(["--json"])
+        .automatic_workers()
+        .run(repository.path());
+    assert_eq!(result, automatic);
+    let report = checked_json(&result.stdout);
+    let package_name = |package: u64| {
+        report["packages"][package as usize]["path"]
+            .as_str()
+            .unwrap()
+            .to_owned()
+    };
+    let findings: Vec<_> = report["stable_dependency_findings"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .map(|finding| {
+            (
+                package_name(finding["source"].as_u64().unwrap()),
+                package_name(finding["target"].as_u64().unwrap()),
+                finding["references"].as_u64().unwrap(),
+            )
+        })
+        .collect();
+    assert_eq!(
+        findings,
+        [("crates/a".to_owned(), "crates/b".to_owned(), 2)]
+    );
+    assert_golden("unified-stable-dependency.json", &result.stdout);
+
+    let terminal = Invocation::new(["--all"]).run(repository.path());
+    terminal.success();
+    let text = String::from_utf8(terminal.stdout.clone()).unwrap();
+    assert!(text.contains("depends on less stable code"), "{text}");
+    assert_golden("unified-stable-dependency.terminal.txt", &terminal.stdout);
+
+    let scoped = stable_dependency_repository(true);
+    let scoped_result = Invocation::new(["--json"]).run(scoped.path());
+    scoped_result.success();
+    let scoped_report = checked_json(&scoped_result.stdout);
+    assert!(
+        scoped_report["stable_dependency_findings"]
+            .as_array()
+            .unwrap()
+            .is_empty(),
+        "a test-scoped import is not a production dependency direction"
+    );
 }
 
 #[test]

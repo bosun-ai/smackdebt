@@ -1,0 +1,7 @@
+smackdebt · repository root
+  Clean. Ship it.
+0 high · 0 watch · 7 checked
+
+HISTORY
+  crates/alpha ↔ crates/beta changed together in 3 of 7 commits · 43% · code dependency exists
+  crates/alpha ↔ crates/gamma changed together in 4 of 7 commits · 57% · code dependency exists

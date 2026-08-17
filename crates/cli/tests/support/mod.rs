@@ -466,10 +466,10 @@ pub(crate) fn static_architecture_repository() -> GeneratedRepository {
 /// the test module alone, and `src/shipped.rs` is reached only from production
 /// code, so the two roles stay separable in the committed JSON.
 ///
-/// A later change makes verdict graphs primary-only. When it lands, the
-/// relation rows below stay as they are and the package graph's counts move:
-/// `src/only_tests.rs` leaves the verdict graph's fan-in while remaining a used
-/// file for orphan purposes.
+/// Verdict graphs are primary-only, so the test-role relations below are
+/// context: `src/only_tests.rs` is outside the cycle graph while staying a used
+/// file for orphan purposes. The repository holds one package, so no package
+/// graph value depends on them.
 pub(crate) fn rust_test_scope_repository() -> GeneratedRepository {
     let repository = GeneratedRepository::new("main");
     repository.apply(&[
@@ -493,6 +493,172 @@ pub(crate) fn rust_test_scope_repository() -> GeneratedRepository {
         },
         date: "2026-01-01T12:00:00Z",
     });
+    repository
+}
+
+/// A Rust workspace whose only return dependencies are test code.
+///
+/// `alpha` ships a dependency on `beta`; `beta` depends back on `alpha` only
+/// from its integration test and from a `#[cfg(test)]` module, so the pair is
+/// not a package cycle. `gamma` reaches `alpha` and `zeta` from its test alone,
+/// which explains their change coupling without entering a verdict graph;
+/// `zeta` declares no entry file, so that reference is a manifest-name one.
+///
+/// The history is shaped so exactly two package pairs qualify for a coupling
+/// finding — `alpha`-`beta` and `alpha`-`gamma` — and both have a code
+/// dependency to explain them, the second one from test source only.
+pub(crate) fn test_scoped_workspace_repository() -> GeneratedRepository {
+    let repository = GeneratedRepository::new("main");
+    repository.apply(&[
+        WorktreeEdit::Write(
+            "crates/alpha/Cargo.toml",
+            b"[package]\nname = \"alpha\"\nversion = \"0.1.0\"\nedition = \"2024\"\n",
+        ),
+        WorktreeEdit::Write(
+            "crates/alpha/src/lib.rs",
+            b"use beta::helper;\n\npub fn run() -> u32 {\n    helper()\n}\n",
+        ),
+        WorktreeEdit::Write(
+            "crates/beta/Cargo.toml",
+            b"[package]\nname = \"beta\"\nversion = \"0.1.0\"\nedition = \"2024\"\n",
+        ),
+        WorktreeEdit::Write(
+            "crates/beta/src/lib.rs",
+            b"pub fn helper() -> u32 {\n    1\n}\n\n#[cfg(test)]\nmod tests {\n    use alpha::run;\n\n    #[test]\n    fn covers() {\n        assert_eq!(run(), 1);\n    }\n}\n",
+        ),
+        WorktreeEdit::Write(
+            "crates/beta/tests/integration.rs",
+            b"use alpha::run;\n\n#[test]\nfn integrates() {\n    assert_eq!(run(), 1);\n}\n",
+        ),
+        WorktreeEdit::Write(
+            "crates/gamma/Cargo.toml",
+            b"[package]\nname = \"gamma\"\nversion = \"0.1.0\"\nedition = \"2024\"\n",
+        ),
+        WorktreeEdit::Write(
+            "crates/gamma/src/lib.rs",
+            b"pub fn gamma() -> u32 {\n    2\n}\n",
+        ),
+        WorktreeEdit::Write(
+            "crates/gamma/tests/integration.rs",
+            b"use alpha::run;\nuse zeta::piece;\n\n#[test]\nfn integrates() {\n    assert_eq!(run() + piece(), 3);\n}\n",
+        ),
+        WorktreeEdit::Write(
+            "crates/zeta/Cargo.toml",
+            b"[package]\nname = \"zeta\"\nversion = \"0.1.0\"\nedition = \"2024\"\n",
+        ),
+        WorktreeEdit::Write(
+            "crates/zeta/src/piece.rs",
+            b"pub fn piece() -> u32 {\n    2\n}\n",
+        ),
+    ]);
+    repository.commit(scope_commit("test: workspace", 1));
+    for round in 0..3 {
+        repository.write(
+            "crates/alpha/src/lib.rs",
+            format!("use beta::helper;\n\npub fn run() -> u32 {{\n    helper() + {round}\n}}\n")
+                .as_bytes(),
+        );
+        repository.write(
+            "crates/gamma/src/lib.rs",
+            format!("pub fn gamma() -> u32 {{\n    2 + {round}\n}}\n").as_bytes(),
+        );
+        repository.commit(scope_commit("feat: alpha and gamma", 2 + round));
+    }
+    for round in 0..3 {
+        repository.write(
+            "crates/alpha/src/lib.rs",
+            format!(
+                "use beta::helper;\n\npub fn run() -> u32 {{\n    helper() + {round} + 1\n}}\n"
+            )
+            .as_bytes(),
+        );
+        repository.write(
+            "crates/beta/src/lib.rs",
+            format!(
+                "pub fn helper() -> u32 {{\n    {}\n}}\n\n#[cfg(test)]\nmod tests {{\n    use alpha::run;\n\n    #[test]\n    fn covers() {{\n        assert_eq!(run(), 1);\n    }}\n}}\n",
+                round + 1
+            )
+            .as_bytes(),
+        );
+        repository.commit(scope_commit("feat: alpha and beta", 5 + round));
+    }
+    repository
+}
+
+fn scope_commit(message: &str, day: u32) -> Commit<'_> {
+    Commit {
+        message,
+        identity: Identity {
+            name: "Scope Fixture",
+            address: "scope@example.invalid",
+        },
+        date: SCOPE_DATES[day as usize - 1],
+    }
+}
+
+const SCOPE_DATES: [&str; 7] = [
+    "2026-01-01T12:00:00Z",
+    "2026-01-02T12:00:00Z",
+    "2026-01-03T12:00:00Z",
+    "2026-01-04T12:00:00Z",
+    "2026-01-05T12:00:00Z",
+    "2026-01-06T12:00:00Z",
+    "2026-01-07T12:00:00Z",
+];
+
+/// A Rust workspace whose production dependency runs the wrong way.
+///
+/// `a` is depended on by `x` and depends on `b`, which itself depends on `c`
+/// and `d`. That makes `b` the more unstable of the pair, so `a` -> `b` is a
+/// stable-dependency violation. The same shape driven by a `#[cfg(test)]`
+/// import instead is not a production direction and creates no finding.
+pub(crate) fn stable_dependency_repository(test_scoped: bool) -> GeneratedRepository {
+    let repository = GeneratedRepository::new("main");
+    let a_source: &[u8] = if test_scoped {
+        b"pub fn run() -> u32 {\n    3\n}\n\n#[cfg(test)]\nmod tests {\n    use b::one;\n    use b::two;\n\n    #[test]\n    fn covers() {\n        assert_eq!(one() + two(), 3);\n    }\n}\n"
+    } else {
+        b"use b::one;\nuse b::two;\n\npub fn run() -> u32 {\n    one() + two()\n}\n"
+    };
+    repository.apply(&[
+        WorktreeEdit::Write(
+            "crates/x/Cargo.toml",
+            b"[package]\nname = \"x\"\nversion = \"0.1.0\"\nedition = \"2024\"\n",
+        ),
+        WorktreeEdit::Write(
+            "crates/x/src/lib.rs",
+            b"use a::run;\n\npub fn top() -> u32 {\n    run()\n}\n",
+        ),
+        WorktreeEdit::Write(
+            "crates/a/Cargo.toml",
+            b"[package]\nname = \"a\"\nversion = \"0.1.0\"\nedition = \"2024\"\n",
+        ),
+        WorktreeEdit::Write("crates/a/src/lib.rs", a_source),
+        WorktreeEdit::Write(
+            "crates/b/Cargo.toml",
+            b"[package]\nname = \"b\"\nversion = \"0.1.0\"\nedition = \"2024\"\n",
+        ),
+        WorktreeEdit::Write(
+            "crates/b/src/lib.rs",
+            b"use c::cee;\nuse d::dee;\n\npub fn one() -> u32 {\n    cee()\n}\n\npub fn two() -> u32 {\n    dee()\n}\n",
+        ),
+        WorktreeEdit::Write(
+            "crates/c/Cargo.toml",
+            b"[package]\nname = \"c\"\nversion = \"0.1.0\"\nedition = \"2024\"\n",
+        ),
+        WorktreeEdit::Write(
+            "crates/c/src/lib.rs",
+            b"pub fn cee() -> u32 {\n    1\n}\n",
+        ),
+        WorktreeEdit::Write(
+            "crates/d/Cargo.toml",
+            b"[package]\nname = \"d\"\nversion = \"0.1.0\"\nedition = \"2024\"\n",
+        ),
+        WorktreeEdit::Write(
+            "crates/d/src/lib.rs",
+            b"pub fn dee() -> u32 {\n    2\n}\n",
+        ),
+    ]);
+    repository.commit(scope_commit("test: stable dependency direction", 1));
     repository
 }
 

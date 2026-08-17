@@ -962,6 +962,9 @@ fn only_a_cfg_attribute_that_selects_test_scopes_a_rust_reference() {
     for attribute in [
         "#[cfg(test)]",
         "#[cfg(all(test, not(loom)))]",
+        // The identifier order inside the predicate does not matter: `test` is
+        // still selected when it follows a negated identifier.
+        "#[cfg(all(not(loom), test))]",
         "#[cfg(any(test, fuzzing))]",
     ] {
         assert_eq!(
