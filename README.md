@@ -515,13 +515,15 @@ Terminal limits never remove JSON facts. The checked schema is
 [`schemas/report-v4.schema.json`](schemas/report-v4.schema.json); no earlier
 schema is emitted.
 
-Source findings are ordered by rating, count of signals at that rating, total
-triggered signals, hot state, role class, cognitive complexity, cyclomatic
-complexity, statements, activity, path, and span. Hot means a rated file whose
-touch count inside the selected history window reaches the minimum touch count,
-five by default. Role class places primary source before non-primary source at
-equal rating, and non-primary source stays visible below it. Findings show unit
-kind and any non-primary role.
+Source findings are ordered by rating, role class, hot state, count of signals
+at that rating, total triggered signals, cognitive complexity, cyclomatic
+complexity, logical lines, activity, path, and span. Role class places primary
+source before non-primary source at equal rating, and non-primary source stays
+visible below it rather than being removed. Hot state decides next, so among
+production findings of the same rating the file being edited comes first. Hot
+means a rated file whose touch count inside the selected history window reaches
+the minimum touch count, five by default. Findings show unit kind and any
+non-primary role.
 
 Finding debt does not fail the command. Exit codes describe whether Smackdebt
 could produce a report:

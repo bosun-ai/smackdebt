@@ -624,10 +624,10 @@ impl Finding {
 #[derive(Clone, Copy, Debug, Eq, Ord, PartialEq, PartialOrd)]
 pub struct FindingRank<'a> {
     rating: Reverse<u8>,
+    role_class: u8,
+    hot: Reverse<bool>,
     signals_at_rating: Reverse<u8>,
     triggered_signals: Reverse<u8>,
-    hot: Reverse<bool>,
-    role_class: u8,
     cognitive_complexity: Reverse<u32>,
     cyclomatic_complexity: Reverse<u32>,
     logical_lines: Reverse<u32>,
@@ -643,10 +643,10 @@ impl<'a> FindingRank<'a> {
         let measurements = finding.measurements();
         Self {
             rating: Reverse(finding.assessment().rating().rank()),
+            role_class: role_class(finding.role()),
+            hot: Reverse(hot),
             signals_at_rating: Reverse(finding.assessment().signals_at_rating()),
             triggered_signals: Reverse(finding.assessment().triggered_signals()),
-            hot: Reverse(hot),
-            role_class: role_class(finding.role()),
             cognitive_complexity: Reverse(measurements.cognitive_complexity()),
             cyclomatic_complexity: Reverse(measurements.cyclomatic_complexity()),
             logical_lines: Reverse(measurements.logical_lines()),
@@ -1387,16 +1387,30 @@ mod tests {
         }
 
         fn add_finding(&mut self, scope: ScopeId, file: FileId, name: &str, cognitive: u32) {
+            self.add_role_finding(scope, file, name, cognitive, SourceRole::Primary);
+        }
+
+        fn add_role_finding(
+            &mut self,
+            scope: ScopeId,
+            file: FileId,
+            name: &str,
+            cognitive: u32,
+            role: SourceRole,
+        ) {
             let measurements = Measurements::new(cognitive, 1, 1);
             let id = FindingId::from_index(self.builder.report.findings.len());
-            self.builder.add_finding(Finding::new(
-                id,
-                file,
-                UnitIdentity::new(name, UnitKind::Function),
-                SourceSpan::new(1, 4),
-                measurements,
-                HealthPolicy::default().assess(measurements),
-            ));
+            self.builder.add_finding(
+                Finding::new(
+                    id,
+                    file,
+                    UnitIdentity::new(name, UnitKind::Function),
+                    SourceSpan::new(1, 4),
+                    measurements,
+                    HealthPolicy::default().assess(measurements),
+                )
+                .with_evidence(role, SourceTrust::Trusted),
+            );
             self.builder.link_finding(scope, id);
         }
 
@@ -1458,6 +1472,20 @@ mod tests {
         let report = fixture.finish();
         let offender = report.verdict().unwrap().worst_offender().unwrap();
         assert_eq!(offender.reason(), WorstOffenderReason::HotAndComplex);
+    }
+
+    #[test]
+    fn a_scope_whose_only_debt_is_non_primary_still_names_a_worst_offender() {
+        let mut fixture = ReportFixture::new(ReportMode::Codebase);
+        let (scope, file) = fixture.add_file("tests/work.rs", HealthCounts::new(97, 2, 1));
+        fixture.add_role_finding(scope, file, "work", 25, SourceRole::Test);
+        let report = fixture.finish();
+        let offender = report
+            .verdict()
+            .unwrap()
+            .worst_offender()
+            .expect("test-only debt is still named rather than silently dropped");
+        assert_eq!(offender.path(), "tests/work.rs");
     }
 
     #[test]
@@ -1911,69 +1939,91 @@ mod tests {
 
         let high = finding("high", Measurements::new(25, 1, 1), SourceSpan::new(1, 1));
         let watch = finding("watch", Measurements::new(15, 1, 1), SourceSpan::new(1, 1));
+        let as_test = |finding: &Finding| {
+            finding
+                .clone()
+                .with_evidence(SourceRole::Test, SourceTrust::Trusted)
+        };
+
+        // KEY 1 rating: High precedes Watch however bad every later key is.
         assert!(rank(&high, 0, "z") < rank(&watch, 99, "a"));
+        // KEY 1 rating: it dominates role class and hot state together, so a
+        // cold test High still precedes a hot primary Watch.
+        assert!(
+            FindingRank::new(&as_test(&high), false, 0, "z")
+                < FindingRank::new(&watch, true, 99, "a")
+        );
 
-        let two_high = finding("two", Measurements::new(25, 21, 1), SourceSpan::new(1, 1));
-        assert!(rank(&two_high, 0, "z") < rank(&high, 99, "a"));
+        // KEY 2 role class: it decides before hot state, so a cold primary
+        // High precedes a hot test High.
+        let test_high = as_test(&high);
+        assert!(
+            FindingRank::new(&high, false, 0, "z") < FindingRank::new(&test_high, true, 99, "a")
+        );
+        // KEY 2 role class: it also decides before the signal counts, so a
+        // primary High with one signal at rating precedes a test High with
+        // three, hot state tied.
+        let three_high = finding(
+            "three",
+            Measurements::new(25, 21, 100),
+            SourceSpan::new(1, 1),
+        );
+        assert_eq!(three_high.assessment().signals_at_rating(), 3);
+        assert_eq!(high.assessment().signals_at_rating(), 1);
+        assert!(rank(&high, 0, "z") < rank(&as_test(&three_high), 99, "a"));
 
+        // KEY 3 hot: among primary findings of equal rating, hot precedes cold
+        // even when the cold finding carries strictly more signals at rating.
+        assert!(
+            FindingRank::new(&high, true, 0, "z") < FindingRank::new(&three_high, false, 99, "a")
+        );
+        // KEY 3 hot: it decides before total triggered signals too.
         let high_with_watch = finding(
             "triggered",
             Measurements::new(25, 11, 1),
             SourceSpan::new(1, 1),
         );
-        assert!(rank(&high_with_watch, 0, "z") < rank(&high, 99, "a"));
-
-        // Hot debt precedes equally rated cold debt, and primary source
-        // precedes non-primary source once hot state ties.
-        assert!(FindingRank::new(&high, true, 0, "z") < FindingRank::new(&high, false, 99, "a"));
-        // Rating still dominates hot state: cold High precedes hot Watch.
-        assert!(FindingRank::new(&high, false, 0, "z") < FindingRank::new(&watch, true, 99, "a"));
-        let test_watch = watch
-            .clone()
-            .with_evidence(SourceRole::Test, SourceTrust::Trusted);
+        assert_eq!(high_with_watch.assessment().signals_at_rating(), 1);
+        assert_eq!(high_with_watch.assessment().triggered_signals(), 2);
         assert!(
-            FindingRank::new(&high, false, 0, "z") < FindingRank::new(&test_watch, true, 99, "a")
+            FindingRank::new(&high, true, 0, "z")
+                < FindingRank::new(&high_with_watch, false, 99, "a")
         );
-        // Hot state still dominates every measurement key: a hot Watch finding
-        // precedes a cold Watch finding with strictly more cognitive
-        // complexity, more cyclomatic complexity, and more statements.
-        let heavier_watch = finding(
+        // KEY 3 hot: and before every measurement key.
+        let heavier_high = finding(
             "heavier",
-            Measurements::new(20, 11, 50),
-            SourceSpan::new(1, 1),
-        );
-        let lighter_watch = finding(
-            "lighter",
-            Measurements::new(15, 11, 50),
+            Measurements::new(40, 1, 1),
             SourceSpan::new(1, 1),
         );
         assert_eq!(
-            heavier_watch.assessment().rating(),
-            lighter_watch.assessment().rating()
+            heavier_high.assessment().rating(),
+            high.assessment().rating()
         );
         assert_eq!(
             (
-                heavier_watch.assessment().signals_at_rating(),
-                heavier_watch.assessment().triggered_signals()
+                heavier_high.assessment().signals_at_rating(),
+                heavier_high.assessment().triggered_signals()
             ),
             (
-                lighter_watch.assessment().signals_at_rating(),
-                lighter_watch.assessment().triggered_signals()
+                high.assessment().signals_at_rating(),
+                high.assessment().triggered_signals()
             )
         );
-        assert!(rank(&heavier_watch, 0, "a") < rank(&lighter_watch, 0, "a"));
         assert!(
-            FindingRank::new(&lighter_watch, true, 0, "z")
-                < FindingRank::new(&heavier_watch, false, 99, "a")
-        );
-        let test_role = high
-            .clone()
-            .with_evidence(SourceRole::Test, SourceTrust::Trusted);
-        assert!(rank(&high, 0, "z") < rank(&test_role, 99, "a"));
-        assert!(
-            FindingRank::new(&test_role, true, 0, "z") < FindingRank::new(&high, false, 99, "a")
+            FindingRank::new(&high, true, 0, "z") < FindingRank::new(&heavier_high, false, 99, "a")
         );
 
+        // KEY 4 signals at rating: rating, role class, and hot all tie, so more
+        // signals at the rating precede fewer.
+        assert!(rank(&three_high, 0, "z") < rank(&high, 99, "a"));
+
+        // KEY 5 triggered signals: signals at rating tie at one, so the finding
+        // that also triggered a lower signal precedes the one that did not.
+        assert_eq!(high.assessment().triggered_signals(), 1);
+        assert!(rank(&high_with_watch, 0, "z") < rank(&high, 99, "a"));
+
+        // KEY 6 cognitive complexity: every earlier key ties, so the larger
+        // cognitive complexity precedes.
         let more_cognitive = finding(
             "cognitive",
             Measurements::new(26, 1, 1),
@@ -1981,6 +2031,7 @@ mod tests {
         );
         assert!(rank(&more_cognitive, 0, "z") < rank(&high, 99, "a"));
 
+        // KEY 7 cyclomatic complexity: cognitive ties, so cyclomatic decides.
         let more_cyclomatic = finding(
             "cyclomatic",
             Measurements::new(25, 2, 1),
@@ -1988,11 +2039,16 @@ mod tests {
         );
         assert!(rank(&more_cyclomatic, 0, "z") < rank(&high, 99, "a"));
 
+        // KEY 8 logical lines: both complexity keys tie, so logical lines
+        // decides.
         let more_lines = finding("lines", Measurements::new(25, 1, 2), SourceSpan::new(1, 1));
         assert!(rank(&more_lines, 0, "z") < rank(&high, 99, "a"));
+        // KEY 9 activity: every measurement ties, so the busier file precedes.
         assert!(rank(&high, 2, "z") < rank(&high, 1, "a"));
+        // KEY 10 path: activity ties, so the earlier path precedes.
         assert!(rank(&high, 1, "a") < rank(&high, 1, "b"));
 
+        // KEY 11 start line: path ties, so the earlier span start precedes.
         let earlier = finding(
             "earlier",
             Measurements::new(25, 1, 1),
@@ -2000,6 +2056,7 @@ mod tests {
         );
         let later = finding("later", Measurements::new(25, 1, 1), SourceSpan::new(2, 3));
         assert!(rank(&earlier, 1, "a") < rank(&later, 1, "a"));
+        // KEY 12 end line: the start line ties, so the earlier end precedes.
         let shorter = finding(
             "shorter",
             Measurements::new(25, 1, 1),
@@ -2036,7 +2093,7 @@ mod tests {
         ranked.sort_by(|left, right| left.0.cmp(&right.0));
         assert_eq!(
             ranked.iter().map(|entry| entry.1).collect::<Vec<_>>(),
-            ["hot primary", "hot test", "primary", "test"]
+            ["hot primary", "primary", "hot test", "test"]
         );
         let mut reversed = ranked.clone();
         reversed.reverse();

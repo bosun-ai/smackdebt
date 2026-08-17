@@ -331,12 +331,13 @@ file-level comparison diagnostic instead of a guessed match.
 
 ## Output and failure behavior
 
-Analysis owns the exact source finding rank: rating, count of signals at that
-rating, total triggered signals, hot state, role class, cognitive complexity,
-cyclomatic complexity, logical lines, activity, path, then span. Hot state comes
-from the hotspot table, which crosses a file's rated units with its windowed
-touch count; role class keeps primary source above non-primary source at equal
-rating without removing it. Hotspot and size input comes only from trusted
+Analysis owns the exact source finding rank: rating, role class, hot state,
+count of signals at that rating, total triggered signals, cognitive complexity,
+cyclomatic complexity, logical lines, activity, path, then span. Role class
+keeps primary source above non-primary source at equal rating without removing
+it, and hot state decides among findings of the same rating and role class. Hot
+state comes from the hotspot table, which crosses a file's rated units with its
+windowed touch count. Hotspot and size input comes only from trusted
 parsed source in a verdict role, so advisory recovered facts and context fixture
 or generated files stay descriptive however often they change.
 
