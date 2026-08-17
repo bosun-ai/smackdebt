@@ -2230,6 +2230,19 @@ struct ReferenceTables {
         BTreeMap<(PackageId, PackageId), (std::collections::BTreeSet<FileId>, u32)>,
 }
 
+/// The role one reference carries as evidence.
+///
+/// A reference declared under a test configuration is at least test code, so a
+/// primary file's `#[cfg(test)]` imports become test evidence while a file that
+/// already carries a later role keeps it.
+fn evidence_role(reference: &DependencySyntax, dependencies: &SourceDependencies) -> SourceRole {
+    if reference.scope() == smackdebt_analysis::DependencyScope::Test {
+        dependencies.role.max(SourceRole::Test)
+    } else {
+        dependencies.role
+    }
+}
+
 impl ReferenceTables {
     fn record_internal(
         &mut self,
@@ -2238,9 +2251,10 @@ impl ReferenceTables {
         reference: &DependencySyntax,
         dependencies: &SourceDependencies,
     ) {
+        let role = evidence_role(reference, dependencies);
         self.coverage.record(
             reference.relation(),
-            dependencies.role,
+            role,
             dependencies.trust,
             RelationResolution::ResolvedInternal,
         );
@@ -2253,7 +2267,7 @@ impl ReferenceTables {
                 source,
                 target,
                 reference.relation(),
-                dependencies.role,
+                role,
                 dependencies.trust,
             ))
             .or_default();
@@ -2269,9 +2283,10 @@ impl ReferenceTables {
         reference: &DependencySyntax,
         dependencies: &SourceDependencies,
     ) {
+        let role = evidence_role(reference, dependencies);
         self.coverage.record(
             reference.relation(),
-            dependencies.role,
+            role,
             dependencies.trust,
             RelationResolution::External,
         );
@@ -2281,7 +2296,7 @@ impl ReferenceTables {
                 source,
                 reference.target().to_owned(),
                 reference.relation(),
-                dependencies.role,
+                role,
                 dependencies.trust,
             ))
             .or_default();
@@ -2300,15 +2315,16 @@ impl ReferenceTables {
         dependencies: &SourceDependencies,
     ) {
         let source_file = dependencies.file;
+        let role = evidence_role(reference, dependencies);
         self.coverage.record(
             reference.relation(),
-            dependencies.role,
+            role,
             dependencies.trust,
             RelationResolution::ResolvedInternal,
         );
         if source == target
             || !(reference.relation() == smackdebt_analysis::StaticRelationKind::Uses
-                && dependencies.role.affects_verdict()
+                && role.affects_verdict()
                 && dependencies.trust == SourceTrust::Trusted)
         {
             return;
@@ -2330,17 +2346,14 @@ impl ReferenceTables {
         kind: ResolutionIssueKind,
         reason: &str,
     ) {
-        self.coverage.record(
-            reference.relation(),
-            dependencies.role,
-            dependencies.trust,
-            resolution,
-        );
+        let role = evidence_role(reference, dependencies);
+        self.coverage
+            .record(reference.relation(), role, dependencies.trust, resolution);
         record_resolution_diagnostic(
             &mut self.diagnostic_values,
             source,
             reference,
-            dependencies.role,
+            role,
             dependencies.trust,
             kind,
             reason,
@@ -4922,6 +4935,88 @@ mod tests {
             1
         );
         assert_eq!(result.report().dependency_coverage().total(), 1);
+    }
+
+    #[test]
+    fn a_rust_test_scope_demotes_a_primary_reference_while_the_file_keeps_its_own_role() {
+        let root = tempfile::tempdir().unwrap();
+        fs::write(
+            root.path().join("Cargo.toml"),
+            "[package]\nname='scoped'\nversion='0.1.0'\n",
+        )
+        .unwrap();
+        fs::write(
+            root.path().join("helper.rs"),
+            "pub fn work() -> u32 { 1 }\n",
+        )
+        .unwrap();
+        fs::write(
+            root.path().join("shipped.rs"),
+            "use crate::helper::work;\n#[cfg(test)]\nmod tests {\n    use crate::helper::work;\n    #[test]\n    fn covers() { assert_eq!(work(), 1); }\n}\npub fn ship() -> u32 { work() }\n",
+        )
+        .unwrap();
+        fs::create_dir(root.path().join("fixtures")).unwrap();
+        fs::write(
+            root.path().join("fixtures/kept.rs"),
+            "#[cfg(test)]\nmod tests {\n    use crate::helper::work;\n}\n",
+        )
+        .unwrap();
+
+        let result = analyze_codebase(&CodebaseRequest::new(root.path())).unwrap();
+        let report = result.report();
+        let helper = file_id(report, "helper.rs");
+        let shipped = file_id(report, "shipped.rs");
+        let fixture = file_id(report, "fixtures/kept.rs");
+
+        let mut shipped_roles: Vec<_> = report
+            .dependency_edges()
+            .iter()
+            .filter(|edge| edge.source() == shipped && edge.target() == helper)
+            .map(|edge| (edge.role(), edge.relation(), edge.references()))
+            .collect();
+        shipped_roles.sort();
+        assert_eq!(
+            shipped_roles,
+            [
+                (
+                    SourceRole::Primary,
+                    smackdebt_analysis::StaticRelationKind::Uses,
+                    1
+                ),
+                (
+                    SourceRole::Test,
+                    smackdebt_analysis::StaticRelationKind::Uses,
+                    1
+                ),
+            ]
+        );
+        assert!(
+            report
+                .dependency_edges()
+                .iter()
+                .filter(|edge| edge.source() == shipped && edge.target() == helper)
+                .all(DependencyEdge::affects_verdict)
+        );
+        assert_eq!(
+            report
+                .dependency_edges()
+                .iter()
+                .filter(|edge| edge.source() == fixture && edge.target() == helper)
+                .map(DependencyEdge::role)
+                .collect::<Vec<_>>(),
+            [SourceRole::Fixture]
+        );
+        assert_eq!(report.dependency_coverage().resolved_internal_uses(), 2);
+        assert_eq!(report.dependency_coverage().context_relations(), 1);
+    }
+
+    fn file_id(report: &smackdebt_analysis::Report, path: &str) -> FileId {
+        report
+            .files()
+            .iter()
+            .find(|file| file.path() == path)
+            .unwrap_or_else(|| panic!("missing {path}"))
+            .id()
     }
 
     #[test]
