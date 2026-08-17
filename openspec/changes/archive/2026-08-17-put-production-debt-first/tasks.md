@@ -38,4 +38,4 @@
 ## 6. Close
 
 - [x] 6.1 Pass formatting, Clippy, workspace tests, architecture checks, performance tests, acceptance evidence, strict OpenSpec validation, and the final diff check.
-- [ ] 6.2 Archive this change before authoring `classify-production-architecture`.
+- [x] 6.2 Archive this change before authoring `classify-production-architecture`.
