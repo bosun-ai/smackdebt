@@ -5925,6 +5925,78 @@ mod tests {
         );
     }
 
+    #[test]
+    fn a_cycle_that_passes_through_an_owning_pair_by_other_files_survives() {
+        let root = tempfile::tempdir().unwrap();
+        fs::write(
+            root.path().join("Cargo.toml"),
+            "[package]\nname='through'\nversion='0.1.0'\n",
+        )
+        .unwrap();
+        fs::create_dir_all(root.path().join("a")).unwrap();
+        fs::write(
+            root.path().join("a.rs"),
+            "mod child;\nuse self::child::step;\nuse self::other::other;\npub fn a() -> u32 { other() + step() }\n",
+        )
+        .unwrap();
+        fs::write(
+            root.path().join("a/child.rs"),
+            "use super::back::back;\npub fn step() -> u32 { back() }\n",
+        )
+        .unwrap();
+        fs::write(
+            root.path().join("a/other.rs"),
+            "use super::child::step;\npub fn other() -> u32 { step() }\n",
+        )
+        .unwrap();
+        fs::write(
+            root.path().join("a/back.rs"),
+            "use super::a;\npub fn back() -> u32 { a() }\n",
+        )
+        .unwrap();
+        let result = analyze_codebase(&CodebaseRequest::new(root.path())).unwrap();
+        let report = result.report();
+        let cycles: Vec<_> = report
+            .architecture_findings()
+            .iter()
+            .filter(|finding| finding.kind() == ArchitectureFindingKind::FileCycle)
+            .map(|finding| {
+                let mut files: Vec<_> = finding
+                    .files()
+                    .iter()
+                    .map(|file| report.files()[file.index()].path().to_owned())
+                    .collect();
+                files.sort();
+                files
+            })
+            .collect();
+        assert_eq!(
+            cycles,
+            [vec![
+                "a.rs".to_owned(),
+                "a/back.rs".to_owned(),
+                "a/child.rs".to_owned(),
+                "a/other.rs".to_owned(),
+            ]],
+            "only the owning pair's own relations leave the graph"
+        );
+        let witnessed: Vec<_> = report.architecture_findings()[0]
+            .witness_edges()
+            .iter()
+            .map(|edge| {
+                let edge = &report.dependency_edges()[edge.index()];
+                (
+                    report.files()[edge.source().index()].path().to_owned(),
+                    report.files()[edge.target().index()].path().to_owned(),
+                )
+            })
+            .collect();
+        assert!(
+            !witnessed.contains(&("a.rs".to_owned(), "a/child.rs".to_owned())),
+            "a witness can only name a relation the cycle graph kept: {witnessed:?}"
+        );
+    }
+
     /// A `mod.rs` that re-exports two children which import it back.
     fn write_module_component(root: &Path, first_extra: &str) {
         fs::write(

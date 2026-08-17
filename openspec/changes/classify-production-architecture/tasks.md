@@ -31,13 +31,13 @@
 
 ## 4. Module-wiring cycle exclusion
 
-- [ ] 4.1 Extend `rust_module_ownership_cycle_is_context_while_mutual_uses_are_a_verdict` with a suppressed parent-child pair, a surviving sibling cycle, and a surviving mutual-uses pair between unowned files.
-- [ ] 4.2 Exclude, from the file cycle graph only, `uses` relations between a file pair that also carries a `module_ownership` relation in either direction.
-- [ ] 4.3 Apply the identical exclusion in the cycle witness lookup and prove a suppressed pair produces neither a cycle nor a witness.
-- [ ] 4.4 Prove the exclusion is pairwise by keeping a cycle that passes through an owning pair via other files.
-- [ ] 4.5 Prove fan-in, fan-out, instability, and orphan facts are unaffected by the exclusion.
-- [ ] 4.6 Add a fixture that pins the suppression in committed terminal and JSON bytes.
-- [ ] 4.7 Verify on the field repositories that tokio's `fs/` and `io/` cycles are gone while scikit-learn's `_config`-`_array_api`, opencode's three cycles, and smackdebt's `change_coupling`-`evolution` remain.
+- [x] 4.1 Extend `rust_module_ownership_cycle_is_context_while_mutual_uses_are_a_verdict` with a suppressed parent-child pair, a surviving sibling cycle, and a surviving mutual-uses pair between unowned files.
+- [x] 4.2 Exclude, from the file cycle graph only, `uses` relations between a file pair that also carries a `module_ownership` relation in either direction.
+- [x] 4.3 Apply the identical exclusion in the cycle witness lookup and prove a suppressed pair produces neither a cycle nor a witness.
+- [x] 4.4 Prove the exclusion is pairwise by keeping a cycle that passes through an owning pair via other files.
+- [x] 4.5 Prove fan-in, fan-out, instability, and orphan facts are unaffected by the exclusion.
+- [x] 4.6 Add a fixture that pins the suppression in committed terminal and JSON bytes.
+- [x] 4.7 Verify on the field repositories that tokio's `fs/` and `io/` cycles are gone while scikit-learn's `_config`-`_array_api`, opencode's three cycles, and smackdebt's `change_coupling`-`evolution` remain.
 
 ## 5. Documentation
 
