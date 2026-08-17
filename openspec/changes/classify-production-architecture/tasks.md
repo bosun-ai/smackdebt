@@ -1,13 +1,13 @@
 ## 1. Rust cfg(test) scope
 
-- [ ] 1.1 Add languages unit tests for the matching rule covering all six decided forms: `#[cfg(test)]`, `#[cfg(all(test, not(loom)))]`, and `#[cfg(any(test, fuzzing))]` match; `#[cfg(not(test))]`, `#[cfg(feature = "test")]`, and `#[cfg_attr(test, ...)]` do not.
-- [ ] 1.2 Add a languages test proving an ancestor `mod` attribute scopes references declared in nested items.
-- [ ] 1.3 Add the `DependencyScope { Default, Test }` field to `DependencySyntax` and detect test scope from outer `cfg` attributes on the item and its ancestor modules.
-- [ ] 1.4 Prove `offset_dependency` preserves the scope when it rebuilds the syntax record.
-- [ ] 1.5 Add a project test proving a primary file with a `#[cfg(test)]` module yields a test-role relation, and a separate primary relation when the same target is also imported outside the test scope.
-- [ ] 1.6 Apply `role = max(file role, test)` for test-scoped references in every record path, and prove a fixture or generated file keeps its own role.
-- [ ] 1.7 Add `#[cfg(test)]` content to a generated fixture so committed JSON pins `"role":"test"`, and confirm no other committed snapshot moves.
-- [ ] 1.8 Verify on the field repositories that tokio's JSON shows test-role relations from `src/**` `#[cfg(test)]` modules while scikit-learn and opencode stay byte-identical.
+- [x] 1.1 Add languages unit tests for the matching rule covering all six decided forms: `#[cfg(test)]`, `#[cfg(all(test, not(loom)))]`, and `#[cfg(any(test, fuzzing))]` match; `#[cfg(not(test))]`, `#[cfg(feature = "test")]`, and `#[cfg_attr(test, ...)]` do not.
+- [x] 1.2 Add a languages test proving an ancestor `mod` attribute scopes references declared in nested items.
+- [x] 1.3 Add the `DependencyScope { Default, Test }` field to `DependencySyntax` and detect test scope from outer `cfg` attributes on the item and its ancestor modules.
+- [x] 1.4 Prove `offset_dependency` preserves the scope when it rebuilds the syntax record.
+- [x] 1.5 Add a project test proving a primary file with a `#[cfg(test)]` module yields a test-role relation, and a separate primary relation when the same target is also imported outside the test scope.
+- [x] 1.6 Apply `role = max(file role, test)` for test-scoped references in every record path, and prove a fixture or generated file keeps its own role.
+- [x] 1.7 Add `#[cfg(test)]` content to a generated fixture so committed JSON pins `"role":"test"`, and confirm no other committed snapshot moves.
+- [x] 1.8 Verify on the field repositories that tokio's JSON shows test-role relations from `src/**` `#[cfg(test)]` modules while scikit-learn and opencode stay byte-identical.
 
 ## 2. Primary-only verdict graphs
 
