@@ -89,6 +89,39 @@ fn diff_reports_metric_changes_from_the_worktree() {
 }
 
 #[test]
+fn added_and_removed_diff_cards_state_the_measurements_of_the_side_that_exists() {
+    let project = one_sided_diff_fixture();
+    let output = cargo_bin_cmd!("smackdebt")
+        .current_dir(project.path())
+        .env("COLUMNS", "120")
+        .args(["diff", "HEAD", "--all", "--color", "never"])
+        .output()
+        .unwrap();
+    assert!(
+        output.status.success(),
+        "{}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let terminal = String::from_utf8(output.stdout).unwrap();
+    // An added unit has an after side only, so the card states it absolutely.
+    assert!(
+        terminal.contains(
+            "        added · cognitive 3 · cyclomatic 3 · statements 2 · nesting 2 · parameters 1\n"
+        ),
+        "{terminal}"
+    );
+    // A removed unit has a before side only, stated the same way.
+    assert!(
+        terminal.contains(
+            "        removed · cognitive 3 · cyclomatic 3 · statements 2 · nesting 2 · parameters 2\n"
+        ),
+        "{terminal}"
+    );
+    // The card carries facts, never arithmetic, for a side that does not exist.
+    assert!(!terminal.contains('→'), "{terminal}");
+}
+
+#[test]
 fn invalid_project_config_uses_argument_exit_code() {
     let project = fixture();
     fs::write(
@@ -2507,6 +2540,43 @@ fn fixture() -> tempfile::TempDir {
     fs::write(
         project.path().join("src/view.vue"),
         "<template><ul><li v-for=\"item in items\" v-if=\"item.ready\">{{ item.name }}</li></ul></template>\n<script setup lang=\"ts\">\nconst ready = (item) => item.ready\n</script>\n<style>.ready { color: green; }</style>\n",
+    )
+    .unwrap();
+    project
+}
+
+/// A repository whose worktree deletes one rated unit and writes another, so a
+/// diff carries exactly one added and one removed comparison.
+fn one_sided_diff_fixture() -> tempfile::TempDir {
+    let project = tempfile::tempdir().unwrap();
+    fs::write(
+        project.path().join("package.json"),
+        "{\"name\":\"one-sided\",\"private\":true}\n",
+    )
+    .unwrap();
+    fs::write(
+        project.path().join(".smackdebt.toml"),
+        "[thresholds.cognitive]\nwatch = 2\nhigh = 5\n\n[thresholds.cyclomatic]\nwatch = 2\nhigh = 5\n\n[thresholds.function_lines]\nwatch = 2\nhigh = 5\n",
+    )
+    .unwrap();
+    fs::create_dir(project.path().join("src")).unwrap();
+    fs::write(
+        project.path().join("src/gone.js"),
+        "export function gone(value, other) {\n  if (value) {\n    if (other) {\n      return value + other;\n    }\n  }\n  return 0;\n}\n",
+    )
+    .unwrap();
+    git(project.path(), ["init", "-b", "main"]);
+    git(project.path(), ["config", "user.name", "Smackdebt Test"]);
+    git(
+        project.path(),
+        ["config", "user.email", "smackdebt@example.invalid"],
+    );
+    git(project.path(), ["add", "."]);
+    git(project.path(), ["commit", "-m", "test: one rated unit"]);
+    fs::remove_file(project.path().join("src/gone.js")).unwrap();
+    fs::write(
+        project.path().join("src/fresh.js"),
+        "export function fresh(value) {\n  if (value) {\n    if (value > 1) {\n      return value;\n    }\n  }\n  return 0;\n}\n",
     )
     .unwrap();
     project

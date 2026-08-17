@@ -9,8 +9,8 @@ use anstyle::{Ansi256Color, AnsiColor, Style};
 use smackdebt_analysis::{
     ArchitectureComparisonKind, ArchitectureFindingKind, CodebaseTier, Comparison,
     ComparisonDirection, ComparisonKind, DebtDiffSelection, DebtFamily, Diagnostic, DiagnosticKind,
-    DiffTier, FileId, FileRecord, Finding, Instability, Language, Rating, Report, ReportMode,
-    ResolutionIssueKind, Scope, ScopeId, ScopeKind, Signal, SourceRole, SourceTrust,
+    DiffTier, FileId, FileRecord, Finding, Instability, Language, Measurements, Rating, Report,
+    ReportMode, ResolutionIssueKind, Scope, ScopeId, ScopeKind, Signal, SourceRole, SourceTrust,
     StaticRelationKind, UnitKind, Verdict, instability, qualifies_for_finding,
 };
 use unicode_width::{UnicodeWidthChar, UnicodeWidthStr};
@@ -566,10 +566,19 @@ fn diff_finding_rows(
     section
 }
 
+/// The measurement names a card states, in the order policy rates them.
+const MEASUREMENT_NAMES: [&str; 5] = [
+    "cognitive",
+    "cyclomatic",
+    "statements",
+    "nesting",
+    "parameters",
+];
+
 fn changed_measurements(comparison: &Comparison) -> Vec<String> {
     match comparison.kind() {
-        ComparisonKind::Added => return vec!["added".to_owned()],
-        ComparisonKind::Removed => return vec!["removed".to_owned()],
+        ComparisonKind::Added => return one_sided_measurements("added", comparison.after()),
+        ComparisonKind::Removed => return one_sided_measurements("removed", comparison.before()),
         ComparisonKind::Ambiguous => {
             return vec!["identity could not be matched safely".to_owned()];
         }
@@ -578,34 +587,44 @@ fn changed_measurements(comparison: &Comparison) -> Vec<String> {
     let (Some(before), Some(after)) = (comparison.before(), comparison.after()) else {
         return vec![changed_summary(comparison.kind()).to_owned()];
     };
-    let values = [
-        (
-            "cognitive",
-            before.cognitive_complexity(),
-            after.cognitive_complexity(),
-        ),
-        (
-            "cyclomatic",
-            before.cyclomatic_complexity(),
-            after.cyclomatic_complexity(),
-        ),
-        ("statements", before.logical_lines(), after.logical_lines()),
-        ("nesting", before.max_nesting(), after.max_nesting()),
-        (
-            "parameters",
-            before.parameter_count(),
-            after.parameter_count(),
-        ),
-    ];
-    let facts: Vec<String> = values
+    let (before, after) = (rated_values(before), rated_values(after));
+    let facts: Vec<String> = MEASUREMENT_NAMES
         .into_iter()
-        .filter(|(_, before, after)| before != after)
-        .map(|(name, before, after)| format!("{name} {before} → {after}"))
+        .zip(before.into_iter().zip(after))
+        .filter(|(_, (before, after))| before != after)
+        .map(|(name, (before, after))| format!("{name} {before} → {after}"))
         .collect();
     if facts.is_empty() {
         return vec![changed_summary(comparison.kind()).to_owned()];
     }
     facts
+}
+
+/// The direction word of a one-sided comparison, then the side that exists.
+///
+/// An added or removed unit has no other side to compare against, so its card
+/// states the absolute values the report already carries. A zero measures
+/// nothing worth reading, and a side that is zero everywhere leaves the word
+/// alone.
+fn one_sided_measurements(word: &str, present: Option<Measurements>) -> Vec<String> {
+    let mut facts = vec![word.to_owned()];
+    let Some(present) = present else {
+        return facts;
+    };
+    facts.extend(
+        MEASUREMENT_NAMES
+            .into_iter()
+            .zip(rated_values(present))
+            .filter(|(_, value)| *value != 0)
+            .map(|(name, value)| format!("{name} {value}")),
+    );
+    facts
+}
+
+/// The rated measurements in the order `MEASUREMENT_NAMES` states them.
+const fn rated_values(measurements: Measurements) -> [u32; 5] {
+    let (cognitive, cyclomatic, statements, nesting, parameters) = measurements.rated();
+    [cognitive, cyclomatic, statements, nesting, parameters]
 }
 
 /// The human sentence a comparison falls back to when no measurement moved.
@@ -2158,6 +2177,61 @@ mod tests {
         assert_eq!(
             changed_measurements(&comparison),
             vec!["measurements changed".to_owned()]
+        );
+    }
+
+    #[test]
+    fn a_one_sided_comparison_states_its_direction_then_its_present_side() {
+        let one_sided = |kind, before, after| {
+            changed_measurements(&Comparison::new(
+                ComparisonId::from_index(0),
+                UnitIdentity::new("work", UnitKind::Function),
+                kind,
+                before,
+                after,
+                before.map(|_| Rating::Watch),
+                after.map(|_| Rating::Watch),
+            ))
+        };
+        // An added unit has an after side only, and it is stated absolutely.
+        assert_eq!(
+            one_sided(
+                ComparisonKind::Added,
+                None,
+                Some(Measurements::new(6, 4, 2).with_shape(3, 1)),
+            ),
+            vec![
+                "added".to_owned(),
+                "cognitive 6".to_owned(),
+                "cyclomatic 4".to_owned(),
+                "statements 2".to_owned(),
+                "nesting 3".to_owned(),
+                "parameters 1".to_owned(),
+            ]
+        );
+        // A removed unit has a before side only, and zeros are not facts.
+        assert_eq!(
+            one_sided(
+                ComparisonKind::Removed,
+                Some(Measurements::new(5, 3, 4).with_shape(0, 0)),
+                None,
+            ),
+            vec![
+                "removed".to_owned(),
+                "cognitive 5".to_owned(),
+                "cyclomatic 3".to_owned(),
+                "statements 4".to_owned(),
+            ]
+        );
+        // A side that measures zero everywhere leaves the word alone.
+        assert_eq!(
+            one_sided(ComparisonKind::Added, None, Some(Measurements::default())),
+            vec!["added".to_owned()]
+        );
+        // No side can be trusted, so the sentence stands by itself.
+        assert_eq!(
+            one_sided(ComparisonKind::Ambiguous, None, None),
+            vec!["identity could not be matched safely".to_owned()]
         );
     }
 

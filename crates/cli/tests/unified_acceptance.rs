@@ -360,6 +360,14 @@ fn worktree_diff_reports_the_declared_mixed_change_outcomes_once() {
     parallel_terminal.success();
     assert_eq!(terminal, parallel_terminal);
     assert_golden("unified-worktree-diff.terminal.txt", &terminal.stdout);
+    // The added unit has an after side only, so its card states that side.
+    assert!(
+        String::from_utf8(terminal.stdout.clone()).unwrap().contains(
+            "        added · cognitive 3 · cyclomatic 3 · statements 2 · nesting 2 · parameters 1\n"
+        ),
+        "{}",
+        String::from_utf8_lossy(&terminal.stdout)
+    );
     for width in [80, 50] {
         let result = Invocation::new(["diff", "main", "--all", "--history", "36500d"])
             .columns(width)
