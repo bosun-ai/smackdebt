@@ -127,9 +127,10 @@ paths and file metadata. Source-role classification handles generated files
 instead of excluding a whole directory by name.
 
 Role classification has one fixed order: explicit configuration,
-language-owned generated markers, generic filename and path rules, then the
-primary fallback. Conflicting matches at one level stop configuration with
-status 2. Primary, test, example, and benchmark source participate in default
+language-owned generated markers, generic filename and path rules, the
+test-declared Rust module rule that project analysis applies once module
+declarations resolve, then the primary fallback. Conflicting matches at one
+level stop configuration with status 2. Primary, test, example, and benchmark source participate in default
 verdicts; fixture and generated source remain context. Each language owns its
 generated marker syntax, while discovery owns only generic path and filename
 rules.
@@ -196,24 +197,65 @@ change only when the measurement rule itself changes.
 
 Each language implementation translates its import forms during the existing
 tree traversal. A dependency syntax value contains its kind, raw target, source
-span, and ordered path candidates, or an explicit external or unresolved state.
-This grammar-owned step performs no filesystem or Git access. Vue combines
+span, ordered path candidates, and a scope, or an explicit external or
+unresolved state. Scope is `Default` or `Test`: the Rust grammar sets `Test`
+when a `cfg` attribute on the declaring item or on an enclosing `mod` names
+`test` outside a `not(...)` predicate. This is a syntactic match, not a `cfg`
+evaluator; it never learns which features a build enables. Offsetting a syntax
+record preserves the scope. This grammar-owned step performs no filesystem or
+Git access. Vue combines
 dependencies from its JavaScript or TypeScript script regions while preserving
 document line numbers.
 
 Project orchestration builds one read-only file index from discovery paths and
 package identities. It joins relative candidates to the source directory and
-root candidates to the repository. A reference becomes an internal edge only
-when exactly one file matches. No match is external when the language supplied
+root candidates to the repository. A relative Rust candidate is joined instead
+to the module directory the declaring file owns — its own directory for
+`mod.rs`, `lib.rs`, and `main.rs`, and a directory named after the file
+otherwise — wherever that reading resolves, so `mod child;` in `a.rs` names
+`a/child.rs`; the sibling reading stays for every other layout. A reference
+becomes an internal edge only when exactly one file matches. No match is external when the language supplied
 a fixed package target; a dynamic or malformed target stays unresolved. Several
 matches are ambiguous. Supported project configuration is read as data and is
 never executed.
 
-Analysis owns one flat file edge per directed file pair. Repeated references
-increment its reference count and retain representative locations. Package
-edges are derived from unique cross-package file pairs and record both file-pair
-and reference counts. External dependencies and resolution diagnostics remain
-outside the internal graph.
+A recorded reference carries `role.max(Test)` when its scope is test, so a
+`#[cfg(test)]` import inside production source becomes a test relation while a
+fixture or generated file keeps its own role. A Rust file is reclassified as
+test source when it has at least one module declaration and every one of them is
+test-scoped, decided by a deterministic fixpoint before findings, ratings,
+coverage, and history evidence read a role, on the codebase path and on both
+sides of a diff. Explicit configuration, generated markers, and path rules keep
+precedence; the rule only replaces the primary fallback.
+
+Analysis owns one flat file edge per directed file pair, relation, role, and
+trust combination, so one pair can carry both a primary and a test `uses` row. Repeated references increment an edge's reference count and
+retain representative locations. Package edges are derived from unique
+cross-package file pairs and record both file-pair and reference counts.
+External dependencies and resolution diagnostics remain outside the internal
+graph.
+
+Two predicates separate the questions an edge can answer.
+`DependencyEdge::affects_verdict` is evidence eligibility: trusted parsed `uses`
+from primary, test, example, or benchmark source. `enters_verdict_graph`
+narrows that to primary source alone. Package dependency edges, the package
+cycle graph, the file cycle graph, fan-in, fan-out, instability, and the
+stable-dependency comparison are built from `enters_verdict_graph`, because a
+verdict describes the structure of the code that ships. Dependency coverage,
+orphan fan-in, and coupling explanation keep `affects_verdict`, because a file
+its own tests import is used and two packages linked only by a test import do
+have a code dependency. Coupling explanation reads a separate `explanation_pairs`
+set — cross-package file-edge pairs satisfying `affects_verdict`, unioned with
+manifest-name pairs — supplied on both sides of a diff.
+
+The file cycle graph carries one further exclusion: a `uses` relation between a
+file pair that also carries a `module_ownership` relation in either direction
+does not enter it, because a Rust `mod` declaration and the imports that
+accompany it are one wiring relationship. The graph build and the witness lookup
+share the predicate, so a suppressed pair yields neither a cycle nor a witness.
+The exclusion is pairwise and local to that graph: a cycle passing through an
+owning pair by way of other files still reports, and fan-in, fan-out,
+instability, and orphan facts are unaffected.
 
 Separate pure modules calculate strongly connected components, stable concise
 cycle witnesses, unique fan-in and fan-out, exact instability fractions, and
@@ -226,8 +268,9 @@ A package cycle is a High architecture finding. A file cycle inside one package
 is Watch. A package that depends on a less stable package with at least two
 references into it is a Watch stable-dependency finding, decided by integer
 cross-multiplication of the degree operands rather than a float. A supported
-primary file with no incoming verdict edge that is not an entry file is a
-descriptive orphan fact. Fan-in, fan-out, instability, reference counts, and coverage are
+primary file with no incoming trusted eligible `uses` relation that is not an
+entry file is a descriptive orphan fact, so a file imported only by its own
+tests is not an orphan. Fan-in, fan-out, instability, reference counts, and coverage are
 descriptive facts. Architecture findings and source findings use separate flat
 tables and separate summary counts.
 

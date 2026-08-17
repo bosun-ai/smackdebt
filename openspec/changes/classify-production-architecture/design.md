@@ -3,7 +3,7 @@
 Architecture verdicts are built in `crates/project` from the relations that
 `crates/languages` extracts and `crates/analysis` types. Today a single
 predicate, `DependencyEdge::affects_verdict()`
-(`crates/analysis/src/architecture.rs:148-152`), decides both what is *evidence*
+(`crates/analysis/src/architecture.rs`), decides both what is *evidence*
 and what may *produce a verdict*: it accepts trusted parsed `uses` from primary,
 test, example, and benchmark source. Every architecture graph is built from that
 one set.
@@ -47,7 +47,7 @@ FileCycle findings for exactly this.
 
 A new predicate `DependencyEdge::enters_verdict_graph()` is added, defined as
 `Uses && Trusted && Primary`. The existing `affects_verdict()`
-(`crates/analysis/src/architecture.rs:148-152`) is **kept unchanged** as the
+(`DependencyEdge::affects_verdict` in `crates/analysis/src/architecture.rs`) is **kept unchanged** as the
 evidence-eligibility predicate — trusted parsed `uses` from primary, test,
 example, and benchmark source — because two different questions are being asked
 and one predicate cannot answer both.
@@ -57,7 +57,7 @@ Call-site disposition of the existing `affects_verdict()` uses:
 | Call site | Predicate after this change | Why |
 | --- | --- | --- |
 | Package dependency edges, package cycle graph, file cycle graph, package-graph fan-in/fan-out/instability, stable-dependency comparison | `enters_verdict_graph()` | These are the verdicts. |
-| Coverage partitioning (`crates/project/src/project.rs:2181`) | `affects_verdict()`, unchanged | Coverage counts extracted references, not verdicts; a test import is still resolved-internal. |
+| Coverage partitioning (`DependencyPartitionCounts::record` in `crates/project/src/project.rs`) | `affects_verdict()`, unchanged | Coverage counts extracted references, not verdicts; a test import is still resolved-internal. |
 | Coupling explanation | `affects_verdict()`, unchanged | See below. |
 | Orphan fan-in | `affects_verdict()`, unchanged | See below. |
 | Worst-offender eligibility filter (`crates/analysis/src/report.rs`) | unchanged | Unit findings, not architecture edges. |
@@ -69,14 +69,14 @@ and whose endpoints are in different packages, unioned with the manifest-name
 explanation pairs — is threaded through `ArchitectureBuild` into
 `evolution::finish` / `unexplained_coupling` / `compare_evolution`. It must be
 supplied at **both** call sites, including the diff's **before** side
-(`crates/project/src/project.rs:503-519` and `:2024-2031`); omitting the before
+(`analyze_diff` and the codebase path in `crates/project/src/project.rs`); omitting the before
 side silently produces spurious Worse `FindingIntroduced` rows on
 dev-dependency repositories.
 
 ### Rust `cfg(test)` scope, stated as an exact matching rule
 
 A new `DependencyScope { Default, Test }` field is added to `DependencySyntax`
-(`crates/analysis/src/source.rs:74-131`). Detection lives in
+(`crates/analysis/src/source.rs`). Detection lives in
 `crates/languages/src/dependency.rs::rust`: for the item declaring the reference
 and for each ancestor `mod_item`, scan the immediately preceding
 `attribute_item` siblings (outer attributes), and match when
@@ -100,7 +100,7 @@ The rule is deliberately syntactic. It is not a `cfg` evaluator, it does not
 know which features are enabled, and it does not need to: an item reachable only
 when `test` is set is test code regardless of what else the predicate says.
 
-**Trap:** `crates/languages/src/engine.rs:252` `offset_dependency` rebuilds the
+**Trap:** `offset_dependency` in `crates/languages/src/engine.rs` rebuilds the
 `DependencySyntax` struct. It must carry the scope through, or the scope is
 silently dropped for every reference that is offset — this compiles and passes
 type checks.
@@ -114,13 +114,13 @@ every non-primary role — test, example, benchmark, fixture, generated —
 unchanged. A fixture file does not become test code because it contains a
 `cfg(test)` module.
 
-The rule is applied in all four record functions
-(`crates/project/src/project.rs:2234`, `:2265`, `:2295`, `:2324`) so no path
-into the graph can bypass it.
+The rule is applied wherever a reference is recorded — `record_internal`,
+`record_external`, `record_package`, and `record_diagnostic` in
+`crates/project/src/project.rs` — so no path into the graph can bypass it.
 
 Role remains a separate evidence field, as
 `architecture-analysis` "Static relation kind is independent from evidence"
-(`openspec/specs/architecture-analysis/spec.md:133-144`) requires. Scope adds
+in `openspec/specs/architecture-analysis/spec.md` requires. Scope adds
 **no** relation kind and no new column: it only decides which role an already
 existing relation carries. A consequence is that one file pair may now emit two
 edge rows, one Primary and one Test, where a primary file both imports a module
@@ -198,9 +198,9 @@ and exclude those package edges. It is rejected on two grounds.
 
 The file cycle graph excludes a `uses` edge between files A and B whenever a
 `module_ownership` relation exists between the same unordered pair, in either
-direction. The witness lookup (`crates/project/src/project.rs:2848-2860`) applies
-the identical predicate, so reported witnesses and detected cycles cannot
-disagree; the exclusion at `:2823` and the one at `:2854` must be mirrored.
+direction. The graph build and the witness lookup in `build_architecture`
+(`crates/project/src/project.rs`) share one `enters_cycle_graph` predicate, so
+reported witnesses and detected cycles cannot disagree.
 
 The rejected alternative is to suppress two-node cycles between an owning pair.
 It does not work: tokio's `fs/` is a single large strongly connected component
@@ -272,7 +272,7 @@ narrow it to the verdict graph.
    terminal and JSON evidence.
 4. Ownership-pair cycle exclusion in the graph and the witness lookup, extending
    `rust_module_ownership_cycle_is_context_while_mutual_uses_are_a_verdict`
-   (`crates/project/src/project.rs:4928`) with a suppressed parent↔child case, a
+   (`crates/project/src/project.rs`) with a suppressed parent↔child case, a
    surviving sibling cycle, and a surviving mutual-uses pair.
 5. README and `ARCHITECTURE.md`, then the five-repository verification matrix and
    a serial/parallel byte-identity check on tokio JSON.

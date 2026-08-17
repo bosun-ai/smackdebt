@@ -311,6 +311,33 @@ fan-out is the number it depends on. Instability is `fan-out / (fan-in +
 fan-out)` and is printed as its exact integer fraction, so a package that
 depends on less stable code reads `instability 1/4 → 2/3`.
 
+Architecture verdicts describe the code that ships. Package dependency edges,
+package and file cycles, fan-in, fan-out, instability, and stable-dependency
+findings are built from primary-role relations only. Test, example, and
+benchmark relations stay complete in the machine report as context: they appear
+in JSON and in `--all`, they still count toward dependency coverage, and they
+still explain change coupling, so a package pair linked only by a test import is
+never reported as coupling with `no code dependency`.
+
+A Rust reference declared under a `#[cfg(test)]` scope carries the test role even
+when the file around it is production source. The rule is syntactic: Smackdebt
+matches a `cfg` attribute on the reference's own item or on any enclosing `mod`
+whose predicate names `test` outside a `not(...)`, so `#[cfg(test)]`,
+`#[cfg(all(test, not(loom)))]`, and `#[cfg(any(test, fuzzing))]` match while
+`#[cfg(not(test))]`, `#[cfg(feature = "test")]`, and `#[cfg_attr(test, ...)]` do
+not. Smackdebt does not evaluate configuration predicates and never learns which
+features a build enables. A file whose module declarations are all test-scoped —
+the file named by `#[cfg(test)] mod tests;` and nothing else — is test source
+itself.
+
+Rust module wiring is not a cycle. A Rust file that is not `mod.rs`, `lib.rs`, or
+`main.rs` owns a directory of its own name, so `mod child;` in `a.rs` names
+`a/child.rs` rather than a sibling. When two files already own each other through
+a module declaration, the imports between that pair are excluded from the file
+cycle graph. The exclusion is limited to that pair: every other relation stays,
+so a cycle that merely passes through an owning pair by way of other files still
+reports, and cycles between sibling modules are untouched.
+
 Code and architecture results remain separate. Lower source complexity does not
 cancel an introduced package cycle. In diff output an introduced cycle is
 worse, a removed cycle is better, and an ordinary edge change is changed.
@@ -369,7 +396,10 @@ into that one row, and per-role history stays in JSON. A scope and its own
 ancestor never form a pair, because commits they share are structural rather
 than hidden coupling. `no code dependency` means no trusted eligible `uses`
 relation exists in either direction, including relations resolved through a
-declared manifest name.
+declared manifest name and relations whose role is test, example, or benchmark.
+Coupling explanation is a claim about the repository rather than about
+production code, so it keeps the wider set of relations that architecture
+verdicts leave out.
 
 Smackdebt follows detected renames back from files that still exist and assigns
 their history to the files' current packages. It does not reconstruct removed
@@ -426,7 +456,8 @@ file is not ignored only because its directory looks generated.
 Every selected file has one source role: primary, test, example, benchmark,
 fixture, or generated. Classification checks explicit `source_roles`
 configuration first, then language-owned generated markers, generic filenames
-and paths, and finally primary. Different matches at the same level are an
+and paths, then a Rust file whose every module declaration is test-scoped, and
+finally primary. Different matches at the same level are an
 invalid configuration and exit with status 2. Primary, test, example, and
 benchmark source affect default verdicts. Fixture and generated source remain
 visible for inspection without affecting those verdicts.
@@ -500,7 +531,9 @@ facts remain advisory in JSON and `--all` without entering health, default
 findings, architecture verdicts, coupling, or diff verdicts.
 
 Static relations identify `uses` or `module_ownership` independently from
-role, trust, resolution, and source spans. History rows expose role-aware churn,
+role, trust, resolution, and source spans. One file pair can carry more than one
+relation row, because a file that imports a module normally and again inside a
+`#[cfg(test)]` module produces one primary and one test relation. History rows expose role-aware churn,
 coupling operands, and contributor concentration without contributor identity.
 Hotspots, size findings, orphan files, stable-dependency findings, and
 knowledge-concentration findings each own a table and state their own `kind`.
