@@ -2113,7 +2113,12 @@ fn long_responsive_fixture() -> tempfile::TempDir {
             .join(source_package)
             .join(source_directory)
             .join("choice.js"),
-        "export default 1;\n",
+        // The long source file is configured as test source, so the primary
+        // half of the package cycle has to come from a primary file: a verdict
+        // graph carries primary relations only.
+        format!(
+            "import target from '../../{target_package}/{target_directory}/{target_file}';\nexport default target;\n"
+        ),
     )
     .unwrap();
     fs::write(

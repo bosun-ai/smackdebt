@@ -18,8 +18,7 @@ FINDINGS
 ARCHITECTURE
   high package dependency cycle
         very-long-source-package-name/
-        very-long-source-directory-name/
-        very-long-source-file-name.js
+        very-long-source-directory-name/choice.js
         → very-long-target-package-name/
         very-long-target-directory-name/
         very-long-target-file-name.js

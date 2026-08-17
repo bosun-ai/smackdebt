@@ -311,6 +311,7 @@ pub const fn smackdebt_analysis::DependencyCoverage::unresolved_package_uses(sel
 pub struct smackdebt_analysis::DependencyEdge
 impl smackdebt_analysis::DependencyEdge
 pub const fn smackdebt_analysis::DependencyEdge::affects_verdict(&self) -> bool
+pub const fn smackdebt_analysis::DependencyEdge::enters_verdict_graph(&self) -> bool
 pub const fn smackdebt_analysis::DependencyEdge::id(&self) -> smackdebt_analysis::DependencyEdgeId
 pub fn smackdebt_analysis::DependencyEdge::locations(&self) -> &[smackdebt_analysis::SourceSpan]
 pub fn smackdebt_analysis::DependencyEdge::new(smackdebt_analysis::DependencyEdgeId, smackdebt_analysis::FileId, smackdebt_analysis::FileId, u32, alloc::vec::Vec<smackdebt_analysis::SourceSpan>) -> Self
@@ -365,7 +366,7 @@ pub const fn smackdebt_analysis::DiffCounts::worse(self) -> u32
 pub struct smackdebt_analysis::EvolutionAccumulator
 impl smackdebt_analysis::EvolutionAccumulator
 pub fn smackdebt_analysis::EvolutionAccumulator::accept(&mut self, smackdebt_analysis::HistoryCommitFact)
-pub fn smackdebt_analysis::EvolutionAccumulator::finish(self, smackdebt_analysis::HistoryCoverage, usize, usize, &smackdebt_analysis::PackageContainment, &[smackdebt_analysis::PackageEdge], core::option::Option<&[smackdebt_analysis::PackageEdge]>) -> smackdebt_analysis::EvolutionaryReportFacts
+pub fn smackdebt_analysis::EvolutionAccumulator::finish(self, smackdebt_analysis::HistoryCoverage, usize, usize, &smackdebt_analysis::PackageContainment, &alloc::collections::btree::set::BTreeSet<(smackdebt_analysis::PackageId, smackdebt_analysis::PackageId)>, core::option::Option<&alloc::collections::btree::set::BTreeSet<(smackdebt_analysis::PackageId, smackdebt_analysis::PackageId)>>) -> smackdebt_analysis::EvolutionaryReportFacts
 pub fn smackdebt_analysis::EvolutionAccumulator::register_source(&mut self, smackdebt_analysis::FileId, smackdebt_analysis::PackageId, smackdebt_analysis::SourceRole, smackdebt_analysis::SourceTrust)
 pub struct smackdebt_analysis::EvolutionaryComparison
 impl smackdebt_analysis::EvolutionaryComparison
@@ -889,7 +890,7 @@ pub fn smackdebt_analysis::aggregate_scopes(&mut [smackdebt_analysis::Scope], &[
 pub fn smackdebt_analysis::change_coupling(&[smackdebt_analysis::HistoryCommitFact], &smackdebt_analysis::PackageContainment) -> alloc::vec::Vec<smackdebt_analysis::ChangeCoupling>
 pub fn smackdebt_analysis::churn(usize, usize, &[smackdebt_analysis::HistoryCommitFact]) -> (alloc::vec::Vec<smackdebt_analysis::FileHistory>, alloc::vec::Vec<smackdebt_analysis::PackageHistory>)
 pub fn smackdebt_analysis::compare_architecture(&[(smackdebt_analysis::PackageId, smackdebt_analysis::PackageId)], &[(smackdebt_analysis::PackageId, smackdebt_analysis::PackageId)], &[smackdebt_analysis::PackageCycle], &[smackdebt_analysis::PackageCycle]) -> alloc::vec::Vec<smackdebt_analysis::ArchitectureComparison>
-pub fn smackdebt_analysis::compare_evolution(&[smackdebt_analysis::ChangeCoupling], &[smackdebt_analysis::PackageEdge], &[smackdebt_analysis::PackageEdge]) -> alloc::vec::Vec<smackdebt_analysis::EvolutionaryComparison>
+pub fn smackdebt_analysis::compare_evolution(&[smackdebt_analysis::ChangeCoupling], &alloc::collections::btree::set::BTreeSet<(smackdebt_analysis::PackageId, smackdebt_analysis::PackageId)>, &alloc::collections::btree::set::BTreeSet<(smackdebt_analysis::PackageId, smackdebt_analysis::PackageId)>) -> alloc::vec::Vec<smackdebt_analysis::EvolutionaryComparison>
 pub fn smackdebt_analysis::compare_units(&[smackdebt_analysis::UnitFact], &[smackdebt_analysis::UnitFact], smackdebt_analysis::HealthPolicy) -> alloc::vec::Vec<smackdebt_analysis::Comparison>
 pub fn smackdebt_analysis::contributor_concentration(&[smackdebt_analysis::HistoryCommitFact]) -> alloc::vec::Vec<smackdebt_analysis::ContributorConcentration>
 pub fn smackdebt_analysis::cycle_witness(&[usize], &[(usize, usize)]) -> core::option::Option<alloc::vec::Vec<(usize, usize)>>
@@ -902,5 +903,5 @@ pub fn smackdebt_analysis::orphan_files(&[smackdebt_analysis::OrphanCandidate<'_
 pub fn smackdebt_analysis::qualifies_for_finding(smackdebt_analysis::ChangeCoupling) -> bool
 pub fn smackdebt_analysis::stable_dependency_findings(&[smackdebt_analysis::PackageEdge], &[smackdebt_analysis::PackageGraphMeasurement]) -> alloc::vec::Vec<smackdebt_analysis::StableDependencyFinding>
 pub fn smackdebt_analysis::strongly_connected_components(usize, &[(usize, usize)]) -> alloc::vec::Vec<alloc::vec::Vec<usize>>
-pub fn smackdebt_analysis::unexplained_coupling(&[smackdebt_analysis::ChangeCoupling], &[smackdebt_analysis::PackageEdge]) -> alloc::vec::Vec<smackdebt_analysis::EvolutionaryFinding>
+pub fn smackdebt_analysis::unexplained_coupling(&[smackdebt_analysis::ChangeCoupling], &alloc::collections::btree::set::BTreeSet<(smackdebt_analysis::PackageId, smackdebt_analysis::PackageId)>) -> alloc::vec::Vec<smackdebt_analysis::EvolutionaryFinding>
 pub type smackdebt_analysis::PackageCycle = (alloc::vec::Vec<smackdebt_analysis::PackageId>, alloc::vec::Vec<smackdebt_analysis::PackageId>)

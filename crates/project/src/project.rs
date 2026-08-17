@@ -500,8 +500,8 @@ pub(super) fn analyze_diff(request: &DiffRequest) -> Result<ProjectReport, Proje
         .collect::<Vec<_>>();
     let history = load_evolution(repository.root(), request.history_days, &history_files);
     let history_diagnostic = history.diagnostic.clone();
-    let current_package_edges = current_architecture.package_edges.clone();
-    let before_package_edges = before_architecture.package_edges.clone();
+    let current_explanation_pairs = current_architecture.explanation_pairs.clone();
+    let before_explanation_pairs = before_architecture.explanation_pairs.clone();
     work.record_algorithm_pass();
     let containment = PackageContainment::from_paths(
         &package_roots
@@ -514,8 +514,8 @@ pub(super) fn analyze_diff(request: &DiffRequest) -> Result<ProjectReport, Proje
         builder.files().len(),
         package_roots.len(),
         &containment,
-        &current_package_edges,
-        Some(&before_package_edges),
+        &current_explanation_pairs,
+        Some(&before_explanation_pairs),
     );
     let evolutionary_findings = evolution.findings().to_vec();
     let evolutionary_comparisons = evolution.comparisons().to_vec();
@@ -2012,7 +2012,7 @@ impl<'a> CodebaseReportBuilder<'a> {
             &self.manifest_names,
         );
         let architecture_findings_for_links = architecture.findings.clone();
-        let package_edges = architecture.package_edges.clone();
+        let explanation_pairs = architecture.explanation_pairs.clone();
         work.record_algorithm_pass();
         let containment = PackageContainment::from_paths(
             &self
@@ -2026,7 +2026,7 @@ impl<'a> CodebaseReportBuilder<'a> {
             self.files.len(),
             self.package_roots.len(),
             &containment,
-            &package_edges,
+            &explanation_pairs,
             None,
         );
         let evolutionary_findings = evolution.findings().to_vec();
@@ -2113,6 +2113,9 @@ struct ArchitectureBuild {
     findings: Vec<ArchitectureFinding>,
     finding_links: Vec<(ScopeId, ArchitectureFindingId)>,
     cycles: Vec<smackdebt_analysis::PackageCycle>,
+    /// Cross-package pairs that explain change coupling, whether or not they
+    /// enter a verdict graph.
+    explanation_pairs: BTreeSet<(PackageId, PackageId)>,
 }
 
 #[derive(Clone)]
@@ -2228,6 +2231,9 @@ struct ReferenceTables {
     diagnostic_values: BTreeMap<ResolutionDiagnosticKey, DependencyEdgeValue>,
     manifest_package_values:
         BTreeMap<(PackageId, PackageId), (std::collections::BTreeSet<FileId>, u32)>,
+    /// Manifest-name package pairs that explain change coupling without
+    /// entering a verdict graph, such as a dev-dependency test import.
+    manifest_explanation_pairs: BTreeSet<(PackageId, PackageId)>,
 }
 
 /// The role one reference carries as evidence.
@@ -2327,6 +2333,10 @@ impl ReferenceTables {
                 && role.affects_verdict()
                 && dependencies.trust == SourceTrust::Trusted)
         {
+            return;
+        }
+        self.manifest_explanation_pairs.insert((source, target));
+        if role != SourceRole::Primary {
             return;
         }
         let value = self
@@ -2680,6 +2690,7 @@ fn build_architecture(
         external_values,
         diagnostic_values,
         manifest_package_values,
+        manifest_explanation_pairs,
     } = tables;
 
     let diagnostics = diagnostic_values
@@ -2722,6 +2733,7 @@ fn build_architecture(
 
     let mut package_values: BTreeMap<(PackageId, PackageId), (u32, u32, Vec<DependencyEdgeId>)> =
         BTreeMap::new();
+    let mut explanation_pairs: BTreeSet<(PackageId, PackageId)> = BTreeSet::new();
     for edge in &file_edges {
         if !edge.affects_verdict() {
             continue;
@@ -2738,13 +2750,19 @@ fn build_architecture(
             .unwrap_or_else(|| Path::new(files[edge.target().index()].path()));
         let source = package_of(source_path, side_package_roots, package_roots);
         let target = package_of(target_path, side_package_roots, package_roots);
-        if source != target {
-            let value = package_values.entry((source, target)).or_default();
-            value.0 += 1;
-            value.1 += edge.references();
-            value.2.push(edge.id());
+        if source == target {
+            continue;
         }
+        explanation_pairs.insert((source, target));
+        if !edge.enters_verdict_graph() {
+            continue;
+        }
+        let value = package_values.entry((source, target)).or_default();
+        value.0 += 1;
+        value.1 += edge.references();
+        value.2.push(edge.id());
     }
+    explanation_pairs.extend(manifest_explanation_pairs);
     for ((source, target), (files, references)) in manifest_package_values {
         let value = package_values.entry((source, target)).or_default();
         value.0 += u32::try_from(files.len()).unwrap_or(u32::MAX);
@@ -2833,15 +2851,23 @@ fn build_architecture(
     }
     let stable_dependencies = stable_dependency_findings(&package_edges, &measurements);
 
-    let file_pairs: Vec<_> = file_edges
+    // Orphan fan-in asks whether anything uses a file at all, so it keeps the
+    // wider evidence predicate: a file its own tests import is used. The cycle
+    // graph is a verdict, so it keeps primary relations only.
+    let orphan_pairs: Vec<_> = file_edges
         .iter()
         .filter(|edge| edge.affects_verdict())
+        .map(|edge| (edge.source().index(), edge.target().index()))
+        .collect();
+    let file_pairs: Vec<_> = file_edges
+        .iter()
+        .filter(|edge| edge.enters_verdict_graph())
         .map(|edge| (edge.source().index(), edge.target().index()))
         .collect();
     let orphans = derive_orphans(
         files,
         dependencies,
-        &file_pairs,
+        &orphan_pairs,
         package_roots,
         manifest_names,
         &index,
@@ -2864,7 +2890,7 @@ fn build_architecture(
                 file_edges
                     .iter()
                     .find(|edge| {
-                        edge.affects_verdict()
+                        edge.enters_verdict_graph()
                             && edge.source().index() == source
                             && edge.target().index() == target
                     })
@@ -2896,6 +2922,7 @@ fn build_architecture(
         findings,
         finding_links,
         cycles,
+        explanation_pairs,
     }
 }
 
@@ -5017,6 +5044,177 @@ mod tests {
             .find(|file| file.path() == path)
             .unwrap_or_else(|| panic!("missing {path}"))
             .id()
+    }
+
+    fn write_crate(root: &Path, name: &str, entry: &str) {
+        fs::create_dir_all(root.join(format!("crates/{name}/src"))).unwrap();
+        fs::write(
+            root.join(format!("crates/{name}/Cargo.toml")),
+            format!("[package]\nname='{name}'\nversion='0.1.0'\n"),
+        )
+        .unwrap();
+        fs::write(root.join(format!("crates/{name}/src/lib.rs")), entry).unwrap();
+    }
+
+    #[test]
+    fn a_test_role_relation_stays_evidence_and_never_closes_a_package_cycle() {
+        let root = tempfile::tempdir().unwrap();
+        write_crate(
+            root.path(),
+            "alpha",
+            "use beta::helper;\npub fn run() -> u32 { helper() }\n",
+        );
+        write_crate(
+            root.path(),
+            "beta",
+            "pub fn helper() -> u32 { 1 }\n#[cfg(test)]\nmod tests {\n    use alpha::run;\n    #[test]\n    fn covers() { assert_eq!(run(), 1); }\n}\n",
+        );
+        fs::create_dir_all(root.path().join("crates/beta/tests")).unwrap();
+        fs::write(
+            root.path().join("crates/beta/tests/it.rs"),
+            "use alpha::run;\n#[test]\nfn integrates() { assert_eq!(run(), 1); }\n",
+        )
+        .unwrap();
+
+        let result = analyze_codebase(&CodebaseRequest::new(root.path())).unwrap();
+        let report = result.report();
+        let alpha = file_id(report, "crates/alpha/src/lib.rs");
+        let beta = file_id(report, "crates/beta/src/lib.rs");
+
+        let mut back_edges: Vec<_> = report
+            .dependency_edges()
+            .iter()
+            .filter(|edge| edge.target() == alpha)
+            .map(|edge| (edge.source() == beta, edge.role()))
+            .collect();
+        back_edges.sort();
+        assert_eq!(
+            back_edges,
+            [(false, SourceRole::Test), (true, SourceRole::Test)],
+            "the test-role relations into alpha must stay in the machine report"
+        );
+
+        let package_edges: Vec<_> = report
+            .package_edges()
+            .iter()
+            .map(|edge| (edge.source(), edge.target()))
+            .collect();
+        let alpha_package = report.files()[alpha.index()].package().unwrap();
+        let beta_package = report.files()[beta.index()].package().unwrap();
+        assert_eq!(package_edges, [(alpha_package, beta_package)]);
+        assert!(
+            report
+                .architecture_findings()
+                .iter()
+                .all(|finding| finding.kind() != ArchitectureFindingKind::PackageCycle)
+        );
+        assert!(report.stable_dependency_findings().is_empty());
+    }
+
+    #[test]
+    fn a_primary_file_imported_only_by_tests_is_not_an_orphan() {
+        let root = tempfile::tempdir().unwrap();
+        fs::create_dir_all(root.path().join("src")).unwrap();
+        fs::write(
+            root.path().join("Cargo.toml"),
+            "[package]\nname='orphans'\nversion='0.1.0'\n",
+        )
+        .unwrap();
+        fs::write(
+            root.path().join("src/lib.rs"),
+            "#[cfg(test)]\nmod tests {\n    use crate::only_tests::sample;\n    #[test]\n    fn runs() { assert!(sample()); }\n}\n",
+        )
+        .unwrap();
+        fs::write(
+            root.path().join("src/only_tests.rs"),
+            "pub fn sample() -> bool { true }\n",
+        )
+        .unwrap();
+
+        let result = analyze_codebase(&CodebaseRequest::new(root.path())).unwrap();
+        let report = result.report();
+        let only_tests = file_id(report, "src/only_tests.rs");
+        assert!(
+            report
+                .dependency_edges()
+                .iter()
+                .any(|edge| edge.target() == only_tests && edge.role() == SourceRole::Test)
+        );
+        assert!(
+            report
+                .orphan_files()
+                .iter()
+                .all(|orphan| orphan.file() != only_tests),
+            "a file its own tests import is used"
+        );
+    }
+
+    #[test]
+    fn a_primary_edge_reports_a_stable_dependency_violation_that_test_edges_do_not() {
+        let violating = tempfile::tempdir().unwrap();
+        write_crate(
+            violating.path(),
+            "x",
+            "use a::run;\npub fn x() -> u32 { run() }\n",
+        );
+        write_crate(
+            violating.path(),
+            "a",
+            "use b::one;\nuse b::two;\npub fn run() -> u32 { one() + two() }\n",
+        );
+        write_crate(
+            violating.path(),
+            "b",
+            "use c::cee;\nuse d::dee;\npub fn one() -> u32 { cee() }\npub fn two() -> u32 { dee() }\n",
+        );
+        write_crate(violating.path(), "c", "pub fn cee() -> u32 { 1 }\n");
+        write_crate(violating.path(), "d", "pub fn dee() -> u32 { 2 }\n");
+
+        let result = analyze_codebase(&CodebaseRequest::new(violating.path())).unwrap();
+        let report = result.report();
+        let package_name = |package: smackdebt_analysis::PackageId| {
+            report.packages()[package.index()].path().to_owned()
+        };
+        let findings: Vec<_> = report
+            .stable_dependency_findings()
+            .iter()
+            .map(|finding| {
+                (
+                    package_name(finding.source()),
+                    package_name(finding.target()),
+                    finding.evidence().references(),
+                )
+            })
+            .collect();
+        assert_eq!(
+            findings,
+            [("crates/a".to_owned(), "crates/b".to_owned(), 2)]
+        );
+
+        let scoped = tempfile::tempdir().unwrap();
+        write_crate(
+            scoped.path(),
+            "x",
+            "use a::run;\npub fn x() -> u32 { run() }\n",
+        );
+        write_crate(
+            scoped.path(),
+            "a",
+            "pub fn run() -> u32 { 3 }\n#[cfg(test)]\nmod tests {\n    use b::one;\n    use b::two;\n    #[test]\n    fn covers() { assert_eq!(one() + two(), 3); }\n}\n",
+        );
+        write_crate(
+            scoped.path(),
+            "b",
+            "use c::cee;\nuse d::dee;\npub fn one() -> u32 { cee() }\npub fn two() -> u32 { dee() }\n",
+        );
+        write_crate(scoped.path(), "c", "pub fn cee() -> u32 { 1 }\n");
+        write_crate(scoped.path(), "d", "pub fn dee() -> u32 { 2 }\n");
+
+        let result = analyze_codebase(&CodebaseRequest::new(scoped.path())).unwrap();
+        assert!(
+            result.report().stable_dependency_findings().is_empty(),
+            "a test-scoped import is not a production dependency direction"
+        );
     }
 
     #[test]

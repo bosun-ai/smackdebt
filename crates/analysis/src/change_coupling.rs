@@ -1,9 +1,9 @@
 use std::collections::{BTreeMap, BTreeSet};
 
-use crate::evolution::has_static_edge;
+use crate::evolution::pair_is_explained;
 use crate::{
-    ChangeCoupling, EvolutionaryFinding, EvolutionaryFindingId, HistoryCommitFact, PackageEdge,
-    PackageId, SourceRole, SourceTrust,
+    ChangeCoupling, EvolutionaryFinding, EvolutionaryFindingId, HistoryCommitFact, PackageId,
+    SourceRole, SourceTrust,
 };
 
 /// The strongest source evidence one package contributed to a commit.
@@ -165,12 +165,12 @@ fn eligible_coupling_rows(
 
 pub fn unexplained_coupling(
     coupling: &[ChangeCoupling],
-    static_edges: &[PackageEdge],
+    explanation_pairs: &BTreeSet<(PackageId, PackageId)>,
 ) -> Vec<EvolutionaryFinding> {
     coupling
         .iter()
         .filter(|pair| qualifies_for_finding(**pair))
-        .filter(|pair| !has_static_edge(static_edges, pair.left(), pair.right()))
+        .filter(|pair| !pair_is_explained(explanation_pairs, pair.left(), pair.right()))
         .enumerate()
         .map(|(index, pair)| {
             EvolutionaryFinding::new(EvolutionaryFindingId::from_index(index), *pair)

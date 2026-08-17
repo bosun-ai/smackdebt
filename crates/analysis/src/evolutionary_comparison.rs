@@ -1,19 +1,20 @@
 use crate::change_coupling::qualifies_for_finding;
-use crate::evolution::has_static_edge;
+use crate::evolution::pair_is_explained;
 use crate::{
     ChangeCoupling, ComparisonDirection, EvolutionaryComparison, EvolutionaryComparisonId,
-    EvolutionaryComparisonKind, PackageEdge,
+    EvolutionaryComparisonKind, PackageId,
 };
+use std::collections::BTreeSet;
 
 pub fn compare_evolution(
     coupling: &[ChangeCoupling],
-    before: &[PackageEdge],
-    after: &[PackageEdge],
+    before: &BTreeSet<(PackageId, PackageId)>,
+    after: &BTreeSet<(PackageId, PackageId)>,
 ) -> Vec<EvolutionaryComparison> {
     let mut result = Vec::new();
     for pair in coupling.iter().filter(|pair| qualifies_for_finding(**pair)) {
-        let before_explained = has_static_edge(before, pair.left(), pair.right());
-        let after_explained = has_static_edge(after, pair.left(), pair.right());
+        let before_explained = pair_is_explained(before, pair.left(), pair.right());
+        let after_explained = pair_is_explained(after, pair.left(), pair.right());
         let value = match (before_explained, after_explained) {
             (true, false) => Some((
                 EvolutionaryComparisonKind::FindingIntroduced,

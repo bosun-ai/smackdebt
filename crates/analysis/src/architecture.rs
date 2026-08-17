@@ -150,6 +150,17 @@ impl DependencyEdge {
             && self.role.affects_verdict()
             && matches!(self.trust, SourceTrust::Trusted)
     }
+    /// Whether this relation may produce an architecture verdict.
+    ///
+    /// A verdict describes the structure of the code that ships, so only
+    /// trusted parsed `uses` from primary source enters a verdict graph.
+    /// Test, example, and benchmark relations stay evidence through
+    /// [`Self::affects_verdict`].
+    pub const fn enters_verdict_graph(&self) -> bool {
+        matches!(self.relation, StaticRelationKind::Uses)
+            && matches!(self.role, SourceRole::Primary)
+            && matches!(self.trust, SourceTrust::Trusted)
+    }
 }
 
 #[derive(Clone, Debug, Eq, PartialEq)]
@@ -734,7 +745,56 @@ impl ExternalDependency {
 
 #[cfg(test)]
 mod tests {
-    use super::DependencyCoverage;
+    use super::{
+        DependencyCoverage, DependencyEdge, DependencyEdgeId, FileId, SourceRole, SourceTrust,
+        StaticRelationKind,
+    };
+
+    fn edge(role: SourceRole, trust: SourceTrust, relation: StaticRelationKind) -> DependencyEdge {
+        DependencyEdge::new(
+            DependencyEdgeId::from_index(0),
+            FileId::from_index(0),
+            FileId::from_index(1),
+            1,
+            Vec::new(),
+        )
+        .with_relation(relation)
+        .with_evidence(role, trust)
+    }
+
+    #[test]
+    fn only_trusted_primary_uses_enter_a_verdict_graph_while_evidence_stays_wider() {
+        let primary = edge(
+            SourceRole::Primary,
+            SourceTrust::Trusted,
+            StaticRelationKind::Uses,
+        );
+        assert!(primary.enters_verdict_graph());
+        assert!(primary.affects_verdict());
+
+        for role in [SourceRole::Test, SourceRole::Example, SourceRole::Benchmark] {
+            let value = edge(role, SourceTrust::Trusted, StaticRelationKind::Uses);
+            assert!(!value.enters_verdict_graph(), "{role:?} entered a verdict");
+            assert!(value.affects_verdict(), "{role:?} stopped being evidence");
+        }
+
+        assert!(
+            !edge(
+                SourceRole::Primary,
+                SourceTrust::Advisory,
+                StaticRelationKind::Uses
+            )
+            .enters_verdict_graph()
+        );
+        assert!(
+            !edge(
+                SourceRole::Primary,
+                SourceTrust::Trusted,
+                StaticRelationKind::ModuleOwnership
+            )
+            .enters_verdict_graph()
+        );
+    }
 
     #[test]
     fn dependency_evidence_partitions_have_one_exact_total() {

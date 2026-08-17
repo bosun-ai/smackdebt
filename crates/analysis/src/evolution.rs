@@ -1,4 +1,5 @@
-use crate::{ComparisonDirection, FileId, PackageEdge, PackageId, SourceRole, SourceTrust};
+use crate::{ComparisonDirection, FileId, PackageId, SourceRole, SourceTrust};
+use std::collections::BTreeSet;
 
 macro_rules! evolution_index {
     ($name:ident) => {
@@ -287,8 +288,8 @@ impl EvolutionAccumulator {
         file_count: usize,
         package_count: usize,
         containment: &crate::PackageContainment,
-        static_edges: &[PackageEdge],
-        before_static_edges: Option<&[PackageEdge]>,
+        explanation_pairs: &BTreeSet<(PackageId, PackageId)>,
+        before_explanation_pairs: Option<&BTreeSet<(PackageId, PackageId)>>,
     ) -> EvolutionaryReportFacts {
         let (file_history, package_history) = self.churn.finish(file_count, package_count);
         let (coupling, eligible_coupling) = self.coupling.finish(containment);
@@ -297,13 +298,13 @@ impl EvolutionAccumulator {
             && coverage.eligible_commits() > 0
             && coverage.mapped_eligible_changes() > 0;
         let findings = if history_is_sufficient {
-            crate::unexplained_coupling(&eligible_coupling, static_edges)
+            crate::unexplained_coupling(&eligible_coupling, explanation_pairs)
         } else {
             Vec::new()
         };
         let comparisons = if history_is_sufficient {
-            before_static_edges.map_or_else(Vec::new, |before| {
-                crate::compare_evolution(&eligible_coupling, before, static_edges)
+            before_explanation_pairs.map_or_else(Vec::new, |before| {
+                crate::compare_evolution(&eligible_coupling, before, explanation_pairs)
             })
         } else {
             Vec::new()
@@ -329,10 +330,7 @@ impl EvolutionAccumulator {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::{
-        DependencyEdgeId, HistoryChangeFact, PackageEdgeId, change_coupling,
-        contributor_concentration,
-    };
+    use crate::{HistoryChangeFact, change_coupling, contributor_concentration};
 
     fn commit(
         contributor: usize,
@@ -512,19 +510,17 @@ mod tests {
     }
 
     #[test]
-    fn static_edge_suppresses_finding_and_changes_diff_context() {
+    fn an_explaining_pair_suppresses_finding_and_changes_diff_context() {
         let pair = ChangeCoupling::new(PackageId::from_index(0), PackageId::from_index(1), 3, 3);
-        let edge = PackageEdge::new(
-            PackageEdgeId::from_index(0),
-            PackageId::from_index(0),
-            PackageId::from_index(1),
-            1,
-            1,
-            vec![DependencyEdgeId::from_index(0)],
+        let explained: BTreeSet<_> = [(PackageId::from_index(0), PackageId::from_index(1))].into();
+        assert_eq!(
+            crate::unexplained_coupling(&[pair], &BTreeSet::new()).len(),
+            1
         );
-        assert_eq!(crate::unexplained_coupling(&[pair], &[]).len(), 1);
-        assert!(crate::unexplained_coupling(&[pair], std::slice::from_ref(&edge)).is_empty());
-        let comparisons = crate::compare_evolution(&[pair], &[], &[edge]);
+        assert!(crate::unexplained_coupling(&[pair], &explained).is_empty());
+        let reversed: BTreeSet<_> = [(PackageId::from_index(1), PackageId::from_index(0))].into();
+        assert!(crate::unexplained_coupling(&[pair], &reversed).is_empty());
+        let comparisons = crate::compare_evolution(&[pair], &BTreeSet::new(), &explained);
         assert_eq!(
             comparisons[0].kind(),
             EvolutionaryComparisonKind::FindingRemoved
@@ -540,9 +536,12 @@ mod tests {
         let too_few_shared = ChangeCoupling::new(package_a, package_b, 2, 10);
         let below_similarity = ChangeCoupling::new(package_a, package_b, 3, 16);
 
-        assert_eq!(crate::unexplained_coupling(&[at_boundary], &[]).len(), 1);
-        assert!(crate::unexplained_coupling(&[too_few_shared], &[]).is_empty());
-        assert!(crate::unexplained_coupling(&[below_similarity], &[]).is_empty());
+        assert_eq!(
+            crate::unexplained_coupling(&[at_boundary], &BTreeSet::new()).len(),
+            1
+        );
+        assert!(crate::unexplained_coupling(&[too_few_shared], &BTreeSet::new()).is_empty());
+        assert!(crate::unexplained_coupling(&[below_similarity], &BTreeSet::new()).is_empty());
     }
 
     #[test]
@@ -592,7 +591,7 @@ mod tests {
             2,
             2,
             &crate::PackageContainment::default(),
-            &[],
+            &BTreeSet::new(),
             None,
         );
         assert_eq!(report.coupling.len(), 1);
@@ -628,15 +627,8 @@ mod tests {
             2,
             2,
             &crate::PackageContainment::default(),
-            &[],
-            Some(&[PackageEdge::new(
-                PackageEdgeId::from_index(0),
-                PackageId::from_index(0),
-                PackageId::from_index(1),
-                1,
-                1,
-                vec![DependencyEdgeId::from_index(0)],
-            )]),
+            &BTreeSet::new(),
+            Some(&[(PackageId::from_index(0), PackageId::from_index(1))].into()),
         );
         assert_eq!(report.coupling.len(), 1);
         assert!(report.findings().is_empty());
@@ -686,7 +678,7 @@ mod tests {
             2,
             2,
             &crate::PackageContainment::default(),
-            &[],
+            &BTreeSet::new(),
             None,
         );
 
@@ -737,7 +729,7 @@ mod tests {
             3,
             2,
             &crate::PackageContainment::default(),
-            &[],
+            &BTreeSet::new(),
             None,
         );
 
@@ -1251,9 +1243,15 @@ impl EvolutionaryReportFacts {
     }
 }
 
-pub(crate) fn has_static_edge(edges: &[PackageEdge], left: PackageId, right: PackageId) -> bool {
-    edges.iter().any(|edge| {
-        (edge.source() == left && edge.target() == right)
-            || (edge.source() == right && edge.target() == left)
-    })
+/// Whether a code dependency explains why two packages change together.
+///
+/// The pairs are direction-carrying, so a pair is explained when either
+/// direction is present. They are wider than the verdict graph on purpose: a
+/// dev-dependency test import is still a code dependency.
+pub(crate) fn pair_is_explained(
+    pairs: &BTreeSet<(PackageId, PackageId)>,
+    left: PackageId,
+    right: PackageId,
+) -> bool {
+    pairs.contains(&(left, right)) || pairs.contains(&(right, left))
 }
