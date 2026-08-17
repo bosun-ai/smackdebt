@@ -54,4 +54,4 @@
 - [x] 6.3 Run the five-repository matrix and record that every previously validated true positive survives.
 - [x] 6.4 Spot-check serial and parallel runs for byte-identical terminal and JSON output on tokio.
 - [x] 6.5 Pass formatting, Clippy, workspace tests, architecture checks, performance tests, acceptance evidence, strict OpenSpec validation, and the final diff check.
-- [ ] 6.6 Archive this change.
+- [x] 6.6 Archive this change.
