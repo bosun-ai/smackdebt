@@ -78,6 +78,10 @@ together.
 - **WHEN** two sibling modules import each other, or a cycle merely passes through an owning pair by way of other files
 - **THEN** the cycle is still detected and its witnesses are the relations that remain in the graph
 
+#### Scenario: A module declared only under a test configuration creates no package cycle
+- **WHEN** a primary Rust file declares `#[cfg(test)] mod tests;` and the declared file imports another package that depends back on this one
+- **THEN** the declared file is test source, its relations stay in the machine report, and no package dependency cycle finding is created
+
 #### Scenario: A dev-dependency test import creates no package cycle
 - **WHEN** two packages depend on each other only because a test file or a `#[cfg(test)]` module in one imports the other
 - **THEN** no package dependency cycle finding and no stable-dependency finding is created, and both test-role relations remain present in the machine report

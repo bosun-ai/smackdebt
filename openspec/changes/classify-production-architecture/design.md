@@ -129,6 +129,39 @@ change to `dependency_edges`, not a shape change, so report schema v4 needs no
 delta — but every consumer that assumes `(source, target)` uniqueness must be
 audited, `crates/analysis/src/architecture_comparison.rs` first.
 
+### A file declared only under `#[cfg(test)]` is test source
+
+Scope detection reads the item that declares a reference, so `#[cfg(test)] mod
+tests;` makes the *declaration* test-scoped — but the declared file is a separate
+file whose role comes from its path, and `tokio/src/fs/file/tests.rs` is not on
+any test path. Field verification of the predicate split found tokio's package
+cycle standing for exactly that reason: `tokio/src/fs/file.rs` declares
+`#[cfg(test)] mod tests;`, and the declared file's `tokio-test` imports were
+primary relations.
+
+The rule closes it at classification rather than at the graph: a file is `test`
+when it has at least one module declaration and every one of them is
+test-scoped, where a declaration is test-scoped if its reference is, or if the
+declaring file is itself test source by this rule. The recursion is a
+monotone fixpoint over ordered sets, so it is deterministic and terminates.
+
+Three fences keep it narrow.
+
+- It only ever replaces the **primary fallback**. Configuration, language-owned
+  generated markers, and generic path rules all keep precedence, so
+  `source-signal-quality`'s precedence requirement stays true and gains one
+  explicit step.
+- **Any** non-test declaration keeps the file primary. A file that `main.rs`
+  declares plainly and `lib.rs` declares under `#[cfg(test)]` ships.
+- A file no one declares is untouched, so the rule cannot reach a language
+  without module declarations.
+
+It runs before the report builder reads a role, so one file carries one role in
+findings, ratings, coverage, history evidence, and the graphs alike. The
+alternative — filtering the declared file's edges inside `build_architecture` —
+was rejected because it would leave the file labelled `primary` in the report
+while its relations behaved like test relations.
+
 ### Why not parse `Cargo.toml` `[dev-dependencies]`
 
 The obvious alternative is to read the manifest's `[dev-dependencies]` section

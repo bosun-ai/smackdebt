@@ -22,29 +22,36 @@
 - [x] 2.9 Audit consumers that assume `(source, target)` uniqueness in `dependency_edges`, starting with the architecture comparison.
 - [ ] 2.10 Verify on the field repositories that tokio reports no package cycle and no stable-dependency finding while the other four repositories' package graphs and orphan lists are unchanged.
 
-## 3. Module-wiring cycle exclusion
+## 3. Test-declared module files
 
-- [ ] 3.1 Extend `rust_module_ownership_cycle_is_context_while_mutual_uses_are_a_verdict` with a suppressed parent-child pair, a surviving sibling cycle, and a surviving mutual-uses pair between unowned files.
-- [ ] 3.2 Exclude, from the file cycle graph only, `uses` relations between a file pair that also carries a `module_ownership` relation in either direction.
-- [ ] 3.3 Apply the identical exclusion in the cycle witness lookup and prove a suppressed pair produces neither a cycle nor a witness.
-- [ ] 3.4 Prove the exclusion is pairwise by keeping a cycle that passes through an owning pair via other files.
-- [ ] 3.5 Prove fan-in, fan-out, instability, and orphan facts are unaffected by the exclusion.
-- [ ] 3.6 Add a fixture that pins the suppression in committed terminal and JSON bytes.
-- [ ] 3.7 Verify on the field repositories that tokio's `fs/` and `io/` cycles are gone while scikit-learn's `_config`-`_array_api`, opencode's three cycles, and smackdebt's `change_coupling`-`evolution` remain.
+- [ ] 3.1 Add project tests for a `#[cfg(test)] mod name;` declaration: the declared file is test source, its relations leave the verdict graphs, a file also declared outside a test scope stays primary, a transitively declared file is test source, and an explicitly configured role wins.
+- [ ] 3.2 Resolve module declarations to files and classify a file as test when it has at least one declaration and every declaration is test-scoped, by a deterministic fixpoint over ordered structures.
+- [ ] 3.3 Apply the classification before findings, ratings, coverage, and history evidence read a role, on the codebase path and on both sides of a diff.
+- [ ] 3.4 Verify on the field repositories that tokio reports no package dependency cycle and that scikit-learn, opencode, kwaak, and fluyt keep their verdicts.
 
-## 4. Documentation
+## 4. Module-wiring cycle exclusion
 
-- [ ] 4.1 Explain in the README that verdict graphs use primary-role relations only and that test, example, and benchmark relations stay complete as context.
-- [ ] 4.2 Explain in the README that a Rust reference under a `#[cfg(test)]` scope carries the test role by a syntactic rule, and that `no code dependency` still accounts for those relations.
-- [ ] 4.3 Explain in the README that imports between a Rust module-owning file pair are excluded from the file cycle graph, and that the exclusion is limited to that pair.
-- [ ] 4.4 Update `ARCHITECTURE.md` for the predicate split, the scope field, and the cycle-graph exclusion.
-- [ ] 4.5 Grep the README and `ARCHITECTURE.md` for stale `trusted eligible uses` wording that now means the verdict graph.
+- [ ] 4.1 Extend `rust_module_ownership_cycle_is_context_while_mutual_uses_are_a_verdict` with a suppressed parent-child pair, a surviving sibling cycle, and a surviving mutual-uses pair between unowned files.
+- [ ] 4.2 Exclude, from the file cycle graph only, `uses` relations between a file pair that also carries a `module_ownership` relation in either direction.
+- [ ] 4.3 Apply the identical exclusion in the cycle witness lookup and prove a suppressed pair produces neither a cycle nor a witness.
+- [ ] 4.4 Prove the exclusion is pairwise by keeping a cycle that passes through an owning pair via other files.
+- [ ] 4.5 Prove fan-in, fan-out, instability, and orphan facts are unaffected by the exclusion.
+- [ ] 4.6 Add a fixture that pins the suppression in committed terminal and JSON bytes.
+- [ ] 4.7 Verify on the field repositories that tokio's `fs/` and `io/` cycles are gone while scikit-learn's `_config`-`_array_api`, opencode's three cycles, and smackdebt's `change_coupling`-`evolution` remain.
 
-## 5. Evidence and close
+## 5. Documentation
 
-- [ ] 5.1 Review every newly authored fixture and golden file as a product artifact rather than as regenerated output.
-- [ ] 5.2 Confirm ratings, signals, unit measurements, exit codes, work counts, and the JSON schema shape are unchanged, and that no report-schema delta is required.
-- [ ] 5.3 Run the five-repository matrix and record that every previously validated true positive survives.
-- [ ] 5.4 Spot-check serial and parallel runs for byte-identical terminal and JSON output on tokio.
-- [ ] 5.5 Pass formatting, Clippy, workspace tests, architecture checks, performance tests, acceptance evidence, strict OpenSpec validation, and the final diff check.
-- [ ] 5.6 Archive this change.
+- [ ] 5.1 Explain in the README that verdict graphs use primary-role relations only and that test, example, and benchmark relations stay complete as context.
+- [ ] 5.2 Explain in the README that a Rust reference under a `#[cfg(test)]` scope carries the test role by a syntactic rule, and that `no code dependency` still accounts for those relations.
+- [ ] 5.3 Explain in the README that imports between a Rust module-owning file pair are excluded from the file cycle graph, and that the exclusion is limited to that pair.
+- [ ] 5.4 Update `ARCHITECTURE.md` for the predicate split, the scope field, and the cycle-graph exclusion.
+- [ ] 5.5 Grep the README and `ARCHITECTURE.md` for stale `trusted eligible uses` wording that now means the verdict graph.
+
+## 6. Evidence and close
+
+- [ ] 6.1 Review every newly authored fixture and golden file as a product artifact rather than as regenerated output.
+- [ ] 6.2 Confirm ratings, signals, unit measurements, exit codes, work counts, and the JSON schema shape are unchanged, and that no report-schema delta is required.
+- [ ] 6.3 Run the five-repository matrix and record that every previously validated true positive survives.
+- [ ] 6.4 Spot-check serial and parallel runs for byte-identical terminal and JSON output on tokio.
+- [ ] 6.5 Pass formatting, Clippy, workspace tests, architecture checks, performance tests, acceptance evidence, strict OpenSpec validation, and the final diff check.
+- [ ] 6.6 Archive this change.
