@@ -254,29 +254,10 @@ fn offset_dependency(dependency: DependencySyntax, line_offset: u32) -> Dependen
         return dependency;
     }
     let span = dependency.span();
-    let internal = dependency.intent() == smackdebt_analysis::DependencyIntent::Internal;
-    let relation = dependency.relation();
-    let test_scope = dependency.scope() == smackdebt_analysis::DependencyScope::Test;
-    let dependency = DependencySyntax::new(
-        dependency.kind(),
-        dependency.target(),
-        SourceSpan::new(
-            span.start_line() + line_offset,
-            span.end_line() + line_offset,
-        ),
-        dependency.state().clone(),
-    );
-    let dependency = dependency.with_relation(relation);
-    let dependency = if test_scope {
-        dependency.with_test_scope()
-    } else {
-        dependency
-    };
-    if internal {
-        dependency.with_internal_intent()
-    } else {
-        dependency
-    }
+    dependency.with_span(SourceSpan::new(
+        span.start_line() + line_offset,
+        span.end_line() + line_offset,
+    ))
 }
 
 fn measure<L: Language>(root: Node<'_>, source: &[u8], scratch: &mut Scratch) -> Measurements {

@@ -149,6 +149,16 @@ impl DependencySyntax {
         self.scope = DependencyScope::Test;
         self
     }
+
+    /// Returns the same reference relocated to `span`.
+    ///
+    /// Every other field is carried unchanged, so a new field cannot be
+    /// silently dropped by a relocation.
+    #[must_use]
+    pub fn with_span(mut self, span: SourceSpan) -> Self {
+        self.span = span;
+        self
+    }
 }
 
 impl SourceSpan {
@@ -203,6 +213,17 @@ impl SourceRole {
             self,
             Self::Primary | Self::Test | Self::Example | Self::Benchmark
         )
+    }
+
+    /// The role this one becomes where a test configuration selects the code.
+    ///
+    /// Only production code is reclassified: every other role already states
+    /// what the file is, so a test configuration tells nothing new about it.
+    pub const fn demoted_by_test_scope(self) -> Self {
+        match self {
+            Self::Primary => Self::Test,
+            other => other,
+        }
     }
 }
 

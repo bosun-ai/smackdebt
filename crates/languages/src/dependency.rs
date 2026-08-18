@@ -42,16 +42,15 @@ pub(super) fn rust(node: Node<'_>, source: &[u8]) -> Option<DependencySyntax> {
 /// and of every module that contains it, and never evaluates a configuration
 /// predicate or consults enabled features.
 fn declared_in_test_scope(node: Node<'_>, source: &[u8]) -> bool {
-    let mut item = Some(node);
-    while let Some(current) = item {
-        if (current.id() == node.id() || current.kind() == "mod_item")
-            && outer_attributes_select_test(current, source)
-        {
-            return true;
-        }
-        item = current.parent();
-    }
-    false
+    outer_attributes_select_test(node, source)
+        || ancestors(node)
+            .filter(|item| item.kind() == "mod_item")
+            .any(|item| outer_attributes_select_test(item, source))
+}
+
+/// The nodes that contain this node, innermost first.
+fn ancestors(node: Node<'_>) -> impl Iterator<Item = Node<'_>> {
+    std::iter::successors(node.parent(), |current| current.parent())
 }
 
 /// Reads the run of attributes that immediately precedes an item.
@@ -95,7 +94,7 @@ fn attribute_selects_test(attribute_item: Node<'_>, source: &[u8]) -> bool {
 /// Whether a `cfg` token tree names `test` outside a negated predicate.
 fn token_tree_selects_test(tree: Node<'_>, source: &[u8]) -> bool {
     let mut cursor = tree.walk();
-    let mut previous_identifier = None;
+    let mut negated = false;
     for child in tree.children(&mut cursor) {
         match child.kind() {
             "identifier" => {
@@ -103,16 +102,15 @@ fn token_tree_selects_test(tree: Node<'_>, source: &[u8]) -> bool {
                 if text == Some("test") {
                     return true;
                 }
-                previous_identifier = text;
+                negated = text == Some("not");
             }
             "token_tree" => {
-                if previous_identifier != Some("not") && token_tree_selects_test(child, source) {
+                if !negated && token_tree_selects_test(child, source) {
                     return true;
                 }
-                previous_identifier = None;
+                negated = false;
             }
-            "(" | ")" | "," => {}
-            _ => previous_identifier = None,
+            _ => negated = false,
         }
     }
     false
@@ -288,25 +286,14 @@ fn strip_visibility(text: &str) -> &str {
 }
 
 /// Counts the inline modules that contain this node inside its own file.
-fn inline_module_depth(mut node: Node<'_>) -> usize {
-    let mut depth = 0;
-    while let Some(parent) = node.parent() {
-        if parent.kind() == "mod_item" {
-            depth += 1;
-        }
-        node = parent;
-    }
-    depth
+fn inline_module_depth(node: Node<'_>) -> usize {
+    ancestors(node)
+        .filter(|parent| parent.kind() == "mod_item")
+        .count()
 }
 
-fn has_ancestor(mut node: Node<'_>, kind: &str) -> bool {
-    while let Some(parent) = node.parent() {
-        if parent.kind() == kind {
-            return true;
-        }
-        node = parent;
-    }
-    false
+fn has_ancestor(node: Node<'_>, kind: &str) -> bool {
+    ancestors(node).any(|parent| parent.kind() == kind)
 }
 
 pub(super) fn python(node: Node<'_>, source: &[u8]) -> Option<DependencySyntax> {

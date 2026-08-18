@@ -20,6 +20,7 @@ mod size;
 mod source;
 mod stable_dependencies;
 mod strongly_connected_components;
+mod test_scope;
 mod verdict;
 
 pub use architecture::{
@@ -57,6 +58,7 @@ pub use orphan::{ENTRY_FILENAMES, OrphanCandidate, OrphanFile, is_entry_filename
 pub use size::{SizeFinding, SizePolicy, SizeSubject};
 pub use stable_dependencies::{MINIMUM_STABLE_DEPENDENCY_REFERENCES, stable_dependency_findings};
 pub use strongly_connected_components::strongly_connected_components;
+pub use test_scope::{ModuleDeclaration, test_declared_files};
 
 pub use comparison::{Comparison, ComparisonDirection, ComparisonKind, compare_units};
 pub use health::{
