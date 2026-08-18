@@ -566,13 +566,16 @@ fn diff_finding_rows(
     section
 }
 
-/// The measurement names a card states, in the order policy rates them.
-const MEASUREMENT_NAMES: [&str; 5] = [
-    "cognitive",
-    "cyclomatic",
-    "statements",
-    "nesting",
-    "parameters",
+/// The signals a card states, in the order policy rates them.
+///
+/// Every name comes from `signal_name`, so a measurement is named once for the
+/// whole writer.
+const RATED_SIGNALS: [Signal; 5] = [
+    Signal::CognitiveComplexity,
+    Signal::CyclomaticComplexity,
+    Signal::LogicalLines,
+    Signal::MaxNesting,
+    Signal::ParameterCount,
 ];
 
 fn changed_measurements(comparison: &Comparison) -> Vec<String> {
@@ -588,8 +591,9 @@ fn changed_measurements(comparison: &Comparison) -> Vec<String> {
         return vec![changed_summary(comparison.kind()).to_owned()];
     };
     let (before, after) = (rated_values(before), rated_values(after));
-    let facts: Vec<String> = MEASUREMENT_NAMES
+    let facts: Vec<String> = RATED_SIGNALS
         .into_iter()
+        .map(signal_name)
         .zip(before.into_iter().zip(after))
         .filter(|(_, (before, after))| before != after)
         .map(|(name, (before, after))| format!("{name} {before} → {after}"))
@@ -612,8 +616,9 @@ fn one_sided_measurements(word: &str, present: Option<Measurements>) -> Vec<Stri
         return facts;
     };
     facts.extend(
-        MEASUREMENT_NAMES
+        RATED_SIGNALS
             .into_iter()
+            .map(signal_name)
             .zip(rated_values(present))
             .filter(|(_, value)| *value != 0)
             .map(|(name, value)| format!("{name} {value}")),
@@ -621,7 +626,7 @@ fn one_sided_measurements(word: &str, present: Option<Measurements>) -> Vec<Stri
     facts
 }
 
-/// The rated measurements in the order `MEASUREMENT_NAMES` states them.
+/// The rated measurements in the order `RATED_SIGNALS` states them.
 const fn rated_values(measurements: Measurements) -> [u32; 5] {
     let (cognitive, cyclomatic, statements, nesting, parameters) = measurements.rated();
     [cognitive, cyclomatic, statements, nesting, parameters]
@@ -965,7 +970,7 @@ fn history_rows(
                 ),
             )
             .with_fact(format!("{}%", (pair.similarity() * 100.0).round() as u32))
-            .with_fact(if coupling_has_code_dependency(report, pair) {
+            .with_fact(if report.coupling_explained(pair.left(), pair.right()) {
                 "code dependency exists"
             } else {
                 "no code dependency"
@@ -1480,33 +1485,6 @@ fn same_pair(
 ) -> bool {
     (left.left(), left.right()) == (right.left(), right.right())
         || (left.left(), left.right()) == (right.right(), right.left())
-}
-
-/// Whether a code dependency explains why two packages change together.
-///
-/// The claim is about the repository, not about the code that ships, so it
-/// reads the trusted eligible relations rather than the verdict graph: a
-/// dev-dependency import in a test file is still a code dependency even though
-/// it never becomes a package edge.
-fn coupling_has_code_dependency(
-    report: &Report,
-    coupling: smackdebt_analysis::ChangeCoupling,
-) -> bool {
-    let joins = |left, right| {
-        (left == Some(coupling.left()) && right == Some(coupling.right()))
-            || (left == Some(coupling.right()) && right == Some(coupling.left()))
-    };
-    report
-        .package_edges()
-        .iter()
-        .any(|edge| joins(Some(edge.source()), Some(edge.target())))
-        || report.dependency_edges().iter().any(|edge| {
-            edge.affects_verdict()
-                && joins(
-                    report.files()[edge.source().index()].package(),
-                    report.files()[edge.target().index()].package(),
-                )
-        })
 }
 
 fn history_role_name(role: SourceRole) -> &'static str {
@@ -2430,6 +2408,79 @@ mod tests {
         assert!(
             detailed
                 .contains("d ↔ e changed together in 3 of 5 commits · 60% · no code dependency")
+        );
+    }
+
+    /// A pair a manifest test-role reference explains produces no package edge
+    /// and no file edge, so the claim can only come from the explanation set
+    /// analysis recorded.
+    #[test]
+    fn a_coupling_row_states_the_explanation_analysis_recorded() {
+        let mut builder = ReportBuilder::new(ReportMode::Codebase);
+        let root = ScopeId::from_index(0);
+        builder.add_scope(Scope::new(root, ScopeKind::Repository, ".", None));
+        builder.set_root(root);
+        let packages = ["a", "b", "c"]
+            .into_iter()
+            .enumerate()
+            .map(|(index, name)| {
+                let scope = ScopeId::from_index(index + 1);
+                builder.add_scope(Scope::new(scope, ScopeKind::Package, name, Some(root)));
+                PackageRecord::current(PackageId::from_index(index), scope, name)
+            })
+            .collect::<Vec<_>>();
+        builder.set_packages(packages);
+        let couplings = [(0, 1), (1, 2)]
+            .into_iter()
+            .map(|(left, right)| {
+                ChangeCoupling::new(
+                    PackageId::from_index(left),
+                    PackageId::from_index(right),
+                    3,
+                    4,
+                )
+            })
+            .collect::<Vec<_>>();
+        let findings = couplings
+            .iter()
+            .copied()
+            .enumerate()
+            .map(|(index, coupling)| {
+                EvolutionaryFinding::new(EvolutionaryFindingId::from_index(index), coupling)
+            })
+            .collect::<Vec<_>>();
+        builder.set_evolution(EvolutionaryReportFacts::new(
+            HistoryCoverage::unavailable("test"),
+            Vec::new(),
+            Vec::new(),
+            couplings,
+            Vec::new(),
+            findings,
+            Vec::new(),
+        ));
+        // Only the second pair is explained, and in the opposite direction.
+        builder.set_explanation_pairs(std::collections::BTreeSet::from([(
+            PackageId::from_index(2),
+            PackageId::from_index(1),
+        )]));
+        for index in 0..2 {
+            builder.link_evolutionary_finding(root, EvolutionaryFindingId::from_index(index));
+        }
+        let report = builder.finish();
+        assert!(report.package_edges().is_empty());
+        assert!(report.dependency_edges().is_empty());
+
+        let terminal = render(&report, TerminalOptions::default());
+        assert!(
+            terminal
+                .contains("a ↔ b changed together in 3 of 4 commits · 75% · no code dependency"),
+            "{terminal}"
+        );
+        assert!(
+            terminal.contains(
+                "b ↔ c changed together in 3 of 4 commits · 75% · code dependency exists"
+            ),
+            "{terminal}"
         );
     }
 
