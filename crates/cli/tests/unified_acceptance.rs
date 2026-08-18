@@ -30,6 +30,23 @@ struct LanguageFileFacts {
     units: Vec<(String, u64, u64, u64)>,
 }
 
+/// The repository path of one file in a report.
+fn file_path(report: &Value, file: u64) -> String {
+    let file = &report["files"][file as usize];
+    report["paths"][file["path"].as_u64().unwrap() as usize]
+        .as_str()
+        .unwrap()
+        .to_owned()
+}
+
+/// The repository path of one package in a report.
+fn package_path(report: &Value, package: u64) -> String {
+    report["packages"][package as usize]["path"]
+        .as_str()
+        .unwrap()
+        .to_owned()
+}
+
 const PRIVATE_JSON_KEYS: &[&str] = &[
     "source_text",
     "commit_message",
@@ -136,21 +153,14 @@ fn a_rust_test_scope_publishes_test_relations_beside_the_primary_ones() {
         .run(repository.path());
     assert_eq!(result, automatic);
     let report = checked_json(&result.stdout);
-    let path_of = |file: u64| {
-        let file = &report["files"][file as usize];
-        report["paths"][file["path"].as_u64().unwrap() as usize]
-            .as_str()
-            .unwrap()
-            .to_owned()
-    };
     let mut relations: Vec<_> = report["dependency_edges"]
         .as_array()
         .unwrap()
         .iter()
         .map(|edge| {
             (
-                path_of(edge["source"].as_u64().unwrap()),
-                path_of(edge["target"].as_u64().unwrap()),
+                file_path(&report, edge["source"].as_u64().unwrap()),
+                file_path(&report, edge["target"].as_u64().unwrap()),
                 edge["relation"].as_str().unwrap().to_owned(),
                 edge["role"].as_str().unwrap().to_owned(),
             )
@@ -234,21 +244,14 @@ fn rust_module_wiring_publishes_its_relations_without_a_file_cycle() {
         .run(repository.path());
     assert_eq!(result, automatic);
     let report = checked_json(&result.stdout);
-    let path_of = |file: u64| {
-        let file = &report["files"][file as usize];
-        report["paths"][file["path"].as_u64().unwrap() as usize]
-            .as_str()
-            .unwrap()
-            .to_owned()
-    };
     let mut relations: Vec<_> = report["dependency_edges"]
         .as_array()
         .unwrap()
         .iter()
         .map(|edge| {
             (
-                path_of(edge["source"].as_u64().unwrap()),
-                path_of(edge["target"].as_u64().unwrap()),
+                file_path(&report, edge["source"].as_u64().unwrap()),
+                file_path(&report, edge["target"].as_u64().unwrap()),
                 edge["relation"].as_str().unwrap().to_owned(),
             )
         })
@@ -313,19 +316,6 @@ fn test_only_return_dependencies_are_context_and_still_explain_coupling() {
         .run(repository.path());
     assert_eq!(result, automatic);
     let report = checked_json(&result.stdout);
-    let package_name = |package: u64| {
-        report["packages"][package as usize]["path"]
-            .as_str()
-            .unwrap()
-            .to_owned()
-    };
-    let path_of = |file: u64| {
-        let file = &report["files"][file as usize];
-        report["paths"][file["path"].as_u64().unwrap() as usize]
-            .as_str()
-            .unwrap()
-            .to_owned()
-    };
 
     // The verdict graph carries the shipped direction only.
     let mut package_edges: Vec<_> = report["package_edges"]
@@ -334,8 +324,8 @@ fn test_only_return_dependencies_are_context_and_still_explain_coupling() {
         .iter()
         .map(|edge| {
             (
-                package_name(edge["source"].as_u64().unwrap()),
-                package_name(edge["target"].as_u64().unwrap()),
+                package_path(&report, edge["source"].as_u64().unwrap()),
+                package_path(&report, edge["target"].as_u64().unwrap()),
             )
         })
         .collect();
@@ -364,10 +354,12 @@ fn test_only_return_dependencies_are_context_and_still_explain_coupling() {
         .as_array()
         .unwrap()
         .iter()
-        .filter(|edge| path_of(edge["target"].as_u64().unwrap()) == "crates/alpha/src/lib.rs")
+        .filter(|edge| {
+            file_path(&report, edge["target"].as_u64().unwrap()) == "crates/alpha/src/lib.rs"
+        })
         .map(|edge| {
             (
-                path_of(edge["source"].as_u64().unwrap()),
+                file_path(&report, edge["source"].as_u64().unwrap()),
                 edge["role"].as_str().unwrap().to_owned(),
             )
         })
@@ -397,8 +389,8 @@ fn test_only_return_dependencies_are_context_and_still_explain_coupling() {
         .filter(|pair| pair["shared_commits"].as_u64().unwrap() >= 3)
         .map(|pair| {
             (
-                package_name(pair["left"].as_u64().unwrap()),
-                package_name(pair["right"].as_u64().unwrap()),
+                package_path(&report, pair["left"].as_u64().unwrap()),
+                package_path(&report, pair["right"].as_u64().unwrap()),
             )
         })
         .collect();
@@ -461,20 +453,14 @@ fn a_primary_dependency_direction_publishes_a_stable_dependency_finding() {
         .run(repository.path());
     assert_eq!(result, automatic);
     let report = checked_json(&result.stdout);
-    let package_name = |package: u64| {
-        report["packages"][package as usize]["path"]
-            .as_str()
-            .unwrap()
-            .to_owned()
-    };
     let findings: Vec<_> = report["stable_dependency_findings"]
         .as_array()
         .unwrap()
         .iter()
         .map(|finding| {
             (
-                package_name(finding["source"].as_u64().unwrap()),
-                package_name(finding["target"].as_u64().unwrap()),
+                package_path(&report, finding["source"].as_u64().unwrap()),
+                package_path(&report, finding["target"].as_u64().unwrap()),
                 finding["references"].as_u64().unwrap(),
             )
         })
@@ -1865,19 +1851,6 @@ fn every_derived_signal_table_carries_its_exact_rows() {
         .run(repository.path());
     assert_eq!(result, parallel, "serial and parallel runs must agree");
     let report = checked_json(&result.stdout);
-    let path = |index: &Value| {
-        report["paths"][index.as_u64().unwrap() as usize]
-            .as_str()
-            .unwrap()
-            .to_owned()
-    };
-    let file_path = |file: u64| path(&report["files"][file as usize]["path"]);
-    let package_path = |package: u64| {
-        report["packages"][package as usize]["path"]
-            .as_str()
-            .unwrap()
-            .to_owned()
-    };
 
     let hot: Vec<_> = report["hotspots"]
         .as_array()
@@ -1885,7 +1858,7 @@ fn every_derived_signal_table_carries_its_exact_rows() {
         .iter()
         .map(|hotspot| {
             (
-                file_path(hotspot["file"].as_u64().unwrap()),
+                file_path(&report, hotspot["file"].as_u64().unwrap()),
                 hotspot["rating"].as_str().unwrap().to_owned(),
                 hotspot["touches"].as_u64().unwrap(),
             )
@@ -1907,7 +1880,7 @@ fn every_derived_signal_table_carries_its_exact_rows() {
         .iter()
         .map(|finding| {
             (
-                file_path(finding["file"].as_u64().unwrap()),
+                file_path(&report, finding["file"].as_u64().unwrap()),
                 finding["subject"].as_str().unwrap(),
                 finding["value"].as_u64().unwrap(),
             )
@@ -1930,7 +1903,7 @@ fn every_derived_signal_table_carries_its_exact_rows() {
         .as_array()
         .unwrap()
         .iter()
-        .map(|file| file_path(file.as_u64().unwrap()))
+        .map(|file| file_path(&report, file.as_u64().unwrap()))
         .collect();
     assert!(orphans.contains("core/unused.js"), "{orphans:?}");
 
@@ -1940,8 +1913,8 @@ fn every_derived_signal_table_carries_its_exact_rows() {
         .iter()
         .map(|finding| {
             (
-                package_path(finding["source"].as_u64().unwrap()),
-                package_path(finding["target"].as_u64().unwrap()),
+                package_path(&report, finding["source"].as_u64().unwrap()),
+                package_path(&report, finding["target"].as_u64().unwrap()),
                 finding["source_fan_in"].as_u64().unwrap(),
                 finding["source_fan_out"].as_u64().unwrap(),
                 finding["target_fan_in"].as_u64().unwrap(),
@@ -1961,7 +1934,7 @@ fn every_derived_signal_table_carries_its_exact_rows() {
         .iter()
         .map(|finding| {
             (
-                package_path(finding["package"].as_u64().unwrap()),
+                package_path(&report, finding["package"].as_u64().unwrap()),
                 finding["contributor_count"].as_u64().unwrap(),
                 finding["numerator"].as_u64().unwrap(),
                 finding["denominator"].as_u64().unwrap(),

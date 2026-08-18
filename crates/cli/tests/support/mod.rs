@@ -486,14 +486,12 @@ pub(crate) fn rust_test_scope_repository() -> GeneratedRepository {
         WorktreeEdit::Write("src/shipped.rs", b"pub fn ship() -> bool {\n    true\n}\n"),
         WorktreeEdit::Write("src/only_tests.rs", b"pub fn sample() -> bool {\n    true\n}\n"),
     ]);
-    repository.commit(Commit {
-        message: "test: rust test scope",
-        identity: Identity {
-            name: "Scope Fixture",
-            address: "scope@example.invalid",
-        },
-        date: "2026-01-01T12:00:00Z",
-    });
+    repository.commit(commit(
+        "test: rust test scope",
+        "Scope Fixture",
+        "scope@example.invalid",
+        "2026-01-01T12:00:00Z",
+    ));
     repository
 }
 
@@ -524,14 +522,12 @@ pub(crate) fn module_wiring_repository() -> GeneratedRepository {
             b"use super::*;\n\npub fn step() -> u32 {\n    base() + 1\n}\n",
         ),
     ]);
-    repository.commit(Commit {
-        message: "test: module wiring",
-        identity: Identity {
-            name: "Wiring Fixture",
-            address: "wiring@example.invalid",
-        },
-        date: "2026-01-01T12:00:00Z",
-    });
+    repository.commit(commit(
+        "test: module wiring",
+        "Wiring Fixture",
+        "wiring@example.invalid",
+        "2026-01-01T12:00:00Z",
+    ));
     repository
 }
 
@@ -590,7 +586,7 @@ pub(crate) fn test_scoped_workspace_repository() -> GeneratedRepository {
             b"pub fn piece() -> u32 {\n    2\n}\n",
         ),
     ]);
-    repository.commit(scope_commit("test: workspace", 1));
+    repository.commit(scope_commit("test: workspace", &scope_date(1)));
     for round in 0..3 {
         repository.write(
             "crates/alpha/src/lib.rs",
@@ -601,7 +597,10 @@ pub(crate) fn test_scoped_workspace_repository() -> GeneratedRepository {
             "crates/gamma/src/lib.rs",
             format!("pub fn gamma() -> u32 {{\n    2 + {round}\n}}\n").as_bytes(),
         );
-        repository.commit(scope_commit("feat: alpha and gamma", 2 + round));
+        repository.commit(scope_commit(
+            "feat: alpha and gamma",
+            &scope_date(2 + round),
+        ));
     }
     for round in 0..3 {
         repository.write(
@@ -619,31 +618,19 @@ pub(crate) fn test_scoped_workspace_repository() -> GeneratedRepository {
             )
             .as_bytes(),
         );
-        repository.commit(scope_commit("feat: alpha and beta", 5 + round));
+        repository.commit(scope_commit("feat: alpha and beta", &scope_date(5 + round)));
     }
     repository
 }
 
-fn scope_commit(message: &str, day: u32) -> Commit<'_> {
-    Commit {
-        message,
-        identity: Identity {
-            name: "Scope Fixture",
-            address: "scope@example.invalid",
-        },
-        date: SCOPE_DATES[day as usize - 1],
-    }
+fn scope_commit<'a>(message: &'a str, date: &'a str) -> Commit<'a> {
+    commit(message, "Scope Fixture", "scope@example.invalid", date)
 }
 
-const SCOPE_DATES: [&str; 7] = [
-    "2026-01-01T12:00:00Z",
-    "2026-01-02T12:00:00Z",
-    "2026-01-03T12:00:00Z",
-    "2026-01-04T12:00:00Z",
-    "2026-01-05T12:00:00Z",
-    "2026-01-06T12:00:00Z",
-    "2026-01-07T12:00:00Z",
-];
+/// The fixture date of one scope-fixture day, which stays within one month.
+fn scope_date(day: u32) -> String {
+    format!("2026-01-0{day}T12:00:00Z")
+}
 
 /// A Rust workspace whose production dependency runs the wrong way.
 ///
@@ -697,7 +684,10 @@ pub(crate) fn stable_dependency_repository(test_scoped: bool) -> GeneratedReposi
             b"pub fn dee() -> u32 {\n    2\n}\n",
         ),
     ]);
-    repository.commit(scope_commit("test: stable dependency direction", 1));
+    repository.commit(scope_commit(
+        "test: stable dependency direction",
+        &scope_date(1),
+    ));
     repository
 }
 
