@@ -141,6 +141,7 @@ pub smackdebt_analysis::SourceRole::Primary
 pub smackdebt_analysis::SourceRole::Test
 impl smackdebt_analysis::SourceRole
 pub const fn smackdebt_analysis::SourceRole::affects_verdict(self) -> bool
+pub const fn smackdebt_analysis::SourceRole::demoted_by_test_scope(self) -> Self
 pub enum smackdebt_analysis::SourceTrust
 pub smackdebt_analysis::SourceTrust::Advisory
 pub smackdebt_analysis::SourceTrust::Failed
@@ -340,6 +341,7 @@ pub const fn smackdebt_analysis::DependencySyntax::state(&self) -> &smackdebt_an
 pub fn smackdebt_analysis::DependencySyntax::target(&self) -> &str
 pub fn smackdebt_analysis::DependencySyntax::with_internal_intent(self) -> Self
 pub fn smackdebt_analysis::DependencySyntax::with_relation(self, smackdebt_analysis::StaticRelationKind) -> Self
+pub fn smackdebt_analysis::DependencySyntax::with_span(self, smackdebt_analysis::SourceSpan) -> Self
 pub fn smackdebt_analysis::DependencySyntax::with_test_scope(self) -> Self
 pub struct smackdebt_analysis::Diagnostic
 impl smackdebt_analysis::Diagnostic
@@ -678,6 +680,7 @@ pub fn smackdebt_analysis::Report::architecture_findings(&self) -> &[smackdebt_a
 pub fn smackdebt_analysis::Report::change_coupling(&self) -> &[smackdebt_analysis::ChangeCoupling]
 pub fn smackdebt_analysis::Report::comparisons(&self) -> &[smackdebt_analysis::Comparison]
 pub fn smackdebt_analysis::Report::contributor_concentration(&self) -> &[smackdebt_analysis::ContributorConcentration]
+pub fn smackdebt_analysis::Report::coupling_explained(&self, smackdebt_analysis::PackageId, smackdebt_analysis::PackageId) -> bool
 pub const fn smackdebt_analysis::Report::dependency_coverage(&self) -> smackdebt_analysis::DependencyCoverage
 pub fn smackdebt_analysis::Report::dependency_edges(&self) -> &[smackdebt_analysis::DependencyEdge]
 pub fn smackdebt_analysis::Report::diagnostics(&self) -> &[smackdebt_analysis::Diagnostic]
@@ -726,6 +729,7 @@ pub fn smackdebt_analysis::ReportBuilder::link_finding(&mut self, smackdebt_anal
 pub fn smackdebt_analysis::ReportBuilder::new(smackdebt_analysis::ReportMode) -> Self
 pub fn smackdebt_analysis::ReportBuilder::set_architecture(&mut self, smackdebt_analysis::ArchitectureReportFacts)
 pub fn smackdebt_analysis::ReportBuilder::set_evolution(&mut self, smackdebt_analysis::EvolutionaryReportFacts)
+pub fn smackdebt_analysis::ReportBuilder::set_explanation_pairs(&mut self, alloc::collections::btree::set::BTreeSet<(smackdebt_analysis::PackageId, smackdebt_analysis::PackageId)>)
 pub fn smackdebt_analysis::ReportBuilder::set_hotspots(&mut self, alloc::vec::Vec<smackdebt_analysis::Hotspot>)
 pub fn smackdebt_analysis::ReportBuilder::set_orphan_files(&mut self, alloc::vec::Vec<smackdebt_analysis::OrphanFile>)
 pub fn smackdebt_analysis::ReportBuilder::set_packages(&mut self, alloc::vec::Vec<smackdebt_analysis::PackageRecord>)
@@ -903,5 +907,7 @@ pub fn smackdebt_analysis::orphan_files(&[smackdebt_analysis::OrphanCandidate<'_
 pub fn smackdebt_analysis::qualifies_for_finding(smackdebt_analysis::ChangeCoupling) -> bool
 pub fn smackdebt_analysis::stable_dependency_findings(&[smackdebt_analysis::PackageEdge], &[smackdebt_analysis::PackageGraphMeasurement]) -> alloc::vec::Vec<smackdebt_analysis::StableDependencyFinding>
 pub fn smackdebt_analysis::strongly_connected_components(usize, &[(usize, usize)]) -> alloc::vec::Vec<alloc::vec::Vec<usize>>
+pub fn smackdebt_analysis::test_declared_files(&alloc::collections::btree::set::BTreeSet<smackdebt_analysis::ModuleDeclaration>) -> alloc::collections::btree::set::BTreeSet<usize>
 pub fn smackdebt_analysis::unexplained_coupling(&[smackdebt_analysis::ChangeCoupling], &alloc::collections::btree::set::BTreeSet<(smackdebt_analysis::PackageId, smackdebt_analysis::PackageId)>) -> alloc::vec::Vec<smackdebt_analysis::EvolutionaryFinding>
+pub type smackdebt_analysis::ModuleDeclaration = (usize, usize, bool)
 pub type smackdebt_analysis::PackageCycle = (alloc::vec::Vec<smackdebt_analysis::PackageId>, alloc::vec::Vec<smackdebt_analysis::PackageId>)

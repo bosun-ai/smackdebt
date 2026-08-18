@@ -16,12 +16,13 @@ use smackdebt_analysis::{
     EvolutionAccumulator, ExternalDependency, FileActivity, FileAnalysis, FileDebt, FileId,
     FileRecord, Finding, FindingId, HealthAssessment, HealthCounts, HealthPolicy,
     HistoryAvailability, HistoryChangeFact, HistoryCommitFact, HistoryCoverage, HistoryWindow,
-    HotspotPolicy, Language, OrphanCandidate, OrphanFile, PackageContainment, PackageEdge,
-    PackageEdgeId, PackageGraphMeasurement, PackageId, PackageRecord, ParseStatus, Rating, Report,
-    ReportBuilder as AnalysisReportBuilder, ReportMode, ResolutionDiagnostic, ResolutionIssueKind,
-    Scope, ScopeId, ScopeKind, SizeFinding, SizePolicy, SourceCoverageOutcome, SourceRole,
-    SourceTrust, StableDependencyFinding, compare_architecture, compare_units, cycle_witness,
-    dependency_degree, orphan_files, stable_dependency_findings, strongly_connected_components,
+    HotspotPolicy, Language, ModuleDeclaration, OrphanCandidate, OrphanFile, PackageContainment,
+    PackageEdge, PackageEdgeId, PackageGraphMeasurement, PackageId, PackageRecord, ParseStatus,
+    Rating, Report, ReportBuilder as AnalysisReportBuilder, ReportMode, ResolutionDiagnostic,
+    ResolutionIssueKind, Scope, ScopeId, ScopeKind, SizeFinding, SizePolicy, SourceCoverageOutcome,
+    SourceRole, SourceTrust, StableDependencyFinding, compare_architecture, compare_units,
+    cycle_witness, dependency_degree, orphan_files, stable_dependency_findings,
+    strongly_connected_components, test_declared_files,
 };
 use smackdebt_discovery::{DiscoveredFile, Inventory, generic_source_roles, glob_matches};
 use smackdebt_git::{Change, ContributorIdentity, GitRepository};
@@ -254,7 +255,7 @@ pub(super) fn analyze_diff(request: &DiffRequest) -> Result<ProjectReport, Proje
         hierarchy.add_file(file.path().as_path(), package_index);
     }
     let file_scopes = hierarchy.file_scopes.clone();
-    let results = analyze_diff_inputs(
+    let mut results = analyze_diff_inputs(
         changed,
         repository.root().to_path_buf(),
         base,
@@ -286,7 +287,6 @@ pub(super) fn analyze_diff(request: &DiffRequest) -> Result<ProjectReport, Proje
         &request.role_rules,
         &work,
     )?;
-    let mut results = results;
     for side in [DiffSideSelector::Current, DiffSideSelector::Before] {
         demote_test_declared_diff_roles(
             side,
@@ -298,8 +298,6 @@ pub(super) fn analyze_diff(request: &DiffRequest) -> Result<ProjectReport, Proje
             &request.role_rules,
         );
     }
-    let results = results;
-    let unchanged = unchanged;
     let root = ScopeId::from_index(0);
     let mut builder = AnalysisReportBuilder::with_capacity(
         ReportMode::Diff,
@@ -556,6 +554,7 @@ pub(super) fn analyze_diff(request: &DiffRequest) -> Result<ProjectReport, Proje
         architecture_comparisons,
     ));
     builder.set_evolution(evolution);
+    builder.set_explanation_pairs(current_explanation_pairs);
     if let Some(message) = history_diagnostic {
         let id = DiagnosticId::from_index(builder.diagnostic_count());
         builder.add_diagnostic(Diagnostic::new(id, None, DiagnosticKind::Other, message, 0));
@@ -1348,16 +1347,12 @@ fn role_results(results: Vec<FileResult>) -> Result<Vec<FileResult>, ProjectErro
     }
 }
 
-/// One file bringing another into the build, and whether it does so only under
-/// a test configuration.
-type ModuleDeclaration = (FileId, FileId, bool);
-
 /// The module declarations one side of an analysis states.
 ///
 /// A declaration is a `module_ownership` relation, so this reads the same
 /// references the architecture pass resolves later, before any role is read.
 fn module_declarations<'a>(
-    sources: impl Iterator<Item = (FileId, &'a Path, &'a [DependencySyntax])>,
+    sources: impl Iterator<Item = (usize, &'a Path, &'a [DependencySyntax])>,
     index: &BTreeMap<PathBuf, FileId>,
     aliases: &[ResolutionAlias],
 ) -> BTreeSet<ModuleDeclaration> {
@@ -1372,8 +1367,8 @@ fn module_declarations<'a>(
             };
             let test_scoped = reference.scope() == smackdebt_analysis::DependencyScope::Test;
             for target in resolve_candidates(path, candidates, index, aliases) {
-                if target != declarer {
-                    declarations.insert((declarer, target, test_scoped));
+                if target.index() != declarer {
+                    declarations.insert((declarer, target.index(), test_scoped));
                 }
             }
         }
@@ -1381,50 +1376,54 @@ fn module_declarations<'a>(
     declarations
 }
 
-/// The files a build compiles only when `test` is set.
+/// The files a pass reclassifies because the build only compiles them when
+/// `test` is set.
 ///
-/// A file qualifies when it is declared at least once and every declaration of
-/// it is test-scoped, where a declaration is test-scoped if its reference is or
-/// if the declaring file already qualifies. The set only grows, so iterating to
-/// a fixpoint over ordered structures terminates and is deterministic.
-fn test_declared_files(declarations: &BTreeSet<ModuleDeclaration>) -> BTreeSet<FileId> {
-    let mut declared: BTreeMap<FileId, Vec<(FileId, bool)>> = BTreeMap::new();
-    for &(declarer, target, test_scoped) in declarations {
-        declared
-            .entry(target)
-            .or_default()
-            .push((declarer, test_scoped));
-    }
-    let mut test_declared: BTreeSet<FileId> = BTreeSet::new();
-    loop {
-        let mut added = false;
-        for (target, sources) in &declared {
-            if test_declared.contains(target) {
-                continue;
-            }
-            if sources
-                .iter()
-                .all(|(declarer, test_scoped)| *test_scoped || test_declared.contains(declarer))
-            {
-                test_declared.insert(*target);
-                added = true;
-            }
-        }
-        if !added {
-            return test_declared;
-        }
-    }
+/// This resolves the module declarations of one file table, runs the
+/// test-declared fixpoint over them, and drops every file explicit
+/// configuration already claims — configuration keeps precedence over every
+/// later rule.
+fn test_declared_demotions<P: AsRef<Path>>(
+    paths: &[P],
+    references: &[&[DependencySyntax]],
+    aliases: &[ResolutionAlias],
+    rules: &[SourceRoleRule],
+) -> BTreeSet<usize> {
+    debug_assert_eq!(paths.len(), references.len());
+    let index: BTreeMap<PathBuf, FileId> = paths
+        .iter()
+        .enumerate()
+        .map(|(index, path)| (path.as_ref().to_path_buf(), FileId::from_index(index)))
+        .collect();
+    let declarations = module_declarations(
+        paths
+            .iter()
+            .zip(references)
+            .enumerate()
+            .map(|(index, (path, references))| (index, path.as_ref(), *references)),
+        &index,
+        aliases,
+    );
+    test_declared_files(&declarations)
+        .into_iter()
+        .filter(|file| {
+            matching_role_rules(paths[*file].as_ref(), rules)
+                .next()
+                .is_none()
+        })
+        .collect()
 }
 
-/// Whether explicit configuration already claims this path.
-///
-/// Configuration keeps precedence over every later rule, so a declared file it
-/// names is never reclassified.
-fn has_explicit_role_rule(path: &Path, rules: &[SourceRoleRule]) -> bool {
+/// The roles explicit configuration states for one path, in rule order.
+fn matching_role_rules<'a>(
+    path: &Path,
+    rules: &'a [SourceRoleRule],
+) -> impl Iterator<Item = SourceRole> + 'a {
     let normalized = path.to_string_lossy().replace('\\', "/");
     rules
         .iter()
-        .any(|rule| glob_matches(rule.pattern(), &normalized))
+        .filter(move |rule| glob_matches(rule.pattern(), &normalized))
+        .map(SourceRoleRule::role)
 }
 
 fn classify_source_role(
@@ -1432,12 +1431,7 @@ fn classify_source_role(
     source: &[u8],
     rules: &[SourceRoleRule],
 ) -> Result<SourceRole, String> {
-    let normalized = path.to_string_lossy().replace('\\', "/");
-    let mut explicit: Vec<_> = rules
-        .iter()
-        .filter(|rule| glob_matches(rule.pattern(), &normalized))
-        .map(SourceRoleRule::role)
-        .collect();
+    let mut explicit: Vec<_> = matching_role_rules(path, rules).collect();
     explicit.sort();
     explicit.dedup();
     if !explicit.is_empty() {
@@ -1803,9 +1797,7 @@ impl FileResult {
             Self::Unsupported { role, .. } | Self::Failed { role, .. } => role,
             Self::RoleConflict { .. } => return,
         };
-        if *role == SourceRole::Primary {
-            *role = SourceRole::Test;
-        }
+        *role = role.demoted_by_test_scope();
     }
 }
 
@@ -1820,23 +1812,13 @@ fn demote_test_declared_roles(
     aliases: &[ResolutionAlias],
     rules: &[SourceRoleRule],
 ) {
-    let index: BTreeMap<PathBuf, FileId> = paths
-        .iter()
-        .enumerate()
-        .map(|(index, path)| ((*path).to_path_buf(), FileId::from_index(index)))
-        .collect();
-    let declarations = module_declarations(
-        results
-            .iter()
-            .enumerate()
-            .map(|(index, result)| (FileId::from_index(index), paths[index], result.references())),
-        &index,
-        aliases,
-    );
-    for file in test_declared_files(&declarations) {
-        if !has_explicit_role_rule(paths[file.index()], rules) {
-            results[file.index()].demote_to_test();
-        }
+    let demotions = {
+        let references: Vec<&[DependencySyntax]> =
+            results.iter().map(FileResult::references).collect();
+        test_declared_demotions(paths, &references, aliases, rules)
+    };
+    for file in demotions {
+        results[file].demote_to_test();
     }
 }
 
@@ -1862,9 +1844,7 @@ impl DiffSide {
             | Self::Failed { role, .. } => role,
             Self::Missing | Self::RoleConflict { .. } => return,
         };
-        if *role == SourceRole::Primary {
-            *role = SourceRole::Test;
-        }
+        *role = role.demoted_by_test_scope();
     }
 }
 
@@ -1881,57 +1861,43 @@ fn demote_test_declared_diff_roles(
     aliases: &[ResolutionAlias],
     rules: &[SourceRoleRule],
 ) {
-    let mut paths: Vec<PathBuf> = vec![PathBuf::new(); changed_count + unchanged.len()];
-    let mut references: Vec<&[DependencySyntax]> = vec![&[][..]; changed_count + unchanged.len()];
-    for result in results.iter() {
-        let file = match side {
-            DiffSideSelector::Current => &result.current,
-            DiffSideSelector::Before => &result.before,
-        };
-        paths[result.index] = match side {
-            DiffSideSelector::Current => result.change.current_path().to_path_buf(),
-            DiffSideSelector::Before => result.change.base_path().to_path_buf(),
-        };
-        references[result.index] = file.references();
-    }
-    for (offset, file) in unchanged_candidates.iter().enumerate() {
-        paths[changed_count + offset] = file.path().as_path().to_path_buf();
-        references[changed_count + offset] = unchanged[offset].references();
-    }
-    let index: BTreeMap<PathBuf, FileId> = paths
-        .iter()
-        .enumerate()
-        .filter(|(_, path)| !path.as_os_str().is_empty())
-        .map(|(index, path)| (path.clone(), FileId::from_index(index)))
-        .collect();
-    let declarations = module_declarations(
-        paths
+    debug_assert_eq!(results.len(), changed_count);
+    debug_assert!(
+        results
             .iter()
-            .zip(&references)
             .enumerate()
-            .map(|(index, (path, references))| {
-                (FileId::from_index(index), path.as_path(), *references)
-            }),
-        &index,
-        aliases,
+            .all(|(offset, result)| result.index == offset),
+        "diff results are dense and ordered by file index"
     );
-    let declared = test_declared_files(&declarations);
-    for file in declared {
-        if has_explicit_role_rule(&paths[file.index()], rules) {
-            continue;
-        }
-        if file.index() < changed_count {
-            if let Some(result) = results
-                .iter_mut()
-                .find(|result| result.index == file.index())
-            {
-                match side {
-                    DiffSideSelector::Current => result.current.demote_to_test(),
-                    DiffSideSelector::Before => result.before.demote_to_test(),
-                }
+    let demotions =
+        {
+            let (paths, references): (Vec<PathBuf>, Vec<&[DependencySyntax]>) =
+                results
+                    .iter()
+                    .map(|result| match side {
+                        DiffSideSelector::Current => (
+                            result.change.current_path().to_path_buf(),
+                            result.current.references(),
+                        ),
+                        DiffSideSelector::Before => (
+                            result.change.base_path().to_path_buf(),
+                            result.before.references(),
+                        ),
+                    })
+                    .chain(unchanged_candidates.iter().zip(unchanged.iter()).map(
+                        |(file, result)| (file.path().as_path().to_path_buf(), result.references()),
+                    ))
+                    .unzip();
+            test_declared_demotions(&paths, &references, aliases, rules)
+        };
+    for file in demotions {
+        if file < changed_count {
+            match side {
+                DiffSideSelector::Current => results[file].current.demote_to_test(),
+                DiffSideSelector::Before => results[file].before.demote_to_test(),
             }
         } else if side == DiffSideSelector::Current {
-            unchanged[file.index() - changed_count].demote_to_test();
+            unchanged[file - changed_count].demote_to_test();
         }
     }
 }
@@ -2323,6 +2289,7 @@ impl<'a> CodebaseReportBuilder<'a> {
         builder.set_stable_dependency_findings(architecture.stable_dependencies);
         builder.set_size_findings(self.size_findings);
         builder.set_evolution(evolution);
+        builder.set_explanation_pairs(explanation_pairs);
         for finding in evolutionary_findings {
             let pair = finding.coupling();
             builder.link_evolutionary_finding(root, finding.id());
@@ -2497,7 +2464,7 @@ struct ReferenceTables {
 /// already carries a later role keeps it.
 fn evidence_role(reference: &DependencySyntax, dependencies: &SourceDependencies) -> SourceRole {
     if reference.scope() == smackdebt_analysis::DependencyScope::Test {
-        dependencies.role.max(SourceRole::Test)
+        dependencies.role.demoted_by_test_scope()
     } else {
         dependencies.role
     }
@@ -3376,6 +3343,15 @@ fn resolve_candidates(
     aliases: &[ResolutionAlias],
 ) -> Vec<FileId> {
     let parent = source.parent().unwrap_or(Path::new(""));
+    let rust = source
+        .extension()
+        .is_some_and(|extension| extension == "rs");
+    // A Rust file that is not `mod.rs`, `lib.rs`, or `main.rs` owns a directory
+    // of its own name, so `mod child;` in `a.rs` names `a/child.rs` rather than
+    // a sibling. That reading wins where it resolves; the sibling reading stays
+    // for every other layout.
+    let module_directory = rust.then(|| rust_module_directory(source)).flatten();
+    let source_root = rust.then(|| rust_source_root(source)).flatten();
     let mut matches = std::collections::BTreeSet::new();
     for candidate in candidates {
         if smackdebt_analysis::is_symbolic_candidate(candidate) {
@@ -3386,29 +3362,21 @@ fn resolve_candidates(
         for candidate in expanded {
             let path = Path::new(&candidate);
             let relative = candidate.starts_with("./") || candidate.starts_with("../");
-            let rust = source
-                .extension()
-                .is_some_and(|extension| extension == "rs");
-            // A Rust file that is not `mod.rs`, `lib.rs`, or `main.rs` owns a
-            // directory of its own name, so `mod child;` in `a.rs` names
-            // `a/child.rs` rather than a sibling. That reading wins where it
-            // resolves; the sibling reading stays for every other layout.
-            let module = (rust && relative)
-                .then(|| rust_module_directory(source))
-                .flatten()
-                .map(|directory| directory.join(path))
-                .filter(|joined| {
-                    clean_relative(joined).is_some_and(|clean| index.contains_key(&clean))
-                });
-            let mut joined = match module {
-                Some(joined) => vec![joined],
-                None if relative => vec![parent.join(path)],
-                None => vec![path.to_path_buf()],
+            let module = module_directory
+                .as_ref()
+                .filter(|_| relative)
+                .and_then(|directory| clean_relative(&directory.join(path)))
+                .and_then(|clean| index.get(&clean));
+            if let Some(file) = module {
+                matches.insert(*file);
+                continue;
+            }
+            let mut joined = if relative {
+                vec![parent.join(path)]
+            } else {
+                vec![path.to_path_buf()]
             };
-            if rust
-                && !relative
-                && let Some(source_root) = rust_source_root(source)
-            {
+            if !relative && let Some(source_root) = &source_root {
                 joined.push(source_root.join(path));
             }
             for joined in joined {
@@ -5529,18 +5497,8 @@ mod tests {
                 .filter(|edge| edge.source() == declared)
                 .all(|edge| edge.role() == SourceRole::Test && !edge.enters_verdict_graph())
         );
-        let package_edges: Vec<_> = report
-            .package_edges()
-            .iter()
-            .map(|edge| {
-                (
-                    report.packages()[edge.source().index()].path().to_owned(),
-                    report.packages()[edge.target().index()].path().to_owned(),
-                )
-            })
-            .collect();
         assert_eq!(
-            package_edges,
+            package_pairs(report),
             [("crates/support".to_owned(), "crates/main".to_owned())]
         );
         assert!(

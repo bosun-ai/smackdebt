@@ -22,6 +22,7 @@ use crate::{
 #[cfg(test)]
 use crate::{HealthPolicy, LocalUnitId, Signal, Thresholds, compare_units};
 use std::cmp::{Ordering, Reverse};
+use std::collections::BTreeSet;
 
 macro_rules! index_type {
     ($name:ident) => {
@@ -760,6 +761,10 @@ pub struct Report {
     orphan_files: Vec<OrphanFile>,
     stable_dependency_findings: Vec<StableDependencyFinding>,
     knowledge_concentration_findings: Vec<KnowledgeConcentrationFinding>,
+    /// The package pairs a code dependency explains, in the direction the
+    /// dependency runs.  Analysis states this once; it is a read-only fact for
+    /// renderers and is never serialized.
+    explanation_pairs: BTreeSet<(PackageId, PackageId)>,
     verdict: Option<Verdict>,
 }
 
@@ -852,6 +857,14 @@ impl ReportBuilder {
     /// Sets the stable-dependency findings, ordered by package edge position.
     pub fn set_stable_dependency_findings(&mut self, findings: Vec<StableDependencyFinding>) {
         self.report.stable_dependency_findings = findings;
+    }
+
+    /// Sets the package pairs a code dependency explains.
+    ///
+    /// This is the same set the unexplained-coupling rule reads, so a renderer
+    /// never re-derives the claim from the graphs.
+    pub fn set_explanation_pairs(&mut self, pairs: BTreeSet<(PackageId, PackageId)>) {
+        self.report.explanation_pairs = pairs;
     }
 
     pub fn set_evolution(&mut self, facts: EvolutionaryReportFacts) {
@@ -947,6 +960,7 @@ impl Report {
             file_history: Vec::new(),
             package_history: Vec::new(),
             change_coupling: Vec::new(),
+            explanation_pairs: BTreeSet::new(),
             contributor_concentration: Vec::new(),
             evolutionary_findings: Vec::new(),
             evolutionary_comparisons: Vec::new(),
@@ -1025,6 +1039,11 @@ impl Report {
     pub fn package_history(&self) -> &[PackageHistory] {
         &self.package_history
     }
+    /// Whether a code dependency explains why two packages change together.
+    pub fn coupling_explained(&self, left: PackageId, right: PackageId) -> bool {
+        crate::evolution::pair_is_explained(&self.explanation_pairs, left, right)
+    }
+
     pub fn change_coupling(&self) -> &[ChangeCoupling] {
         &self.change_coupling
     }
