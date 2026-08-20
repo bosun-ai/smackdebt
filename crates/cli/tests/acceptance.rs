@@ -1,9 +1,14 @@
+// The hermetic pinning is shared with the unified suite; only that helper is
+// mapped in, because this suite builds its commands directly.
+#[path = "support/hermetic.rs"]
+mod support;
+
 use std::collections::HashSet;
 use std::fs;
 use std::path::Path;
 use std::process::Command;
 
-use assert_cmd::cargo::cargo_bin_cmd;
+use support::hermetic_env;
 
 const SOURCE_ENGINE_FIXTURE: &str =
     concat!(env!("CARGO_MANIFEST_DIR"), "/tests/fixtures/source-engine");
@@ -91,7 +96,7 @@ fn diff_reports_metric_changes_from_the_worktree() {
 #[test]
 fn added_and_removed_diff_cards_state_the_measurements_of_the_side_that_exists() {
     let project = one_sided_diff_fixture();
-    let output = cargo_bin_cmd!("smackdebt")
+    let output = smackdebt()
         .current_dir(project.path())
         .env("COLUMNS", "120")
         .args(["diff", "HEAD", "--all", "--color", "never"])
@@ -129,7 +134,7 @@ fn invalid_project_config_uses_argument_exit_code() {
         "[thresholds.cognitive]\nwatch = 25\nhigh = 10\n",
     )
     .unwrap();
-    cargo_bin_cmd!("smackdebt")
+    smackdebt()
         .arg(project.path())
         .assert()
         .code(2)
@@ -150,7 +155,7 @@ fn same_level_source_role_conflict_has_exact_argument_failure_streams() {
     )
     .unwrap();
 
-    cargo_bin_cmd!("smackdebt")
+    smackdebt()
         .arg(project.path())
         .assert()
         .code(2)
@@ -296,7 +301,7 @@ fn terminal_color_can_be_forced_or_disabled_through_a_pipe() {
 #[test]
 fn explicit_color_is_rejected_for_json() {
     let project = fixture();
-    cargo_bin_cmd!("smackdebt")
+    smackdebt()
         .args(["--json", "--color", "always"])
         .arg(project.path())
         .assert()
@@ -394,7 +399,7 @@ fn static_architecture_codebase_snapshots_are_reviewed() {
 #[test]
 fn long_fact_families_keep_their_meaning_at_fifty_columns() {
     let project = long_responsive_fixture();
-    let output = cargo_bin_cmd!("smackdebt")
+    let output = smackdebt()
         .current_dir(project.path())
         .env("COLUMNS", "50")
         .args(["--all", "--color", "never", "--history", "36500d"])
@@ -437,7 +442,7 @@ fn long_fact_families_keep_their_meaning_at_fifty_columns() {
 
     // A path view keeps the relationships that explain one package, still at
     // fifty columns and still without losing a fact.
-    let path = cargo_bin_cmd!("smackdebt")
+    let path = smackdebt()
         .current_dir(project.path())
         .env("COLUMNS", "50")
         .args([
@@ -612,7 +617,7 @@ fn diff_detail_renders_external_unresolved_and_ambiguous_relations_once() {
     .into_iter()
     .enumerate()
     {
-        let output = cargo_bin_cmd!("smackdebt")
+        let output = smackdebt()
             .current_dir(project.path())
             .args(arguments)
             .output()
@@ -1381,7 +1386,9 @@ fn empty_git_history_is_unavailable_in_coverage_terminal_and_diagnostics() {
 fn shallow_history_is_reported_as_incomplete() {
     let origin = evolutionary_fixture();
     let checkout = tempfile::tempdir().unwrap();
-    let output = Command::new("git")
+    let mut clone = Command::new("git");
+    hermetic_env(&mut clone);
+    let output = clone
         .args([
             "clone",
             "--depth",
@@ -1484,7 +1491,10 @@ fn a_report_piped_into_head_is_quiet_and_successful() {
     // has already left by the time the next write happens.
     let project = tangled_fixture(400);
     let binary = assert_cmd::cargo::cargo_bin("smackdebt");
-    let output = Command::new("sh")
+    let mut shell = Command::new("sh");
+    // The pipeline inherits the pinned environment through the shell.
+    hermetic_env(&mut shell);
+    let output = shell
         .arg("-c")
         .arg(format!(
             "'{}' --all '{}' | head -1",
@@ -2016,16 +2026,19 @@ fn strip_ansi(value: &[u8]) -> Vec<u8> {
     result
 }
 
+/// The built command with its environment pinned to the hermetic home.
+fn smackdebt() -> assert_cmd::Command {
+    let mut command = Command::new(assert_cmd::cargo::cargo_bin("smackdebt"));
+    hermetic_env(&mut command);
+    assert_cmd::Command::from_std(command)
+}
+
 fn run<const N: usize>(arguments: [&str; N]) -> Vec<u8> {
-    cargo_bin_cmd!("smackdebt")
-        .args(arguments)
-        .output()
-        .unwrap()
-        .stdout
+    smackdebt().args(arguments).output().unwrap().stdout
 }
 
 fn run_in<const N: usize>(directory: &Path, arguments: [&str; N]) -> Vec<u8> {
-    cargo_bin_cmd!("smackdebt")
+    smackdebt()
         .current_dir(directory)
         .args(arguments)
         .output()
@@ -2174,7 +2187,9 @@ fn long_responsive_fixture() -> tempfile::TempDir {
 }
 
 fn git<const N: usize>(directory: &Path, arguments: [&str; N]) {
-    let status = Command::new("git")
+    let mut command = Command::new("git");
+    hermetic_env(&mut command);
+    let status = command
         .args(arguments)
         .env("GIT_AUTHOR_DATE", "2026-08-01T12:00:00Z")
         .env("GIT_COMMITTER_DATE", "2026-08-01T12:00:00Z")
@@ -2511,7 +2526,9 @@ fn weak_history_fixture() -> tempfile::TempDir {
 
 fn commit_as(directory: &Path, name: &str, email: &str, message: &str) {
     git(directory, ["add", "-A"]);
-    let status = Command::new("git")
+    let mut command = Command::new("git");
+    hermetic_env(&mut command);
+    let status = command
         .args([
             "-c",
             &format!("user.name={name}"),

@@ -10,8 +10,8 @@
 
 ## 3. Hermetic acceptance environment
 
-- [ ] 3.1 Pin `HOME`, `XDG_CONFIG_HOME`, `GIT_CONFIG_GLOBAL`, and `GIT_CONFIG_SYSTEM` for acceptance child processes and fixture git commands through one shared helper.
-- [ ] 3.2 Prove the pinning moves zero snapshot bytes.
+- [x] 3.1 Pin `HOME`, `XDG_CONFIG_HOME`, `GIT_CONFIG_GLOBAL`, and `GIT_CONFIG_SYSTEM` for acceptance child processes and fixture git commands through one shared helper.
+- [x] 3.2 Prove the pinning moves zero snapshot bytes.
 
 ## 4. Discovery on git ignore semantics
 

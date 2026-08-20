@@ -1,9 +1,12 @@
+pub(crate) mod hermetic;
+
 use std::ffi::OsString;
 use std::fs;
 use std::path::Path;
 use std::process::{Command, ExitStatus};
 
 use assert_cmd::cargo::cargo_bin;
+use hermetic::hermetic_env;
 
 #[derive(Clone, Copy, Debug)]
 pub(crate) struct Identity<'a> {
@@ -159,6 +162,7 @@ impl Invocation {
 
     pub(crate) fn run(&self, directory: &Path) -> ProcessResult {
         let mut command = Command::new(cargo_bin!("smackdebt"));
+        hermetic_env(&mut command);
         command
             .current_dir(directory)
             .args(&self.arguments)
@@ -1049,6 +1053,7 @@ fn commit<'a>(message: &'a str, name: &'a str, address: &'a str, date: &'a str) 
 
 fn run_git<const N: usize>(directory: &Path, arguments: [&str; N], commit: Option<Commit<'_>>) {
     let mut command = Command::new("git");
+    hermetic_env(&mut command);
     command
         .args(arguments)
         .current_dir(directory)

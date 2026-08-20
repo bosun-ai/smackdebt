@@ -11,6 +11,7 @@ use unicode_width::UnicodeWidthStr;
 
 #[cfg(unix)]
 use support::coverage_failure_repository;
+use support::hermetic::hermetic_env;
 use support::{
     GeneratedRepository, Invocation, copy_language_truth_files, deepened_signal_repository,
     evolution_repository, module_wiring_repository, ref_diff_repository,
@@ -814,7 +815,9 @@ fn worktree_diff_reports_the_declared_mixed_change_outcomes_once() {
 #[test]
 fn committed_ref_diff_has_exact_terminal_and_json_with_a_clean_worktree() {
     let repository = ref_diff_repository();
-    let status = Command::new("git")
+    let mut command = Command::new("git");
+    hermetic_env(&mut command);
+    let status = command
         .args(["status", "--porcelain"])
         .current_dir(repository.path())
         .output()
@@ -1675,7 +1678,9 @@ fn installed_command_runs_outside_the_workspace() {
     );
     let command = prefix.path().join("bin/smackdebt");
     for arguments in [vec!["--help"], vec!["--version"]] {
-        let output = Command::new(&command).args(arguments).output().unwrap();
+        let mut invocation = Command::new(&command);
+        hermetic_env(&mut invocation);
+        let output = invocation.args(arguments).output().unwrap();
         assert_eq!(output.status.code(), Some(0));
         assert!(!output.stdout.is_empty());
         assert!(output.stderr.is_empty());
@@ -1684,7 +1689,9 @@ fn installed_command_runs_outside_the_workspace() {
         vec!["--color", "never", "--jobs", "1"],
         vec!["--json", "--jobs", "1"],
     ] {
-        let output = Command::new(&command)
+        let mut invocation = Command::new(&command);
+        hermetic_env(&mut invocation);
+        let output = invocation
             .args(arguments)
             .current_dir(repository.path())
             .env("COLUMNS", "120")
