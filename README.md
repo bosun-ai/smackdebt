@@ -57,7 +57,7 @@ watch crates/billing ↔ crates/core changed together in 6 of 9 commits · 67% �
 watch one contributor made 34 of 36 commits to crates/api
 
 WARNINGS
-warning 29 imports could not be followed.
+warning 29 imports could not be followed · 24 named nothing in the repository · 5 matched more than one file
 
 next: smackdebt crates/api
 ```

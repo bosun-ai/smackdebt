@@ -1035,14 +1035,15 @@ fn history_rows(
 
 fn warning_rows(report: &Report, selected: &Scope, detail: bool) -> (Section, Vec<String>) {
     let mut section = Section::new("WARNINGS");
-    let mut warnings = Vec::new();
+    let mut warnings: Vec<Row> = Vec::new();
+    let warning = |text: String| Row::new(Some(Word::Warning), text);
     let history = report.history_coverage();
     match history.availability() {
         smackdebt_analysis::HistoryAvailability::Incomplete => {
-            warnings.push("History is incomplete.".to_owned());
+            warnings.push(warning("History is incomplete.".to_owned()));
         }
         smackdebt_analysis::HistoryAvailability::Unavailable => {
-            warnings.push("History is unavailable.".to_owned());
+            warnings.push(warning("History is unavailable.".to_owned()));
         }
         smackdebt_analysis::HistoryAvailability::Complete => {
             // A selected window that contains no commits is disclosed rather
@@ -1051,26 +1052,47 @@ fn warning_rows(report: &Report, selected: &Scope, detail: bool) -> (Section, Ve
             if history.eligible_commits() == 0
                 && let Some(days) = history.window_days()
             {
-                warnings.push(format!(
+                warnings.push(warning(format!(
                     "No commits in the last {}.",
                     Counted::new(days as usize, "day", "days")
-                ));
+                )));
             }
         }
     }
     if history.rename_gaps() > 0 {
-        warnings.push("Some renamed files could not be matched.".to_owned());
+        warnings.push(warning(
+            "Some renamed files could not be matched.".to_owned(),
+        ));
     }
-    let unfollowed = report
+    let mut unresolved = 0usize;
+    let mut ambiguous = 0usize;
+    for diagnostic in report
         .resolution_diagnostics()
         .iter()
         .filter(|diagnostic| file_belongs_to_scope(report, diagnostic.file(), selected))
-        .count();
-    if unfollowed > 0 {
-        warnings.push(format!(
-            "{} could not be followed.",
-            Counted::new(unfollowed, "import", "imports")
-        ));
+    {
+        match diagnostic.kind() {
+            smackdebt_analysis::ResolutionIssueKind::Unresolved => unresolved += 1,
+            smackdebt_analysis::ResolutionIssueKind::Ambiguous => ambiguous += 1,
+        }
+    }
+    if unresolved + ambiguous > 0 {
+        // The total alone hides whether names were missing or duplicated, so
+        // each cause states its own count — and only when it happened.
+        let mut row = Row::new(
+            Some(Word::Warning),
+            format!(
+                "{} could not be followed",
+                Counted::new(unresolved + ambiguous, "import", "imports")
+            ),
+        );
+        if unresolved > 0 {
+            row = row.with_fact(format!("{unresolved} named nothing in the repository"));
+        }
+        if ambiguous > 0 {
+            row = row.with_fact(format!("{ambiguous} matched more than one file"));
+        }
+        warnings.push(row);
     }
     let relevant = |diagnostic: &Diagnostic| {
         diagnostic
@@ -1099,13 +1121,10 @@ fn warning_rows(report: &Report, selected: &Scope, detail: bool) -> (Section, Ve
             .filter(|diagnostic| !diagnostic.message().starts_with("Git history"))
             .count();
         if count > 0 {
-            warnings.push(diagnostic_summary(kind, count));
+            warnings.push(warning(diagnostic_summary(kind, count)));
         }
     }
-    section.rows = warnings
-        .into_iter()
-        .map(|warning| Row::new(Some(Word::Warning), warning))
-        .collect();
+    section.rows = warnings;
     let mut warning_detail = Vec::new();
     if detail {
         for diagnostic in report

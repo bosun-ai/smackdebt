@@ -57,7 +57,9 @@ ARCHITECTURE
         could not be matched · test
 
 WARNINGS
-  warning 2 imports could not be followed.
+  warning 2 imports could not be followed
+        1 named nothing in the repository
+        1 matched more than one file
 
   next: smackdebt very-long-source-package-name/
         very-long-source-directory-name/

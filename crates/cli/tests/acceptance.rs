@@ -616,14 +616,25 @@ fn architecture_path_drill_keeps_incoming_edges_and_omits_unrelated_regions() {
 #[test]
 fn selected_path_scopes_import_warning_counts() {
     let project = static_architecture_fixture();
+    // Both causes in one scope: the total row carries one fact per cause.
     let app = String::from_utf8(run_in(project.path(), ["app", "--color", "never"])).unwrap();
     assert!(
-        app.contains("warning 3 imports could not be followed."),
+        app.contains("warning 3 imports could not be followed"),
         "{app}"
     );
+    assert!(app.contains("2 named nothing in the repository"), "{app}");
+    assert!(app.contains("1 matched more than one file"), "{app}");
+
+    // A single cause states the total and that cause only.
+    let core = String::from_utf8(run_in(project.path(), ["core", "--color", "never"])).unwrap();
+    assert!(
+        core.contains("warning 1 import could not be followed · 1 named nothing in the repository"),
+        "{core}"
+    );
+    assert!(!core.contains("matched more than one file"), "{core}");
 
     let native = String::from_utf8(run_in(project.path(), ["native", "--color", "never"])).unwrap();
-    assert!(!native.contains("could not be followed."), "{native}");
+    assert!(!native.contains("could not be followed"), "{native}");
 }
 
 #[test]
@@ -736,7 +747,12 @@ fn diff_detail_renders_external_unresolved_and_ambiguous_relations_once() {
                 "case {case}: {terminal}"
             );
         }
-        for status in ["matched more than one file", "could not be matched"] {
+        // The warning breakdown may repeat a cause's words, so each relation's
+        // own status is matched together with its target.
+        for status in [
+            "./choice · matched more than one file",
+            "require(moduleName) · could not be matched",
+        ] {
             assert_eq!(
                 terminal.matches(status).count(),
                 1,

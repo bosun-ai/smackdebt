@@ -52,8 +52,8 @@
 
 ## 10. Unfollowed-import breakdown
 
-- [ ] 10.1 Break the unfollowed-imports warning into its causes, printing each fact only when non-zero.
-- [ ] 10.2 Add acceptance evidence with both causes in one scope and with a single cause, moving documented literals and snapshots together.
+- [x] 10.1 Break the unfollowed-imports warning into its causes, printing each fact only when non-zero.
+- [x] 10.2 Add acceptance evidence with both causes in one scope and with a single cause, moving documented literals and snapshots together.
 
 ## 11. Volume terms in the codebase tier
 

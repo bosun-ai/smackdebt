@@ -17,4 +17,5 @@ ARCHITECTURE
 
 WARNINGS
   warning History is unavailable.
-  warning 2 imports could not be followed.
+  warning 2 imports could not be followed
+        1 named nothing in the repository · 1 matched more than one file
