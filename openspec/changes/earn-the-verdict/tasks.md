@@ -69,8 +69,8 @@
 
 ## 13. `--top`
 
-- [ ] 13.1 Add `--top N` limiting displayed findings only, rejecting zero and conflicting with `--json` and `--all`.
-- [ ] 13.2 Add tests for a smaller and larger limit, the zero rejection, and both conflicts, updating the help golden and README.
+- [x] 13.1 Add `--top N` limiting displayed findings only, rejecting zero and conflicting with `--json` and `--all`.
+- [x] 13.2 Add tests for a smaller and larger limit, the zero rejection, and both conflicts, updating the help golden and README.
 
 ## 14. The gate command
 

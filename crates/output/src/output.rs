@@ -3,6 +3,7 @@
 use std::cmp::Reverse;
 use std::fmt;
 use std::io::{self, Write};
+use std::num::NonZeroUsize;
 use std::path::{Path, PathBuf};
 
 use anstyle::{Ansi256Color, AnsiColor, Style};
@@ -28,6 +29,9 @@ pub struct TerminalOptions {
     all: bool,
     color: bool,
     decorations: bool,
+    /// A caller-chosen limit on displayed findings or comparisons, replacing
+    /// the default of three; every other section keeps its own limit.
+    top: Option<NonZeroUsize>,
 }
 
 impl TerminalOptions {
@@ -38,6 +42,7 @@ impl TerminalOptions {
             all,
             color,
             decorations: false,
+            top: None,
         }
     }
 
@@ -45,6 +50,13 @@ impl TerminalOptions {
     /// terminal detection.
     pub const fn with_decorations(mut self, decorations: bool) -> Self {
         self.decorations = decorations;
+        self
+    }
+
+    /// Limits displayed findings or comparisons to the given count instead of
+    /// the default of three.
+    pub const fn with_top(mut self, top: Option<NonZeroUsize>) -> Self {
+        self.top = top;
         self
     }
 }
@@ -56,6 +68,7 @@ impl Default for TerminalOptions {
             all: false,
             color: false,
             decorations: false,
+            top: None,
         }
     }
 }
@@ -67,7 +80,7 @@ pub fn write_terminal(
     selected_scope: Option<ScopeId>,
     options: TerminalOptions,
 ) -> io::Result<()> {
-    let presentation = Presentation::new(report, selected_scope, options.all);
+    let presentation = Presentation::new(report, selected_scope, options.all, options.top);
     let mut width_writer = WidthWriter::new(writer, options.width);
     Renderer::new(&mut width_writer, options).write(&presentation)?;
     width_writer.finish()?;
@@ -320,7 +333,12 @@ struct Presentation {
 }
 
 impl Presentation {
-    fn new(report: &Report, selected_scope: Option<ScopeId>, all: bool) -> Self {
+    fn new(
+        report: &Report,
+        selected_scope: Option<ScopeId>,
+        all: bool,
+        top: Option<NonZeroUsize>,
+    ) -> Self {
         let selected = selected_scope
             .or_else(|| report.root())
             .and_then(|id| report.scopes().get(id.index()));
@@ -353,8 +371,8 @@ impl Presentation {
 
         let areas = area_rows(report, displayed);
         let findings = match report.mode() {
-            ReportMode::Codebase => codebase_finding_rows(report, displayed, all),
-            ReportMode::Diff => diff_finding_rows(report, displayed, all, selection),
+            ReportMode::Codebase => codebase_finding_rows(report, displayed, all, top),
+            ReportMode::Diff => diff_finding_rows(report, displayed, all, top, selection),
         };
         let architecture = architecture_rows(report, selected, all, detail, verdict.selection());
         let history = history_rows(report, selected, detail, verdict.selection());
@@ -446,7 +464,18 @@ fn area_row(report: &Report, area: &Scope) -> Row {
     Row::new(None, terminal_path(area.name())).with_facts(facts)
 }
 
-fn codebase_finding_rows(report: &Report, displayed: &Scope, all: bool) -> Section {
+/// How many ranked findings or comparisons the default view shows; a
+/// caller-chosen limit replaces only this count, never another section's.
+fn finding_limit(top: Option<NonZeroUsize>) -> usize {
+    top.map_or(3, NonZeroUsize::get)
+}
+
+fn codebase_finding_rows(
+    report: &Report,
+    displayed: &Scope,
+    all: bool,
+    top: Option<NonZeroUsize>,
+) -> Section {
     let mut section = Section::new("FINDINGS");
     let mut findings: Vec<&Finding> = displayed
         .findings()
@@ -458,7 +487,7 @@ fn codebase_finding_rows(report: &Report, displayed: &Scope, all: bool) -> Secti
     }
     findings.sort_by(|left, right| finding_order(report, left, right));
     if !all && displayed.kind() != ScopeKind::File {
-        findings.truncate(3);
+        findings.truncate(finding_limit(top));
     }
     for finding in findings {
         let file = &report.files()[finding.file().index()];
@@ -524,6 +553,7 @@ fn diff_finding_rows(
     report: &Report,
     displayed: &Scope,
     all: bool,
+    top: Option<NonZeroUsize>,
     selection: &DebtDiffSelection,
 ) -> Section {
     let mut section = Section::new("FINDINGS");
@@ -540,7 +570,7 @@ fn diff_finding_rows(
             .then_with(|| left.identity().name().cmp(right.identity().name()))
     });
     if !all && displayed.kind() != ScopeKind::File {
-        comparisons.truncate(3);
+        comparisons.truncate(finding_limit(top));
     }
     for comparison in comparisons {
         let path = comparison
@@ -2642,6 +2672,29 @@ mod tests {
     fn absent_activity_keeps_the_findings_heading() {
         let report = report_with_findings(false);
         assert!(render(&report, TerminalOptions::default()).contains("FINDINGS"));
+    }
+
+    #[test]
+    fn a_top_limit_replaces_only_the_default_finding_count() {
+        let report = report_with_findings(false);
+        let finding_rows = |text: &str| {
+            text.lines()
+                .filter(|line| line.contains(" · function"))
+                .count()
+        };
+        let default = render(&report, TerminalOptions::default());
+        assert_eq!(finding_rows(&default), 3, "{default}");
+        let five = render(
+            &report,
+            TerminalOptions::default().with_top(NonZeroUsize::new(5)),
+        );
+        assert_eq!(finding_rows(&five), 5, "{five}");
+        // A limit above the eleven findings shows all of them and nothing more.
+        let roomy = render(
+            &report,
+            TerminalOptions::default().with_top(NonZeroUsize::new(20)),
+        );
+        assert_eq!(finding_rows(&roomy), 11, "{roomy}");
     }
 
     #[test]

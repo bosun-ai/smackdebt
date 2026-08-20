@@ -107,6 +107,9 @@ high process_checkout · function
 ```
 
 The default terminal view shows at most five affected areas and three findings.
+`--top 10` is the middle level of detail: it raises or lowers only the number
+of displayed findings, leaving every other section at its default limit, and
+cannot be combined with `--json` or `--all`.
 Use `--all` for all useful debt without those limits. `--all` is not an export:
 raw dependency edges, references outside the repository, churn totals,
 cyclomatic-one values, weak coupling, and healthy rows never appear in any

@@ -47,6 +47,9 @@ pub(crate) struct Common {
     /// Show all useful terminal detail.
     #[arg(long)]
     pub(crate) all: bool,
+    /// Show up to this many findings.
+    #[arg(long, value_parser = parse_top, conflicts_with_all = ["json", "all"])]
+    pub(crate) top: Option<usize>,
     /// Glyph color: auto, always, or never.
     #[arg(long, value_enum, conflicts_with = "json")]
     pub(crate) color: Option<ColorChoice>,
@@ -69,6 +72,16 @@ pub(crate) fn parse_days(value: &str) -> Result<u32, String> {
         return Err("use at least one day".to_owned());
     }
     Ok(days)
+}
+
+fn parse_top(value: &str) -> Result<usize, String> {
+    let top = value
+        .parse::<usize>()
+        .map_err(|_| "use a whole number greater than zero".to_owned())?;
+    if top == 0 {
+        return Err("use a whole number greater than zero".to_owned());
+    }
+    Ok(top)
 }
 
 fn parse_jobs(value: &str) -> Result<usize, String> {
@@ -106,5 +119,18 @@ mod tests {
     #[test]
     fn explicit_color_conflicts_with_json() {
         assert!(Cli::try_parse_from(["smackdebt", "--json", "--color", "always"]).is_err());
+    }
+
+    #[test]
+    fn rejects_a_zero_finding_limit() {
+        assert!(Cli::try_parse_from(["smackdebt", "--top", "0"]).is_err());
+        let cli = Cli::try_parse_from(["smackdebt", "--top", "5"]).unwrap();
+        assert_eq!(cli.common.top, Some(5));
+    }
+
+    #[test]
+    fn a_finding_limit_conflicts_with_json_and_with_all() {
+        assert!(Cli::try_parse_from(["smackdebt", "--top", "5", "--json"]).is_err());
+        assert!(Cli::try_parse_from(["smackdebt", "--top", "5", "--all"]).is_err());
     }
 }

@@ -708,6 +708,48 @@ fn unified_codebase_terminal_and_json_are_exact_and_deterministic() {
 }
 
 #[test]
+fn top_limits_only_the_displayed_findings() {
+    let repository = worktree_change_repository();
+    // A limit of one keeps the single worst finding and drops the rest.
+    let top_one = Invocation::new(["--top", "1", "--history", "36500d"]).run(repository.path());
+    top_one.success();
+    let limited = String::from_utf8_lossy(&top_one.stdout).into_owned();
+    assert!(limited.contains("  high b · function\n"), "{limited}");
+    assert!(!limited.contains("watch renamed"), "{limited}");
+    assert!(!limited.contains("watch c"), "{limited}");
+    // The limit changes nothing else, so the architecture section survives.
+    assert!(limited.contains("ARCHITECTURE"), "{limited}");
+    // A limit above the finding count shows everything the default shows,
+    // byte for byte, with no filler or bookkeeping row.
+    let concise = Invocation::new(["--history", "36500d"]).run(repository.path());
+    concise.success();
+    let top_ten = Invocation::new(["--top", "10", "--history", "36500d"]).run(repository.path());
+    top_ten.success();
+    assert_eq!(top_ten.stdout, concise.stdout);
+
+    // Zero and both documented conflicts are rejected before any analysis.
+    let zero = Invocation::new(["--top", "0"]).run(repository.path());
+    assert_eq!(zero.status.code(), Some(2));
+    assert!(zero.stdout.is_empty());
+    assert!(
+        zero.stderr_text()
+            .contains("use a whole number greater than zero"),
+        "{}",
+        zero.stderr_text()
+    );
+    for conflict in [["--top", "1", "--json"], ["--top", "1", "--all"]] {
+        let rejected = Invocation::new(conflict).run(repository.path());
+        assert_eq!(rejected.status.code(), Some(2));
+        assert!(rejected.stdout.is_empty());
+        assert!(
+            rejected.stderr_text().contains("cannot be used with"),
+            "{}",
+            rejected.stderr_text()
+        );
+    }
+}
+
+#[test]
 fn worktree_diff_reports_the_declared_mixed_change_outcomes_once() {
     let repository = worktree_change_repository();
     let facts: Value = repository.facts("worktree-change.json");
@@ -1438,6 +1480,7 @@ fn help_and_version_use_the_success_stream_contract() {
                     "      --jobs <JOBS>        Number of workers to use\n",
                     "      --history <HISTORY>  Recent activity window, such as 90d\n",
                     "      --all                Show all useful terminal detail\n",
+                    "      --top <TOP>          Show up to this many findings\n",
                     "      --color <COLOR>      Glyph color: auto, always, or never [possible values: auto, always, never]\n",
                     "  -h, --help               Print help\n",
                     "  -V, --version            Print version\n",

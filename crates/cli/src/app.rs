@@ -1,5 +1,6 @@
 use std::ffi::OsString;
 use std::io::{self, IsTerminal, Write};
+use std::num::NonZeroUsize;
 use std::path::PathBuf;
 use std::process::ExitCode;
 
@@ -158,7 +159,9 @@ fn run(arguments: impl IntoIterator<Item = OsString>) -> ExitCode {
                     &mut stdout,
                     result.report(),
                     result.selected_scope(),
-                    TerminalOptions::new(width, common.all, color).with_decorations(decorations),
+                    TerminalOptions::new(width, common.all, color)
+                        .with_decorations(decorations)
+                        .with_top(common.top.and_then(NonZeroUsize::new)),
                 )
             };
             match rendered.and_then(|()| stdout.flush()) {
