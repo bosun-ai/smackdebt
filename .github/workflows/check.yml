@@ -1,0 +1,39 @@
+name: check
+
+on:
+  push:
+  pull_request:
+
+jobs:
+  check:
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, macos-latest]
+    runs-on: ${{ matrix.os }}
+    steps:
+      # Full history: self-analysis and the ratchet gate read the repository's
+      # own commits.
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      # Nightly is not a build toolchain: cargo-public-api invokes nightly
+      # rustdoc for its JSON output. Installed first so the pinned workspace
+      # toolchain below stays the default.
+      - uses: dtolnay/rust-toolchain@nightly
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          toolchain: "1.97"
+          components: rustfmt, clippy
+      - uses: Swatinem/rust-cache@v2
+      - uses: taiki-e/install-action@v2
+        with:
+          tool: just, cargo-public-api@0.52.0
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+      - run: npm install -g openspec@1.4.1
+      - run: just check

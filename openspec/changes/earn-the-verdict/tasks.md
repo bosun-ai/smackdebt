@@ -6,7 +6,7 @@
 
 ## 2. Continuous integration
 
-- [ ] 2.1 Add one workflow that runs the complete `just check` on every push and pull request, on Linux and macOS, from a full-depth checkout, installing only tools `just check` already needs.
+- [x] 2.1 Add one workflow that runs the complete `just check` on every push and pull request, on Linux and macOS, from a full-depth checkout, installing only tools `just check` already needs.
 
 ## 3. Hermetic acceptance environment
 
