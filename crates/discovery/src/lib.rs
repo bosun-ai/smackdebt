@@ -1,9 +1,10 @@
 #![forbid(unsafe_code)]
 
-mod ignore;
+mod glob;
 mod inventory;
+mod walk;
 
-pub use ignore::glob_matches;
+pub use glob::glob_matches;
 pub use inventory::{
     DiscoveredFile, Inventory, Package, PackageId, RelativePath, generic_source_roles,
 };

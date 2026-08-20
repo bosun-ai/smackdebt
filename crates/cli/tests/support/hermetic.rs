@@ -19,11 +19,15 @@ fn hermetic_home() -> &'static Path {
 
 /// Pins the child environment to a harness-owned home and empty git
 /// configuration, so evidence bytes are identical on every machine.
-pub(crate) fn hermetic_env(command: &mut Command) {
+///
+/// Returns the pinned home so evidence can place machine-level files — the
+/// global gitignore lives at `git/ignore` under this directory.
+pub(crate) fn hermetic_env(command: &mut Command) -> &'static Path {
     let home = hermetic_home();
     command
         .env("HOME", home)
         .env("XDG_CONFIG_HOME", home)
         .env("GIT_CONFIG_GLOBAL", "/dev/null")
         .env("GIT_CONFIG_SYSTEM", "/dev/null");
+    home
 }

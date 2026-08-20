@@ -334,6 +334,50 @@ fn source_engine_json_snapshot_is_reviewed_and_matches_schema() {
 }
 
 #[test]
+fn the_global_gitignore_excludes_candidates() {
+    let project = tempfile::tempdir().unwrap();
+    fs::write(project.path().join("kept.js"), "export const kept = 1;\n").unwrap();
+    fs::write(
+        project.path().join("machine-wide-ignored.js"),
+        "export const dropped = 1;\n",
+    )
+    .unwrap();
+    // Every child process shares one pinned home; the global gitignore lives
+    // at git/ignore under it. The pattern names one file unique to this test.
+    let home = hermetic_env(&mut Command::new("git"));
+    fs::create_dir_all(home.join("git")).unwrap();
+    fs::write(home.join("git/ignore"), "machine-wide-ignored.js\n").unwrap();
+
+    let output = run_in(project.path(), ["--json", "--jobs", "1"]);
+    let report: serde_json::Value = serde_json::from_slice(&output).unwrap();
+    let paths: Vec<&str> = report["paths"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .filter_map(|path| path.as_str())
+        .collect();
+    assert!(paths.contains(&"kept.js"), "{paths:?}");
+    assert!(!paths.contains(&"machine-wide-ignored.js"), "{paths:?}");
+}
+
+#[test]
+fn ancestor_ignore_files_never_swallow_the_committed_source_engine_fixture() {
+    // The committed fixture lives inside this workspace, so with git ignore
+    // semantics every ancestor ignore file up to the workspace root applies
+    // to it. This exact evidence fails loudly if a future edit to the
+    // workspace `.gitignore` starts matching fixture files.
+    let output = run(["--json", "--jobs", "1", SOURCE_ENGINE_FIXTURE]);
+    let report: serde_json::Value = serde_json::from_slice(&output).unwrap();
+    let scope = &report["scopes"][report["selected_scope"].as_u64().unwrap() as usize];
+    assert_eq!(
+        report["paths"][scope["path"].as_u64().unwrap() as usize],
+        "crates/cli/tests/fixtures/source-engine"
+    );
+    assert_eq!(scope["coverage"]["selected_files"], 1);
+    assert_eq!(scope["coverage"]["analyzed_files"], 1);
+}
+
+#[test]
 fn static_architecture_codebase_snapshots_are_reviewed() {
     let project = static_architecture_fixture();
     let terminal = run_in(project.path(), ["--jobs", "1", "--color", "never"]);

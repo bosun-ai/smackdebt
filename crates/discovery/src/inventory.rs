@@ -5,7 +5,7 @@
 //! language crates.
 
 use std::collections::BTreeMap;
-use std::fs::{self, DirEntry};
+use std::fs;
 use std::io;
 use std::path::{Component, Path, PathBuf};
 
@@ -13,8 +13,8 @@ pub use smackdebt_analysis::PackageId;
 use smackdebt_analysis::SourceRole;
 
 #[cfg(test)]
-use crate::ignore::glob_matches;
-use crate::ignore::{Pattern, is_generated_dir, parse_pattern, read_ignore_file, should_ignore};
+use crate::glob::glob_matches;
+use crate::walk::{config_excludes, error_path, source_walk};
 
 /// A path relative to the inventory root.
 #[derive(Clone, Debug, Eq, Ord, PartialEq, PartialOrd, Hash)]
@@ -253,7 +253,6 @@ pub fn generic_source_roles(path: &Path) -> Vec<SourceRole> {
 #[derive(Clone, Debug, Eq, PartialEq)]
 enum InventoryDiagnostic {
     UnreadableDirectory { path: RelativePath, message: String },
-    UnreadableMetadata { path: RelativePath, message: String },
     SymlinkSkipped { path: RelativePath },
 }
 
@@ -263,7 +262,6 @@ struct InventoryStats {
     directories_visited: usize,
     files_visited: usize,
     source_candidates: usize,
-    ignored_entries: usize,
     symlinks_skipped: usize,
 }
 
@@ -314,13 +312,14 @@ impl Inventory {
             ));
         }
         let root = root.to_path_buf();
-        let initial_patterns = options
-            .excludes
-            .iter()
-            .filter_map(|pattern| parse_pattern(pattern, Path::new("")))
-            .collect();
+        let excludes = config_excludes(&root, &options.excludes);
         let mut walker = Walker::new(options);
-        walker.visit_dir(Path::new(""), &root, initial_patterns);
+        for entry in source_walk(&root, excludes) {
+            match entry {
+                Ok(entry) => walker.visit(&entry, &root),
+                Err(error) => walker.record_error(&error, &root),
+            }
+        }
         walker.finish(root)
     }
 
@@ -357,7 +356,10 @@ impl Inventory {
         self.stats
     }
 
-    /// Returns the number of filesystem entries inspected by the walk.
+    /// Returns the number of directory and file entries the walk yielded.
+    ///
+    /// Pruned subtrees — ignored, excluded, and dependency directories — are
+    /// never yielded, so they contribute nothing here.
     pub const fn visited_entries(&self) -> usize {
         self.stats.directories_visited + self.stats.files_visited
     }
@@ -395,82 +397,35 @@ impl Walker {
         }
     }
 
-    fn visit_dir(&mut self, relative: &Path, absolute: &Path, inherited: Vec<Pattern>) {
-        self.stats.directories_visited += 1;
-        let mut patterns = inherited;
-        patterns.extend(read_ignore_file(absolute, relative));
-
-        let read_entries = match fs::read_dir(absolute) {
-            Ok(entries) => entries,
-            Err(error) => {
-                if let Some(path) = RelativePath::new(relative.to_path_buf()) {
-                    self.diagnostics
-                        .push(InventoryDiagnostic::UnreadableDirectory {
-                            path,
-                            message: error.to_string(),
-                        });
-                }
-                return;
-            }
+    /// Records one entry the walk yielded.
+    ///
+    /// The depth-zero root entry only counts as a visited directory; every
+    /// deeper entry is classified by its own file type.
+    fn visit(&mut self, entry: &ignore::DirEntry, root: &Path) {
+        if entry.depth() == 0 {
+            self.stats.directories_visited += 1;
+            return;
+        }
+        let Ok(relative_path) = entry.path().strip_prefix(root).map(Path::to_path_buf) else {
+            return;
         };
-
-        let mut entries = Vec::new();
-        for entry in read_entries {
-            match entry {
-                Ok(entry) => entries.push(entry),
-                Err(error) => {
-                    if let Some(path) = RelativePath::new(relative.to_path_buf()) {
-                        self.diagnostics
-                            .push(InventoryDiagnostic::UnreadableDirectory {
-                                path,
-                                message: error.to_string(),
-                            });
-                    }
-                }
-            }
-        }
-        entries.sort_by_key(|entry| entry.file_name());
-        for entry in entries {
-            self.visit_entry(relative, &entry, &patterns);
-        }
-    }
-
-    fn visit_entry(&mut self, parent: &Path, entry: &DirEntry, patterns: &[Pattern]) {
-        let name = entry.file_name();
-        let relative_path = parent.join(&name);
         let Some(relative) = RelativePath::new(relative_path.clone()) else {
             return;
         };
-        let metadata = match fs::symlink_metadata(entry.path()) {
-            Ok(metadata) => metadata,
-            Err(error) => {
-                self.diagnostics
-                    .push(InventoryDiagnostic::UnreadableMetadata {
-                        path: relative,
-                        message: error.to_string(),
-                    });
-                return;
-            }
-        };
-        if should_ignore(&relative_path, metadata.is_dir(), patterns) {
-            self.stats.ignored_entries += 1;
+        let Some(file_type) = entry.file_type() else {
             return;
-        }
-        if metadata.file_type().is_symlink() {
+        };
+        if file_type.is_symlink() {
             self.stats.symlinks_skipped += 1;
             self.diagnostics
                 .push(InventoryDiagnostic::SymlinkSkipped { path: relative });
             return;
         }
-        if metadata.is_dir() {
-            if is_generated_dir(&name) {
-                self.stats.ignored_entries += 1;
-                return;
-            }
-            self.visit_dir(&relative_path, &entry.path(), patterns.to_vec());
+        if file_type.is_dir() {
+            self.stats.directories_visited += 1;
             return;
         }
-        if !metadata.is_file() {
+        if !file_type.is_file() {
             return;
         }
 
@@ -485,18 +440,37 @@ impl Walker {
             self.stats.source_candidates += 1;
         }
         if let FileKind::Manifest(manifest) = kind {
+            let parent = relative_path.parent().unwrap_or_else(|| Path::new(""));
             self.manifest_dirs
                 .entry(parent.to_path_buf())
                 .or_default()
                 .push(manifest);
             if manifest.declares_a_name() {
-                self.record_manifest_name(parent, manifest, &entry.path());
+                self.record_manifest_name(parent, manifest, entry.path());
             }
         }
         self.files.push(RawFile {
             path: relative,
             kind,
         });
+    }
+
+    /// Records one walk error, keeping unreadable directories visible.
+    fn record_error(&mut self, error: &ignore::Error, root: &Path) {
+        let Some(io_error) = error.io_error() else {
+            return;
+        };
+        let Some(path) = error_path(error) else {
+            return;
+        };
+        let relative = path.strip_prefix(root).unwrap_or(path);
+        if let Some(path) = RelativePath::new(relative.to_path_buf()) {
+            self.diagnostics
+                .push(InventoryDiagnostic::UnreadableDirectory {
+                    path,
+                    message: io_error.to_string(),
+                });
+        }
     }
 
     /// Reads the declared name of one recognized manifest.
@@ -777,6 +751,120 @@ mod tests {
             .collect();
         expected.sort();
         assert_eq!(names, expected);
+    }
+
+    fn source_paths(inventory: &Inventory) -> Vec<String> {
+        inventory
+            .source_files()
+            .map(|file| file.path().to_string())
+            .collect()
+    }
+
+    #[test]
+    fn a_nested_ignore_file_overrides_its_ancestor() {
+        let directory = tempfile::tempdir().unwrap();
+        fs::write(directory.path().join(".gitignore"), "kept.rs\n").unwrap();
+        fs::create_dir_all(directory.path().join("nested")).unwrap();
+        fs::write(directory.path().join("nested/.gitignore"), "!kept.rs\n").unwrap();
+        fs::write(directory.path().join("kept.rs"), "").unwrap();
+        fs::write(directory.path().join("nested/kept.rs"), "").unwrap();
+        let inventory = Inventory::discover(directory.path()).unwrap();
+        assert_eq!(source_paths(&inventory), ["nested/kept.rs"]);
+    }
+
+    #[test]
+    fn a_negation_reincludes_a_previously_excluded_file() {
+        let directory = tempfile::tempdir().unwrap();
+        fs::write(directory.path().join(".gitignore"), "*.rs\n!keep.rs\n").unwrap();
+        fs::write(directory.path().join("drop.rs"), "").unwrap();
+        fs::write(directory.path().join("keep.rs"), "").unwrap();
+        let inventory = Inventory::discover(directory.path()).unwrap();
+        assert_eq!(source_paths(&inventory), ["keep.rs"]);
+    }
+
+    #[test]
+    fn an_anchored_pattern_matches_only_at_its_ignore_files_directory() {
+        let directory = tempfile::tempdir().unwrap();
+        fs::write(directory.path().join(".gitignore"), "/build.rs\n").unwrap();
+        fs::create_dir_all(directory.path().join("sub")).unwrap();
+        fs::write(directory.path().join("build.rs"), "").unwrap();
+        fs::write(directory.path().join("sub/build.rs"), "").unwrap();
+        let inventory = Inventory::discover(directory.path()).unwrap();
+        assert_eq!(source_paths(&inventory), ["sub/build.rs"]);
+    }
+
+    #[test]
+    fn the_repository_exclude_file_is_honored() {
+        let directory = tempfile::tempdir().unwrap();
+        fs::create_dir_all(directory.path().join(".git/info")).unwrap();
+        fs::write(directory.path().join(".git/info/exclude"), "local.rs\n").unwrap();
+        fs::write(directory.path().join("local.rs"), "").unwrap();
+        fs::write(directory.path().join("kept.rs"), "").unwrap();
+        let inventory = Inventory::discover(directory.path()).unwrap();
+        assert_eq!(source_paths(&inventory), ["kept.rs"]);
+    }
+
+    #[test]
+    fn ancestor_ignore_files_apply_when_a_subpath_is_analyzed() {
+        let directory = tempfile::tempdir().unwrap();
+        fs::write(directory.path().join(".gitignore"), "secret.rs\n").unwrap();
+        fs::create_dir_all(directory.path().join("sub")).unwrap();
+        fs::write(directory.path().join("sub/secret.rs"), "").unwrap();
+        fs::write(directory.path().join("sub/ok.rs"), "").unwrap();
+        let inventory = Inventory::discover(directory.path().join("sub")).unwrap();
+        assert_eq!(source_paths(&inventory), ["ok.rs"]);
+    }
+
+    #[test]
+    fn configuration_patterns_anchor_at_the_analyzed_root() {
+        let directory = tempfile::tempdir().unwrap();
+        fs::create_dir_all(directory.path().join("generated")).unwrap();
+        fs::create_dir_all(directory.path().join("sub/generated")).unwrap();
+        fs::write(directory.path().join("generated/root.rs"), "").unwrap();
+        fs::write(directory.path().join("sub/generated/kept.rs"), "").unwrap();
+        let inventory =
+            Inventory::discover_sources(directory.path(), vec!["/generated".to_owned()]).unwrap();
+        assert_eq!(source_paths(&inventory), ["sub/generated/kept.rs"]);
+    }
+
+    #[test]
+    fn a_configuration_negation_reincludes_a_candidate() {
+        let directory = tempfile::tempdir().unwrap();
+        fs::create_dir_all(directory.path().join("docs")).unwrap();
+        fs::write(directory.path().join("docs/spec.rs"), "").unwrap();
+        fs::write(directory.path().join("docs/other.rs"), "").unwrap();
+        let inventory = Inventory::discover_sources(
+            directory.path(),
+            vec!["docs/**".to_owned(), "!docs/spec.rs".to_owned()],
+        )
+        .unwrap();
+        assert_eq!(source_paths(&inventory), ["docs/spec.rs"]);
+    }
+
+    #[test]
+    fn dependency_directories_survive_every_negation() {
+        let directory = tempfile::tempdir().unwrap();
+        fs::write(directory.path().join(".gitignore"), "!node_modules/\n").unwrap();
+        fs::create_dir_all(directory.path().join("node_modules")).unwrap();
+        fs::write(directory.path().join("node_modules/dep.js"), "").unwrap();
+        fs::write(directory.path().join("main.js"), "").unwrap();
+        let inventory =
+            Inventory::discover_sources(directory.path(), vec!["!node_modules".to_owned()])
+                .unwrap();
+        assert_eq!(source_paths(&inventory), ["main.js"]);
+    }
+
+    #[test]
+    fn two_walks_of_the_same_tree_yield_identical_order() {
+        let directory = tempfile::tempdir().unwrap();
+        fs::create_dir_all(directory.path().join("b")).unwrap();
+        fs::write(directory.path().join("b/late.rs"), "").unwrap();
+        fs::write(directory.path().join("a.rs"), "").unwrap();
+        fs::write(directory.path().join("z.rs"), "").unwrap();
+        let first = Inventory::discover(directory.path()).unwrap();
+        let second = Inventory::discover(directory.path()).unwrap();
+        assert_eq!(first.files(), second.files());
+        assert_eq!(source_paths(&first), ["a.rs", "b/late.rs", "z.rs"]);
     }
 
     #[test]

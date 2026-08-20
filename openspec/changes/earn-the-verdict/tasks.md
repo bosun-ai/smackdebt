@@ -15,11 +15,11 @@
 
 ## 4. Discovery on git ignore semantics
 
-- [ ] 4.1 Rewrite the walk on the `ignore` crate with the pinned serial builder configuration, keeping the public discovery types, per-directory name order, and the final repository-relative sort.
-- [ ] 4.2 Layer configuration excludes as gitignore patterns anchored at the analyzed root, with working anchors and negations.
-- [ ] 4.3 Add unit tests for nested `.gitignore` override, `!` re-include, root-anchored patterns, `.git/info/exclude`, configuration anchors and negations, dependency-directory precedence over negation, and identical order across two walks.
-- [ ] 4.4 Add global-gitignore acceptance evidence through the pinned configuration home, the subpath ancestor-ignore guard test, and hand-updated visited-entry evidence with an explanation per delta.
-- [ ] 4.5 Run the license check over the new dependency tree and prove zero terminal and JSON byte changes.
+- [x] 4.1 Rewrite the walk on the `ignore` crate with the pinned serial builder configuration, keeping the public discovery types, per-directory name order, and the final repository-relative sort.
+- [x] 4.2 Layer configuration excludes as gitignore patterns anchored at the analyzed root, with working anchors and negations.
+- [x] 4.3 Add unit tests for nested `.gitignore` override, `!` re-include, root-anchored patterns, `.git/info/exclude`, configuration anchors and negations, dependency-directory precedence over negation, and identical order across two walks.
+- [x] 4.4 Add global-gitignore acceptance evidence through the pinned configuration home, the subpath ancestor-ignore guard test, and hand-updated visited-entry evidence with an explanation per delta.
+- [x] 4.5 Run the license check over the new dependency tree and prove zero terminal and JSON byte changes.
 
 ## 5. Nested checkout exclusion
 
