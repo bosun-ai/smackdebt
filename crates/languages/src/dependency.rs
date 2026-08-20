@@ -44,7 +44,7 @@ pub(super) fn rust(node: Node<'_>, source: &[u8]) -> Option<DependencySyntax> {
 fn declared_in_test_scope(node: Node<'_>, source: &[u8]) -> bool {
     outer_attributes_select_test(node, source)
         || ancestors(node)
-            .filter(|item| item.kind() == "mod_item")
+            .filter(|item| matches!(item.kind(), "mod_item" | "use_declaration"))
             .any(|item| outer_attributes_select_test(item, source))
 }
 
@@ -117,6 +117,9 @@ fn token_tree_selects_test(tree: Node<'_>, source: &[u8]) -> bool {
 }
 
 fn rust_reference(node: Node<'_>, source: &[u8]) -> Option<DependencySyntax> {
+    if let Some(member) = use_list_member(node, source) {
+        return Some(member);
+    }
     let kind = match node.kind() {
         "use_declaration" | "extern_crate_declaration" | "scoped_identifier" => {
             DependencyKind::Import
@@ -125,6 +128,15 @@ fn rust_reference(node: Node<'_>, source: &[u8]) -> Option<DependencySyntax> {
         "macro_invocation" => DependencyKind::Include,
         _ => return None,
     };
+    // A grouped declaration resolves through its list members, never as one
+    // reference naming only the shared prefix.
+    if node.kind() == "use_declaration"
+        && node
+            .child_by_field_name("argument")
+            .is_some_and(|argument| matches!(argument.kind(), "use_list" | "scoped_use_list"))
+    {
+        return None;
+    }
     let text = strip_visibility(node.utf8_text(source).ok()?.trim());
     if node.kind() == "scoped_identifier"
         && (node
@@ -208,23 +220,43 @@ fn rust_reference(node: Node<'_>, source: &[u8]) -> Option<DependencySyntax> {
             "dependency target is malformed",
         ));
     }
+    Some(resolved_path_reference(
+        node,
+        kind,
+        target,
+        node.kind() == "mod_item",
+        matches!(node.kind(), "use_declaration" | "scoped_identifier"),
+    ))
+}
+
+/// Resolves one extracted Rust path into candidates or an external package.
+///
+/// `is_module` marks a `mod` declaration; `with_parent_candidates` adds the
+/// enclosing-module fallbacks an import may resolve through.
+fn resolved_path_reference(
+    node: Node<'_>,
+    kind: DependencyKind,
+    target: &str,
+    is_module: bool,
+    with_parent_candidates: bool,
+) -> DependencySyntax {
     let root = target.split("::").next().unwrap_or_default();
-    let internal = node.kind() == "mod_item" || matches!(root, "crate" | "self" | "super");
+    let internal = is_module || matches!(root, "crate" | "self" | "super");
     if !internal {
-        return Some(external(node, kind, target));
+        return external(node, kind, target);
     }
     // A glob import names the module itself, not a child of it.
     let path = target.strip_suffix("::*").unwrap_or(target);
-    if node.kind() != "mod_item" && path == root {
+    if !is_module && path == root {
         let value = match root {
             "crate" => CRATE_ROOT_CANDIDATE,
             "self" => DECLARING_FILE_CANDIDATE,
             _ if inline_module_depth(node) > 0 => DECLARING_FILE_CANDIDATE,
             _ => "./mod.rs",
         };
-        return Some(candidates(node, kind, target, vec![value.to_owned()]).with_internal_intent());
+        return candidates(node, kind, target, vec![value.to_owned()]).with_internal_intent();
     }
-    let (prefix, value) = if node.kind() == "mod_item" || path.starts_with("self::") {
+    let (prefix, value) = if is_module || path.starts_with("self::") {
         ("./", path.trim_start_matches("self::"))
     } else if path.starts_with("super::") {
         ("../", path.trim_start_matches("super::"))
@@ -233,7 +265,7 @@ fn rust_reference(node: Node<'_>, source: &[u8]) -> Option<DependencySyntax> {
     };
     let normalized = format!("{prefix}{}", value.replace("::", "/"));
     let mut values = vec![format!("{normalized}.rs"), format!("{normalized}/mod.rs")];
-    if matches!(node.kind(), "use_declaration" | "scoped_identifier") {
+    if with_parent_candidates {
         let mut parent = normalized.as_str();
         while let Some((prefix, _)) = parent.rsplit_once('/') {
             if prefix.chars().all(|character| character == '.') {
@@ -246,15 +278,82 @@ fn rust_reference(node: Node<'_>, source: &[u8]) -> Option<DependencySyntax> {
     }
     if root == "crate" {
         values.push(CRATE_ROOT_CANDIDATE.to_owned());
-    } else if node.kind() != "mod_item" && inline_module_depth(node) > 0 {
+    } else if !is_module && inline_module_depth(node) > 0 {
         values.push(DECLARING_FILE_CANDIDATE.to_owned());
     }
     let dependency = candidates(node, kind, target, values).with_internal_intent();
-    Some(if node.kind() == "mod_item" {
+    if is_module {
         dependency.with_relation(StaticRelationKind::ModuleOwnership)
     } else {
         dependency
-    })
+    }
+}
+
+/// One reference per imported item of a grouped `use` list.
+///
+/// Grammar members are the direct named children of a `use_list`; path
+/// segments live under `scoped_use_list` or `scoped_identifier` parents and
+/// never match here, so every member is counted exactly once.
+fn use_list_member(node: Node<'_>, source: &[u8]) -> Option<DependencySyntax> {
+    if node.parent()?.kind() != "use_list" {
+        return None;
+    }
+    let prefix = use_list_prefix(node, source);
+    let target = match node.kind() {
+        "identifier" | "scoped_identifier" | "use_wildcard" => {
+            joined_path(prefix, node.utf8_text(source).ok()?.trim())
+        }
+        // An `as` clause references the original item, never the alias.
+        "use_as_clause" => joined_path(
+            prefix,
+            node.child_by_field_name("path")?
+                .utf8_text(source)
+                .ok()?
+                .trim(),
+        ),
+        // A `self` member imports the enclosing list's own path.
+        "self" => prefix?,
+        _ => return None,
+    };
+    Some(resolved_path_reference(
+        node,
+        DependencyKind::Import,
+        &target,
+        false,
+        true,
+    ))
+}
+
+/// The `::`-joined path the enclosing `use` lists prefix a member with.
+fn use_list_prefix(node: Node<'_>, source: &[u8]) -> Option<String> {
+    let mut prefix = String::new();
+    for ancestor in ancestors(node) {
+        match ancestor.kind() {
+            "scoped_use_list" => {
+                if let Some(text) = ancestor
+                    .child_by_field_name("path")
+                    .and_then(|path| path.utf8_text(source).ok())
+                {
+                    if prefix.is_empty() {
+                        prefix = text.trim().to_owned();
+                    } else {
+                        prefix = format!("{}::{prefix}", text.trim());
+                    }
+                }
+            }
+            "use_declaration" => break,
+            _ => {}
+        }
+    }
+    (!prefix.is_empty()).then_some(prefix)
+}
+
+/// Joins an optional list prefix and one member path with `::`.
+fn joined_path(prefix: Option<String>, member: &str) -> String {
+    match prefix {
+        Some(prefix) => format!("{prefix}::{member}"),
+        None => member.to_owned(),
+    }
 }
 
 /// Removes a leading Rust visibility modifier so it cannot become a target.

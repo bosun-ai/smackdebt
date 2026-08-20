@@ -29,9 +29,9 @@
 
 ## 6. Grouped import resolution
 
-- [ ] 6.1 Emit one Rust reference per imported item of a grouped `use` list, reconstructing paths from enclosing list prefixes, without changing the shared language dependency contract.
-- [ ] 6.2 Add fixtures for flat lists, nested lists, re-exported lists, `as` clauses, `self` members, and test-scoped lists with per-item role demotion.
-- [ ] 6.3 Regenerate churned snapshots per case and update documented import-count literals.
+- [x] 6.1 Emit one Rust reference per imported item of a grouped `use` list, reconstructing paths from enclosing list prefixes, without changing the shared language dependency contract.
+- [x] 6.2 Add fixtures for flat lists, nested lists, re-exported lists, `as` clauses, `self` members, and test-scoped lists with per-item role demotion.
+- [x] 6.3 Regenerate churned snapshots per case and update documented import-count literals.
 
 ## 7. Windowed history streaming
 

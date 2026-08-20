@@ -884,9 +884,24 @@ fn rust_crate_rooted_references_offer_the_crate_root_as_a_fallback() {
         &[
             DependencySyntax::new(
                 DependencyKind::Import,
-                "crate",
+                "crate::First",
                 SourceSpan::new(1, 1),
-                DependencySyntaxState::Candidates(vec!["crate".to_owned()]),
+                DependencySyntaxState::Candidates(vec![
+                    "First.rs".to_owned(),
+                    "First/mod.rs".to_owned(),
+                    "crate".to_owned(),
+                ]),
+            )
+            .with_internal_intent(),
+            DependencySyntax::new(
+                DependencyKind::Import,
+                "crate::Second",
+                SourceSpan::new(1, 1),
+                DependencySyntaxState::Candidates(vec![
+                    "Second.rs".to_owned(),
+                    "Second/mod.rs".to_owned(),
+                    "crate".to_owned(),
+                ]),
             )
             .with_internal_intent(),
             DependencySyntax::new(
@@ -900,6 +915,137 @@ fn rust_crate_rooted_references_offer_the_crate_root_as_a_fallback() {
                 ]),
             )
             .with_internal_intent(),
+        ]
+    );
+}
+
+fn rust_targets(source: &str) -> Vec<String> {
+    Analyzer::default()
+        .analyze(Path::new("src/lib.rs"), source.as_bytes().to_vec())
+        .unwrap()
+        .dependencies()
+        .iter()
+        .map(|dependency| dependency.target().to_owned())
+        .collect()
+}
+
+#[test]
+fn a_grouped_use_emits_one_reference_per_imported_item() {
+    assert_eq!(
+        rust_targets("use crate::{first, second, third};\n"),
+        ["crate::first", "crate::second", "crate::third"]
+    );
+}
+
+#[test]
+fn a_nested_use_list_resolves_each_leaf_through_its_prefixes() {
+    assert_eq!(
+        rust_targets("use crate::{inner::{First, Second}, other};\n"),
+        [
+            "crate::inner::First",
+            "crate::inner::Second",
+            "crate::other"
+        ]
+    );
+}
+
+#[test]
+fn a_re_exported_list_resolves_exactly_like_a_plain_one() {
+    assert_eq!(
+        rust_targets("pub use crate::{First, Second};\n"),
+        rust_targets("use crate::{First, Second};\n")
+    );
+}
+
+#[test]
+fn an_aliased_list_member_references_the_original_item_not_the_alias() {
+    assert_eq!(
+        rust_targets("use crate::{long_name as short, Other};\n"),
+        ["crate::long_name", "crate::Other"]
+    );
+}
+
+#[test]
+fn a_self_member_references_the_enclosing_list_path_itself() {
+    let analysis = Analyzer::default()
+        .analyze(
+            Path::new("src/lib.rs"),
+            b"use crate::module::{self, Item};\n".to_vec(),
+        )
+        .unwrap();
+    assert_eq!(
+        analysis.dependencies(),
+        &[
+            DependencySyntax::new(
+                DependencyKind::Import,
+                "crate::module",
+                SourceSpan::new(1, 1),
+                DependencySyntaxState::Candidates(vec![
+                    "module.rs".to_owned(),
+                    "module/mod.rs".to_owned(),
+                    "crate".to_owned(),
+                ]),
+            )
+            .with_internal_intent(),
+            DependencySyntax::new(
+                DependencyKind::Import,
+                "crate::module::Item",
+                SourceSpan::new(1, 1),
+                DependencySyntaxState::Candidates(vec![
+                    "module/Item.rs".to_owned(),
+                    "module/Item/mod.rs".to_owned(),
+                    "module.rs".to_owned(),
+                    "module/mod.rs".to_owned(),
+                    "crate".to_owned(),
+                ]),
+            )
+            .with_internal_intent(),
+        ]
+    );
+}
+
+#[test]
+fn a_wildcard_list_member_names_the_module_it_globs() {
+    assert_eq!(
+        rust_targets("use crate::{inner::*, Other};\n"),
+        ["crate::inner::*", "crate::Other"]
+    );
+    let analysis = Analyzer::default()
+        .analyze(
+            Path::new("src/lib.rs"),
+            b"use crate::{inner::*};\n".to_vec(),
+        )
+        .unwrap();
+    assert_eq!(
+        analysis.dependencies()[0].state(),
+        &DependencySyntaxState::Candidates(vec![
+            "inner.rs".to_owned(),
+            "inner/mod.rs".to_owned(),
+            "crate".to_owned(),
+        ])
+    );
+}
+
+#[test]
+fn an_external_grouped_use_stays_one_external_reference_per_item() {
+    let analysis = Analyzer::default()
+        .analyze(Path::new("src/lib.rs"), b"use std::{fmt, io};\n".to_vec())
+        .unwrap();
+    assert_eq!(
+        analysis.dependencies(),
+        &[
+            DependencySyntax::new(
+                DependencyKind::Import,
+                "std::fmt",
+                SourceSpan::new(1, 1),
+                DependencySyntaxState::External,
+            ),
+            DependencySyntax::new(
+                DependencyKind::Import,
+                "std::io",
+                SourceSpan::new(1, 1),
+                DependencySyntaxState::External,
+            ),
         ]
     );
 }
@@ -1028,6 +1174,30 @@ fn a_comment_between_a_test_attribute_and_its_item_keeps_the_scope() {
             "}\n",
         )),
         [("crate::helper".to_owned(), DependencyScope::Test)]
+    );
+}
+
+#[test]
+fn a_test_scoped_grouped_use_demotes_every_emitted_item() {
+    assert_eq!(
+        rust_scopes(concat!(
+            "#[cfg(test)]\n",
+            "mod tests {\n",
+            "    use crate::{first, second::{Third, Fourth}};\n",
+            "}\n",
+        )),
+        [
+            ("crate::first".to_owned(), DependencyScope::Test),
+            ("crate::second::Third".to_owned(), DependencyScope::Test),
+            ("crate::second::Fourth".to_owned(), DependencyScope::Test),
+        ]
+    );
+    assert_eq!(
+        rust_scopes("#[cfg(test)]\nuse crate::{first, second};\n"),
+        [
+            ("crate::first".to_owned(), DependencyScope::Test),
+            ("crate::second".to_owned(), DependencyScope::Test),
+        ]
     );
 }
 
