@@ -63,9 +63,9 @@
 
 ## 12. Unsupported-share qualifier
 
-- [ ] 12.1 Record file sizes from walk metadata and expose selected and unsupported byte totals in coverage, JSON, and the schema.
-- [ ] 12.2 Add the analysis-owned qualifier with its frozen sentence and share fact, proven never to move the tier.
-- [ ] 12.3 Render the qualifier row under the verdict and beside the tier in JSON, regenerating snapshots and API snapshots.
+- [x] 12.1 Record file sizes from walk metadata and expose selected and unsupported byte totals in coverage, JSON, and the schema.
+- [x] 12.2 Add the analysis-owned qualifier with its frozen sentence and share fact, proven never to move the tier.
+- [x] 12.3 Render the qualifier row under the verdict and beside the tier in JSON, regenerating snapshots and API snapshots.
 
 ## 13. `--top`
 

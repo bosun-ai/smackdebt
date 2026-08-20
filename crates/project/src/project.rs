@@ -785,14 +785,17 @@ enum DiffSide {
         analysis: FileAnalysis,
         health: HealthCounts,
         role: SourceRole,
+        size_bytes: u64,
     },
     Unsupported {
         language: Language,
         role: SourceRole,
+        size_bytes: u64,
     },
     Failed {
         message: String,
         role: SourceRole,
+        size_bytes: u64,
     },
     RoleConflict {
         path: PathBuf,
@@ -1009,12 +1012,14 @@ fn analyze_diff_side(
             |role| DiffSide::Failed {
                 message: error,
                 role,
+                size_bytes: 0,
             },
         );
     }
     let Some(bytes) = input.bytes else {
         return DiffSide::Missing;
     };
+    let size_bytes = bytes.len() as u64;
     let role = match classify_source_role(path, &bytes, role_rules) {
         Ok(role) => role,
         Err(roles) => {
@@ -1031,12 +1036,18 @@ fn analyze_diff_side(
                 analysis,
                 health,
                 role,
+                size_bytes,
             }
         }
-        Err(LanguageError::Unsupported(language)) => DiffSide::Unsupported { language, role },
+        Err(LanguageError::Unsupported(language)) => DiffSide::Unsupported {
+            language,
+            role,
+            size_bytes,
+        },
         Err(error) => DiffSide::Failed {
             message: error.to_string(),
             role,
+            size_bytes,
         },
     }
 }
@@ -1141,12 +1152,22 @@ fn diff_side_summary(side: &DiffSide) -> (Coverage, HealthCounts, Option<Languag
             HealthCounts::default(),
             None,
         ),
-        DiffSide::Unsupported { language, .. } => (
-            Coverage::classified(1, SourceCoverageOutcome::Unsupported, 0, 0),
+        DiffSide::Unsupported {
+            language,
+            size_bytes,
+            ..
+        } => (
+            Coverage::classified(1, SourceCoverageOutcome::Unsupported, 0, 0)
+                .with_bytes(*size_bytes, *size_bytes),
             HealthCounts::default(),
             Some(*language),
         ),
-        DiffSide::Failed { .. } | DiffSide::RoleConflict { .. } => (
+        DiffSide::Failed { size_bytes, .. } => (
+            Coverage::classified(1, SourceCoverageOutcome::Failed, 0, 0).with_bytes(*size_bytes, 0),
+            HealthCounts::default(),
+            None,
+        ),
+        DiffSide::RoleConflict { .. } => (
             Coverage::classified(1, SourceCoverageOutcome::Failed, 0, 0),
             HealthCounts::default(),
             None,
@@ -1155,9 +1176,9 @@ fn diff_side_summary(side: &DiffSide) -> (Coverage, HealthCounts, Option<Languag
             analysis,
             health,
             role,
-            ..
+            size_bytes,
         } => (
-            source_coverage(analysis, *role),
+            source_coverage(analysis, *role).with_bytes(*size_bytes, 0),
             *health,
             Some(analysis.language()),
         ),
@@ -1995,6 +2016,7 @@ struct CodebaseReportBuilder<'a> {
     findings: Vec<Finding>,
     diagnostics: Vec<Diagnostic>,
     file_scopes: Vec<ScopeId>,
+    file_sizes: Vec<u64>,
     activity: &'a HashMap<PathBuf, u32>,
     package_ids: Vec<PackageId>,
     dependencies: Vec<SourceDependencies>,
@@ -2057,6 +2079,7 @@ impl<'a> CodebaseReportBuilder<'a> {
             .iter()
             .map(|file| hierarchy.file_scopes[file.path().as_path()])
             .collect();
+        let file_sizes = candidates.iter().map(|file| file.size_bytes()).collect();
 
         Self {
             scopes: hierarchy.scopes,
@@ -2064,6 +2087,7 @@ impl<'a> CodebaseReportBuilder<'a> {
             findings: Vec::with_capacity(candidates.len()),
             diagnostics: Vec::with_capacity(candidates.len()),
             file_scopes,
+            file_sizes,
             activity,
             package_ids,
             dependencies: Vec::with_capacity(candidates.len()),
@@ -2081,6 +2105,7 @@ impl<'a> CodebaseReportBuilder<'a> {
     fn add_analysis(&mut self, index: usize, result: FileResult) {
         let file_id = FileId::from_index(index);
         let scope_id = self.file_scopes[index];
+        let size_bytes = self.file_sizes[index];
         let path = self.scopes[scope_id.index()].name().to_owned();
         let touches = self.activity.get(Path::new(&path)).copied();
         let mut health = HealthCounts::default();
@@ -2150,7 +2175,7 @@ impl<'a> CodebaseReportBuilder<'a> {
                     );
                 }
                 (
-                    source_coverage(&analysis, rated.role),
+                    source_coverage(&analysis, rated.role).with_bytes(size_bytes, 0),
                     Some((
                         analysis.language(),
                         rated.role,
@@ -2166,7 +2191,8 @@ impl<'a> CodebaseReportBuilder<'a> {
                     0,
                 );
                 (
-                    Coverage::classified(1, SourceCoverageOutcome::Unsupported, 0, 0),
+                    Coverage::classified(1, SourceCoverageOutcome::Unsupported, 0, 0)
+                        .with_bytes(size_bytes, size_bytes),
                     Some((language, role, ParseStatus::Failed)),
                 )
             }
@@ -2182,7 +2208,8 @@ impl<'a> CodebaseReportBuilder<'a> {
                     0,
                 );
                 (
-                    Coverage::classified(1, SourceCoverageOutcome::Failed, 0, 0),
+                    Coverage::classified(1, SourceCoverageOutcome::Failed, 0, 0)
+                        .with_bytes(size_bytes, 0),
                     Some((language, role, ParseStatus::Failed)),
                 )
             }

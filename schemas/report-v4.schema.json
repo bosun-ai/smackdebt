@@ -316,7 +316,9 @@
         "failed_files",
         "context_files",
         "source_lines",
-        "excluded_lines"
+        "excluded_lines",
+        "selected_bytes",
+        "unsupported_bytes"
       ],
       "properties": {
         "selected_files": {
@@ -352,6 +354,14 @@
           "minimum": 0
         },
         "excluded_lines": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "selected_bytes": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "unsupported_bytes": {
           "type": "integer",
           "minimum": 0
         }
@@ -1797,6 +1807,28 @@
         },
         "sentence": {
           "type": "string"
+        },
+        "qualifier": {
+          "type": "object",
+          "required": [
+            "sentence",
+            "share_permille",
+            "largest_language"
+          ],
+          "properties": {
+            "sentence": {
+              "const": "Not all source was checked."
+            },
+            "share_permille": {
+              "type": "integer",
+              "minimum": 0,
+              "maximum": 1000
+            },
+            "largest_language": {
+              "type": "string"
+            }
+          },
+          "additionalProperties": false
         },
         "mode": {
           "enum": [

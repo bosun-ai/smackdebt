@@ -1041,7 +1041,7 @@ impl Serialize for CoverageView {
     where
         S: Serializer,
     {
-        let mut map = serializer.serialize_map(Some(9))?;
+        let mut map = serializer.serialize_map(Some(11))?;
         map.serialize_entry("selected_files", &self.0.selected_files())?;
         map.serialize_entry("analyzed_files", &self.0.analyzed_files())?;
         map.serialize_entry("clean_files", &self.0.clean_files())?;
@@ -1051,6 +1051,8 @@ impl Serialize for CoverageView {
         map.serialize_entry("context_files", &self.0.context_files())?;
         map.serialize_entry("source_lines", &self.0.source_lines())?;
         map.serialize_entry("excluded_lines", &self.0.excluded_lines())?;
+        map.serialize_entry("selected_bytes", &self.0.selected_bytes())?;
+        map.serialize_entry("unsupported_bytes", &self.0.unsupported_bytes())?;
         map.end()
     }
 }
@@ -1089,14 +1091,32 @@ impl Serialize for MeasurementsView {
 struct VerdictView<'a>(&'a Verdict, smackdebt_analysis::ReportMode);
 impl Serialize for VerdictView<'_> {
     fn serialize<S: Serializer>(&self, serializer: S) -> Result<S::Ok, S::Error> {
-        let mut map = serializer.serialize_map(Some(3))?;
+        let mut map = serializer.serialize_map(None)?;
         let tier = match self.0.diff_tier() {
             Some(tier) => tier.id(),
             None => self.0.tier().id(),
         };
         map.serialize_entry("tier", tier)?;
         map.serialize_entry("sentence", self.0.sentence())?;
+        if let Some(qualifier) = self.0.qualifier() {
+            map.serialize_entry("qualifier", &QualifierView(qualifier))?;
+        }
         map.serialize_entry("mode", mode_name(self.1))?;
+        map.end()
+    }
+}
+
+/// The unsupported-coverage qualifier beside the tier and sentence.
+///
+/// The sentence bytes are analysis-owned, so a machine consumer and the
+/// terminal state the same qualifier for the same report.
+struct QualifierView<'a>(&'a smackdebt_analysis::CoverageQualifier);
+impl Serialize for QualifierView<'_> {
+    fn serialize<S: Serializer>(&self, serializer: S) -> Result<S::Ok, S::Error> {
+        let mut map = serializer.serialize_map(Some(3))?;
+        map.serialize_entry("sentence", self.0.sentence())?;
+        map.serialize_entry("share_permille", &self.0.share_permille())?;
+        map.serialize_entry("largest_language", self.0.largest_language())?;
         map.end()
     }
 }

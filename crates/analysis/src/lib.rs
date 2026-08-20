@@ -78,8 +78,8 @@ pub use source::{
     UnitKind, is_symbolic_candidate,
 };
 pub use verdict::{
-    CodebaseTier, DENSITY_EVIDENCE_UNITS, DebtDiffFacts, DebtDiffSelection, DebtFamily, DiffTier,
-    FIGHTS_BACK_PERMILLE, SMALL_SCOPE_HIGH_UNITS, VOLUME_FIGHTS_BACK_HIGH, VOLUME_LOST_HIGH,
-    Verdict, VerdictCounts, WORN_PERMILLE, WORST_OFFENDER_LIMIT, WorstOffender,
-    WorstOffenderReason,
+    CodebaseTier, CoverageQualifier, DENSITY_EVIDENCE_UNITS, DebtDiffFacts, DebtDiffSelection,
+    DebtFamily, DiffTier, FIGHTS_BACK_PERMILLE, SMALL_SCOPE_HIGH_UNITS,
+    UNSUPPORTED_QUALIFIER_PERMILLE, VOLUME_FIGHTS_BACK_HIGH, VOLUME_LOST_HIGH, Verdict,
+    VerdictCounts, WORN_PERMILLE, WORST_OFFENDER_LIMIT, WorstOffender, WorstOffenderReason,
 };

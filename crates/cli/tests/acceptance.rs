@@ -422,6 +422,57 @@ fn nested_git_checkouts_are_pruned_and_disclosed() {
 }
 
 #[test]
+fn a_mostly_unsupported_selection_qualifies_its_verdict() {
+    let project = unsupported_share_fixture();
+
+    // The qualifier row renders in default output, directly under the tier
+    // sentence, without any detail flag.
+    let terminal = run_in(project.path(), ["--jobs", "1", "--color", "never"]);
+    assert_snapshot(
+        "unsupported-share.terminal.txt",
+        &terminal,
+        include_bytes!("snapshots/unsupported-share.terminal.txt"),
+    );
+    let text = String::from_utf8(terminal).unwrap();
+    assert!(
+        text.contains("Not all source was checked. 62% of source bytes are Go."),
+        "{text}"
+    );
+
+    let json = run_in(project.path(), ["--json", "--jobs", "1"]);
+    let report: serde_json::Value = serde_json::from_slice(&json).unwrap();
+    validate_schema(&report);
+    let qualifier = &report["verdict"]["qualifier"];
+    assert_eq!(qualifier["sentence"], "Not all source was checked.");
+    assert_eq!(qualifier["share_permille"], 625);
+    assert_eq!(qualifier["largest_language"], "Go");
+    let coverage = &report["scopes"][0]["coverage"];
+    assert_eq!(coverage["selected_bytes"], 104);
+    assert_eq!(coverage["unsupported_bytes"], 65);
+    // The qualifier informs the reader only; the tier is still selected from
+    // the checked units alone.
+    assert_eq!(report["verdict"]["tier"], "clean");
+}
+
+#[test]
+fn a_marginal_unsupported_share_leaves_the_verdict_head_unqualified() {
+    let project = tempfile::tempdir().unwrap();
+    fs::write(
+        project.path().join("kept.js"),
+        "export function kept() {\n  return 1;\n}\n",
+    )
+    .unwrap();
+    let json = run_in(project.path(), ["--json", "--jobs", "1"]);
+    let report: serde_json::Value = serde_json::from_slice(&json).unwrap();
+    validate_schema(&report);
+    assert!(
+        report["verdict"].get("qualifier").is_none(),
+        "{}",
+        report["verdict"]
+    );
+}
+
+#[test]
 fn static_architecture_codebase_snapshots_are_reviewed() {
     let project = static_architecture_fixture();
     let terminal = run_in(project.path(), ["--jobs", "1", "--color", "never"]);
@@ -2338,6 +2389,23 @@ fn nested_checkout_fixture() -> tempfile::TempDir {
     fs::write(
         project.path().join("worktree/lost.js"),
         "export const lost = 1;\n",
+    )
+    .unwrap();
+    project
+}
+
+/// One supported JavaScript file of 39 bytes beside one unsupported Go file
+/// of 65 bytes, so the unsupported byte share is exactly 625 permille.
+fn unsupported_share_fixture() -> tempfile::TempDir {
+    let project = tempfile::tempdir().unwrap();
+    fs::write(
+        project.path().join("kept.js"),
+        "export function kept() {\n  return 1;\n}\n",
+    )
+    .unwrap();
+    fs::write(
+        project.path().join("main.go"),
+        "package main\n\nimport \"fmt\"\n\nfunc main() {\n\tfmt.Println(\"debt\")\n}\n",
     )
     .unwrap();
     project

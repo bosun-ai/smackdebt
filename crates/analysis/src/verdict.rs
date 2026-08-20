@@ -110,6 +110,71 @@ pub const VOLUME_FIGHTS_BACK_HIGH: u32 = 100;
 /// The High count that floors the tier at `lost` at any density.
 pub const VOLUME_LOST_HIGH: u32 = 1000;
 
+/// The unsupported byte permille above which a verdict qualifies itself.
+///
+/// Above this share of selected source bytes in languages Smackdebt cannot
+/// analyze, the verdict states that not all source was checked. The value is
+/// a proposed constant under review.
+pub const UNSUPPORTED_QUALIFIER_PERMILLE: u32 = 100;
+
+/// The coverage honesty a qualified verdict carries.
+///
+/// The sentence and the share fact are copy owned by analysis, so a terminal
+/// renderer and a machine consumer print the same bytes for the same report.
+/// The qualifier informs the reader only — it never moves the selected tier.
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct CoverageQualifier {
+    share_permille: u32,
+    largest_language: String,
+}
+
+impl CoverageQualifier {
+    /// Completes a qualifier when the unsupported byte share is material.
+    ///
+    /// The share is the integer permille of unsupported source bytes over
+    /// selected source bytes; at or below the threshold, and for a scope
+    /// without selected bytes, no qualifier exists.
+    pub fn from_shares(
+        selected_bytes: u64,
+        unsupported_bytes: u64,
+        largest_language: impl Into<String>,
+    ) -> Option<Self> {
+        if selected_bytes == 0 {
+            return None;
+        }
+        // The share never exceeds 1000, so the narrowing cast is exact.
+        let share_permille = (unsupported_bytes.saturating_mul(1000) / selected_bytes) as u32;
+        (share_permille > UNSUPPORTED_QUALIFIER_PERMILLE).then(|| Self {
+            share_permille,
+            largest_language: largest_language.into(),
+        })
+    }
+
+    /// The exact sentence every consumer prints for a qualified verdict.
+    pub const fn sentence(&self) -> &'static str {
+        "Not all source was checked."
+    }
+
+    /// The exact fact naming the share and the largest unsupported language.
+    pub fn fact(&self) -> String {
+        format!(
+            "{}% of source bytes are {}.",
+            self.share_permille / 10,
+            self.largest_language
+        )
+    }
+
+    /// Unsupported source bytes per thousand selected source bytes.
+    pub const fn share_permille(&self) -> u32 {
+        self.share_permille
+    }
+
+    /// The unsupported language owning the most selected bytes.
+    pub fn largest_language(&self) -> &str {
+        &self.largest_language
+    }
+}
+
 impl VerdictCounts {
     /// Retains one scope's rated unit counts and its High architecture
     /// findings, which are the package dependency cycles.
@@ -482,6 +547,7 @@ pub struct Verdict {
     diff: Option<DiffTier>,
     selection: DebtDiffSelection,
     worst: Vec<WorstOffender>,
+    qualifier: Option<CoverageQualifier>,
 }
 
 impl Verdict {
@@ -493,6 +559,7 @@ impl Verdict {
             diff: None,
             selection: DebtDiffSelection::default(),
             worst,
+            qualifier: None,
         }
     }
 
@@ -508,7 +575,23 @@ impl Verdict {
             diff: Some(selection.tier()),
             selection,
             worst,
+            qualifier: None,
         }
+    }
+
+    /// Returns the same verdict carrying a coverage qualifier.
+    ///
+    /// The tier was already selected; the qualifier never changes it.
+    #[must_use]
+    pub fn with_qualifier(mut self, qualifier: Option<CoverageQualifier>) -> Self {
+        self.qualifier = qualifier;
+        self
+    }
+
+    /// The coverage honesty this verdict carries, when the unsupported byte
+    /// share is material.
+    pub const fn qualifier(&self) -> Option<&CoverageQualifier> {
+        self.qualifier.as_ref()
     }
 
     pub const fn tier(&self) -> CodebaseTier {
@@ -617,6 +700,36 @@ mod tests {
             direction,
             ChangeCoupling::new(PackageId::from_index(0), PackageId::from_index(1), 5, 5),
         )
+    }
+
+    #[test]
+    fn the_coverage_qualifier_fires_only_above_the_permille_threshold() {
+        assert!(
+            CoverageQualifier::from_shares(1000, 100, "Go").is_none(),
+            "a share exactly at the threshold stays unqualified"
+        );
+        let qualifier = CoverageQualifier::from_shares(1000, 101, "Go")
+            .expect("one permille above the threshold qualifies");
+        assert_eq!(qualifier.share_permille(), 101);
+        assert_eq!(qualifier.sentence(), "Not all source was checked.");
+        assert_eq!(qualifier.fact(), "10% of source bytes are Go.");
+        assert_eq!(qualifier.largest_language(), "Go");
+        assert!(
+            CoverageQualifier::from_shares(0, 0, "Go").is_none(),
+            "a scope without selected bytes has no share to state"
+        );
+    }
+
+    #[test]
+    fn a_coverage_qualifier_never_moves_the_selected_tier() {
+        let counts = VerdictCounts::new(HealthCounts::new(3, 1, 1), 0);
+        let bare = Verdict::codebase(counts, Vec::new());
+        let qualified = bare
+            .clone()
+            .with_qualifier(CoverageQualifier::from_shares(10, 9, "Go"));
+        assert_eq!(qualified.tier(), bare.tier());
+        assert_eq!(qualified.sentence(), bare.sentence());
+        assert!(qualified.qualifier().is_some());
     }
 
     #[test]

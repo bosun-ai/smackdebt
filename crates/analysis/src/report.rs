@@ -5,8 +5,8 @@ use crate::orphan::OrphanFile;
 use crate::size::SizeFinding;
 use crate::source::{Language, ParseStatus, SourceRole, SourceSpan, SourceTrust, UnitIdentity};
 use crate::verdict::{
-    DebtDiffSelection, Verdict, VerdictCounts, WORST_OFFENDER_LIMIT, WorstOffender,
-    WorstOffenderReason,
+    CoverageQualifier, DebtDiffSelection, Verdict, VerdictCounts, WORST_OFFENDER_LIMIT,
+    WorstOffender, WorstOffenderReason,
 };
 use crate::{
     ArchitectureComparison, ArchitectureComparisonId, ArchitectureFinding, ArchitectureFindingId,
@@ -146,6 +146,8 @@ pub struct Coverage {
     context_files: u32,
     source_lines: u32,
     excluded_lines: u32,
+    selected_bytes: u64,
+    unsupported_bytes: u64,
 }
 
 impl Coverage {
@@ -166,6 +168,8 @@ impl Coverage {
             context_files: 0,
             source_lines,
             excluded_lines,
+            selected_bytes: 0,
+            unsupported_bytes: 0,
         }
     }
 
@@ -204,7 +208,18 @@ impl Coverage {
             },
             source_lines,
             excluded_lines,
+            selected_bytes: 0,
+            unsupported_bytes: 0,
         }
+    }
+
+    /// Returns the same coverage carrying the selected and unsupported byte
+    /// totals the walk measured, so shares never require another file read.
+    #[must_use]
+    pub const fn with_bytes(mut self, selected_bytes: u64, unsupported_bytes: u64) -> Self {
+        self.selected_bytes = selected_bytes;
+        self.unsupported_bytes = unsupported_bytes;
+        self
     }
 
     pub const fn selected_files(self) -> u32 {
@@ -234,6 +249,12 @@ impl Coverage {
     pub const fn excluded_lines(self) -> u32 {
         self.excluded_lines
     }
+    pub const fn selected_bytes(self) -> u64 {
+        self.selected_bytes
+    }
+    pub const fn unsupported_bytes(self) -> u64 {
+        self.unsupported_bytes
+    }
 
     pub fn combine(self, other: Self) -> Self {
         Self {
@@ -245,6 +266,8 @@ impl Coverage {
             context_files: self.context_files + other.context_files,
             source_lines: self.source_lines + other.source_lines,
             excluded_lines: self.excluded_lines + other.excluded_lines,
+            selected_bytes: self.selected_bytes + other.selected_bytes,
+            unsupported_bytes: self.unsupported_bytes + other.unsupported_bytes,
         }
     }
 }
@@ -934,6 +957,28 @@ impl ReportBuilder {
     }
 }
 
+/// The human name of the unsupported language a file's extension declares.
+///
+/// Unsupported files never reach a parser, so the recorded extension is the
+/// whole classification. An extension without a known name is stated verbatim
+/// rather than hidden, and a file without one is named as unknown.
+fn unsupported_language_label(path: &str) -> String {
+    let name = path.rsplit(['/', '\\']).next().unwrap_or(path);
+    let extension = name.rsplit_once('.').map_or("", |(_, extension)| extension);
+    match extension {
+        "kt" | "kts" => "Kotlin".to_owned(),
+        "go" => "Go".to_owned(),
+        "cs" => "C#".to_owned(),
+        "swift" => "Swift".to_owned(),
+        "php" => "PHP".to_owned(),
+        "scala" | "sc" => "Scala".to_owned(),
+        "ex" | "exs" => "Elixir".to_owned(),
+        "dart" => "Dart".to_owned(),
+        "" => "an unknown language".to_owned(),
+        other => other.to_owned(),
+    }
+}
+
 /// The stable map key for an unordered package pair.
 fn ordered_pair(left: PackageId, right: PackageId) -> (PackageId, PackageId) {
     if left <= right {
@@ -1152,9 +1197,50 @@ impl Report {
         let scope = &self.scopes[scope.index()];
         let counts = VerdictCounts::new(scope.health(), self.high_architecture_findings(scope));
         let worst = self.worst_offenders(scope);
-        match self.mode {
+        let verdict = match self.mode {
             ReportMode::Codebase => Verdict::codebase(counts, worst),
             ReportMode::Diff => Verdict::diff(counts, self.debt_diff(scope), worst),
+        };
+        verdict.with_qualifier(self.coverage_qualifier(scope))
+    }
+
+    /// The coverage qualifier one scope's byte totals earn, when they earn
+    /// one.
+    ///
+    /// The subtree is walked only when unsupported bytes exist at all, and the
+    /// largest unsupported language is chosen by selected bytes with ties
+    /// broken by name so two runs state the same language.
+    fn coverage_qualifier(&self, scope: &Scope) -> Option<CoverageQualifier> {
+        let coverage = scope.coverage();
+        if coverage.unsupported_bytes() == 0 {
+            return None;
+        }
+        let mut totals: BTreeMap<String, u64> = BTreeMap::new();
+        self.collect_unsupported_bytes(scope, &mut totals);
+        let largest = totals
+            .into_iter()
+            .reduce(|best, entry| if entry.1 > best.1 { entry } else { best })?;
+        CoverageQualifier::from_shares(
+            coverage.selected_bytes(),
+            coverage.unsupported_bytes(),
+            largest.0,
+        )
+    }
+
+    /// Sums the selected bytes of unsupported files per language label across
+    /// one scope's subtree.
+    fn collect_unsupported_bytes(&self, scope: &Scope, totals: &mut BTreeMap<String, u64>) {
+        for &file_id in scope.files() {
+            let file = &self.files[file_id.index()];
+            let coverage = file.coverage();
+            if coverage.unsupported_files() > 0 && coverage.selected_bytes() > 0 {
+                *totals
+                    .entry(unsupported_language_label(file.path()))
+                    .or_default() += coverage.selected_bytes();
+            }
+        }
+        for &child in scope.children() {
+            self.collect_unsupported_bytes(&self.scopes[child.index()], totals);
         }
     }
 
@@ -1501,6 +1587,29 @@ mod tests {
             (scope, file)
         }
 
+        /// Adds one file scope with explicit coverage and rated counts.
+        fn add_coverage_file(
+            &mut self,
+            path: &str,
+            coverage: Coverage,
+            health: HealthCounts,
+        ) -> (ScopeId, FileId) {
+            let scope = ScopeId::from_index(self.builder.report.scopes.len());
+            self.builder
+                .add_scope(Scope::new(scope, ScopeKind::File, path, Some(self.root)));
+            self.builder.report.scopes[self.root.index()].add_child(scope);
+            let file = FileId::from_index(self.files);
+            self.files += 1;
+            let package = PackageId::from_index(self.packages.len());
+            self.packages
+                .push(PackageRecord::current(package, scope, path));
+            self.builder.add_file(
+                FileRecord::new(file, scope, path, coverage, health).with_package(package),
+            );
+            self.builder.link_file(scope, file);
+            (scope, file)
+        }
+
         fn add_finding(&mut self, scope: ScopeId, file: FileId, name: &str, cognitive: u32) {
             self.add_role_finding(scope, file, name, cognitive, SourceRole::Primary);
         }
@@ -1574,6 +1683,58 @@ mod tests {
         assert_eq!(offender.path(), "src/work.rs");
         assert_eq!(offender.reason(), WorstOffenderReason::MostComplex);
         assert_eq!(&report.scope_verdict(report.root().unwrap()), verdict);
+    }
+
+    #[test]
+    fn a_material_unsupported_byte_share_qualifies_the_verdict_without_moving_the_tier() {
+        let mut fixture = ReportFixture::new(ReportMode::Codebase);
+        let (scope, file) = fixture.add_coverage_file(
+            "src/main.rs",
+            Coverage::new(1, 1, 0, 0, 10, 0).with_bytes(800, 0),
+            HealthCounts::new(97, 2, 1),
+        );
+        fixture.add_finding(scope, file, "work", 25);
+        fixture.add_coverage_file(
+            "tools/build.go",
+            Coverage::classified(1, SourceCoverageOutcome::Unsupported, 0, 0).with_bytes(700, 700),
+            HealthCounts::default(),
+        );
+        fixture.add_coverage_file(
+            "app/app.kt",
+            Coverage::classified(1, SourceCoverageOutcome::Unsupported, 0, 0).with_bytes(300, 300),
+            HealthCounts::default(),
+        );
+        let report = fixture.finish();
+        let verdict = report.verdict().expect("a built report answers");
+        assert_eq!(verdict.tier(), CodebaseTier::Worn);
+        let qualifier = verdict
+            .qualifier()
+            .expect("a majority-unsupported selection is disclosed");
+        assert_eq!(qualifier.sentence(), "Not all source was checked.");
+        assert_eq!(qualifier.share_permille(), 555);
+        assert_eq!(qualifier.largest_language(), "Go");
+        assert_eq!(qualifier.fact(), "55% of source bytes are Go.");
+    }
+
+    #[test]
+    fn a_marginal_unsupported_byte_share_leaves_the_verdict_unqualified() {
+        let mut fixture = ReportFixture::new(ReportMode::Codebase);
+        fixture.add_coverage_file(
+            "src/main.rs",
+            Coverage::new(1, 1, 0, 0, 10, 0).with_bytes(900, 0),
+            HealthCounts::new(97, 2, 1),
+        );
+        fixture.add_coverage_file(
+            "tools/build.go",
+            Coverage::classified(1, SourceCoverageOutcome::Unsupported, 0, 0).with_bytes(100, 100),
+            HealthCounts::default(),
+        );
+        let report = fixture.finish();
+        let verdict = report.verdict().expect("a built report answers");
+        assert!(
+            verdict.qualifier().is_none(),
+            "a share at the threshold stays unqualified"
+        );
     }
 
     #[test]

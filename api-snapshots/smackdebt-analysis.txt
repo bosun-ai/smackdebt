@@ -275,9 +275,19 @@ pub const fn smackdebt_analysis::Coverage::excluded_lines(self) -> u32
 pub const fn smackdebt_analysis::Coverage::failed_files(self) -> u32
 pub const fn smackdebt_analysis::Coverage::new(u32, u32, u32, u32, u32, u32) -> Self
 pub const fn smackdebt_analysis::Coverage::recovered_files(self) -> u32
+pub const fn smackdebt_analysis::Coverage::selected_bytes(self) -> u64
 pub const fn smackdebt_analysis::Coverage::selected_files(self) -> u32
 pub const fn smackdebt_analysis::Coverage::source_lines(self) -> u32
+pub const fn smackdebt_analysis::Coverage::unsupported_bytes(self) -> u64
 pub const fn smackdebt_analysis::Coverage::unsupported_files(self) -> u32
+pub const fn smackdebt_analysis::Coverage::with_bytes(self, u64, u64) -> Self
+pub struct smackdebt_analysis::CoverageQualifier
+impl smackdebt_analysis::CoverageQualifier
+pub fn smackdebt_analysis::CoverageQualifier::fact(&self) -> alloc::string::String
+pub fn smackdebt_analysis::CoverageQualifier::from_shares(u64, u64, impl core::convert::Into<alloc::string::String>) -> core::option::Option<Self>
+pub fn smackdebt_analysis::CoverageQualifier::largest_language(&self) -> &str
+pub const fn smackdebt_analysis::CoverageQualifier::sentence(&self) -> &'static str
+pub const fn smackdebt_analysis::CoverageQualifier::share_permille(&self) -> u32
 pub struct smackdebt_analysis::DebtDiffFacts
 impl smackdebt_analysis::DebtDiffFacts
 pub const fn smackdebt_analysis::DebtDiffFacts::architecture(self) -> smackdebt_analysis::DiffCounts
@@ -864,9 +874,11 @@ pub const fn smackdebt_analysis::Verdict::counts(&self) -> smackdebt_analysis::V
 pub fn smackdebt_analysis::Verdict::diff(smackdebt_analysis::VerdictCounts, smackdebt_analysis::DebtDiffSelection, alloc::vec::Vec<smackdebt_analysis::WorstOffender>) -> Self
 pub const fn smackdebt_analysis::Verdict::diff_tier(&self) -> core::option::Option<smackdebt_analysis::DiffTier>
 pub const fn smackdebt_analysis::Verdict::facts(&self) -> smackdebt_analysis::DebtDiffFacts
+pub const fn smackdebt_analysis::Verdict::qualifier(&self) -> core::option::Option<&smackdebt_analysis::CoverageQualifier>
 pub const fn smackdebt_analysis::Verdict::selection(&self) -> &smackdebt_analysis::DebtDiffSelection
 pub const fn smackdebt_analysis::Verdict::sentence(&self) -> &'static str
 pub const fn smackdebt_analysis::Verdict::tier(&self) -> smackdebt_analysis::CodebaseTier
+pub fn smackdebt_analysis::Verdict::with_qualifier(self, core::option::Option<smackdebt_analysis::CoverageQualifier>) -> Self
 pub fn smackdebt_analysis::Verdict::worst(&self) -> &[smackdebt_analysis::WorstOffender]
 pub fn smackdebt_analysis::Verdict::worst_offender(&self) -> core::option::Option<&smackdebt_analysis::WorstOffender>
 pub struct smackdebt_analysis::VerdictCounts
@@ -894,6 +906,7 @@ pub const smackdebt_analysis::MINIMUM_CONCENTRATION_COMMITS: u32
 pub const smackdebt_analysis::MINIMUM_CONCENTRATION_PERCENT: u32
 pub const smackdebt_analysis::MINIMUM_STABLE_DEPENDENCY_REFERENCES: u32
 pub const smackdebt_analysis::SMALL_SCOPE_HIGH_UNITS: u32
+pub const smackdebt_analysis::UNSUPPORTED_QUALIFIER_PERMILLE: u32
 pub const smackdebt_analysis::VOLUME_FIGHTS_BACK_HIGH: u32
 pub const smackdebt_analysis::VOLUME_LOST_HIGH: u32
 pub const smackdebt_analysis::WORN_PERMILLE: u32

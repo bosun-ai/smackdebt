@@ -162,6 +162,7 @@ pub struct DiscoveredFile {
     relative_path: RelativePath,
     package: PackageId,
     kind: FileKind,
+    size_bytes: u64,
 }
 
 impl DiscoveredFile {
@@ -173,6 +174,14 @@ impl DiscoveredFile {
     /// Returns the package this file belongs to.
     pub const fn package(&self) -> PackageId {
         self.package
+    }
+
+    /// Returns the file's size in bytes from walk metadata.
+    ///
+    /// The size comes from the directory walk that discovered the file, so
+    /// coverage can state byte totals without reading any file again.
+    pub const fn size_bytes(&self) -> u64 {
+        self.size_bytes
     }
 
     /// Returns whether this is a source candidate for language dispatch.
@@ -407,6 +416,7 @@ struct Walker {
 struct RawFile {
     path: RelativePath,
     kind: FileKind,
+    size_bytes: u64,
 }
 
 impl Walker {
@@ -476,6 +486,7 @@ impl Walker {
         self.files.push(RawFile {
             path: relative,
             kind,
+            size_bytes: entry.metadata().map_or(0, |metadata| metadata.len()),
         });
     }
 
@@ -555,6 +566,7 @@ impl Walker {
                 relative_path: file.path,
                 package,
                 kind: file.kind,
+                size_bytes: file.size_bytes,
             });
         }
 
@@ -935,6 +947,15 @@ mod tests {
         assert_eq!(source_paths(&inventory), ["main.rs"]);
         assert_eq!(nested_checkout_paths(&inventory), Vec::<String>::new());
         assert_eq!(inventory.stats().nested_checkouts_skipped, 0);
+    }
+
+    #[test]
+    fn discovered_files_state_their_size_from_walk_metadata() {
+        let directory = tempfile::tempdir().unwrap();
+        fs::write(directory.path().join("main.rs"), "fn main() {}\n").unwrap();
+        let inventory = Inventory::discover(directory.path()).unwrap();
+        let file = inventory.source_files().next().unwrap();
+        assert_eq!(file.size_bytes(), 13);
     }
 
     #[test]

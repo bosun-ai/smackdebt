@@ -1200,6 +1200,10 @@ impl<'a, W: Write> Renderer<'a, W> {
             write!(self.writer, "  ")?;
         }
         self.write_text(view.verdict.sentence(), 2)?;
+        if let Some(qualifier) = view.verdict.qualifier() {
+            write!(self.writer, "  ")?;
+            self.write_text(&format!("{} {}", qualifier.sentence(), qualifier.fact()), 2)?;
+        }
         self.write_text(&verdict_counts(&view.verdict, view.mode), 0)?;
         if let Some(worst) = view.verdict.worst_offender()
             && view.verdict.diff_tier() != Some(DiffTier::NoDebtChange)

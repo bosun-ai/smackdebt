@@ -4,6 +4,7 @@ pub struct smackdebt_discovery::DiscoveredFile
 impl smackdebt_discovery::DiscoveredFile
 pub const fn smackdebt_discovery::DiscoveredFile::package(&self) -> smackdebt_analysis::report::PackageId
 pub fn smackdebt_discovery::DiscoveredFile::path(&self) -> &smackdebt_discovery::RelativePath
+pub const fn smackdebt_discovery::DiscoveredFile::size_bytes(&self) -> u64
 pub struct smackdebt_discovery::Inventory
 impl smackdebt_discovery::Inventory
 pub fn smackdebt_discovery::Inventory::absolute_path(&self, &smackdebt_discovery::RelativePath) -> core::option::Option<std::path::PathBuf>
