@@ -46,9 +46,9 @@
 
 ## 9. Transitive-aware coupling wording
 
-- [ ] 9.1 Compute a per-pair link classification — direct, indirect via a named first intermediate, or none — once at report build, checked in both directions.
-- [ ] 9.2 Render indirect pairs as `no direct dependency` with `linked via <package>` while keeping direct and unreachable wording and finding creation unchanged.
-- [ ] 9.3 Add pure three-package-chain tests for all three variants, an acceptance chain case, and move every documented literal together.
+- [x] 9.1 Compute a per-pair link classification — direct, indirect via a named first intermediate, or none — once at report build, checked in both directions.
+- [x] 9.2 Render indirect pairs as `no direct dependency` with `linked via <package>` while keeping direct and unreachable wording and finding creation unchanged.
+- [x] 9.3 Add pure three-package-chain tests for all three variants, an acceptance chain case, and move every documented literal together.
 
 ## 10. Unfollowed-import breakdown
 

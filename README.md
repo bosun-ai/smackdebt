@@ -53,6 +53,7 @@ watch crates/api → crates/core
 
 HISTORY
 watch crates/api ↔ packages/web changed together in 8 of 10 commits · 80% · no code dependency
+watch crates/billing ↔ crates/core changed together in 6 of 9 commits · 67% · no direct dependency · linked via crates/api
 watch one contributor made 34 of 36 commits to crates/api
 
 WARNINGS
@@ -387,16 +388,23 @@ Watch row stating counts only, such as
 
 Default `HISTORY` shows at most three actionable rows. It orders coupling by
 shared commits, then similarity, then stable package identity. Each row includes
-the shared and total commit counts, similarity, and whether a code dependency
-exists. Churn totals stay in JSON; the terminal reports activity where it
+the shared and total commit counts, similarity, and how the package dependency
+graph links the pair. Churn totals stay in JSON; the terminal reports activity where it
 changes a decision, as `hot (n commits)` on a finding.
 
 A package pair is reported once. Source role and trust variants are aggregated
 into that one row, and per-role history stays in JSON. A scope and its own
 ancestor never form a pair, because commits they share are structural rather
-than hidden coupling. `no code dependency` means no trusted eligible `uses`
-relation exists in either direction, including relations resolved through a
-declared manifest name and relations whose role is test, example, or benchmark.
+than hidden coupling. Each row states how the package dependency graph links
+the pair. `code dependency exists` means a trusted eligible `uses` relation
+links the pair in either direction, including relations resolved through a
+declared manifest name and relations whose role is test, example, or
+benchmark. `no direct dependency` with `linked via <package>` means no such
+relation exists but a dependency path connects the pair in one direction,
+naming the first intermediate package on a shortest such path. `no code
+dependency` means neither a direct relation nor a dependency path exists in
+either direction. The link informs the wording only: a pair without a direct
+relation keeps its Watch finding whether or not an indirect path exists.
 Coupling explanation is a claim about the repository rather than about
 production code, so it keeps the wider set of relations that architecture
 verdicts leave out.

@@ -15,14 +15,14 @@ use crate::{
     StableDependencyFinding,
 };
 use crate::{
-    ChangeCoupling, ContributorConcentration, EvolutionaryComparison, EvolutionaryComparisonId,
-    EvolutionaryFinding, EvolutionaryFindingId, EvolutionaryReportFacts, FileHistory,
-    HistoryCoverage, KnowledgeConcentrationFinding, PackageHistory,
+    ChangeCoupling, ContributorConcentration, CouplingLink, EvolutionaryComparison,
+    EvolutionaryComparisonId, EvolutionaryFinding, EvolutionaryFindingId, EvolutionaryReportFacts,
+    FileHistory, HistoryCoverage, KnowledgeConcentrationFinding, PackageHistory,
 };
 #[cfg(test)]
 use crate::{HealthPolicy, LocalUnitId, Signal, Thresholds, compare_units};
 use std::cmp::{Ordering, Reverse};
-use std::collections::BTreeSet;
+use std::collections::{BTreeMap, BTreeSet, VecDeque};
 
 macro_rules! index_type {
     ($name:ident) => {
@@ -766,6 +766,10 @@ pub struct Report {
     /// dependency runs.  Analysis states this once; it is a read-only fact for
     /// renderers and is never serialized.
     explanation_pairs: BTreeSet<(PackageId, PackageId)>,
+    /// How the package dependency graph links each retained coupling pair,
+    /// keyed by the ordered pair.  Classified once when the report is built;
+    /// it informs wording only and is never serialized.
+    coupling_links: BTreeMap<(PackageId, PackageId), CouplingLink>,
     verdict: Option<Verdict>,
 }
 
@@ -924,8 +928,56 @@ impl ReportBuilder {
     }
 
     pub fn finish(mut self) -> Report {
+        self.report.classify_coupling_links();
         self.report.aggregate();
         self.report
+    }
+}
+
+/// The stable map key for an unordered package pair.
+fn ordered_pair(left: PackageId, right: PackageId) -> (PackageId, PackageId) {
+    if left <= right {
+        (left, right)
+    } else {
+        (right, left)
+    }
+}
+
+/// Breadth-first shortest path over the directed package graph, returning the
+/// path length and the first package after the start when a path exists.
+fn shortest_path(adjacency: &[Vec<usize>], from: usize, to: usize) -> Option<(u32, usize)> {
+    if from >= adjacency.len() || to >= adjacency.len() {
+        return None;
+    }
+    let mut visited = vec![false; adjacency.len()];
+    visited[from] = true;
+    let mut queue = VecDeque::new();
+    queue.push_back((from, 0u32, None));
+    while let Some((node, distance, first_hop)) = queue.pop_front() {
+        for &next in &adjacency[node] {
+            if visited[next] {
+                continue;
+            }
+            visited[next] = true;
+            let hop = first_hop.unwrap_or(next);
+            if next == to {
+                return Some((distance + 1, hop));
+            }
+            queue.push_back((next, distance + 1, Some(hop)));
+        }
+    }
+    None
+}
+
+/// Turns a shortest path into a link classification.
+///
+/// A one-edge path carries no intermediate; construction records every
+/// package edge as an explanation pair too, so this arm is defensive.
+fn path_link((distance, first_hop): (u32, usize)) -> CouplingLink {
+    if distance <= 1 {
+        CouplingLink::Direct
+    } else {
+        CouplingLink::Indirect(PackageId::from_index(first_hop))
     }
 }
 
@@ -962,6 +1014,7 @@ impl Report {
             package_history: Vec::new(),
             change_coupling: Vec::new(),
             explanation_pairs: BTreeSet::new(),
+            coupling_links: BTreeMap::new(),
             contributor_concentration: Vec::new(),
             evolutionary_findings: Vec::new(),
             evolutionary_comparisons: Vec::new(),
@@ -1040,9 +1093,17 @@ impl Report {
     pub fn package_history(&self) -> &[PackageHistory] {
         &self.package_history
     }
-    /// Whether a code dependency explains why two packages change together.
-    pub fn coupling_explained(&self, left: PackageId, right: PackageId) -> bool {
-        crate::evolution::pair_is_explained(&self.explanation_pairs, left, right)
+    /// How the package dependency graph links a coupled package pair.
+    ///
+    /// Direct means a trusted eligible `uses` relation exists in either
+    /// direction; indirect means only a dependency path connects the pair,
+    /// naming the first intermediate on a shortest such path.  The
+    /// classification informs wording only — finding creation never reads it.
+    pub fn coupling_link(&self, left: PackageId, right: PackageId) -> CouplingLink {
+        self.coupling_links
+            .get(&ordered_pair(left, right))
+            .copied()
+            .unwrap_or(CouplingLink::None)
     }
 
     pub fn change_coupling(&self) -> &[ChangeCoupling] {
@@ -1249,6 +1310,40 @@ impl Report {
         id
     }
 
+    /// Classifies how the package dependency graph links each retained
+    /// coupling pair, checked in both directions.
+    ///
+    /// Runs once when the report is built so renderers read a recorded fact
+    /// instead of re-deriving graph reachability.
+    fn classify_coupling_links(&mut self) {
+        let mut adjacency = vec![Vec::new(); self.packages.len()];
+        for edge in &self.package_edges {
+            if let Some(targets) = adjacency.get_mut(edge.source().index()) {
+                targets.push(edge.target().index());
+            }
+        }
+        for pair in &self.change_coupling {
+            let (left, right) = (pair.left(), pair.right());
+            let link = if crate::evolution::pair_is_explained(&self.explanation_pairs, left, right)
+            {
+                CouplingLink::Direct
+            } else {
+                let forward = shortest_path(&adjacency, left.index(), right.index());
+                let backward = shortest_path(&adjacency, right.index(), left.index());
+                match (forward, backward) {
+                    (None, None) => CouplingLink::None,
+                    (Some(path), None) | (None, Some(path)) => path_link(path),
+                    (Some(forward), Some(backward)) => path_link(if backward.0 < forward.0 {
+                        backward
+                    } else {
+                        forward
+                    }),
+                }
+            };
+            self.coupling_links.insert(ordered_pair(left, right), link);
+        }
+    }
+
     /// Completes scope summaries from the report's owned tables.
     fn aggregate(&mut self) {
         let Some(root) = self.root else {
@@ -1357,7 +1452,7 @@ mod tests {
     use super::*;
     use crate::architecture::{
         ArchitectureComparisonKind, ArchitectureFinding, ArchitectureFindingKind,
-        ArchitectureGraph, DependencyEdge, DependencyEdgeId,
+        ArchitectureGraph, DependencyEdge, DependencyEdgeId, PackageEdgeId,
     };
     use crate::hotspot::Hotspot;
     use crate::verdict::{CodebaseTier, DebtFamily, DiffTier, WorstOffenderReason};
@@ -2121,6 +2216,81 @@ mod tests {
         assert_eq!(
             reversed.iter().map(|entry| entry.1).collect::<Vec<_>>(),
             ranked.iter().map(|entry| entry.1).collect::<Vec<_>>()
+        );
+    }
+
+    /// A coupled pair is classified from the package graph exactly once: a
+    /// direct relation reads direct, a chain a → b → c reads indirect naming
+    /// the first intermediate in both query directions, and a package no path
+    /// reaches reads none.
+    #[test]
+    fn a_coupling_pair_carries_its_package_graph_link() {
+        let mut fixture = ReportFixture::new(ReportMode::Codebase);
+        let (_, _) = fixture.add_file("a/main.rs", HealthCounts::new(1, 0, 0));
+        let (_, _) = fixture.add_file("b/main.rs", HealthCounts::new(1, 0, 0));
+        let (_, _) = fixture.add_file("c/main.rs", HealthCounts::new(1, 0, 0));
+        let (_, _) = fixture.add_file("d/main.rs", HealthCounts::new(1, 0, 0));
+        let package = PackageId::from_index;
+        let edge = |index: usize, source: usize, target: usize| {
+            PackageEdge::new(
+                PackageEdgeId::from_index(index),
+                package(source),
+                package(target),
+                1,
+                1,
+                Vec::new(),
+            )
+        };
+        fixture
+            .builder
+            .set_architecture(ArchitectureReportFacts::new(
+                ArchitectureGraph::new(
+                    DependencyCoverage::default(),
+                    Vec::new(),
+                    vec![edge(0, 0, 1), edge(1, 1, 2)],
+                    Vec::new(),
+                    Vec::new(),
+                    Vec::new(),
+                ),
+                Vec::new(),
+                Vec::new(),
+            ));
+        fixture.builder.set_explanation_pairs(BTreeSet::from([
+            (package(0), package(1)),
+            (package(1), package(2)),
+        ]));
+        let couplings = [(0, 1), (2, 0), (0, 3)]
+            .into_iter()
+            .map(|(left, right)| ChangeCoupling::new(package(left), package(right), 3, 4))
+            .collect::<Vec<_>>();
+        fixture.builder.set_evolution(EvolutionaryReportFacts::new(
+            crate::HistoryCoverage::unavailable("test"),
+            Vec::new(),
+            Vec::new(),
+            couplings,
+            Vec::new(),
+            Vec::new(),
+            Vec::new(),
+        ));
+        let report = fixture.finish();
+
+        assert_eq!(
+            report.coupling_link(package(0), package(1)),
+            CouplingLink::Direct
+        );
+        // The path runs a → b → c only, and the stored pair is reversed, so
+        // the classification is proven direction-independent twice over.
+        assert_eq!(
+            report.coupling_link(package(2), package(0)),
+            CouplingLink::Indirect(package(1))
+        );
+        assert_eq!(
+            report.coupling_link(package(0), package(2)),
+            CouplingLink::Indirect(package(1))
+        );
+        assert_eq!(
+            report.coupling_link(package(0), package(3)),
+            CouplingLink::None
         );
     }
 }

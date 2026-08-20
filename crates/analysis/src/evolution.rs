@@ -1272,6 +1272,23 @@ impl EvolutionaryReportFacts {
     }
 }
 
+/// How the package dependency graph links a coupled package pair.
+///
+/// The classification informs presentation only: finding creation never reads
+/// it, so an indirect link does not suppress or explain an
+/// unexplained-coupling Watch finding.
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub enum CouplingLink {
+    /// A trusted eligible `uses` relation links the pair in either direction.
+    Direct,
+    /// No direct relation exists, but a dependency path connects the pair in
+    /// one direction; the payload names the first intermediate package on a
+    /// shortest such path.
+    Indirect(PackageId),
+    /// No dependency path connects the pair in either direction.
+    None,
+}
+
 /// Whether a code dependency explains why two packages change together.
 ///
 /// The pairs are direction-carrying, so a pair is explained when either

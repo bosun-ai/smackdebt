@@ -1433,6 +1433,7 @@ fn readme_console_examples_use_the_simple_terminal_vocabulary() {
         "HISTORY",
         "WARNINGS",
         "changed together in 8 of 10 commits · 80% · no code dependency",
+        "changed together in 6 of 9 commits · 67% · no direct dependency · linked via crates/api",
         "source → target · 1 import",
         "source owns target",
         "one contributor made 34 of 36 commits to crates/api",

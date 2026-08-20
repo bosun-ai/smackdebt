@@ -30,6 +30,10 @@ pub smackdebt_analysis::ComparisonKind::MetricChanged
 pub smackdebt_analysis::ComparisonKind::Regressed
 pub smackdebt_analysis::ComparisonKind::Removed
 pub smackdebt_analysis::ComparisonKind::Unchanged
+pub enum smackdebt_analysis::CouplingLink
+pub smackdebt_analysis::CouplingLink::Direct
+pub smackdebt_analysis::CouplingLink::Indirect(smackdebt_analysis::PackageId)
+pub smackdebt_analysis::CouplingLink::None
 pub enum smackdebt_analysis::DebtFamily
 pub smackdebt_analysis::DebtFamily::Architecture
 pub smackdebt_analysis::DebtFamily::Evolutionary
@@ -681,7 +685,7 @@ pub fn smackdebt_analysis::Report::architecture_findings(&self) -> &[smackdebt_a
 pub fn smackdebt_analysis::Report::change_coupling(&self) -> &[smackdebt_analysis::ChangeCoupling]
 pub fn smackdebt_analysis::Report::comparisons(&self) -> &[smackdebt_analysis::Comparison]
 pub fn smackdebt_analysis::Report::contributor_concentration(&self) -> &[smackdebt_analysis::ContributorConcentration]
-pub fn smackdebt_analysis::Report::coupling_explained(&self, smackdebt_analysis::PackageId, smackdebt_analysis::PackageId) -> bool
+pub fn smackdebt_analysis::Report::coupling_link(&self, smackdebt_analysis::PackageId, smackdebt_analysis::PackageId) -> smackdebt_analysis::CouplingLink
 pub const fn smackdebt_analysis::Report::dependency_coverage(&self) -> smackdebt_analysis::DependencyCoverage
 pub fn smackdebt_analysis::Report::dependency_edges(&self) -> &[smackdebt_analysis::DependencyEdge]
 pub fn smackdebt_analysis::Report::diagnostics(&self) -> &[smackdebt_analysis::Diagnostic]

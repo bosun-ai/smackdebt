@@ -43,7 +43,7 @@ pub use contributor_concentration::{
 pub use cycle_witness::cycle_witness;
 pub use dependency_degree::dependency_degree;
 pub use evolution::{
-    ChangeCoupling, ContributorConcentration, ContributorId, CouplingEvidence,
+    ChangeCoupling, ContributorConcentration, ContributorId, CouplingEvidence, CouplingLink,
     EvolutionAccumulator, EvolutionaryComparison, EvolutionaryComparisonId,
     EvolutionaryComparisonKind, EvolutionaryFinding, EvolutionaryFindingId,
     EvolutionaryFindingKind, EvolutionaryReportFacts, FileHistory, HistoryAvailability,

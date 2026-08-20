@@ -949,6 +949,68 @@ fn evolutionary_analysis_is_exact_private_and_deterministic() {
 }
 
 #[test]
+fn an_indirect_dependency_path_is_named_without_suppressing_the_finding() {
+    let project = tempfile::tempdir().unwrap();
+    git(project.path(), ["init", "-b", "main"]);
+    for package in ["a", "b", "c"] {
+        fs::create_dir_all(project.path().join(package)).unwrap();
+        fs::write(project.path().join(package).join("package.json"), "{}\n").unwrap();
+    }
+    // The dependency chain runs a → b → c with no direct a → c relation.
+    fs::write(
+        project.path().join("a/main.js"),
+        "import { b } from '../b/main';\nexport const a = b;\n",
+    )
+    .unwrap();
+    fs::write(
+        project.path().join("b/main.js"),
+        "import { c } from '../c/main';\nexport const b = c;\n",
+    )
+    .unwrap();
+    fs::write(project.path().join("c/main.js"), "export const c = 0;\n").unwrap();
+    commit_as(
+        project.path(),
+        "History Test",
+        "history@example.invalid",
+        "initial",
+    );
+    for version in 1..=3 {
+        fs::write(
+            project.path().join("a/main.js"),
+            format!("import {{ b }} from '../b/main';\nexport const a = b + {version};\n"),
+        )
+        .unwrap();
+        fs::write(
+            project.path().join("c/main.js"),
+            format!("export const c = {version};\n"),
+        )
+        .unwrap();
+        commit_as(
+            project.path(),
+            "History Test",
+            "history@example.invalid",
+            &format!("a and c together {version}"),
+        );
+    }
+
+    let terminal = String::from_utf8(run_in(
+        project.path(),
+        ["--color", "never", "--history", "36500d"],
+    ))
+    .unwrap();
+    // The Watch finding is created exactly as when no path exists; only the
+    // wording distinguishes the indirect link and names the first
+    // intermediate on the path.
+    assert!(
+        terminal.contains(
+            "watch a ↔ c changed together in 4 of 4 commits · 100% · no direct dependency · linked via b"
+        ),
+        "{terminal}"
+    );
+    assert!(!terminal.contains("no code dependency"), "{terminal}");
+}
+
+#[test]
 fn default_history_snapshot_orders_strongest_actionable_findings_first() {
     let project = history_strength_order_fixture();
     let json = run_in(project.path(), ["--json", "--history", "36500d"]);

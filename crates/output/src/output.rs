@@ -8,10 +8,10 @@ use std::path::{Path, PathBuf};
 use anstyle::{Ansi256Color, AnsiColor, Style};
 use smackdebt_analysis::{
     ArchitectureComparisonKind, ArchitectureFindingKind, CodebaseTier, Comparison,
-    ComparisonDirection, ComparisonKind, DebtDiffSelection, DebtFamily, Diagnostic, DiagnosticKind,
-    DiffTier, FileId, FileRecord, Finding, Instability, Language, Measurements, Rating, Report,
-    ReportMode, ResolutionIssueKind, Scope, ScopeId, ScopeKind, Signal, SourceRole, SourceTrust,
-    StaticRelationKind, UnitKind, Verdict, instability, qualifies_for_finding,
+    ComparisonDirection, ComparisonKind, CouplingLink, DebtDiffSelection, DebtFamily, Diagnostic,
+    DiagnosticKind, DiffTier, FileId, FileRecord, Finding, Instability, Language, Measurements,
+    Rating, Report, ReportMode, ResolutionIssueKind, Scope, ScopeId, ScopeKind, Signal, SourceRole,
+    SourceTrust, StaticRelationKind, UnitKind, Verdict, instability, qualifies_for_finding,
 };
 use unicode_width::{UnicodeWidthChar, UnicodeWidthStr};
 
@@ -960,22 +960,28 @@ fn history_rows(
     {
         let left = package_name(report, pair.left().index()).unwrap_or("?");
         let right = package_name(report, pair.right().index()).unwrap_or("?");
-        section.rows.push(
-            Row::new(
-                finding.then_some(Word::Watch),
-                format!(
-                    "{left} ↔ {right} changed together in {} of {} commits",
-                    pair.shared_commits(),
-                    pair.union_commits()
-                ),
-            )
-            .with_fact(format!("{}%", (pair.similarity() * 100.0).round() as u32))
-            .with_fact(if report.coupling_explained(pair.left(), pair.right()) {
-                "code dependency exists"
-            } else {
-                "no code dependency"
-            }),
-        );
+        let row = Row::new(
+            finding.then_some(Word::Watch),
+            format!(
+                "{left} ↔ {right} changed together in {} of {} commits",
+                pair.shared_commits(),
+                pair.union_commits()
+            ),
+        )
+        .with_fact(format!("{}%", (pair.similarity() * 100.0).round() as u32));
+        // The link is a recorded fact and informs wording only; the Watch
+        // finding for an unexplained pair is created regardless of a path.
+        let row = match report.coupling_link(pair.left(), pair.right()) {
+            CouplingLink::Direct => row.with_fact("code dependency exists"),
+            CouplingLink::Indirect(via) => {
+                row.with_fact("no direct dependency").with_fact(format!(
+                    "linked via {}",
+                    package_name(report, via.index()).unwrap_or("?")
+                ))
+            }
+            CouplingLink::None => row.with_fact("no code dependency"),
+        };
+        section.rows.push(row);
     }
 
     // One package states its concentration once, however many source roles
@@ -1829,8 +1835,8 @@ mod tests {
         ComparisonId, Coverage, DependencyCoverage, DependencyEdge, DependencyEdgeId,
         EvolutionaryFinding, EvolutionaryFindingId, EvolutionaryReportFacts, FileActivity, FileId,
         FileRecord, FindingId, HealthCounts, HealthPolicy, HistoryCoverage, Measurements,
-        PackageId, PackageRecord, ParseStatus, Report, ReportBuilder, ReportMode, Scope, ScopeId,
-        SourceRole, SourceSpan, SourceTrust, UnitIdentity, UnitKind,
+        PackageEdge, PackageEdgeId, PackageId, PackageRecord, ParseStatus, Report, ReportBuilder,
+        ReportMode, Scope, ScopeId, SourceRole, SourceSpan, SourceTrust, UnitIdentity, UnitKind,
     };
 
     /// Every private-use codepoint, which may never reach a machine consumer.
@@ -2504,6 +2510,100 @@ mod tests {
             ),
             "{terminal}"
         );
+    }
+
+    /// A pair only a dependency path connects is stated as indirect — naming
+    /// the first intermediate — while its Watch finding is created exactly as
+    /// when no path exists.
+    #[test]
+    fn an_indirectly_linked_pair_names_its_intermediate_and_keeps_its_finding() {
+        let mut builder = ReportBuilder::new(ReportMode::Codebase);
+        let root = ScopeId::from_index(0);
+        builder.add_scope(Scope::new(root, ScopeKind::Repository, ".", None));
+        builder.set_root(root);
+        let packages = ["a", "b", "c"]
+            .into_iter()
+            .enumerate()
+            .map(|(index, name)| {
+                let scope = ScopeId::from_index(index + 1);
+                builder.add_scope(Scope::new(scope, ScopeKind::Package, name, Some(root)));
+                PackageRecord::current(PackageId::from_index(index), scope, name)
+            })
+            .collect::<Vec<_>>();
+        builder.set_packages(packages);
+        let edge = |index: usize, source: usize, target: usize| {
+            PackageEdge::new(
+                PackageEdgeId::from_index(index),
+                PackageId::from_index(source),
+                PackageId::from_index(target),
+                1,
+                1,
+                Vec::new(),
+            )
+        };
+        builder.set_architecture(ArchitectureReportFacts::new(
+            ArchitectureGraph::new(
+                DependencyCoverage::default(),
+                Vec::new(),
+                vec![edge(0, 0, 1), edge(1, 1, 2)],
+                Vec::new(),
+                Vec::new(),
+                Vec::new(),
+            ),
+            Vec::new(),
+            Vec::new(),
+        ));
+        builder.set_explanation_pairs(std::collections::BTreeSet::from([
+            (PackageId::from_index(0), PackageId::from_index(1)),
+            (PackageId::from_index(1), PackageId::from_index(2)),
+        ]));
+        let couplings = [(0, 1), (0, 2)]
+            .into_iter()
+            .map(|(left, right)| {
+                ChangeCoupling::new(
+                    PackageId::from_index(left),
+                    PackageId::from_index(right),
+                    3,
+                    4,
+                )
+            })
+            .collect::<Vec<_>>();
+        let findings = couplings
+            .iter()
+            .copied()
+            .enumerate()
+            .map(|(index, coupling)| {
+                EvolutionaryFinding::new(EvolutionaryFindingId::from_index(index), coupling)
+            })
+            .collect::<Vec<_>>();
+        builder.set_evolution(EvolutionaryReportFacts::new(
+            HistoryCoverage::unavailable("test"),
+            Vec::new(),
+            Vec::new(),
+            couplings,
+            Vec::new(),
+            findings,
+            Vec::new(),
+        ));
+        for index in 0..2 {
+            builder.link_evolutionary_finding(root, EvolutionaryFindingId::from_index(index));
+        }
+        let report = builder.finish();
+
+        let terminal = render(&report, TerminalOptions::default());
+        assert!(
+            terminal.contains(
+                "a ↔ b changed together in 3 of 4 commits · 75% · code dependency exists"
+            ),
+            "{terminal}"
+        );
+        assert!(
+            terminal.contains(
+                "watch a ↔ c changed together in 3 of 4 commits · 75% · no direct dependency · linked via b"
+            ),
+            "{terminal}"
+        );
+        assert!(!terminal.contains("no code dependency"), "{terminal}");
     }
 
     #[test]
