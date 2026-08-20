@@ -42,6 +42,12 @@ pub(crate) struct GateArgs {
     /// Baseline file. If omitted, uses .smackdebt-baseline.tsv at the path.
     #[arg(long)]
     pub(crate) baseline: Option<PathBuf>,
+    /// Write the observed debt as the new baseline.
+    #[arg(long, conflicts_with = "json")]
+    pub(crate) update: bool,
+    /// Write the gate result as JSON.
+    #[arg(long)]
+    pub(crate) json: bool,
     /// Number of workers to use.
     #[arg(long, value_parser = parse_jobs)]
     pub(crate) jobs: Option<usize>,
@@ -140,6 +146,16 @@ mod tests {
         assert!(Cli::try_parse_from(["smackdebt", "--top", "0"]).is_err());
         let cli = Cli::try_parse_from(["smackdebt", "--top", "5"]).unwrap();
         assert_eq!(cli.common.top, Some(5));
+    }
+
+    #[test]
+    fn a_baseline_update_conflicts_with_gate_json() {
+        assert!(Cli::try_parse_from(["smackdebt", "gate", "--update", "--json"]).is_err());
+        let cli = Cli::try_parse_from(["smackdebt", "gate", "--update"]).unwrap();
+        let Some(Command::Gate(args)) = cli.command else {
+            panic!("expected the gate subcommand");
+        };
+        assert!(args.update && !args.json);
     }
 
     #[test]

@@ -7,5 +7,6 @@ pub const fn smackdebt_output::TerminalOptions::with_top(self, core::option::Opt
 impl core::default::Default for smackdebt_output::TerminalOptions
 pub fn smackdebt_output::TerminalOptions::default() -> Self
 pub fn smackdebt_output::write_gate(&mut impl core::io::write::Write, &str, &smackdebt_analysis::gate::GateComparison) -> core::io::error::Result<()>
+pub fn smackdebt_output::write_gate_json(&mut impl core::io::write::Write, &str, &smackdebt_analysis::gate::GateComparison) -> core::io::error::Result<()>
 pub fn smackdebt_output::write_json(&mut impl core::io::write::Write, &smackdebt_analysis::report::Report, core::option::Option<smackdebt_analysis::report::ScopeId>) -> core::io::error::Result<()>
 pub fn smackdebt_output::write_terminal(&mut impl core::io::write::Write, &smackdebt_analysis::report::Report, core::option::Option<smackdebt_analysis::report::ScopeId>, smackdebt_output::TerminalOptions) -> core::io::error::Result<()>

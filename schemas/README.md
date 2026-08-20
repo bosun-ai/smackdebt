@@ -18,6 +18,11 @@ concentration ratio are not serialized; their integer operands are, so a
 consumer derives any ratio at its own precision. Acceptance scans each result
 and fails on any floating-point number.
 
+`gate-v1.schema.json` describes the `smackdebt gate --json` result: the
+baseline it read, its clean or regressed status, regression and improvement
+rows carrying both counters' baseline and observed values, and totals. Gate
+JSON acceptance evidence is validated against it.
+
 Changing a field, enum, table, or index relationship requires an intentional
 schema change, updated product documentation, focused semantic assertions, and
 reviewed JSON results. Contributor names, addresses, and temporary identity

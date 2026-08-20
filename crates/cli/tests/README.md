@@ -35,6 +35,21 @@ To read one committed result pretty-printed without configuring git:
 just show-snapshot unified-codebase.json
 ```
 
+The complete check ends with the ratchet gate over the committed workspace
+baseline, `.smackdebt-baseline.tsv` at the repository root:
+
+```console
+just gate
+```
+
+Exit status 3 names each ratcheted counter above its baseline as a `worse`
+row. Remove the debt, or accept it deliberately by rewriting the baseline and
+committing the diff:
+
+```console
+cargo run --quiet -p smackdebt -- gate --update
+```
+
 Work-count evidence is compiled only with its named test feature:
 
 ```console

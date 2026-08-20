@@ -20,7 +20,7 @@ just fmt          # cargo fmt --all -- --check
 just lint         # clippy --workspace --all-targets --all-features -D warnings
 just test         # cargo test --workspace --all-features
 just check        # fmt + lint + test + architecture + performance-tests
-                  # + acceptance-evidence, then openspec validate --strict, git diff --check
+                  # + acceptance-evidence + gate, then openspec validate --strict, git diff --check
 ```
 
 Narrower loops:
@@ -30,9 +30,14 @@ just acceptance             # both black-box CLI suites
 just acceptance-evidence    # work-count checks (needs the evidence-stats feature)
 just acceptance-install     # slow install smoke, ignored by default
 just architecture           # dependency direction, entry modules, API + evidence snapshots
+just gate                   # ratchet gate over .smackdebt-baseline.tsv (exit 3 on new debt)
 just licenses               # cargo deny check licenses bans sources
 just performance-tests      # workload unit tests + baseline check
 ```
+
+The gate compares a self-run against the committed baseline; accept deliberate
+new debt with `cargo run --quiet -p smackdebt -- gate --update` and commit the
+baseline diff.
 
 Single test / package:
 

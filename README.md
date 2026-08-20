@@ -608,6 +608,15 @@ Any counter above its baseline is a regression: the gate names the row as
 Counters below the baseline are improvements, reported as `better` rows and
 never applied to the file. An unchanged tree compares clean and exits 0.
 
+`smackdebt gate --update` writes the observed debt as the new baseline and
+exits 0. It accepts improvements and deliberate new debt alike; the gate never
+tightens or rewrites the baseline on its own, so a clean check run never
+touches the working tree. `smackdebt gate --json` writes the comparison as one
+JSON object — schema version 1, described by `schemas/gate-v1.schema.json` —
+whose regression and improvement rows each carry both counters' baseline and
+observed values. This repository commits its own baseline and runs the gate as
+part of its complete check.
+
 ## Configuration
 
 Configuration is optional. Add `.smackdebt.toml` at the repository root when

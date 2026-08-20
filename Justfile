@@ -40,6 +40,9 @@ architecture:
     python3 scripts/check-api-snapshots.py --all-features --package smackdebt-git --package smackdebt-project
     python3 -m unittest discover -s scripts/tests
 
+gate:
+    cargo run --quiet -p smackdebt --bin smackdebt -- gate
+
 licenses:
     cargo deny check licenses bans sources
 
@@ -54,7 +57,7 @@ release-evidence-check:
     python3 scripts/performance/check-baselines.py --release-head
     python3 scripts/performance/check-workload-reviews.py --release-head
 
-check: fmt lint test architecture performance-tests acceptance-evidence
+check: fmt lint test architecture performance-tests acceptance-evidence gate
     openspec validate --all --strict
     git diff --check
 

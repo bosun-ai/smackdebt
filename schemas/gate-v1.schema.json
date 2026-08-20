@@ -1,0 +1,105 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "Smackdebt gate result, schema version 1",
+  "description": "One ratchet gate comparison: the baseline it read, every regression and improvement with both counters' baseline and observed values, and the totals. Every value is an integer or a string.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schema_version",
+    "status",
+    "baseline",
+    "regressions",
+    "improvements",
+    "totals"
+  ],
+  "properties": {
+    "schema_version": {
+      "const": 1
+    },
+    "status": {
+      "enum": ["clean", "regressed"]
+    },
+    "baseline": {
+      "type": "string",
+      "minLength": 1
+    },
+    "regressions": {
+      "type": "array",
+      "items": {
+        "$ref": "#/$defs/delta"
+      }
+    },
+    "improvements": {
+      "type": "array",
+      "items": {
+        "$ref": "#/$defs/delta"
+      }
+    },
+    "totals": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["regressions", "improvements"],
+      "properties": {
+        "regressions": {
+          "$ref": "#/$defs/count"
+        },
+        "improvements": {
+          "$ref": "#/$defs/count"
+        }
+      }
+    }
+  },
+  "$defs": {
+    "count": {
+      "type": "integer",
+      "minimum": 0
+    },
+    "signal": {
+      "enum": [
+        "cognitive",
+        "container_size",
+        "cyclomatic",
+        "file_cycle",
+        "file_size",
+        "logical_lines",
+        "nesting",
+        "package_cycle",
+        "parameters",
+        "stable_dependency"
+      ]
+    },
+    "delta": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "path",
+        "signal",
+        "baseline_high",
+        "high",
+        "baseline_watch",
+        "watch"
+      ],
+      "properties": {
+        "path": {
+          "type": "string",
+          "minLength": 1
+        },
+        "signal": {
+          "$ref": "#/$defs/signal"
+        },
+        "baseline_high": {
+          "$ref": "#/$defs/count"
+        },
+        "high": {
+          "$ref": "#/$defs/count"
+        },
+        "baseline_watch": {
+          "$ref": "#/$defs/count"
+        },
+        "watch": {
+          "$ref": "#/$defs/count"
+        }
+      }
+    }
+  }
+}

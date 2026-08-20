@@ -5,7 +5,7 @@ use std::path::PathBuf;
 use std::process::ExitCode;
 
 use clap::Parser;
-use smackdebt_output::{TerminalOptions, write_gate, write_json, write_terminal};
+use smackdebt_output::{TerminalOptions, write_gate, write_gate_json, write_json, write_terminal};
 use smackdebt_project::{
     CodebaseRequest, DiffRequest, ExecutionWidth, GateComparison, GateSnapshot, ProjectError,
 };
@@ -219,30 +219,36 @@ fn run(arguments: impl IntoIterator<Item = OsString>) -> ExitCode {
 }
 
 /// Runs the ratchet gate: analyze, compare against the committed baseline,
-/// and exit 3 when any ratcheted counter exceeds it.
+/// and exit 3 when any ratcheted counter exceeds it. `--update` writes the
+/// observed snapshot verbatim instead of comparing, so the baseline moves
+/// only on request and a clean check run never dirties the working tree.
 fn run_gate(args: GateArgs, selected: Option<PathBuf>, config: &ProjectConfig) -> ExitCode {
     let baseline_path = args.baseline.unwrap_or_else(|| match &selected {
         Some(path) => path.join(gate_baseline::BASELINE_FILE_NAME),
         None => PathBuf::from(gate_baseline::BASELINE_FILE_NAME),
     });
-    let text = match std::fs::read_to_string(&baseline_path) {
-        Ok(text) => text,
-        Err(error) if error.kind() == io::ErrorKind::NotFound => {
-            return fail_with(
-                &format!("baseline not found: {}", baseline_path.display()),
-                2,
-            );
+    let baseline = if args.update {
+        None
+    } else {
+        let text = match std::fs::read_to_string(&baseline_path) {
+            Ok(text) => text,
+            Err(error) if error.kind() == io::ErrorKind::NotFound => {
+                return fail_with(
+                    &format!("baseline not found: {}", baseline_path.display()),
+                    2,
+                );
+            }
+            Err(error) => {
+                return fail(&ProjectError::Inspect {
+                    path: baseline_path,
+                    source: error,
+                });
+            }
+        };
+        match gate_baseline::parse(&text) {
+            Ok(baseline) => Some(baseline),
+            Err(message) => return fail_with(&message, 2),
         }
-        Err(error) => {
-            return fail(&ProjectError::Inspect {
-                path: baseline_path,
-                source: error,
-            });
-        }
-    };
-    let baseline = match gate_baseline::parse(&text) {
-        Ok(baseline) => baseline,
-        Err(message) => return fail_with(&message, 2),
     };
     let request = match selected {
         Some(path) => CodebaseRequest::new(path),
@@ -265,13 +271,23 @@ fn run_gate(args: GateArgs, selected: Option<PathBuf>, config: &ProjectConfig) -
         Err(error) => return fail(&error),
     };
     let observed = GateSnapshot::from_report(result.report());
+    let Some(baseline) = baseline else {
+        return match std::fs::write(&baseline_path, gate_baseline::render(&observed)) {
+            Ok(()) => ExitCode::SUCCESS,
+            Err(error) => fail_with(
+                &format!("could not write {}: {error}", baseline_path.display()),
+                1,
+            ),
+        };
+    };
     let comparison = GateComparison::between(&baseline, &observed);
     let mut stdout = io::BufWriter::new(io::stdout().lock());
-    let rendered = write_gate(
-        &mut stdout,
-        &baseline_path.display().to_string(),
-        &comparison,
-    )
+    let baseline_name = baseline_path.display().to_string();
+    let rendered = if args.json {
+        write_gate_json(&mut stdout, &baseline_name, &comparison).and_then(|()| writeln!(stdout))
+    } else {
+        write_gate(&mut stdout, &baseline_name, &comparison)
+    }
     .and_then(|()| stdout.flush());
     match rendered {
         Err(error) if stdout_failure(&error) == StdoutFailure::Reportable => {

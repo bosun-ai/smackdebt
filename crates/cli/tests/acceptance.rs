@@ -272,6 +272,104 @@ fn a_looser_gate_baseline_reports_improvements_and_stays_untouched() {
 }
 
 #[test]
+fn a_baseline_update_is_byte_stable_and_idempotent() {
+    let project = gate_fixture();
+    let baseline = project.path().join(".smackdebt-baseline.tsv");
+    smackdebt()
+        .arg("gate")
+        .arg("--update")
+        .arg(project.path())
+        .assert()
+        .code(0)
+        .stdout("")
+        .stderr("");
+    let written = fs::read_to_string(&baseline).unwrap();
+    assert_eq!(
+        written,
+        format!("{GATE_BASELINE_HEADERS}work.js\tcognitive\t1\t0\n")
+    );
+    smackdebt()
+        .arg("gate")
+        .arg("--update")
+        .arg(project.path())
+        .assert()
+        .code(0)
+        .stdout("")
+        .stderr("");
+    assert_eq!(fs::read_to_string(&baseline).unwrap(), written);
+    // The written baseline immediately gates its own tree clean.
+    smackdebt()
+        .arg("gate")
+        .arg(project.path())
+        .assert()
+        .code(0)
+        .stdout(format!(
+            "GATE  {}\n\n0 regressions · 0 improvements\n",
+            baseline.display()
+        ))
+        .stderr("");
+}
+
+#[test]
+fn a_regressed_gate_json_result_follows_its_checked_schema() {
+    let project = gate_fixture();
+    let baseline = project.path().join(".smackdebt-baseline.tsv");
+    fs::write(&baseline, GATE_BASELINE_HEADERS).unwrap();
+    let output = smackdebt()
+        .arg("gate")
+        .arg("--json")
+        .arg(project.path())
+        .assert()
+        .code(3)
+        .stderr("")
+        .get_output()
+        .stdout
+        .clone();
+    let result: serde_json::Value = serde_json::from_slice(&output).unwrap();
+    validate_gate_schema(&result);
+    assert_eq!(result["schema_version"], 1);
+    assert_eq!(result["status"], "regressed");
+    assert_eq!(result["baseline"], baseline.display().to_string());
+    let regressions = result["regressions"].as_array().unwrap();
+    assert_eq!(regressions.len(), 1);
+    assert_eq!(regressions[0]["path"], "work.js");
+    assert_eq!(regressions[0]["signal"], "cognitive");
+    assert_eq!(regressions[0]["baseline_high"], 0);
+    assert_eq!(regressions[0]["high"], 1);
+    assert_eq!(regressions[0]["baseline_watch"], 0);
+    assert_eq!(regressions[0]["watch"], 0);
+    assert!(result["improvements"].as_array().unwrap().is_empty());
+    assert_eq!(result["totals"]["regressions"], 1);
+    assert_eq!(result["totals"]["improvements"], 0);
+}
+
+#[test]
+fn a_clean_gate_json_result_states_its_status_and_exits_zero() {
+    let project = gate_fixture();
+    let baseline = project.path().join(".smackdebt-baseline.tsv");
+    fs::write(
+        &baseline,
+        format!("{GATE_BASELINE_HEADERS}work.js\tcognitive\t1\t0\n"),
+    )
+    .unwrap();
+    let output = smackdebt()
+        .arg("gate")
+        .arg("--json")
+        .arg(project.path())
+        .assert()
+        .code(0)
+        .stderr("")
+        .get_output()
+        .stdout
+        .clone();
+    let result: serde_json::Value = serde_json::from_slice(&output).unwrap();
+    validate_gate_schema(&result);
+    assert_eq!(result["status"], "clean");
+    assert!(result["regressions"].as_array().unwrap().is_empty());
+    assert!(result["improvements"].as_array().unwrap().is_empty());
+}
+
+#[test]
 fn a_malformed_gate_baseline_never_passes() {
     let project = gate_fixture();
     let baseline = project.path().join(".smackdebt-baseline.tsv");
@@ -1968,6 +2066,15 @@ fn validate_schema(report: &serde_json::Value) {
     jsonschema::validator_for(&schema)
         .unwrap()
         .validate(report)
+        .unwrap();
+}
+
+fn validate_gate_schema(result: &serde_json::Value) {
+    let schema: serde_json::Value =
+        serde_json::from_str(include_str!("../../../schemas/gate-v1.schema.json")).unwrap();
+    jsonschema::validator_for(&schema)
+        .unwrap()
+        .validate(result)
         .unwrap();
 }
 

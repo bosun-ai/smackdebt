@@ -1,5 +1,7 @@
 use std::io::{self, Write};
 
+use serde::Serialize;
+use serde::ser::{SerializeMap, SerializeSeq, Serializer};
 use smackdebt_analysis::{GateComparison, GateDelta};
 
 use crate::output::Counted;
@@ -40,6 +42,100 @@ pub fn write_gate(
         writeln!(writer, "next: smackdebt gate --update")?;
     }
     Ok(())
+}
+
+/// Streams gate JSON schema version 1, described by `schemas/gate-v1.schema.json`.
+///
+/// Every value is an integer or a string, like the report schema: each delta
+/// row carries both counters' baseline and observed values, so a consumer
+/// never has to re-derive which counter moved.
+pub fn write_gate_json(
+    writer: &mut impl Write,
+    baseline: &str,
+    comparison: &GateComparison,
+) -> io::Result<()> {
+    let mut serializer = serde_json::Serializer::new(writer);
+    GateView {
+        baseline,
+        comparison,
+    }
+    .serialize(&mut serializer)
+    .map_err(io::Error::other)
+}
+
+struct GateView<'a> {
+    baseline: &'a str,
+    comparison: &'a GateComparison,
+}
+
+impl Serialize for GateView<'_> {
+    fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
+    where
+        S: Serializer,
+    {
+        let mut map = serializer.serialize_map(Some(6))?;
+        map.serialize_entry("schema_version", &1)?;
+        map.serialize_entry(
+            "status",
+            if self.comparison.regressed() {
+                "regressed"
+            } else {
+                "clean"
+            },
+        )?;
+        map.serialize_entry("baseline", self.baseline)?;
+        map.serialize_entry("regressions", &Deltas(self.comparison.regressions()))?;
+        map.serialize_entry("improvements", &Deltas(self.comparison.improvements()))?;
+        map.serialize_entry("totals", &Totals(self.comparison))?;
+        map.end()
+    }
+}
+
+struct Deltas<'a>(&'a [GateDelta]);
+
+impl Serialize for Deltas<'_> {
+    fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
+    where
+        S: Serializer,
+    {
+        let mut seq = serializer.serialize_seq(Some(self.0.len()))?;
+        for delta in self.0 {
+            seq.serialize_element(&DeltaView(delta))?;
+        }
+        seq.end()
+    }
+}
+
+struct DeltaView<'a>(&'a GateDelta);
+
+impl Serialize for DeltaView<'_> {
+    fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
+    where
+        S: Serializer,
+    {
+        let mut map = serializer.serialize_map(Some(6))?;
+        map.serialize_entry("path", self.0.path())?;
+        map.serialize_entry("signal", self.0.signal().id())?;
+        map.serialize_entry("baseline_high", &self.0.baseline_high())?;
+        map.serialize_entry("high", &self.0.high())?;
+        map.serialize_entry("baseline_watch", &self.0.baseline_watch())?;
+        map.serialize_entry("watch", &self.0.watch())?;
+        map.end()
+    }
+}
+
+struct Totals<'a>(&'a GateComparison);
+
+impl Serialize for Totals<'_> {
+    fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
+    where
+        S: Serializer,
+    {
+        let mut map = serializer.serialize_map(Some(2))?;
+        map.serialize_entry("regressions", &self.0.regressions().len())?;
+        map.serialize_entry("improvements", &self.0.improvements().len())?;
+        map.end()
+    }
 }
 
 fn delta_facts(delta: &GateDelta) -> String {
@@ -110,6 +206,46 @@ mod tests {
                 "\n",
                 "1 regression · 1 improvement\n",
                 "next: smackdebt gate --update\n",
+            )
+        );
+    }
+
+    fn rendered_json(baseline: &[GateRow], observed: &[GateRow]) -> String {
+        let comparison = GateComparison::between(
+            &GateSnapshot::new(baseline.to_vec()),
+            &GateSnapshot::new(observed.to_vec()),
+        );
+        let mut bytes = Vec::new();
+        write_gate_json(&mut bytes, ".smackdebt-baseline.tsv", &comparison).unwrap();
+        String::from_utf8(bytes).unwrap()
+    }
+
+    #[test]
+    fn a_clean_gate_serializes_its_status_and_empty_tables() {
+        assert_eq!(
+            rendered_json(&[], &[]),
+            concat!(
+                "{\"schema_version\":1,\"status\":\"clean\",",
+                "\"baseline\":\".smackdebt-baseline.tsv\",",
+                "\"regressions\":[],\"improvements\":[],",
+                "\"totals\":{\"regressions\":0,\"improvements\":0}}",
+            )
+        );
+    }
+
+    #[test]
+    fn a_delta_row_serializes_both_counters_baseline_and_observed_values() {
+        let baseline = [GateRow::new("src/a.rs", GateSignal::Nesting, 1, 2)];
+        let observed = [GateRow::new("src/a.rs", GateSignal::Nesting, 2, 4)];
+        assert_eq!(
+            rendered_json(&baseline, &observed),
+            concat!(
+                "{\"schema_version\":1,\"status\":\"regressed\",",
+                "\"baseline\":\".smackdebt-baseline.tsv\",",
+                "\"regressions\":[{\"path\":\"src/a.rs\",\"signal\":\"nesting\",",
+                "\"baseline_high\":1,\"high\":2,\"baseline_watch\":2,\"watch\":4}],",
+                "\"improvements\":[],",
+                "\"totals\":{\"regressions\":1,\"improvements\":0}}",
             )
         );
     }

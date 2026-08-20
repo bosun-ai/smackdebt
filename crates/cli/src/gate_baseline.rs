@@ -11,9 +11,6 @@ const COLUMN_LINE: &str = "path\tsignal\thigh\twatch";
 /// Rows are already sorted by path then signal; zero-zero rows are omitted so
 /// vanished debt also vanishes from the file, and the rendering round-trips
 /// byte-identically through [`parse`].
-// The writer ships before `--update` adopts it, so the binary does not call
-// it yet.
-#[cfg_attr(not(test), expect(dead_code))]
 pub(crate) fn render(snapshot: &GateSnapshot) -> String {
     let mut text = format!("{VERSION_LINE}\n{COLUMN_LINE}\n");
     for row in snapshot.rows() {

@@ -81,9 +81,9 @@
 
 ## 15. Self-gating
 
-- [ ] 15.1 Add `--update` writing the observed snapshot verbatim, byte-stable and idempotent.
-- [ ] 15.2 Add gate `--json` with its checked schema and validated acceptance evidence.
-- [ ] 15.3 Commit smackdebt's own baseline and wire the gate into `just check` last, documenting the loop.
+- [x] 15.1 Add `--update` writing the observed snapshot verbatim, byte-stable and idempotent.
+- [x] 15.2 Add gate `--json` with its checked schema and validated acceptance evidence.
+- [x] 15.3 Commit smackdebt's own baseline and wire the gate into `just check` last, documenting the loop.
 
 ## 16. Close the change
 
