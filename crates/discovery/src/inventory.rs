@@ -8,6 +8,7 @@ use std::collections::BTreeMap;
 use std::fs;
 use std::io;
 use std::path::{Component, Path, PathBuf};
+use std::sync::{Arc, Mutex};
 
 pub use smackdebt_analysis::PackageId;
 use smackdebt_analysis::SourceRole;
@@ -254,6 +255,7 @@ pub fn generic_source_roles(path: &Path) -> Vec<SourceRole> {
 enum InventoryDiagnostic {
     UnreadableDirectory { path: RelativePath, message: String },
     SymlinkSkipped { path: RelativePath },
+    NestedCheckoutSkipped { path: RelativePath },
 }
 
 /// Counts that make one-pass behavior observable in acceptance tests.
@@ -263,6 +265,7 @@ struct InventoryStats {
     files_visited: usize,
     source_candidates: usize,
     symlinks_skipped: usize,
+    nested_checkouts_skipped: usize,
 }
 
 /// Options for one filesystem inventory walk.
@@ -313,13 +316,20 @@ impl Inventory {
         }
         let root = root.to_path_buf();
         let excludes = config_excludes(&root, &options.excludes);
+        let nested_checkouts = Arc::new(Mutex::new(Vec::new()));
         let mut walker = Walker::new(options);
-        for entry in source_walk(&root, excludes) {
+        for entry in source_walk(&root, excludes, Arc::clone(&nested_checkouts)) {
             match entry {
                 Ok(entry) => walker.visit(&entry, &root),
                 Err(error) => walker.record_error(&error, &root),
             }
         }
+        let nested_checkouts = std::mem::take(
+            &mut *nested_checkouts
+                .lock()
+                .expect("the serial walk never poisons the nested-checkout list"),
+        );
+        walker.record_nested_checkouts(nested_checkouts, &root);
         walker.finish(root)
     }
 
@@ -362,6 +372,20 @@ impl Inventory {
     /// never yielded, so they contribute nothing here.
     pub const fn visited_entries(&self) -> usize {
         self.stats.directories_visited + self.stats.files_visited
+    }
+
+    /// Returns the nested git checkouts the walk pruned, in walk order.
+    ///
+    /// Each path names a directory below the analyzed root that carries its
+    /// own `.git` entry — a submodule, an embedded clone, or a linked
+    /// worktree — and therefore contributed no candidates.
+    pub fn nested_checkouts(&self) -> impl Iterator<Item = &RelativePath> {
+        self.diagnostics
+            .iter()
+            .filter_map(|diagnostic| match diagnostic {
+                InventoryDiagnostic::NestedCheckoutSkipped { path } => Some(path),
+                _ => None,
+            })
     }
 
     /// Resolves an inventory-relative path to an absolute path.
@@ -470,6 +494,18 @@ impl Walker {
                     path,
                     message: io_error.to_string(),
                 });
+        }
+    }
+
+    /// Records the nested checkouts the walk pruned, in walk order.
+    fn record_nested_checkouts(&mut self, pruned: Vec<PathBuf>, root: &Path) {
+        for path in pruned {
+            let relative = path.strip_prefix(root).unwrap_or(&path);
+            if let Some(path) = RelativePath::new(relative.to_path_buf()) {
+                self.stats.nested_checkouts_skipped += 1;
+                self.diagnostics
+                    .push(InventoryDiagnostic::NestedCheckoutSkipped { path });
+            }
         }
     }
 
@@ -852,6 +888,53 @@ mod tests {
             Inventory::discover_sources(directory.path(), vec!["!node_modules".to_owned()])
                 .unwrap();
         assert_eq!(source_paths(&inventory), ["main.js"]);
+    }
+
+    fn nested_checkout_paths(inventory: &Inventory) -> Vec<String> {
+        inventory
+            .nested_checkouts()
+            .map(RelativePath::to_string)
+            .collect()
+    }
+
+    #[test]
+    fn an_embedded_clone_with_a_git_directory_is_pruned_and_recorded() {
+        let directory = tempfile::tempdir().unwrap();
+        fs::create_dir_all(directory.path().join("sub/clone/.git")).unwrap();
+        fs::write(directory.path().join("sub/clone/lost.rs"), "").unwrap();
+        fs::write(directory.path().join("kept.rs"), "").unwrap();
+        let inventory = Inventory::discover(directory.path()).unwrap();
+        assert_eq!(source_paths(&inventory), ["kept.rs"]);
+        assert_eq!(nested_checkout_paths(&inventory), ["sub/clone"]);
+        assert_eq!(inventory.stats().nested_checkouts_skipped, 1);
+    }
+
+    #[test]
+    fn a_linked_worktree_with_a_git_file_is_pruned_and_recorded() {
+        let directory = tempfile::tempdir().unwrap();
+        fs::create_dir_all(directory.path().join(".worktrees/pr-48")).unwrap();
+        fs::write(
+            directory.path().join(".worktrees/pr-48/.git"),
+            "gitdir: /elsewhere/.git/worktrees/pr-48\n",
+        )
+        .unwrap();
+        fs::write(directory.path().join(".worktrees/pr-48/lost.rs"), "").unwrap();
+        fs::write(directory.path().join("kept.rs"), "").unwrap();
+        let inventory = Inventory::discover(directory.path()).unwrap();
+        assert_eq!(source_paths(&inventory), ["kept.rs"]);
+        assert_eq!(nested_checkout_paths(&inventory), [".worktrees/pr-48"]);
+        assert_eq!(inventory.stats().nested_checkouts_skipped, 1);
+    }
+
+    #[test]
+    fn the_analyzed_root_with_its_own_git_entry_is_never_pruned() {
+        let directory = tempfile::tempdir().unwrap();
+        fs::create_dir_all(directory.path().join(".git")).unwrap();
+        fs::write(directory.path().join("main.rs"), "").unwrap();
+        let inventory = Inventory::discover(directory.path()).unwrap();
+        assert_eq!(source_paths(&inventory), ["main.rs"]);
+        assert_eq!(nested_checkout_paths(&inventory), Vec::<String>::new());
+        assert_eq!(inventory.stats().nested_checkouts_skipped, 0);
     }
 
     #[test]

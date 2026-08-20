@@ -110,6 +110,12 @@ pub(super) fn analyze_codebase(request: &CodebaseRequest) -> Result<ProjectRepor
             size: request.size,
         },
     );
+    for path in inventory.nested_checkouts() {
+        builder.add_general_diagnostic(
+            DiagnosticKind::NestedRepository,
+            format!("{path} is a nested repository"),
+        );
+    }
     if let Some(message) = history.diagnostic {
         builder.add_general_diagnostic(DiagnosticKind::Other, message);
     }

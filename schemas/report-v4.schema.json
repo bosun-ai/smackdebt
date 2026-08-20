@@ -693,6 +693,7 @@
         },
         "kind": {
           "enum": [
+            "nested_repository",
             "unsupported_language",
             "unreadable_file",
             "oversized_file",

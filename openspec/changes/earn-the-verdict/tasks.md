@@ -23,9 +23,9 @@
 
 ## 5. Nested checkout exclusion
 
-- [ ] 5.1 Prune every directory below the analyzed root containing a `.git` entry, directory or file, and never the analyzed root itself.
-- [ ] 5.2 Record pruned checkouts as `nested_repository` diagnostics in the report, JSON, and schema.
-- [ ] 5.3 Emit the default-output disclosure sentence with a per-kind subject and add fixtures for both `.git` shapes.
+- [x] 5.1 Prune every directory below the analyzed root containing a `.git` entry, directory or file, and never the analyzed root itself.
+- [x] 5.2 Record pruned checkouts as `nested_repository` diagnostics in the report, JSON, and schema.
+- [x] 5.3 Emit the default-output disclosure sentence with a per-kind subject and add fixtures for both `.git` shapes.
 
 ## 6. Grouped import resolution
 

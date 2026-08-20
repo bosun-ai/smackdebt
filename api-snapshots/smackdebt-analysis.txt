@@ -54,6 +54,7 @@ pub smackdebt_analysis::DependencySyntaxState::External
 pub smackdebt_analysis::DependencySyntaxState::Unresolved(alloc::string::String)
 pub enum smackdebt_analysis::DiagnosticKind
 pub smackdebt_analysis::DiagnosticKind::AmbiguousIdentity
+pub smackdebt_analysis::DiagnosticKind::NestedRepository
 pub smackdebt_analysis::DiagnosticKind::Other
 pub smackdebt_analysis::DiagnosticKind::OversizedFile
 pub smackdebt_analysis::DiagnosticKind::ParseFailure

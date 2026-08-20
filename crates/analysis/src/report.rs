@@ -675,6 +675,7 @@ const fn role_class(role: SourceRole) -> u8 {
 /// Why source coverage was excluded from debt analysis.
 #[derive(Clone, Copy, Debug, Eq, Hash, Ord, PartialEq, PartialOrd)]
 pub enum DiagnosticKind {
+    NestedRepository,
     UnsupportedLanguage,
     UnreadableFile,
     OversizedFile,

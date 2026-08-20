@@ -378,6 +378,50 @@ fn ancestor_ignore_files_never_swallow_the_committed_source_engine_fixture() {
 }
 
 #[test]
+fn nested_git_checkouts_are_pruned_and_disclosed() {
+    let project = nested_checkout_fixture();
+
+    // Default output discloses the pruned checkouts without detail flags.
+    let terminal = run_in(project.path(), ["--jobs", "1", "--color", "never"]);
+    assert_snapshot(
+        "nested-checkout.terminal.txt",
+        &terminal,
+        include_bytes!("snapshots/nested-checkout.terminal.txt"),
+    );
+    let text = String::from_utf8(terminal).unwrap();
+    assert!(
+        text.contains("2 nested repositories were not analyzed."),
+        "{text}"
+    );
+
+    let json = run_in(project.path(), ["--json", "--jobs", "1"]);
+    let report: serde_json::Value = serde_json::from_slice(&json).unwrap();
+    validate_schema(&report);
+    let messages: Vec<&str> = report["diagnostics"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .filter(|diagnostic| diagnostic["kind"] == "nested_repository")
+        .map(|diagnostic| diagnostic["message"].as_str().unwrap())
+        .collect();
+    assert_eq!(
+        messages,
+        [
+            "clone is a nested repository",
+            "worktree is a nested repository"
+        ]
+    );
+    let paths: Vec<&str> = report["paths"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .filter_map(|path| path.as_str())
+        .collect();
+    assert!(paths.contains(&"kept.js"), "{paths:?}");
+    assert!(!paths.iter().any(|path| path.contains("lost")), "{paths:?}");
+}
+
+#[test]
 fn static_architecture_codebase_snapshots_are_reviewed() {
     let project = static_architecture_fixture();
     let terminal = run_in(project.path(), ["--jobs", "1", "--color", "never"]);
@@ -2101,6 +2145,31 @@ fn source_engine_fixture() -> tempfile::TempDir {
     fs::copy(
         Path::new(SOURCE_ENGINE_FIXTURE).join("src/work.rb"),
         project.path().join("src/work.rb"),
+    )
+    .unwrap();
+    project
+}
+
+/// One kept candidate beside both nested-checkout shapes: an embedded clone
+/// with a `.git` directory and a linked worktree with a `.git` file.
+fn nested_checkout_fixture() -> tempfile::TempDir {
+    let project = tempfile::tempdir().unwrap();
+    fs::write(project.path().join("kept.js"), "export const kept = 1;\n").unwrap();
+    fs::create_dir_all(project.path().join("clone/.git")).unwrap();
+    fs::write(
+        project.path().join("clone/lost.js"),
+        "export const lost = 1;\n",
+    )
+    .unwrap();
+    fs::create_dir_all(project.path().join("worktree")).unwrap();
+    fs::write(
+        project.path().join("worktree/.git"),
+        "gitdir: /elsewhere/.git/worktrees/pr-48\n",
+    )
+    .unwrap();
+    fs::write(
+        project.path().join("worktree/lost.js"),
+        "export const lost = 1;\n",
     )
     .unwrap();
     project

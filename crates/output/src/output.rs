@@ -1060,6 +1060,7 @@ fn warning_rows(report: &Report, selected: &Scope, detail: bool) -> (Section, Ve
             .is_none_or(|file| file_belongs_to_scope(report, file, selected))
     };
     for kind in [
+        DiagnosticKind::NestedRepository,
         DiagnosticKind::UnsupportedLanguage,
         DiagnosticKind::UnreadableFile,
         DiagnosticKind::OversizedFile,
@@ -1068,7 +1069,9 @@ fn warning_rows(report: &Report, selected: &Scope, detail: bool) -> (Section, Ve
         DiagnosticKind::UnsafeReference,
         DiagnosticKind::Other,
     ] {
-        if !detail {
+        // A pruned nested repository is disclosed even without detail,
+        // because silence there would misstate what was analyzed.
+        if !detail && kind != DiagnosticKind::NestedRepository {
             continue;
         }
         let count = report
@@ -1390,9 +1393,15 @@ fn first_char_len(value: &str) -> usize {
     value.chars().next().map_or(1, char::len_utf8)
 }
 
+/// One sentence per diagnostic kind, each with its own subject.
 fn diagnostic_summary(kind: DiagnosticKind, count: usize) -> String {
     let subject = Counted::new(count, "source file", "source files");
     match kind {
+        DiagnosticKind::NestedRepository => {
+            let subject = Counted::new(count, "nested repository", "nested repositories");
+            let verb = if count == 1 { "was" } else { "were" };
+            format!("{subject} {verb} not analyzed.")
+        }
         DiagnosticKind::UnsupportedLanguage => format!("{subject} use unsupported languages."),
         DiagnosticKind::UnreadableFile => format!("{subject} could not be read."),
         DiagnosticKind::OversizedFile => format!("{subject} are too large to inspect."),
@@ -1775,6 +1784,7 @@ pub(super) fn language_name(language: Language) -> &'static str {
 
 pub(super) fn diagnostic_name(kind: DiagnosticKind) -> &'static str {
     match kind {
+        DiagnosticKind::NestedRepository => "nested_repository",
         DiagnosticKind::UnsupportedLanguage => "unsupported_language",
         DiagnosticKind::UnreadableFile => "unreadable_file",
         DiagnosticKind::OversizedFile => "oversized_file",

@@ -9,6 +9,7 @@ impl smackdebt_discovery::Inventory
 pub fn smackdebt_discovery::Inventory::absolute_path(&self, &smackdebt_discovery::RelativePath) -> core::option::Option<std::path::PathBuf>
 pub fn smackdebt_discovery::Inventory::discover(impl core::convert::AsRef<std::path::Path>) -> core::io::error::Result<Self>
 pub fn smackdebt_discovery::Inventory::discover_sources(impl core::convert::AsRef<std::path::Path>, alloc::vec::Vec<alloc::string::String>) -> core::io::error::Result<Self>
+pub fn smackdebt_discovery::Inventory::nested_checkouts(&self) -> impl core::iter::traits::iterator::Iterator<Item = &smackdebt_discovery::RelativePath>
 pub fn smackdebt_discovery::Inventory::packages(&self) -> &[smackdebt_discovery::Package]
 pub fn smackdebt_discovery::Inventory::root(&self) -> &std::path::Path
 pub fn smackdebt_discovery::Inventory::source_files(&self) -> impl core::iter::traits::iterator::Iterator<Item = &smackdebt_discovery::DiscoveredFile>

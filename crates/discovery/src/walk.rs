@@ -7,7 +7,8 @@
 //! directories are always pruned regardless of ignore-file content.
 
 use std::ffi::OsStr;
-use std::path::Path;
+use std::path::{Path, PathBuf};
+use std::sync::{Arc, Mutex};
 
 use ignore::gitignore::{Gitignore, GitignoreBuilder};
 use ignore::{DirEntry, Walk, WalkBuilder};
@@ -36,8 +37,24 @@ pub(crate) fn config_excludes(root: &Path, patterns: &[String]) -> Gitignore {
     builder.build().unwrap_or_else(|_| Gitignore::empty())
 }
 
+/// Whether a directory below the analyzed root is its own git checkout.
+///
+/// A `.git` entry of either shape marks one: a directory for submodules and
+/// embedded clones, a file for linked worktrees. One existence check per
+/// directory is the whole cost.
+fn is_nested_checkout(entry: &DirEntry) -> bool {
+    entry.path().join(".git").exists()
+}
+
 /// Builds the one serial source walk over the selected root.
-pub(crate) fn source_walk(root: &Path, excludes: Gitignore) -> Walk {
+///
+/// Every nested checkout the walk prunes is pushed onto `nested_checkouts`
+/// in walk order so inventory can disclose it.
+pub(crate) fn source_walk(
+    root: &Path,
+    excludes: Gitignore,
+    nested_checkouts: Arc<Mutex<Vec<PathBuf>>>,
+) -> Walk {
     WalkBuilder::new(root)
         .hidden(false)
         .ignore(false)
@@ -48,22 +65,35 @@ pub(crate) fn source_walk(root: &Path, excludes: Gitignore) -> Walk {
         .parents(true)
         .follow_links(false)
         .sort_by_file_name(OsStr::cmp)
-        .filter_entry(move |entry| keep_entry(entry, &excludes))
+        .filter_entry(move |entry| keep_entry(entry, &excludes, &nested_checkouts))
         .build()
 }
 
 /// Decides whether the walk keeps one yielded entry.
 ///
-/// The analyzed root itself is always kept. A dependency directory is always
-/// pruned, even when an ignore-file negation re-includes it. Configuration
-/// excludes apply last, so their own `!` negations can re-include candidates
-/// their earlier patterns excluded.
-fn keep_entry(entry: &DirEntry, excludes: &Gitignore) -> bool {
+/// The analyzed root itself is always kept, even when it is a checkout. A
+/// dependency directory is always pruned, even when an ignore-file negation
+/// re-includes it. A nested checkout is pruned next and recorded, so it is
+/// disclosed even when a configuration pattern would also exclude it.
+/// Configuration excludes apply last, so their own `!` negations can
+/// re-include candidates their earlier patterns excluded.
+fn keep_entry(
+    entry: &DirEntry,
+    excludes: &Gitignore,
+    nested_checkouts: &Mutex<Vec<PathBuf>>,
+) -> bool {
     if entry.depth() == 0 {
         return true;
     }
     let is_dir = entry.file_type().is_some_and(|kind| kind.is_dir());
     if is_dir && is_dependency_dir(entry.file_name()) {
+        return false;
+    }
+    if is_dir && is_nested_checkout(entry) {
+        nested_checkouts
+            .lock()
+            .expect("the serial walk never poisons the nested-checkout list")
+            .push(entry.path().to_path_buf());
         return false;
     }
     !excludes.matched(entry.path(), is_dir).is_ignore()
