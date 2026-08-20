@@ -985,6 +985,44 @@ fn default_history_snapshot_orders_strongest_actionable_findings_first() {
 }
 
 #[test]
+fn commits_that_landed_outside_a_narrow_window_never_reach_the_report() {
+    let project = tempfile::tempdir().unwrap();
+    git(project.path(), ["init", "-b", "main"]);
+    fs::write(project.path().join("package.json"), "{}\n").unwrap();
+    fs::write(project.path().join("main.js"), "export const value = 1;\n").unwrap();
+    commit_landed(
+        project.path(),
+        Some("2000-01-02T03:04:05Z"),
+        "far outside every selectable window",
+    );
+    fs::write(project.path().join("main.js"), "export const value = 2;\n").unwrap();
+    commit_landed(project.path(), None, "inside the narrow window");
+
+    let complete = run_in(project.path(), ["--json", "--history", "36500d"]);
+    let complete: serde_json::Value = serde_json::from_slice(&complete).unwrap();
+    assert_eq!(complete["history_coverage"]["commits"], 2);
+
+    let narrow = run_in(project.path(), ["--json", "--history", "90d"]);
+    let narrow: serde_json::Value = serde_json::from_slice(&narrow).unwrap();
+    validate_schema(&narrow);
+    // The old commit never reaches the report: the streamed set is the
+    // windowed set and the boundary check rejects nothing.
+    assert_eq!(narrow["history_coverage"]["window_days"], 90);
+    assert_eq!(narrow["history_coverage"]["commits"], 1);
+    assert_eq!(narrow["history_coverage"]["window_excluded_commits"], 0);
+    let touches = |report: &serde_json::Value| {
+        report["file_history"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .map(|history| history["touches"].as_u64().unwrap())
+            .sum::<u64>()
+    };
+    assert_eq!(touches(&complete), 2);
+    assert_eq!(touches(&narrow), 1);
+}
+
+#[test]
 fn diff_uses_history_as_context_and_can_explain_coupling() {
     let project = evolutionary_fixture();
     fs::write(
@@ -2656,6 +2694,33 @@ fn commit_as(directory: &Path, name: &str, email: &str, message: &str) {
         .current_dir(directory)
         .status()
         .unwrap();
+    assert!(status.success());
+}
+
+/// Commit with the landed (committer) and authored dates pinned to `date`, or
+/// to the wall clock when no date is given, so window fixtures control the
+/// instant history filters compare.
+fn commit_landed(directory: &Path, date: Option<&str>, message: &str) {
+    git(directory, ["add", "-A"]);
+    let mut command = Command::new("git");
+    hermetic_env(&mut command);
+    command
+        .args([
+            "-c",
+            "user.name=History Test",
+            "-c",
+            "user.email=history@example.invalid",
+            "commit",
+            "-qm",
+            message,
+        ])
+        .current_dir(directory);
+    if let Some(date) = date {
+        command
+            .env("GIT_AUTHOR_DATE", date)
+            .env("GIT_COMMITTER_DATE", date);
+    }
+    let status = command.status().unwrap();
     assert!(status.success());
 }
 

@@ -35,7 +35,7 @@ pub fn smackdebt_git::GitRepository::git_processes(&self) -> usize
 pub fn smackdebt_git::GitRepository::merge_base(&self, &str, &str) -> core::result::Result<alloc::string::String, smackdebt_git::GitError>
 pub fn smackdebt_git::GitRepository::object_reader(&self, usize) -> core::result::Result<smackdebt_git::ObjectReader, smackdebt_git::GitError>
 pub fn smackdebt_git::GitRepository::root(&self) -> &std::path::Path
-pub fn smackdebt_git::GitRepository::stream_history(&self, impl core::ops::function::FnMut(smackdebt_git::HistoryCommit) -> core::result::Result<(), smackdebt_git::GitError>) -> core::result::Result<smackdebt_git::HistoryStreamSummary, smackdebt_git::GitError>
+pub fn smackdebt_git::GitRepository::stream_history(&self, core::option::Option<i64>, impl core::ops::function::FnMut(smackdebt_git::HistoryCommit) -> core::result::Result<(), smackdebt_git::GitError>) -> core::result::Result<smackdebt_git::HistoryStreamSummary, smackdebt_git::GitError>
 pub struct smackdebt_git::HistoryChange
 impl smackdebt_git::HistoryChange
 pub const fn smackdebt_git::HistoryChange::added_lines(&self) -> core::option::Option<u32>

@@ -549,12 +549,12 @@ fn the_selected_history_window_bounds_churn_coupling_and_concentration() {
     complete.success();
     let complete = checked_json(&complete.stdout);
 
-    // The generated repository commits are older than the default window, so a
-    // default run streams the same commits and derives no history facts.
-    assert_eq!(
-        windowed["history_coverage"]["commits"],
-        complete["history_coverage"]["commits"]
-    );
+    // The generated repository commits are older than the default window, so
+    // they never reach a default run's report: the stream is windowed and no
+    // boundary reject is counted.
+    assert_eq!(windowed["history_coverage"]["commits"], 0);
+    assert_eq!(windowed["history_coverage"]["window_excluded_commits"], 0);
+    assert!(complete["history_coverage"]["commits"].as_u64() > Some(0));
     assert!(complete["history_coverage"]["mapped_eligible_changes"].as_u64() > Some(0));
     assert_eq!(windowed["history_coverage"]["mapped_eligible_changes"], 0);
     assert!(!complete["change_coupling"].as_array().unwrap().is_empty());

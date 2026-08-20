@@ -35,9 +35,9 @@
 
 ## 7. Windowed history streaming
 
-- [ ] 7.1 Filter streamed history inside the git process on landed (committer) dates with an epoch cutoff, keeping the in-process boundary filter.
-- [ ] 7.2 Redefine stream coverage counts over the windowed set with the window-excluded counter counting boundary rejects.
-- [ ] 7.3 Add adapter, pure, and acceptance evidence and regenerate the git and project API snapshots for the signature change.
+- [x] 7.1 Filter streamed history inside the git process on landed (committer) dates with an epoch cutoff, keeping the in-process boundary filter.
+- [x] 7.2 Redefine stream coverage counts over the windowed set with the window-excluded counter counting boundary rejects.
+- [x] 7.3 Add adapter, pure, and acceptance evidence and regenerate the git and project API snapshots for the signature change.
 
 ## 8. Empty-window disclosure
 

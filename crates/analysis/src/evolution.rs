@@ -95,7 +95,10 @@ impl HistoryCoverage {
             window_excluded_commits: 0,
         }
     }
-    /// Records the selected window and the commits it excluded.
+    /// Records the selected window and the boundary rejects the defensive
+    /// in-process check excluded. The stream itself is windowed, so streamed
+    /// commits and the newest and oldest timestamps describe the windowed set
+    /// and the excluded count is normally zero.
     pub fn with_window(mut self, days: Option<u32>, excluded_commits: u32) -> Self {
         assert!(
             excluded_commits <= self.commits,
@@ -172,8 +175,9 @@ impl HistoryCoverage {
     pub const fn window_days(&self) -> Option<u32> {
         self.window_days
     }
-    /// Streamed commits the selected window excluded, counted separately from
-    /// changes excluded for other reasons.
+    /// Streamed commits the defensive boundary check rejected at the window
+    /// edge, counted separately from changes excluded for other reasons.
+    /// Normally zero, because out-of-window history is not streamed at all.
     pub const fn window_excluded_commits(&self) -> u32 {
         self.window_excluded_commits
     }
@@ -396,10 +400,12 @@ mod tests {
             (1, 2)
         );
 
+        // The stream itself is windowed, so coverage describes the windowed
+        // set and carries no boundary rejects.
         let coverage = HistoryCoverage::new(
             HistoryAvailability::Complete,
             None,
-            every.len() as u32,
+            windowed.len() as u32,
             windowed.len() as u32,
             3,
             0,
@@ -411,10 +417,33 @@ mod tests {
             0,
             None,
         )
-        .with_window(window.days(), excluded);
+        .with_window(window.days(), 0);
         assert_eq!(coverage.window_days(), Some(1));
-        assert_eq!(coverage.window_excluded_commits(), 2);
-        assert_eq!(coverage.commits(), 4);
+        assert_eq!(coverage.window_excluded_commits(), 0);
+        assert_eq!(coverage.commits(), 2);
+        assert_eq!(excluded, 2);
+    }
+
+    #[test]
+    fn coverage_retains_boundary_rejects_from_the_defensive_window_check() {
+        let coverage = HistoryCoverage::new(
+            HistoryAvailability::Complete,
+            None,
+            2,
+            1,
+            1,
+            0,
+            None,
+            None,
+            1,
+            0,
+            0,
+            0,
+            None,
+        )
+        .with_window(Some(90), 1);
+        assert_eq!(coverage.window_days(), Some(90));
+        assert_eq!(coverage.window_excluded_commits(), 1);
     }
 
     #[test]

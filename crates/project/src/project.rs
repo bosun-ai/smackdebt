@@ -1555,10 +1555,12 @@ fn load_evolution(
         .duration_since(std::time::UNIX_EPOCH)
         .map_or(i64::MIN, |duration| duration.as_secs() as i64);
     let window = HistoryWindow::of_days(history_days, now);
-    let history = repository.stream_history(|commit| {
+    let history = repository.stream_history(Some(window.cutoff()), |commit| {
         streamed_commits += 1;
-        // The window is applied where streamed records become facts, so churn,
-        // touches, coupling, and concentration all describe the same commits.
+        // The window filter runs inside the streamed history process on landed
+        // dates, so out-of-window history is never streamed. This defensive
+        // boundary check compares the same landed instant and keeps any
+        // straggler from becoming a fact; it counts boundary rejects only.
         if !window.includes(commit.timestamp()) {
             window_excluded_commits += 1;
             return Ok(());
@@ -3675,6 +3677,23 @@ mod tests {
         );
     }
 
+    /// Commit with the authored and landed (committer) dates both pinned, so
+    /// window fixtures describe the instant history filters compare.
+    fn git_dated<const N: usize>(root: &Path, date: &str, args: [&str; N]) {
+        let output = Command::new("git")
+            .args(args)
+            .env("GIT_AUTHOR_DATE", date)
+            .env("GIT_COMMITTER_DATE", date)
+            .current_dir(root)
+            .output()
+            .unwrap();
+        assert!(
+            output.status.success(),
+            "git failed: {}",
+            String::from_utf8_lossy(&output.stderr)
+        );
+    }
+
     fn repository() -> tempfile::TempDir {
         let root = tempfile::tempdir().unwrap();
         let actual = root.path().join("repo");
@@ -4717,15 +4736,10 @@ mod tests {
         git(repository_path, ["config", "user.name", "Smackdebt Test"]);
         fs::write(repository_path.join("old.rs"), "pub fn old() {}\n").unwrap();
         git(repository_path, ["add", "."]);
-        git(
+        git_dated(
             repository_path,
-            [
-                "commit",
-                "-qm",
-                "old",
-                "--date",
-                "2001-02-03T04:05:06+00:00",
-            ],
+            "2001-02-03T04:05:06+00:00",
+            ["commit", "-qm", "old"],
         );
         fs::write(repository_path.join("recent.rs"), "pub fn recent() {}\n").unwrap();
         git(repository_path, ["add", "."]);
@@ -4734,8 +4748,10 @@ mod tests {
         let windowed = analyze_codebase(&CodebaseRequest::new(repository_path)).unwrap();
         let coverage = windowed.report().history_coverage();
         assert_eq!(coverage.window_days(), Some(90));
-        assert_eq!(coverage.commits(), 2);
-        assert_eq!(coverage.window_excluded_commits(), 1);
+        // The window filter runs inside the history stream, so the streamed
+        // set is the windowed set and no boundary reject is counted.
+        assert_eq!(coverage.commits(), 1);
+        assert_eq!(coverage.window_excluded_commits(), 0);
         assert_eq!(coverage.eligible_commits(), 1);
         let touches = |report: &Report, path: &str| {
             let file = report

@@ -216,6 +216,8 @@ impl HistoryCommit {
     pub fn contributor(&self) -> &ContributorIdentity {
         &self.contributor
     }
+    /// The moment the commit landed on the analyzed history — the committer
+    /// date in whole seconds since the epoch — not when it was authored.
     pub const fn timestamp(&self) -> i64 {
         self.timestamp
     }
@@ -224,7 +226,9 @@ impl HistoryCommit {
     }
 }
 
-/// Coverage facts collected while streaming history.
+/// Coverage facts collected while streaming history. When a window cutoff is
+/// selected, the streamed set is the windowed set, so the commit count and the
+/// newest and oldest timestamps describe the window.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct HistoryStreamSummary {
     revision: Option<String>,
@@ -414,22 +418,34 @@ impl GitRepository {
             .collect())
     }
 
-    /// Stream non-merge history through one Git process. Only one commit is
+    /// Stream non-merge history through one Git process. When `since` selects
+    /// a window cutoff, the filter runs inside the Git process itself, so
+    /// commits that landed before the cutoff are never streamed; both the
+    /// process filter and each commit's `timestamp` describe the landed
+    /// (committer) date, so the two can never disagree. Only one commit is
     /// retained by this adapter at a time.
     pub fn stream_history(
         &self,
+        since: Option<i64>,
         mut accept: impl FnMut(HistoryCommit) -> Result<(), GitError>,
     ) -> Result<HistoryStreamSummary, GitError> {
-        let args = vec![
+        let mut args = vec![
             OsString::from("log"),
             OsString::from("--no-merges"),
             OsString::from("--numstat"),
-            OsString::from("--format=%x1e%H%x00%aN%x00%aE%x00%at%x00"),
+            OsString::from("--format=%x1e%H%x00%aN%x00%aE%x00%ct%x00"),
             OsString::from("-z"),
             OsString::from("--find-renames"),
             OsString::from("--use-mailmap"),
-            OsString::from("--"),
         ];
+        if let Some(cutoff) = since {
+            // Git's bare `@<epoch>` date form silently falls back to "now" for
+            // small or negative numbers, which would empty the stream. The
+            // internal `@<epoch> <offset>` form parses every non-negative
+            // cutoff, and clamping is exact: no commit landed before the epoch.
+            args.push(OsString::from(format!("--since=@{} +0000", cutoff.max(0))));
+        }
+        args.push(OsString::from("--"));
         let mut command = self.command(args.clone());
         let mut child = command
             .stdout(Stdio::piped())
@@ -1018,6 +1034,33 @@ mod tests {
             git(&self.path, ["add", "."]);
             git(&self.path, ["commit", "-qm", message]);
         }
+        fn commit_dated(
+            &self,
+            path: &str,
+            body: &str,
+            message: &str,
+            authored: &str,
+            landed: &str,
+        ) {
+            let full = self.path.join(path);
+            File::create(full)
+                .unwrap()
+                .write_all(body.as_bytes())
+                .unwrap();
+            git(&self.path, ["add", "."]);
+            let output = Command::new("git")
+                .args(["commit", "-qm", message])
+                .env("GIT_AUTHOR_DATE", authored)
+                .env("GIT_COMMITTER_DATE", landed)
+                .current_dir(&self.path)
+                .output()
+                .unwrap();
+            assert!(
+                output.status.success(),
+                "git failed: {}",
+                String::from_utf8_lossy(&output.stderr)
+            );
+        }
     }
     impl Drop for Repo {
         fn drop(&mut self) {
@@ -1060,7 +1103,7 @@ mod tests {
         let adapter = GitRepository::discover(&repo.path).unwrap();
         let before = adapter.git_processes();
         assert!(matches!(
-            adapter.stream_history(|_| Ok(())),
+            adapter.stream_history(None, |_| Ok(())),
             Err(GitError::EmptyHistory)
         ));
         assert_eq!(adapter.git_processes() - before, 1);
@@ -1119,7 +1162,7 @@ mod tests {
         let before = adapter.git_processes();
         let mut commits = Vec::new();
         let summary = adapter
-            .stream_history(|commit| {
+            .stream_history(None, |commit| {
                 commits.push(commit);
                 Ok(())
             })
@@ -1133,6 +1176,85 @@ mod tests {
     }
 
     #[test]
+    fn a_history_cutoff_filters_inside_the_git_process_on_landed_dates() {
+        let repo = Repo::new();
+        repo.commit_dated(
+            "a.rs",
+            "one",
+            "old",
+            "2000-01-02T03:04:05Z",
+            "2000-01-02T03:04:05Z",
+        );
+        repo.commit_dated(
+            "a.rs",
+            "two",
+            "recent",
+            "2020-01-02T03:04:05Z",
+            "2020-01-02T03:04:05Z",
+        );
+        let adapter = GitRepository::discover(&repo.path).unwrap();
+        let mut unbounded = 0u32;
+        let summary = adapter
+            .stream_history(None, |_| {
+                unbounded += 1;
+                Ok(())
+            })
+            .unwrap();
+        assert_eq!((summary.commits(), unbounded), (2, 2));
+        let cutoff = 1_500_000_000;
+        let mut windowed = Vec::new();
+        let summary = adapter
+            .stream_history(Some(cutoff), |commit| {
+                windowed.push(commit);
+                Ok(())
+            })
+            .unwrap();
+        // The out-of-window commit was never streamed, and the summary
+        // describes the windowed set.
+        assert_eq!((summary.commits(), windowed.len()), (1, 1));
+        assert!(windowed[0].timestamp() >= cutoff);
+        assert_eq!(summary.newest_timestamp(), Some(windowed[0].timestamp()));
+        assert_eq!(summary.oldest_timestamp(), Some(windowed[0].timestamp()));
+    }
+
+    #[test]
+    fn a_rebased_commit_counts_by_when_it_landed_not_when_it_was_authored() {
+        let repo = Repo::new();
+        repo.commit_dated(
+            "a.rs",
+            "one",
+            "authored long ago, landed recently",
+            "2000-01-02T03:04:05Z",
+            "2020-01-02T03:04:05Z",
+        );
+        let adapter = GitRepository::discover(&repo.path).unwrap();
+        let mut commits = Vec::new();
+        let summary = adapter
+            .stream_history(Some(1_500_000_000), |commit| {
+                commits.push(commit);
+                Ok(())
+            })
+            .unwrap();
+        assert_eq!(summary.commits(), 1);
+        assert_eq!(commits[0].timestamp(), 1_577_934_245);
+    }
+
+    #[test]
+    fn a_cutoff_before_the_epoch_still_streams_every_commit() {
+        let repo = Repo::new();
+        repo.commit("a.rs", "one", "one");
+        let adapter = GitRepository::discover(&repo.path).unwrap();
+        let mut streamed = 0u32;
+        let summary = adapter
+            .stream_history(Some(i64::MIN), |_| {
+                streamed += 1;
+                Ok(())
+            })
+            .unwrap();
+        assert_eq!((summary.commits(), streamed), (1, 1));
+    }
+
+    #[test]
     fn history_follows_renames_and_keeps_binary_churn_unknown() {
         let repo = Repo::new();
         repo.commit("old.rs", "one\n", "initial");
@@ -1143,7 +1265,7 @@ mod tests {
         let adapter = GitRepository::discover(&repo.path).unwrap();
         let mut commits = Vec::new();
         adapter
-            .stream_history(|commit| {
+            .stream_history(None, |commit| {
                 commits.push(commit);
                 Ok(())
             })
