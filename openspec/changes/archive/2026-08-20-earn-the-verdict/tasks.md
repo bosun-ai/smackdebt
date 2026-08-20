@@ -87,4 +87,4 @@
 
 ## 16. Close the change
 
-- [ ] 16.1 Tick every task, pass strict validation and the complete check including the gate, confirm `prepare-first-release` stays coherent, and archive this change.
+- [x] 16.1 Tick every task, pass strict validation and the complete check including the gate, confirm `prepare-first-release` stays coherent, and archive this change.
