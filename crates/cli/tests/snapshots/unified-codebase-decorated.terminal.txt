@@ -1,5 +1,5 @@
 smackdebt · repository root
-[31m▌[0m The code is winning.
+[38;5;208m▌[0m Worn in the usual places.
 1 high · 2 watch · 6 checked
 worst: b/main.js — most complex
 

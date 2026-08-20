@@ -1255,10 +1255,14 @@ fn every_codebase_tier_states_its_own_sentence_and_counts() {
     solid.write("main.js", watch_source(1).as_bytes());
     let worn = GeneratedRepository::new("main");
     worn.write("main.js", &mixed_source(1, 200));
+    // Ten High in 200 checked units is 50 permille with enough density
+    // evidence and enough absolute High debt to escape the small-scope cap.
     let fights_back = GeneratedRepository::new("main");
-    fights_back.write("main.js", &mixed_source(1, 60));
+    fights_back.write("main.js", &mixed_source(10, 190));
+    // Twelve High in 20 checked units reaches the small-scope High threshold,
+    // so the saturated 600 permille selects lost.
     let lost = GeneratedRepository::new("main");
-    lost.write("main.js", &mixed_source(1, 4));
+    lost.write("main.js", &mixed_source(12, 8));
 
     for (repository, tier, sentence) in [
         (&empty, "empty", "Nothing was checked."),
@@ -1284,6 +1288,46 @@ fn every_codebase_tier_states_its_own_sentence_and_counts() {
                 && counts.contains(" watch · ")
                 && counts.ends_with(" checked"),
             "{tier}: {counts}"
+        );
+    }
+}
+
+#[test]
+fn tier_volume_boundaries_hold_at_exactly_one_unit() {
+    // The small-scope cap and the volume floors are proven from public bytes
+    // at their exact boundaries, one unit either side where the tier moves.
+    for (name, high, healthy, sentence) in [
+        // One High in five checked units is 200 permille, which used to be
+        // lost; the small-scope cap holds it at worn.
+        ("tiny scope", 1, 4, "Worn in the usual places."),
+        // Nine High at 199 checked units is one unit short of the density
+        // evidence threshold, so the 45 permille stays capped at worn.
+        (
+            "evidence boundary below",
+            9,
+            190,
+            "Worn in the usual places.",
+        ),
+        // The same debt with one more checked unit has enough evidence.
+        ("evidence boundary at", 9, 191, "This code fights back."),
+        // 99 High in 10000 checked units is 9 permille and below the volume
+        // floor, so density keeps the scope worn.
+        ("volume floor below", 99, 9901, "Worn in the usual places."),
+        // One more High finding reaches the absolute floor: 100 High is 10
+        // permille — worn by density — but fights back on volume alone.
+        ("volume floor at", 100, 9900, "This code fights back."),
+    ] {
+        let repository = GeneratedRepository::new("main");
+        repository.write("main.js", &mixed_source(high, healthy));
+        let result = Invocation::new(["--history", "36500d"]).run(repository.path());
+        result.success();
+        let text = String::from_utf8(result.stdout).unwrap();
+        let mut lines = text.lines();
+        assert_eq!(lines.next(), Some("smackdebt · repository root"), "{name}");
+        assert_eq!(
+            lines.next(),
+            Some(format!("  {sentence}").as_str()),
+            "{name}: {text}"
         );
     }
 }

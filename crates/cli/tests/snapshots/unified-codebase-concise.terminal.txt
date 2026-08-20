@@ -1,5 +1,5 @@
 smackdebt · repository root
-  The code is winning.
+  Worn in the usual places.
 1 high · 2 watch · 6 checked
 worst: b/main.js — most complex
 

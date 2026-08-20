@@ -57,9 +57,9 @@
 
 ## 11. Volume terms in the codebase tier
 
-- [ ] 11.1 Add the small-scope cap and absolute volume floors as integer-only terms combined by the existing max-floor rule, with all four constants flagged for review.
-- [ ] 11.2 Add pure boundary tests at each constant and one unit either side, keeping the accepted permille boundary scenarios unchanged.
-- [ ] 11.3 Regenerate per-scope verdict snapshots per case and add exact black-box boundary evidence.
+- [x] 11.1 Add the small-scope cap and absolute volume floors as integer-only terms combined by the existing max-floor rule, with all four constants flagged for review.
+- [x] 11.2 Add pure boundary tests at each constant and one unit either side, keeping the accepted permille boundary scenarios unchanged.
+- [x] 11.3 Regenerate per-scope verdict snapshots per case and add exact black-box boundary evidence.
 
 ## 12. Unsupported-share qualifier
 

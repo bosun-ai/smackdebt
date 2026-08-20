@@ -6138,8 +6138,10 @@ mod tests {
         assert_eq!(verdict.counts().checked(), 1);
         assert_eq!(verdict.counts().high(), 1);
         assert_eq!(verdict.counts().high_permille(), 1000);
-        assert_eq!(verdict.tier(), CodebaseTier::Lost);
-        assert_eq!(verdict.sentence(), "The code is winning.");
+        // One checked unit is far below the density evidence threshold, so
+        // the saturated permille is capped at worn.
+        assert_eq!(verdict.tier(), CodebaseTier::Worn);
+        assert_eq!(verdict.sentence(), "Worn in the usual places.");
         assert_eq!(verdict.diff_tier(), None);
         let offender = verdict.worst_offender().unwrap();
         assert_eq!(offender.path(), "work.rs");

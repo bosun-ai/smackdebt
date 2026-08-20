@@ -54,12 +54,19 @@ impl CodebaseTier {
 
     /// Selects the tier for one scope's counts.
     ///
-    /// Mapping runs first over integer permille of High debt, then
-    /// architecture escalation raises the result when structural debt exists
-    /// that a unit ratio cannot see.
+    /// Mapping runs first over integer permille of High debt, tempered by the
+    /// small-scope evidence cap. The architecture and volume floors then raise
+    /// the result when debt exists that a unit ratio cannot see: structural
+    /// cycles, or an absolute High count a large denominator would dilute.
+    /// Floors raise a tier and never lower one.
     pub const fn select(counts: VerdictCounts) -> Self {
         let mapped = counts.mapped_tier();
-        let floor = counts.architecture_floor();
+        let mapped = Self::raise(mapped, counts.architecture_floor());
+        Self::raise(mapped, counts.volume_floor())
+    }
+
+    /// The higher of a mapped tier and one floor.
+    const fn raise(mapped: Self, floor: Self) -> Self {
         if floor as u8 > mapped as u8 {
             floor
         } else {
@@ -82,6 +89,26 @@ pub const WORN_PERMILLE: u32 = 10;
 
 /// The High permille at which a codebase stops fighting back and is lost.
 pub const FIGHTS_BACK_PERMILLE: u32 = 50;
+
+/// The checked units below which density alone cannot exceed `worn`.
+///
+/// A small denominator makes a permille ratio wild — one High finding in five
+/// checked units reads as 200 permille — so density needs this much evidence
+/// before it can select a tier above `worn` on its own.
+pub const DENSITY_EVIDENCE_UNITS: u32 = 200;
+
+/// The High count at which a small scope can exceed `worn` after all.
+///
+/// A scope below the density evidence threshold that still accumulates this
+/// many High findings is saturated with debt, not short on evidence, so the
+/// small-scope cap stops applying.
+pub const SMALL_SCOPE_HIGH_UNITS: u32 = 10;
+
+/// The High count that floors the tier at `fights_back` at any density.
+pub const VOLUME_FIGHTS_BACK_HIGH: u32 = 100;
+
+/// The High count that floors the tier at `lost` at any density.
+pub const VOLUME_LOST_HIGH: u32 = 1000;
 
 impl VerdictCounts {
     /// Retains one scope's rated unit counts and its High architecture
@@ -134,6 +161,9 @@ impl VerdictCounts {
                 CodebaseTier::Solid
             };
         }
+        if self.checked < DENSITY_EVIDENCE_UNITS && self.high < SMALL_SCOPE_HIGH_UNITS {
+            return CodebaseTier::Worn;
+        }
         match self.high_permille() {
             permille if permille <= WORN_PERMILLE => CodebaseTier::Worn,
             permille if permille <= FIGHTS_BACK_PERMILLE => CodebaseTier::FightsBack,
@@ -146,6 +176,17 @@ impl VerdictCounts {
             0 => CodebaseTier::Empty,
             1 | 2 => CodebaseTier::Worn,
             _ => CodebaseTier::FightsBack,
+        }
+    }
+
+    /// The floor an absolute High count sets regardless of density.
+    const fn volume_floor(self) -> CodebaseTier {
+        if self.high >= VOLUME_LOST_HIGH {
+            CodebaseTier::Lost
+        } else if self.high >= VOLUME_FIGHTS_BACK_HIGH {
+            CodebaseTier::FightsBack
+        } else {
+            CodebaseTier::Empty
         }
     }
 }
@@ -1020,7 +1061,118 @@ mod tests {
         assert_eq!(counts(1_000, 0, 3, 0).high_permille(), 3);
         assert_eq!(counts(999, 0, 7, 0).high_permille(), 7);
         assert_eq!(counts(3, 0, 1, 0).high_permille(), 333);
-        assert_eq!(CodebaseTier::select(counts(3, 0, 1, 0)), CodebaseTier::Lost);
+        // The wild 333 permille no longer decides alone: three checked units
+        // sit below the density evidence threshold, so the cap holds worn.
+        assert_eq!(CodebaseTier::select(counts(3, 0, 1, 0)), CodebaseTier::Worn);
+    }
+
+    #[test]
+    fn a_tiny_scope_with_one_high_finding_is_worn_not_lost() {
+        // One High in five checked units is 200 permille, but five checked
+        // units are not enough evidence for density alone to exceed worn.
+        assert_eq!(counts(5, 0, 1, 0).high_permille(), 200);
+        assert_eq!(CodebaseTier::select(counts(5, 0, 1, 0)), CodebaseTier::Worn);
+    }
+
+    #[test]
+    fn a_saturated_tiny_scope_escapes_the_small_scope_cap() {
+        // Twelve High in twenty checked units reaches the small-scope High
+        // threshold, so the cap does not apply and 600 permille selects lost.
+        assert_eq!(
+            CodebaseTier::select(counts(20, 0, 12, 0)),
+            CodebaseTier::Lost
+        );
+    }
+
+    #[test]
+    fn the_density_evidence_boundary_moves_with_one_checked_unit() {
+        // Nine High at 45 permille is capped one unit below the evidence
+        // threshold and fights back at and above it.
+        assert_eq!(
+            CodebaseTier::select(counts(DENSITY_EVIDENCE_UNITS - 1, 0, 9, 0)),
+            CodebaseTier::Worn
+        );
+        assert_eq!(
+            CodebaseTier::select(counts(DENSITY_EVIDENCE_UNITS, 0, 9, 0)),
+            CodebaseTier::FightsBack
+        );
+        assert_eq!(
+            CodebaseTier::select(counts(DENSITY_EVIDENCE_UNITS + 1, 0, 9, 0)),
+            CodebaseTier::FightsBack
+        );
+    }
+
+    #[test]
+    fn the_small_scope_high_boundary_moves_with_one_high_finding() {
+        // At 100 checked units, one High below the threshold is capped at
+        // worn; at and above it, 100 permille and more selects lost.
+        assert_eq!(
+            CodebaseTier::select(counts(100, 0, SMALL_SCOPE_HIGH_UNITS - 1, 0)),
+            CodebaseTier::Worn
+        );
+        assert_eq!(
+            CodebaseTier::select(counts(100, 0, SMALL_SCOPE_HIGH_UNITS, 0)),
+            CodebaseTier::Lost
+        );
+        assert_eq!(
+            CodebaseTier::select(counts(100, 0, SMALL_SCOPE_HIGH_UNITS + 1, 0)),
+            CodebaseTier::Lost
+        );
+    }
+
+    #[test]
+    fn one_hundred_high_findings_fight_back_at_any_density() {
+        // At 100000 checked units the density rounds to zero permille, so
+        // only the absolute volume floor moves the tier.
+        assert_eq!(
+            CodebaseTier::select(counts(100_000, 0, VOLUME_FIGHTS_BACK_HIGH - 1, 0)),
+            CodebaseTier::Worn
+        );
+        assert_eq!(
+            CodebaseTier::select(counts(100_000, 0, VOLUME_FIGHTS_BACK_HIGH, 0)),
+            CodebaseTier::FightsBack
+        );
+        assert_eq!(
+            CodebaseTier::select(counts(100_000, 0, VOLUME_FIGHTS_BACK_HIGH + 1, 0)),
+            CodebaseTier::FightsBack
+        );
+    }
+
+    #[test]
+    fn one_thousand_high_findings_are_lost_at_any_density() {
+        assert_eq!(
+            CodebaseTier::select(counts(1_000_000, 0, VOLUME_LOST_HIGH - 1, 0)),
+            CodebaseTier::FightsBack
+        );
+        assert_eq!(
+            CodebaseTier::select(counts(1_000_000, 0, VOLUME_LOST_HIGH, 0)),
+            CodebaseTier::Lost
+        );
+        assert_eq!(
+            CodebaseTier::select(counts(1_000_000, 0, VOLUME_LOST_HIGH + 1, 0)),
+            CodebaseTier::Lost
+        );
+    }
+
+    #[test]
+    fn a_diluted_high_count_fights_back_instead_of_being_worn() {
+        // 545 High in 102000 checked units is 5 permille — density alone
+        // says worn — but the absolute volume floors it at fights_back.
+        assert_eq!(counts(102_000, 0, 545, 0).high_permille(), 5);
+        assert_eq!(
+            CodebaseTier::select(counts(102_000, 0, 545, 0)),
+            CodebaseTier::FightsBack
+        );
+    }
+
+    #[test]
+    fn a_volume_floor_never_lowers_a_density_selected_lost() {
+        // 600 High in 1000 checked units is lost by density; the fights-back
+        // volume floor cannot pull it down.
+        assert_eq!(
+            CodebaseTier::select(counts(1_000, 0, 600, 0)),
+            CodebaseTier::Lost
+        );
     }
 
     #[test]

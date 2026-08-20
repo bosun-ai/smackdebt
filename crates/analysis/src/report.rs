@@ -1663,7 +1663,9 @@ mod tests {
         let (light, _) = fixture.add_file("src/light.rs", HealthCounts::new(998, 0, 0));
         let report = fixture.finish();
         assert_eq!(report.verdict().unwrap().tier(), CodebaseTier::Worn);
-        assert_eq!(report.scope_verdict(heavy).tier(), CodebaseTier::Lost);
+        // Two High in two checked units is saturated density, but a scope
+        // this small stays capped at worn by the density evidence rule.
+        assert_eq!(report.scope_verdict(heavy).tier(), CodebaseTier::Worn);
         assert_eq!(report.scope_verdict(light).tier(), CodebaseTier::Clean);
         assert!(report.scope_verdict(light).worst_offender().is_none());
         assert_eq!(
