@@ -1616,14 +1616,14 @@ impl fmt::Display for Grouped {
     }
 }
 
-struct Counted {
+pub(super) struct Counted {
     count: usize,
     singular: &'static str,
     plural: &'static str,
 }
 
 impl Counted {
-    const fn new(count: usize, singular: &'static str, plural: &'static str) -> Self {
+    pub(super) const fn new(count: usize, singular: &'static str, plural: &'static str) -> Self {
         Self {
             count,
             singular,

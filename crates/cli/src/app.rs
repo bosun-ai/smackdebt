@@ -5,16 +5,19 @@ use std::path::PathBuf;
 use std::process::ExitCode;
 
 use clap::Parser;
-use smackdebt_output::{TerminalOptions, write_json, write_terminal};
-use smackdebt_project::{CodebaseRequest, DiffRequest, ExecutionWidth, ProjectError};
+use smackdebt_output::{TerminalOptions, write_gate, write_json, write_terminal};
+use smackdebt_project::{
+    CodebaseRequest, DiffRequest, ExecutionWidth, GateComparison, GateSnapshot, ProjectError,
+};
 
 #[cfg(feature = "allocation-stats")]
 use stats_alloc::{INSTRUMENTED_SYSTEM, StatsAlloc};
 #[cfg(feature = "allocation-stats")]
 use std::alloc::System;
 
-use crate::arguments::{Cli, ColorChoice, Command, Common, parse_days};
+use crate::arguments::{Cli, ColorChoice, Command, Common, GateArgs, parse_days};
 use crate::config::{self, ProjectConfig};
+use crate::gate_baseline;
 use crate::terminal;
 
 #[cfg(feature = "allocation-stats")]
@@ -58,16 +61,14 @@ fn run(arguments: impl IntoIterator<Item = OsString>) -> ExitCode {
     };
 
     if cli.common.json && cli.common.all
-        || cli
-            .command
-            .as_ref()
-            .is_some_and(|Command::Diff(args)| args.common.json && args.common.all)
+        || matches!(&cli.command, Some(Command::Diff(args)) if args.common.json && args.common.all)
     {
         return fail_with("--all cannot be used with --json", 2);
     }
     let selected_path = match &cli.command {
         None => cli.path.as_deref(),
         Some(Command::Diff(args)) => args.path.as_deref().or(cli.path.as_deref()),
+        Some(Command::Gate(args)) => args.path.as_deref().or(cli.path.as_deref()),
     };
     if let Some(path) = selected_path.filter(|path| !path.exists()) {
         return fail_with(&format!("path not found: {}", path.display()), 1);
@@ -76,6 +77,11 @@ fn run(arguments: impl IntoIterator<Item = OsString>) -> ExitCode {
     let config_path = match &cli.command {
         None => cli.path.clone().unwrap_or_else(|| PathBuf::from(".")),
         Some(Command::Diff(args)) => args
+            .path
+            .clone()
+            .or_else(|| cli.path.clone())
+            .unwrap_or_else(|| PathBuf::from(".")),
+        Some(Command::Gate(args)) => args
             .path
             .clone()
             .or_else(|| cli.path.clone())
@@ -97,6 +103,10 @@ fn run(arguments: impl IntoIterator<Item = OsString>) -> ExitCode {
             };
             let request = apply_codebase_common(request, &cli.common, &config);
             (request.analyze(), cli.common)
+        }
+        Some(Command::Gate(args)) => {
+            let selected = args.path.clone().or_else(|| cli.path.clone());
+            return run_gate(args, selected, &config);
         }
         Some(Command::Diff(args)) => {
             let mut request = match args.path {
@@ -205,6 +215,75 @@ fn run(arguments: impl IntoIterator<Item = OsString>) -> ExitCode {
             }
         }
         Err(error) => fail(&error),
+    }
+}
+
+/// Runs the ratchet gate: analyze, compare against the committed baseline,
+/// and exit 3 when any ratcheted counter exceeds it.
+fn run_gate(args: GateArgs, selected: Option<PathBuf>, config: &ProjectConfig) -> ExitCode {
+    let baseline_path = args.baseline.unwrap_or_else(|| match &selected {
+        Some(path) => path.join(gate_baseline::BASELINE_FILE_NAME),
+        None => PathBuf::from(gate_baseline::BASELINE_FILE_NAME),
+    });
+    let text = match std::fs::read_to_string(&baseline_path) {
+        Ok(text) => text,
+        Err(error) if error.kind() == io::ErrorKind::NotFound => {
+            return fail_with(
+                &format!("baseline not found: {}", baseline_path.display()),
+                2,
+            );
+        }
+        Err(error) => {
+            return fail(&ProjectError::Inspect {
+                path: baseline_path,
+                source: error,
+            });
+        }
+    };
+    let baseline = match gate_baseline::parse(&text) {
+        Ok(baseline) => baseline,
+        Err(message) => return fail_with(&message, 2),
+    };
+    let request = match selected {
+        Some(path) => CodebaseRequest::new(path),
+        None => CodebaseRequest::automatic("."),
+    };
+    let configured_history = config
+        .history
+        .as_deref()
+        .and_then(|value| parse_days(value).ok());
+    let request = request
+        .with_history_days(configured_history.unwrap_or(90))
+        .with_excludes(config.exclude.clone())
+        .with_role_rules(config.role_rules());
+    let mut request = apply_codebase_thresholds(request, config);
+    if let Some(width) = execution_width(args.jobs) {
+        request = request.with_width(width);
+    }
+    let result = match request.analyze() {
+        Ok(result) => result,
+        Err(error) => return fail(&error),
+    };
+    let observed = GateSnapshot::from_report(result.report());
+    let comparison = GateComparison::between(&baseline, &observed);
+    let mut stdout = io::BufWriter::new(io::stdout().lock());
+    let rendered = write_gate(
+        &mut stdout,
+        &baseline_path.display().to_string(),
+        &comparison,
+    )
+    .and_then(|()| stdout.flush());
+    match rendered {
+        Err(error) if stdout_failure(&error) == StdoutFailure::Reportable => {
+            fail(&ProjectError::Inspect {
+                path: PathBuf::from("standard output"),
+                source: error,
+            })
+        }
+        // A reader that stopped reading never erases the gate's exit status,
+        // which is the contract a check pipeline depends on.
+        _ if comparison.regressed() => ExitCode::from(3),
+        _ => ExitCode::SUCCESS,
     }
 }
 

@@ -74,10 +74,10 @@
 
 ## 14. The gate command
 
-- [ ] 14.1 Add pure gate policy in analysis: frozen time-invariant signal ids, verdict-affecting snapshot rows, and exact comparison rules.
-- [ ] 14.2 Add strict baseline read and write in the CLI, rejecting unknown signals, duplicates, and out-of-order rows.
-- [ ] 14.3 Add the `gate` subcommand with exit code 3 on regression and the exact missing-baseline failure, rendering the gate report in house vocabulary.
-- [ ] 14.4 Add pure comparison tests and acceptance evidence for clean, regressed, and missing-baseline runs, updating the help golden and the README exit-code table and tombstone.
+- [x] 14.1 Add pure gate policy in analysis: frozen time-invariant signal ids, verdict-affecting snapshot rows, and exact comparison rules.
+- [x] 14.2 Add strict baseline read and write in the CLI, rejecting unknown signals, duplicates, and out-of-order rows.
+- [x] 14.3 Add the `gate` subcommand with exit code 3 on regression and the exact missing-baseline failure, rendering the gate report in house vocabulary.
+- [x] 14.4 Add pure comparison tests and acceptance evidence for clean, regressed, and missing-baseline runs, updating the help golden and the README exit-code table and tombstone.
 
 ## 15. Self-gating
 

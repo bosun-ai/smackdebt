@@ -1470,6 +1470,7 @@ fn help_and_version_use_the_success_stream_contract() {
                     "\n",
                     "Commands:\n",
                     "  diff  Compare your current work with a Git ref\n",
+                    "  gate  Check debt against a committed baseline\n",
                     "  help  Print this message or the help of the given subcommand(s)\n",
                     "\n",
                     "Arguments:\n",
@@ -1532,6 +1533,8 @@ fn readme_console_examples_use_the_simple_terminal_vocabulary() {
         "smackdebt: path not found: does/not/exist",
         "smackdebt: Git ref not found: no-such-ref",
         "smackdebt: --all cannot be used with --json",
+        "smackdebt: baseline not found: .smackdebt-baseline.tsv",
+        "| 3 | Gate baseline exceeded |",
         "U+E000–U+F8FF",
         "`fights_back`",
         "`no_debt_change`",
@@ -1547,6 +1550,7 @@ fn readme_console_examples_use_the_simple_terminal_vocabulary() {
         "coupling finding",
         "ASCII fallback",
         "rated units ·",
+        "Policy gates belong to a later release.",
     ] {
         assert!(!readme.contains(removed), "README contains {removed}");
     }

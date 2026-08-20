@@ -21,6 +21,8 @@ pub(crate) struct Cli {
 pub(crate) enum Command {
     /// Compare your current work with a Git ref.
     Diff(DiffArgs),
+    /// Check debt against a committed baseline.
+    Gate(GateArgs),
 }
 
 #[derive(Debug, Args)]
@@ -31,6 +33,18 @@ pub(crate) struct DiffArgs {
     pub(crate) path: Option<PathBuf>,
     #[command(flatten)]
     pub(crate) common: Common,
+}
+
+#[derive(Debug, Args)]
+pub(crate) struct GateArgs {
+    /// Check one path.
+    pub(crate) path: Option<PathBuf>,
+    /// Baseline file. If omitted, uses .smackdebt-baseline.tsv at the path.
+    #[arg(long)]
+    pub(crate) baseline: Option<PathBuf>,
+    /// Number of workers to use.
+    #[arg(long, value_parser = parse_jobs)]
+    pub(crate) jobs: Option<usize>,
 }
 
 #[derive(Clone, Debug, Args)]

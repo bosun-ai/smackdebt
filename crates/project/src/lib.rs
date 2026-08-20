@@ -15,6 +15,7 @@ pub use requests::{
     WorkStats,
 };
 pub use smackdebt_analysis::DEFAULT_MINIMUM_TOUCHES;
+pub use smackdebt_analysis::{GateComparison, GateRow, GateSignal, GateSnapshot};
 
 #[doc(hidden)]
 pub use smackdebt_languages::{parser_time_ns, reset_parser_time};

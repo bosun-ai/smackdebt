@@ -165,6 +165,130 @@ fn same_level_source_role_conflict_has_exact_argument_failure_streams() {
         );
 }
 
+const GATE_BASELINE_HEADERS: &str = "# smackdebt gate baseline v1\npath\tsignal\thigh\twatch\n";
+
+/// One High-cognitive JavaScript unit under a lowered threshold, so the
+/// observed gate snapshot carries exactly one cognitive key.
+fn gate_fixture() -> tempfile::TempDir {
+    let project = tempfile::tempdir().unwrap();
+    fs::write(
+        project.path().join("work.js"),
+        "export function work(x) {\n  if (x) {\n    if (x > 1) {\n      return 2;\n    }\n  }\n  return 1;\n}\n",
+    )
+    .unwrap();
+    fs::write(
+        project.path().join(".smackdebt.toml"),
+        "[thresholds.cognitive]\nwatch = 1\nhigh = 2\n",
+    )
+    .unwrap();
+    project
+}
+
+#[test]
+fn a_missing_gate_baseline_has_exact_argument_failure_streams() {
+    let project = gate_fixture();
+    let baseline = project.path().join(".smackdebt-baseline.tsv");
+    smackdebt()
+        .arg("gate")
+        .arg(project.path())
+        .assert()
+        .code(2)
+        .stdout("")
+        .stderr(format!(
+            "smackdebt: baseline not found: {}\n",
+            baseline.display()
+        ));
+}
+
+#[test]
+fn a_clean_gate_states_zero_totals_and_succeeds() {
+    let project = gate_fixture();
+    let baseline = project.path().join(".smackdebt-baseline.tsv");
+    fs::write(
+        &baseline,
+        format!("{GATE_BASELINE_HEADERS}work.js\tcognitive\t1\t0\n"),
+    )
+    .unwrap();
+    smackdebt()
+        .arg("gate")
+        .arg(project.path())
+        .assert()
+        .code(0)
+        .stdout(format!(
+            "GATE  {}\n\n0 regressions · 0 improvements\n",
+            baseline.display()
+        ))
+        .stderr("");
+}
+
+#[test]
+fn a_regressed_gate_names_the_offending_row_and_exits_three() {
+    let project = gate_fixture();
+    let baseline = project.path().join(".smackdebt-baseline.tsv");
+    fs::write(&baseline, GATE_BASELINE_HEADERS).unwrap();
+    smackdebt()
+        .arg("gate")
+        .arg(project.path())
+        .assert()
+        .code(3)
+        .stdout(format!(
+            concat!(
+                "GATE  {}\n",
+                "\n",
+                "  worse  work.js · cognitive · high 0 → 1\n",
+                "\n",
+                "1 regression · 0 improvements\n",
+                "next: smackdebt gate --update\n",
+            ),
+            baseline.display()
+        ))
+        .stderr("");
+}
+
+#[test]
+fn a_looser_gate_baseline_reports_improvements_and_stays_untouched() {
+    let project = gate_fixture();
+    let baseline = project.path().join(".smackdebt-baseline.tsv");
+    let written =
+        format!("{GATE_BASELINE_HEADERS}gone.js\tcognitive\t1\t0\nwork.js\tcognitive\t1\t0\n");
+    fs::write(&baseline, &written).unwrap();
+    smackdebt()
+        .arg("gate")
+        .arg(project.path())
+        .assert()
+        .code(0)
+        .stdout(format!(
+            concat!(
+                "GATE  {}\n",
+                "\n",
+                "  better gone.js · cognitive · high 1 → 0\n",
+                "\n",
+                "0 regressions · 1 improvement\n",
+            ),
+            baseline.display()
+        ))
+        .stderr("");
+    assert_eq!(fs::read_to_string(&baseline).unwrap(), written);
+}
+
+#[test]
+fn a_malformed_gate_baseline_never_passes() {
+    let project = gate_fixture();
+    let baseline = project.path().join(".smackdebt-baseline.tsv");
+    fs::write(
+        &baseline,
+        format!("{GATE_BASELINE_HEADERS}work.js\tcoupling\t1\t0\n"),
+    )
+    .unwrap();
+    smackdebt()
+        .arg("gate")
+        .arg(project.path())
+        .assert()
+        .code(2)
+        .stdout("")
+        .stderr("smackdebt: baseline line 3: unknown signal 'coupling'\n");
+}
+
 #[test]
 fn configured_source_role_overrides_the_generic_path_role() {
     let project = fixture();

@@ -579,17 +579,34 @@ could produce a report:
 | 0 | Report produced |
 | 1 | Analysis could not produce a report |
 | 2 | Invalid arguments or configuration |
+| 3 | Gate baseline exceeded |
 
-Three common mistakes get one exact line on standard error, an empty standard
+Four common mistakes get one exact line on standard error, an empty standard
 output, and no usage tail:
 
 ```console
 smackdebt: path not found: does/not/exist
 smackdebt: Git ref not found: no-such-ref
 smackdebt: --all cannot be used with --json
+smackdebt: baseline not found: .smackdebt-baseline.tsv
 ```
 
-Policy gates belong to a later release.
+## Gate
+
+`smackdebt gate` ratchets debt against a committed baseline,
+`.smackdebt-baseline.tsv` at the analyzed root by default; `--baseline`
+selects another file. The baseline is a sorted, tab-separated table of High
+and Watch counts per path and signal, and the gate ratchets exactly ten
+time-invariant signals: `cognitive`, `cyclomatic`, `logical_lines`,
+`nesting`, `parameters`, `file_size`, `container_size`, `package_cycle`,
+`file_cycle`, and `stable_dependency`. History-derived signals such as change
+coupling and knowledge concentration stay out of the gate by rule: they move
+with wall-clock time, and a committed gate must not.
+
+Any counter above its baseline is a regression: the gate names the row as
+`worse` with the moved counter, states the totals, and exits with status 3.
+Counters below the baseline are improvements, reported as `better` rows and
+never applied to the file. An unchanged tree compares clean and exits 0.
 
 ## Configuration
 

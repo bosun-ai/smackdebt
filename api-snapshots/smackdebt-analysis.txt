@@ -80,6 +80,21 @@ pub smackdebt_analysis::EvolutionaryComparisonKind::FindingRemoved
 pub enum smackdebt_analysis::EvolutionaryFindingKind
 pub smackdebt_analysis::EvolutionaryFindingKind::KnowledgeConcentration
 pub smackdebt_analysis::EvolutionaryFindingKind::UnexplainedCoupling
+pub enum smackdebt_analysis::GateSignal
+pub smackdebt_analysis::GateSignal::Cognitive
+pub smackdebt_analysis::GateSignal::ContainerSize
+pub smackdebt_analysis::GateSignal::Cyclomatic
+pub smackdebt_analysis::GateSignal::FileCycle
+pub smackdebt_analysis::GateSignal::FileSize
+pub smackdebt_analysis::GateSignal::LogicalLines
+pub smackdebt_analysis::GateSignal::Nesting
+pub smackdebt_analysis::GateSignal::PackageCycle
+pub smackdebt_analysis::GateSignal::Parameters
+pub smackdebt_analysis::GateSignal::StableDependency
+impl smackdebt_analysis::GateSignal
+pub const smackdebt_analysis::GateSignal::ALL: [Self; 10]
+pub fn smackdebt_analysis::GateSignal::from_id(&str) -> core::option::Option<Self>
+pub const fn smackdebt_analysis::GateSignal::id(self) -> &'static str
 pub enum smackdebt_analysis::HistoryAvailability
 pub smackdebt_analysis::HistoryAvailability::Complete
 pub smackdebt_analysis::HistoryAvailability::Incomplete
@@ -504,6 +519,32 @@ pub const fn smackdebt_analysis::FindingId::index(self) -> usize
 pub struct smackdebt_analysis::FindingRank<'a>
 impl<'a> smackdebt_analysis::FindingRank<'a>
 pub fn smackdebt_analysis::FindingRank<'a>::new(&smackdebt_analysis::Finding, bool, u32, &'a str) -> Self
+pub struct smackdebt_analysis::GateComparison
+impl smackdebt_analysis::GateComparison
+pub fn smackdebt_analysis::GateComparison::between(&smackdebt_analysis::GateSnapshot, &smackdebt_analysis::GateSnapshot) -> Self
+pub fn smackdebt_analysis::GateComparison::improvements(&self) -> &[smackdebt_analysis::GateDelta]
+pub fn smackdebt_analysis::GateComparison::regressed(&self) -> bool
+pub fn smackdebt_analysis::GateComparison::regressions(&self) -> &[smackdebt_analysis::GateDelta]
+pub struct smackdebt_analysis::GateDelta
+impl smackdebt_analysis::GateDelta
+pub const fn smackdebt_analysis::GateDelta::baseline_high(&self) -> u32
+pub const fn smackdebt_analysis::GateDelta::baseline_watch(&self) -> u32
+pub const fn smackdebt_analysis::GateDelta::high(&self) -> u32
+pub fn smackdebt_analysis::GateDelta::path(&self) -> &str
+pub const fn smackdebt_analysis::GateDelta::signal(&self) -> smackdebt_analysis::GateSignal
+pub const fn smackdebt_analysis::GateDelta::watch(&self) -> u32
+pub struct smackdebt_analysis::GateRow
+impl smackdebt_analysis::GateRow
+pub const fn smackdebt_analysis::GateRow::high(&self) -> u32
+pub fn smackdebt_analysis::GateRow::new(impl core::convert::Into<alloc::string::String>, smackdebt_analysis::GateSignal, u32, u32) -> Self
+pub fn smackdebt_analysis::GateRow::path(&self) -> &str
+pub const fn smackdebt_analysis::GateRow::signal(&self) -> smackdebt_analysis::GateSignal
+pub const fn smackdebt_analysis::GateRow::watch(&self) -> u32
+pub struct smackdebt_analysis::GateSnapshot
+impl smackdebt_analysis::GateSnapshot
+pub fn smackdebt_analysis::GateSnapshot::from_report(&smackdebt_analysis::Report) -> Self
+pub fn smackdebt_analysis::GateSnapshot::new(alloc::vec::Vec<smackdebt_analysis::GateRow>) -> Self
+pub fn smackdebt_analysis::GateSnapshot::rows(&self) -> &[smackdebt_analysis::GateRow]
 pub struct smackdebt_analysis::HealthAssessment
 impl smackdebt_analysis::HealthAssessment
 pub const fn smackdebt_analysis::HealthAssessment::rating(self) -> smackdebt_analysis::Rating

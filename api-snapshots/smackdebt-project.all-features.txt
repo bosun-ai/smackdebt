@@ -1,5 +1,9 @@
 pub mod smackdebt_project
 pub use smackdebt_project::DEFAULT_MINIMUM_TOUCHES
+pub use smackdebt_project::GateComparison
+pub use smackdebt_project::GateRow
+pub use smackdebt_project::GateSignal
+pub use smackdebt_project::GateSnapshot
 pub enum smackdebt_project::ExecutionWidth
 pub smackdebt_project::ExecutionWidth::Automatic
 pub smackdebt_project::ExecutionWidth::Fixed(core::num::nonzero::NonZeroUsize)

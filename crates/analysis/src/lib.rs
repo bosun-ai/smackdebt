@@ -10,6 +10,7 @@ mod cycle_witness;
 mod dependency_degree;
 mod evolution;
 mod evolutionary_comparison;
+mod gate;
 mod health;
 mod history_window;
 mod hotspot;
@@ -51,6 +52,7 @@ pub use evolution::{
     KnowledgeConcentrationFindingId, PackageHistory,
 };
 pub use evolutionary_comparison::compare_evolution;
+pub use gate::{GateComparison, GateDelta, GateRow, GateSignal, GateSnapshot};
 pub use history_window::HistoryWindow;
 pub use hotspot::{DEFAULT_MINIMUM_TOUCHES, FileDebt, Hotspot, HotspotPolicy};
 pub use instability::instability;
