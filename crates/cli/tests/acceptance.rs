@@ -1023,6 +1023,58 @@ fn commits_that_landed_outside_a_narrow_window_never_reach_the_report() {
 }
 
 #[test]
+fn an_empty_history_window_is_disclosed() {
+    let project = tempfile::tempdir().unwrap();
+    git(project.path(), ["init", "-b", "main"]);
+    fs::write(project.path().join("package.json"), "{}\n").unwrap();
+    fs::write(
+        project.path().join("lib.js"),
+        "export function value(item) {\n  return item ? 1 : 2;\n}\n",
+    )
+    .unwrap();
+    fs::write(
+        project.path().join("main.js"),
+        "import { value } from './lib';\nexport function doubled(item) {\n  return value(item) * 2;\n}\n",
+    )
+    .unwrap();
+    commit_landed(
+        project.path(),
+        Some("2000-01-02T03:04:05Z"),
+        "older than every selectable window",
+    );
+
+    let terminal = run_in(
+        project.path(),
+        ["--color", "never", "--jobs", "1", "--history", "90d"],
+    );
+    assert_snapshot(
+        "empty-history-window.terminal.txt",
+        &terminal,
+        include_bytes!("snapshots/empty-history-window.terminal.txt"),
+    );
+    let text = String::from_utf8(terminal).unwrap();
+    assert!(text.contains("No commits in the last 90 days."), "{text}");
+
+    let json = run_in(
+        project.path(),
+        ["--json", "--jobs", "1", "--history", "90d"],
+    );
+    let report: serde_json::Value = serde_json::from_slice(&json).unwrap();
+    validate_schema(&report);
+    // The stream is complete; the selected window simply contains nothing.
+    assert_eq!(report["history_coverage"]["availability"], "complete");
+    assert_eq!(report["history_coverage"]["window_days"], 90);
+    assert_eq!(report["history_coverage"]["commits"], 0);
+    // Source and static architecture results survive the empty window.
+    let root = report["root"].as_u64().unwrap() as usize;
+    let coverage = &report["scopes"][root]["coverage"];
+    assert_eq!(coverage["selected_files"], 2);
+    assert_eq!(coverage["analyzed_files"], 2);
+    assert_ne!(report["verdict"]["tier"], "empty");
+    assert_eq!(report["dependency_coverage"]["internal"], 1);
+}
+
+#[test]
 fn diff_uses_history_as_context_and_can_explain_coupling() {
     let project = evolutionary_fixture();
     fs::write(

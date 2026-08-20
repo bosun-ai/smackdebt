@@ -1,6 +1,6 @@
 smackdebt · repository root
   Clean. Ship it.
-0 high · 0 watch · 3 checked
+0 high · 0 watch · 2 checked
 
 WARNINGS
   warning No commits in the last 90 days.

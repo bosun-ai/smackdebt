@@ -4,3 +4,6 @@ smackdebt · repository root
 
 ARCHITECTURE
   watch crates/a → crates/b · depends on less stable code · instability 1/2 → 2/3 · 2 imports
+
+WARNINGS
+  warning No commits in the last 90 days.

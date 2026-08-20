@@ -1038,7 +1038,19 @@ fn warning_rows(report: &Report, selected: &Scope, detail: bool) -> (Section, Ve
         smackdebt_analysis::HistoryAvailability::Unavailable => {
             warnings.push("History is unavailable.".to_owned());
         }
-        smackdebt_analysis::HistoryAvailability::Complete => {}
+        smackdebt_analysis::HistoryAvailability::Complete => {
+            // A selected window that contains no commits is disclosed rather
+            // than left silent, so an evolution-free report is never mistaken
+            // for a quiet one.
+            if history.eligible_commits() == 0
+                && let Some(days) = history.window_days()
+            {
+                warnings.push(format!(
+                    "No commits in the last {}.",
+                    Counted::new(days as usize, "day", "days")
+                ));
+            }
+        }
     }
     if history.rename_gaps() > 0 {
         warnings.push("Some renamed files could not be matched.".to_owned());

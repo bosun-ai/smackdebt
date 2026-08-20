@@ -41,8 +41,8 @@
 
 ## 8. Empty-window disclosure
 
-- [ ] 8.1 Emit the empty-window warning sentence when a complete stream yields zero commits inside a selected window.
-- [ ] 8.2 Add an acceptance case with all commits older than the window proving the sentence and surviving source and architecture results.
+- [x] 8.1 Emit the empty-window warning sentence when a complete stream yields zero commits inside a selected window.
+- [x] 8.2 Add an acceptance case with all commits older than the window proving the sentence and surviving source and architecture results.
 
 ## 9. Transitive-aware coupling wording
 
