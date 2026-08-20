@@ -27,6 +27,9 @@ acceptance-evidence:
     cargo test -p smackdebt --features evidence-stats --test unified_acceptance selected_binary_contains_the_requested_evidence_feature -- --exact
     cargo test -p smackdebt --features evidence-stats --test unified_acceptance composition_work_counts
 
+show-snapshot case:
+    python3 -m json.tool --indent 2 crates/cli/tests/snapshots/{{case}}
+
 acceptance-install:
     cargo test -p smackdebt --test unified_acceptance installed_command_runs_outside_the_workspace -- --ignored --exact
 
@@ -35,7 +38,6 @@ architecture:
     python3 scripts/check-entry-modules.py
     python3 scripts/check-api-snapshots.py
     python3 scripts/check-api-snapshots.py --all-features --package smackdebt-git --package smackdebt-project
-    python3 scripts/check-evidence-map.py
     python3 -m unittest discover -s scripts/tests
 
 licenses:

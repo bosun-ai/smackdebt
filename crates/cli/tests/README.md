@@ -21,6 +21,20 @@ Use `all` only when every changed result is intended. The command prints each
 file written. Review semantic assertions and schema checks before accepting a
 byte change.
 
+JSON results are committed as the exact single-line bytes the CLI wrote, so a
+raw diff is unreadable. `.gitattributes` marks snapshot and schema JSON with
+`diff=json`; opt in once per clone to see structured diffs:
+
+```console
+git config diff.json.textconv "python3 -m json.tool --indent 2"
+```
+
+To read one committed result pretty-printed without configuring git:
+
+```console
+just show-snapshot unified-codebase.json
+```
+
 Work-count evidence is compiled only with its named test feature:
 
 ```console

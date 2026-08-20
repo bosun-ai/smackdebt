@@ -1,8 +1,8 @@
 ## 1. Repo hygiene
 
-- [ ] 1.1 Add the MIT `LICENSE` matching the workspace manifest's declared license.
-- [ ] 1.2 Delete the dead evidence-map script and its documentation and drop its line from the architecture recipe.
-- [ ] 1.3 Make JSON snapshots reviewable: `diff=json` attributes for snapshot and schema JSON, the documented textconv configuration, and a `show-snapshot` recipe.
+- [x] 1.1 Add the MIT `LICENSE` matching the workspace manifest's declared license.
+- [x] 1.2 Delete the dead evidence-map script and its documentation and drop its line from the architecture recipe.
+- [x] 1.3 Make JSON snapshots reviewable: `diff=json` attributes for snapshot and schema JSON, the documented textconv configuration, and a `show-snapshot` recipe.
 
 ## 2. Continuous integration
 
