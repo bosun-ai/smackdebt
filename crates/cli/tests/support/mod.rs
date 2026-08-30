@@ -1042,6 +1042,39 @@ pub(crate) fn coverage_failure_repository() -> GeneratedRepository {
     repository
 }
 
+/// A repository whose worst area is a directory rather than a file.
+///
+/// `wide/` holds thirty files that each carry one High finding, so the root
+/// view's `next:` line proposes a directory holding more cards than the last
+/// ladder rung. A file scope is exempt from the ladder, so a fixture whose
+/// worst area is a single file cannot prove that following the report's own
+/// advice stays inside the budget.
+pub(crate) fn wide_directory_repository() -> GeneratedRepository {
+    let repository = GeneratedRepository::new("main");
+    repository.write("package.json", b"{\"name\":\"wide\",\"private\":true}\n");
+    repository.write(
+        ".smackdebt.toml",
+        b"[thresholds]\ncognitive = { watch = 2, high = 4 }\ncyclomatic = { watch = 2, high = 4 }\n",
+    );
+    repository.write("thin/main.js", b"export const thin = 1;\n");
+    for index in 0..30 {
+        repository.write(
+            &format!("wide/unit-{index}.js"),
+            format!(
+                "export function unit{index}(value) {{\n  if (value > 1) {{\n    if (value > 2) {{\n      if (value > 3) {{\n        return {index};\n      }}\n    }}\n  }}\n  return 0;\n}}\n"
+            )
+            .as_bytes(),
+        );
+    }
+    repository.commit(commit(
+        "test: wide directory",
+        "Wide Fixture",
+        "wide@example.invalid",
+        "2026-01-01T12:00:00Z",
+    ));
+    repository
+}
+
 pub(crate) fn shallow_clone(source: &GeneratedRepository) -> GeneratedRepository {
     let directory = tempfile::tempdir().expect("create shallow fixture checkout");
     let source_url = format!("file://{}", source.path().display());

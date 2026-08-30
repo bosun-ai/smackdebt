@@ -18,7 +18,7 @@ use support::{
     evolution_repository, module_wiring_repository, ref_diff_repository,
     rust_test_scope_repository, shallow_clone, signal_table_repository, source_role_repository,
     stable_dependency_repository, static_architecture_repository, test_scoped_workspace_repository,
-    workspace_manifest_repository, worktree_change_repository,
+    wide_directory_repository, workspace_manifest_repository, worktree_change_repository,
 };
 
 #[derive(Debug, Deserialize)]
@@ -1140,15 +1140,25 @@ fn every_default_codebase_view_spends_at_most_the_screen_budget() {
     assert!(!cyclic.contains('\u{2026}'), "{cyclic}");
 
     // The view the discover line proposes fits the budget too, which is what
-    // makes drilling in a step rather than a flood.
-    let hint = text
+    // makes drilling in a step rather than a flood. The scope it proposes has
+    // to be one the ladder applies to: a file scope shows complete evidence
+    // without the ladder, so a hint landing on a file would pass this
+    // assertion without ever exercising the budget. This repository's worst
+    // area is a directory holding more cards than the last rung.
+    let drill = wide_directory_repository();
+    let root = Invocation::new(Vec::<&str>::new()).run(drill.path());
+    root.success();
+    let root = String::from_utf8(root.stdout).unwrap();
+    let hint = root
         .lines()
         .find_map(|line| line.trim().strip_prefix("next: smackdebt "))
-        .unwrap_or_else(|| panic!("{text}"))
+        .unwrap_or_else(|| panic!("{root}"))
         .to_owned();
-    let target = Invocation::new([hint.as_str()]).run(languages.path());
+    assert!(drill.path().join(&hint).is_dir(), "{hint}: {root}");
+    let target = Invocation::new([hint.as_str()]).run(drill.path());
     target.success();
     let target = String::from_utf8(target.stdout).unwrap();
+    assert!(problem_heads(&target).len() > 6, "{hint}: {target}");
     assert!(slots(&target) <= SCREEN_BUDGET, "{hint}: {target}");
 
     // One invocation states the same cards and the same evidence at every

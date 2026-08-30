@@ -1563,6 +1563,28 @@ fn every_problem_pattern_reaches_a_committed_terminal_and_machine_view() {
         "{text}"
     );
     assert!(!text.contains("hub/first.go: hub/first.go"), "{text}");
+    // A recovered file's whole debt is advisory, so its card states that trust
+    // and cannot be one of the two names reserved for debt that moves a
+    // verdict.
+    assert!(
+        text.contains("  high recovered · function · advisory · god/recovered.js:1\n"),
+        "{text}"
+    );
+
+    // The same fixture rendered by default withholds exactly the cards whose
+    // debt cannot move a verdict, and states the ones whose debt can.
+    let default_view = String::from_utf8(run_in(
+        project.path(),
+        ["--jobs", "1", "--color", "never", "--history", "36500d"],
+    ))
+    .unwrap();
+    for detail in ["god/recovered.js", "god/long.js"] {
+        assert!(!default_view.contains(detail), "{detail}: {default_view}");
+    }
+    assert!(
+        default_view.contains("  high does too much · god/god.js\n"),
+        "{default_view}"
+    );
     // Every rated unit total reaches a reader with a noun that agrees.
     assert!(text.contains(" rated units\n"), "{text}");
 }
@@ -3205,6 +3227,14 @@ fn problem_pattern_fixture() -> tempfile::TempDir {
     fs::write(
         project.path().join("god/plain.js"),
         "export function plain(value) {\n  if (value) {\n    return 2;\n  }\n  return 0;\n}\n",
+    )
+    .unwrap();
+    // One file no grammar can parse cleanly, so its findings are advisory:
+    // they cannot move the verdict and their card is detail rather than
+    // default.
+    fs::write(
+        project.path().join("god/recovered.js"),
+        "export function recovered(value) {\n  if (value > 1) {\n    if (value > 2) {\n      if (value > 3) {\n        return 1;\n      }\n    }\n  }\n  return 0;\n}\n\nexport function unterminated(\n",
     )
     .unwrap();
     // One file whose only debt is its length, so its card heads on its size

@@ -20,6 +20,8 @@ PROBLEMS
         hot/hot.js:1 · function · cognitive 6 · cyclomatic 4
         1 rated unit
         hot (11 commits)
+  high recovered · function · advisory · god/recovered.js:1
+        cognitive 6 · cyclomatic 4
   watch everything depends on this · hub/hub.js
         hub/hub.js:1 · function · cyclomatic 2
         10 files import this
@@ -32,6 +34,8 @@ PROBLEMS
 
 WARNINGS
   warning 2 source files use unsupported languages.
+  warning 1 source file could not be fully parsed.
+  god/recovered.js: parser recovered from syntax errors
   hub/first.go: uses an unsupported language
   hub/second.go: uses an unsupported language
 
