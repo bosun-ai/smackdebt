@@ -1,6 +1,41 @@
 use crate::health::{Rating, Thresholds};
 use crate::report::FileId;
 
+macro_rules! size_index {
+    ($(#[$documentation:meta])* $name:ident) => {
+        $(#[$documentation])*
+        #[derive(Clone, Copy, Debug, Eq, Hash, Ord, PartialEq, PartialOrd)]
+        pub struct $name(u32);
+
+        impl $name {
+            /// Creates an index from a table position.
+            pub const fn from_index(index: usize) -> Self {
+                Self(index as u32)
+            }
+
+            /// Returns the table position represented by this index.
+            pub const fn index(self) -> usize {
+                self.0 as usize
+            }
+
+            /// Returns the compact integer representation.
+            pub const fn get(self) -> u32 {
+                self.0
+            }
+        }
+    };
+}
+
+size_index!(
+    /// The identity of one size finding.
+    ///
+    /// A size finding is identified by its position in the report's size
+    /// finding table, the way every other finding family is identified, so a
+    /// problem card can link one without copying its path, container name, or
+    /// value.
+    SizeFindingId
+);
+
 /// What a size finding measured.
 #[derive(Clone, Copy, Debug, Eq, Hash, Ord, PartialEq, PartialOrd)]
 pub enum SizeSubject {

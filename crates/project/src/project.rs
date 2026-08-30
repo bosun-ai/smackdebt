@@ -3688,7 +3688,9 @@ impl HierarchyBuilder {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use smackdebt_analysis::{CodebaseTier, DiffTier, WorstOffenderReason};
+    use smackdebt_analysis::{
+        CodebaseTier, DiffTier, ProblemPattern, WorstOffenderReason, duplicate_claim,
+    };
     use std::process::Command;
 
     fn git<const N: usize>(root: &Path, args: [&str; N]) {
@@ -4463,6 +4465,75 @@ mod tests {
                 .unwrap()
                 .selection()
                 .has_duplicate_identity()
+        );
+    }
+
+    /// A function whose nesting alone rates High on cognitive complexity.
+    fn nested_source(seed: usize) -> String {
+        let mut source = format!("pub fn work{seed}(value: i32) -> i32 {{\n");
+        for depth in 0..8 {
+            source.push_str(&format!(
+                "{}if value > {depth} {{\n",
+                "    ".repeat(depth + 1)
+            ));
+        }
+        source.push_str(&format!("{}return 1;\n", "    ".repeat(9)));
+        for depth in (0..8).rev() {
+            source.push_str(&format!("{}}}\n", "    ".repeat(depth + 1)));
+        }
+        source.push_str("    value\n}\n");
+        source
+    }
+
+    #[test]
+    fn serial_and_parallel_runs_cluster_identical_problem_cards() {
+        let root = tempfile::tempdir().unwrap();
+        let repository_path = root.path();
+        git(repository_path, ["init", "-q"]);
+        git(
+            repository_path,
+            ["config", "user.email", "test@example.invalid"],
+        );
+        git(repository_path, ["config", "user.name", "Smackdebt Test"]);
+        // More files than the parallel cutover, so the automatic run really
+        // splits the work across workers, and every sixth file carries High
+        // debt so cards exist to compare.
+        for index in 0..120 {
+            let source = if index % 6 == 0 {
+                nested_source(index)
+            } else {
+                format!("pub fn work{index}(value: i32) -> i32 {{ value + {index} }}\n")
+            };
+            fs::write(repository_path.join(format!("file{index}.rs")), source).unwrap();
+        }
+        // One file changes often enough to be hot, so heat reaches a card too.
+        for revision in 0..6 {
+            fs::write(repository_path.join("file0.rs"), nested_source(revision)).unwrap();
+            git(repository_path, ["add", "."]);
+            git(repository_path, ["commit", "-qm", "change"]);
+        }
+
+        let request = CodebaseRequest::new(repository_path).with_size_thresholds((1, 2), (1, 2));
+        let serial = request
+            .clone()
+            .with_width(ExecutionWidth::fixed(1).unwrap())
+            .analyze()
+            .unwrap();
+        let parallel = request
+            .with_width(ExecutionWidth::Automatic)
+            .analyze()
+            .unwrap();
+        let cards = serial.report().problems();
+        assert!(!cards.is_empty());
+        // Clustering reads report tables only, so width cannot move a card or
+        // its position.
+        assert_eq!(cards, parallel.report().problems());
+        assert_eq!(duplicate_claim(cards), None);
+        assert!(
+            cards
+                .iter()
+                .any(|card| card.pattern() == ProblemPattern::HotMess),
+            "the file that changes often carries its heat into a card"
         );
     }
 

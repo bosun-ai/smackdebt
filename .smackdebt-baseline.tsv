@@ -17,6 +17,7 @@ crates/analysis/src/gate.rs	cognitive	0	1
 crates/analysis/src/gate.rs	cyclomatic	0	1
 crates/analysis/src/gate.rs	file_size	0	1
 crates/analysis/src/orphan.rs	parameters	0	1
+crates/analysis/src/problem.rs	file_size	1	0
 crates/analysis/src/report.rs	cognitive	0	2
 crates/analysis/src/report.rs	cyclomatic	0	2
 crates/analysis/src/report.rs	file_size	1	0

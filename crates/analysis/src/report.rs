@@ -2,6 +2,7 @@ use crate::comparison::{Comparison, ComparisonDirection};
 use crate::health::{HealthAssessment, HealthCounts, Measurements, Rating};
 use crate::hotspot::Hotspot;
 use crate::orphan::OrphanFile;
+use crate::problem::{ProblemCard, ProblemInput, cluster_problems};
 use crate::size::SizeFinding;
 use crate::source::{Language, ParseStatus, SourceRole, SourceSpan, SourceTrust, UnitIdentity};
 use crate::verdict::{
@@ -793,6 +794,9 @@ pub struct Report {
     /// keyed by the ordered pair.  Classified once when the report is built;
     /// it informs wording only and is never serialized.
     coupling_links: BTreeMap<(PackageId, PackageId), CouplingLink>,
+    /// The named problems the report's own findings cluster into, ranked once
+    /// when the report is finished.
+    problems: Vec<ProblemCard>,
     verdict: Option<Verdict>,
 }
 
@@ -873,6 +877,9 @@ impl ReportBuilder {
     }
 
     /// Sets the rated size findings, ordered by file, subject, and container.
+    ///
+    /// A size finding's identity is its position in this table, so the order
+    /// given here is the [`SizeFindingId`] a problem card links.
     pub fn set_size_findings(&mut self, findings: Vec<SizeFinding>) {
         self.report.size_findings = findings;
     }
@@ -950,9 +957,17 @@ impl ReportBuilder {
         &self.report.files
     }
 
+    /// Completes the report: coupling links, scope aggregation, and then the
+    /// problem cards.
+    ///
+    /// Clustering runs last because it reads finished tables, and it is not an
+    /// algorithm pass: it measures nothing, rates nothing, and creates no
+    /// finding, so the live work evidence must not move.
     pub fn finish(mut self) -> Report {
         self.report.classify_coupling_links();
         self.report.aggregate();
+        let problems = cluster_problems(self.report.problem_input());
+        self.report.problems = problems;
         self.report
     }
 }
@@ -1068,6 +1083,7 @@ impl Report {
             orphan_files: Vec::new(),
             stable_dependency_findings: Vec::new(),
             knowledge_concentration_findings: Vec::new(),
+            problems: Vec::new(),
             verdict: None,
         }
     }
@@ -1166,6 +1182,8 @@ impl Report {
     pub fn hotspots(&self) -> &[Hotspot] {
         &self.hotspots
     }
+    /// The rated size findings, where a row's position is its
+    /// [`SizeFindingId`].
     pub fn size_findings(&self) -> &[SizeFinding] {
         &self.size_findings
     }
@@ -1177,6 +1195,14 @@ impl Report {
     }
     pub fn knowledge_concentration_findings(&self) -> &[KnowledgeConcentrationFinding] {
         &self.knowledge_concentration_findings
+    }
+    /// The named problems this report's findings cluster into, already in
+    /// problem-rank order.
+    ///
+    /// The table is global: a consumer selects the cards of a scope by testing
+    /// each anchor against that scope rather than by sorting again.
+    pub fn problems(&self) -> &[ProblemCard] {
+        &self.problems
     }
     /// Whether a file crossed rated debt with enough change activity.
     pub fn is_hotspot(&self, file: FileId) -> bool {
@@ -1428,6 +1454,21 @@ impl Report {
             };
             self.coupling_links.insert(ordered_pair(left, right), link);
         }
+    }
+
+    /// Borrows the tables clustering reads, so the pass stays a pure function
+    /// over slices rather than a method that could reach for more.
+    fn problem_input(&self) -> ProblemInput<'_> {
+        ProblemInput::new(&self.files, &self.findings)
+            .with_packages(&self.packages)
+            .with_size_findings(&self.size_findings)
+            .with_architecture(&self.architecture_findings, &self.dependency_edges)
+            .with_stable_dependencies(&self.stable_dependency_findings)
+            .with_evolution(
+                &self.evolutionary_findings,
+                &self.knowledge_concentration_findings,
+            )
+            .with_hotspots(&self.hotspots)
     }
 
     /// Completes scope summaries from the report's owned tables.

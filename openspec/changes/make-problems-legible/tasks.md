@@ -14,13 +14,13 @@
 
 ## 3. The problem card model and its detectors
 
-- [ ] 3.1 Add the problem module in analysis: pattern, anchor, evidence, card, policy constants, and a clustering entry point over borrowed slices.
-- [ ] 3.2 Add the size-finding identity type so a card can link a size finding by index.
-- [ ] 3.3 Implement the detectors in claiming order with integer-only rules, file degree over verdict-graph edges, and the package-relative nearest-rank median computed once per package.
-- [ ] 3.4 Implement the descriptive-card rule so a widely imported file with no rated or size finding carries no rating and stays out of default detail.
-- [ ] 3.5 Implement the problem rank and sort the table once when the report is finished, without recording an algorithm pass.
-- [ ] 3.6 Add pure boundary tests per detector — two High findings producing no god file, fan-in 7 against 8, exactly four times the median — plus a claimed-once audit, an all-keys-tie rank test, and a serial-parallel equality test.
-- [ ] 3.7 Regenerate the analysis API snapshot for the new surface.
+- [x] 3.1 Add the problem module in analysis: pattern, anchor, evidence, card, policy constants, and a clustering entry point over borrowed slices.
+- [x] 3.2 Add the size-finding identity type so a card can link a size finding by index.
+- [x] 3.3 Implement the detectors in claiming order with integer-only rules, file degree over verdict-graph edges, and the package-relative nearest-rank median computed once per package.
+- [x] 3.4 Implement the descriptive-card rule so a widely imported file with no rated or size finding carries no rating and stays out of default detail.
+- [x] 3.5 Implement the problem rank and sort the table once when the report is finished, without recording an algorithm pass.
+- [x] 3.6 Add pure boundary tests per detector — two High findings producing no god file, fan-in 7 against 8, exactly four times the median — plus a claimed-once audit, an all-keys-tie rank test, and a serial-parallel equality test.
+- [x] 3.7 Regenerate the analysis API snapshot for the new surface.
 
 ## 4. Problem cards in the machine report
 

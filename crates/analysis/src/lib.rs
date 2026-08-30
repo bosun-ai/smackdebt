@@ -16,6 +16,7 @@ mod history_window;
 mod hotspot;
 mod instability;
 mod orphan;
+mod problem;
 mod report;
 mod size;
 mod source;
@@ -57,7 +58,12 @@ pub use history_window::HistoryWindow;
 pub use hotspot::{DEFAULT_MINIMUM_TOUCHES, FileDebt, Hotspot, HotspotPolicy};
 pub use instability::instability;
 pub use orphan::{ENTRY_FILENAMES, OrphanCandidate, OrphanFile, is_entry_filename, orphan_files};
-pub use size::{SizeFinding, SizePolicy, SizeSubject};
+pub use problem::{
+    BROAD_RATED_UNITS, CONCENTRATED_HIGH_FINDINGS, ClaimedFinding, GOD_FILE_FAN_OUT, HUB_DEGREE,
+    HUB_MEDIAN_MULTIPLE, ProblemAnchor, ProblemCard, ProblemEvidence, ProblemId, ProblemInput,
+    ProblemPattern, ProblemPolicy, ProblemRank, cluster_problems, duplicate_claim,
+};
+pub use size::{SizeFinding, SizeFindingId, SizePolicy, SizeSubject};
 pub use stable_dependencies::{MINIMUM_STABLE_DEPENDENCY_REFERENCES, stable_dependency_findings};
 pub use strongly_connected_components::strongly_connected_components;
 pub use test_scope::{ModuleDeclaration, test_declared_files};
