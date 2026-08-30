@@ -1551,6 +1551,13 @@ fn every_problem_pattern_reaches_a_committed_terminal_and_machine_view() {
         text.contains("  warning 2 source files use unsupported languages.\n"),
         "{text}"
     );
+    // A warning detail row names its file once: the row states the path and
+    // the diagnostic states what happened to it.
+    assert!(
+        text.contains("  hub/first.go: uses an unsupported language\n"),
+        "{text}"
+    );
+    assert!(!text.contains("hub/first.go: hub/first.go"), "{text}");
     // Every rated unit total reaches a reader with a noun that agrees.
     assert!(text.contains(" rated units\n"), "{text}");
 }

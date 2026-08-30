@@ -1433,15 +1433,31 @@ fn warning_rows(report: &Report, selected: &Scope, file_detail: bool) -> (Sectio
             .filter(|diagnostic| !diagnostic.message().starts_with("Git history"))
         {
             if let Some(file) = diagnostic.file() {
-                warning_detail.push(format!(
-                    "{}: {}",
-                    report.files()[file.index()].path(),
-                    diagnostic.message()
-                ));
+                let path = report.files()[file.index()].path();
+                warning_detail.push(format!("{path}: {}", diagnostic_detail(path, diagnostic)));
             }
         }
     }
     (section, warning_detail)
+}
+
+/// What one file diagnostic says, with the file's own path removed when the
+/// message repeats it.
+///
+/// Some diagnostics name their file and some do not, and the row states the
+/// path itself, so a message that opens with its path would otherwise print it
+/// twice.
+fn diagnostic_detail<'a>(path: &str, diagnostic: &'a Diagnostic) -> &'a str {
+    let message = diagnostic.message();
+    let remainder = message
+        .strip_prefix(path)
+        .map(|rest| rest.trim_start_matches([':', ' ']))
+        .unwrap_or(message);
+    if remainder.is_empty() {
+        message
+    } else {
+        remainder
+    }
 }
 
 struct Renderer<'a, W> {

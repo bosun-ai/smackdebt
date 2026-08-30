@@ -32,7 +32,7 @@ PROBLEMS
 
 WARNINGS
   warning 2 source files use unsupported languages.
-  hub/first.go: hub/first.go uses an unsupported language
-  hub/second.go: hub/second.go uses an unsupported language
+  hub/first.go: uses an unsupported language
+  hub/second.go: uses an unsupported language
 
   next: smackdebt god
