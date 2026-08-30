@@ -796,7 +796,7 @@ pub const fn smackdebt_analysis::ProblemInput<'a>::with_size_findings(self, &'a 
 pub const fn smackdebt_analysis::ProblemInput<'a>::with_stable_dependencies(self, &'a [smackdebt_analysis::StableDependencyFinding]) -> Self
 pub struct smackdebt_analysis::ProblemPolicy
 impl smackdebt_analysis::ProblemPolicy
-pub const fn smackdebt_analysis::ProblemPolicy::broad_rated_units(self) -> u32
+pub const fn smackdebt_analysis::ProblemPolicy::broad_debt_units(self) -> u32
 pub const fn smackdebt_analysis::ProblemPolicy::concentrated_high_findings(self) -> u32
 pub const fn smackdebt_analysis::ProblemPolicy::god_file_fan_out(self) -> u32
 pub const fn smackdebt_analysis::ProblemPolicy::hub_degree(self) -> u32
@@ -1029,7 +1029,7 @@ pub fn smackdebt_analysis::WorstOffender::new(impl core::convert::Into<alloc::st
 pub fn smackdebt_analysis::WorstOffender::path(&self) -> &str
 pub const fn smackdebt_analysis::WorstOffender::reason(&self) -> smackdebt_analysis::WorstOffenderReason
 pub fn smackdebt_analysis::WorstOffender::with_identity(self, smackdebt_analysis::UnitIdentity) -> Self
-pub const smackdebt_analysis::BROAD_RATED_UNITS: u32
+pub const smackdebt_analysis::BROAD_DEBT_UNITS: u32
 pub const smackdebt_analysis::CONCENTRATED_HIGH_FINDINGS: u32
 pub const smackdebt_analysis::CRATE_ROOT_CANDIDATE: &str
 pub const smackdebt_analysis::DECLARING_FILE_CANDIDATE: &str

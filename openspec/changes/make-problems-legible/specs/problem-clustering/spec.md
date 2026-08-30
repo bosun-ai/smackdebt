@@ -110,11 +110,15 @@ nothing to a file's fan-in or fan-out.
   patterns, because being inside a cycle and doing too much are two different
   problems.
 - **`god_file`**: a file SHALL be a `god_file` when both of these hold:
-  (a) it has at least 3 High findings, or at least 1 High finding and at least 8
-  rated units; **and** (b) it carries a size finding or has a fan-out of at
-  least 10. Concentrated debt alone SHALL NOT be enough — conjunct (b) is what
-  makes the pattern mean "does too much" rather than "has bugs" — and breadth
-  alone SHALL NOT be enough either. Its rating SHALL be High.
+  (a) it has at least 3 High findings, or at least 1 High finding and at least 6
+  units rated Watch or High; **and** (b) it carries a size finding or has a
+  fan-out of at least 10. Concentrated debt alone SHALL NOT be enough —
+  conjunct (b) is what makes the pattern mean "does too much" rather than "has
+  bugs" — and breadth alone SHALL NOT be enough either. Its rating SHALL be
+  High. The second arm of conjunct (a) SHALL count units rated Watch or High
+  and SHALL NOT count healthy units: a file's rated unit total is its length in
+  units, so counting all of them names every long file that holds one bug,
+  which single-file components produce by the hundred.
 - **`hub`**: a file that no earlier file pattern claimed SHALL be a `hub` when
   its fan-in is at least 8 and either its package's median fan-in is zero or its
   fan-in is at least 4 times that median; the same rule SHALL apply to fan-out.
@@ -132,21 +136,27 @@ nothing to a file's fan-in or fan-out.
   worst-offender reason.
 
 The High findings the `god_file` and `hot_mess` rules count SHALL be findings
-that affect the verdict, and the rated units the `god_file` rule counts SHALL be
-the file's rated unit total, which analysis already keeps at zero for source
-that cannot move a verdict. A file whose debt cannot move a verdict SHALL
+that affect the verdict, and the debt-carrying units the `god_file` rule counts
+SHALL be the file's units rated Watch or High, which analysis already keeps at
+zero for source that cannot move a verdict. A file whose debt cannot move a
+verdict SHALL
 therefore never be named a `god_file` or a `hot_mess`; it reaches a `hub` or a
 `measured` card instead, which is what keeps those two names meaningful. Every
 other decision a file pattern makes — what it claims, what rating it carries,
 and what it states as evidence — SHALL be blind to role and trust.
 
-The five thresholds — 3 High findings, 8 rated units, fan-out 10, degree 8, and
-the 4-times median multiple — are proposed values under review and SHALL be
-implemented as named integer constants so review can move them in one place.
+The five thresholds — 3 High findings, 6 debt-carrying units, fan-out 10,
+degree 8, and the 4-times median multiple — are proposed values under review and
+SHALL be implemented as named integer constants so review can move them in one
+place.
 
 #### Scenario: A file has two High findings and nothing else
 - **WHEN** the file has 2 High findings, no size finding, and fan-out 2
 - **THEN** it is not a `god_file`, because neither arm of conjunct (a) holds
+
+#### Scenario: A long file holds one bug
+- **WHEN** a broad file has 1 High finding, 1 debt-carrying unit, and twenty healthy units beside it
+- **THEN** it is not a `god_file`, because healthy units never satisfy the second arm of conjunct (a)
 
 #### Scenario: A small file concentrates three High findings
 - **WHEN** the file has 3 High findings, no size finding, and fan-out 2

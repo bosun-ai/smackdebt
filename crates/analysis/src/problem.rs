@@ -220,11 +220,16 @@ impl ProblemCard {
 /// This is a proposed constant under review.
 pub const CONCENTRATED_HIGH_FINDINGS: u32 = 3;
 
-/// The rated units a file holds before one High finding is enough to make it a
-/// `god_file`.
+/// The units rated Watch or High a file holds before one High finding is
+/// enough to make it a `god_file`.
+///
+/// Healthy units are not counted. The arm is about concentrated debt, and a
+/// file's rated unit total is its length in units: counting all of them made
+/// every long file with a single bug a `god_file`, which is what single-file
+/// components produce by the hundred.
 ///
 /// This is a proposed constant under review.
-pub const BROAD_RATED_UNITS: u32 = 8;
+pub const BROAD_DEBT_UNITS: u32 = 6;
 
 /// The fan-out at which a file is broad enough for the `god_file` rule without
 /// a size finding.
@@ -250,7 +255,7 @@ pub const HUB_MEDIAN_MULTIPLE: u32 = 4;
 #[derive(Clone, Copy, Debug, Eq, Hash, PartialEq)]
 pub struct ProblemPolicy {
     concentrated_high_findings: u32,
-    broad_rated_units: u32,
+    broad_debt_units: u32,
     god_file_fan_out: u32,
     hub_degree: u32,
     hub_median_multiple: u32,
@@ -260,7 +265,7 @@ impl Default for ProblemPolicy {
     fn default() -> Self {
         Self::new(
             CONCENTRATED_HIGH_FINDINGS,
-            BROAD_RATED_UNITS,
+            BROAD_DEBT_UNITS,
             GOD_FILE_FAN_OUT,
             HUB_DEGREE,
             HUB_MEDIAN_MULTIPLE,
@@ -271,14 +276,14 @@ impl Default for ProblemPolicy {
 impl ProblemPolicy {
     pub const fn new(
         concentrated_high_findings: u32,
-        broad_rated_units: u32,
+        broad_debt_units: u32,
         god_file_fan_out: u32,
         hub_degree: u32,
         hub_median_multiple: u32,
     ) -> Self {
         Self {
             concentrated_high_findings,
-            broad_rated_units,
+            broad_debt_units,
             god_file_fan_out,
             hub_degree,
             hub_median_multiple,
@@ -288,8 +293,8 @@ impl ProblemPolicy {
     pub const fn concentrated_high_findings(self) -> u32 {
         self.concentrated_high_findings
     }
-    pub const fn broad_rated_units(self) -> u32 {
-        self.broad_rated_units
+    pub const fn broad_debt_units(self) -> u32 {
+        self.broad_debt_units
     }
     pub const fn god_file_fan_out(self) -> u32 {
         self.god_file_fan_out
@@ -392,7 +397,7 @@ impl<'a> ProblemInput<'a> {
             hotspots: &[],
             policy: ProblemPolicy::new(
                 CONCENTRATED_HIGH_FINDINGS,
-                BROAD_RATED_UNITS,
+                BROAD_DEBT_UNITS,
                 GOD_FILE_FAN_OUT,
                 HUB_DEGREE,
                 HUB_MEDIAN_MULTIPLE,
@@ -696,6 +701,12 @@ impl<'a, 'b> FilePass<'a, 'b> {
     /// Concentrated debt alone is not enough — the breadth conjunct is what
     /// makes the pattern mean "does too much" rather than "has bugs" — and
     /// breadth alone is not enough either.
+    ///
+    /// The second arm counts the file's units rated Watch or High rather than
+    /// every rated unit it holds: a file's rated unit total is its length in
+    /// units, so counting all of them named every long file with one bug a
+    /// `god_file`. The card still states that total, because the length is
+    /// context a reader wants beside the concentration.
     fn god_files(&mut self, cards: &mut Vec<ProblemCard>) {
         let policy = self.input.policy;
         for index in 0..self.input.files.len() {
@@ -703,15 +714,15 @@ impl<'a, 'b> FilePass<'a, 'b> {
                 continue;
             }
             let high = self.facts.high[index];
-            let rated = self.input.files[index].health().total();
+            let health = self.input.files[index].health();
             let concentrated = high >= policy.concentrated_high_findings()
-                || (high >= 1 && rated >= policy.broad_rated_units());
+                || (high >= 1 && health.debt() >= policy.broad_debt_units());
             let fan_out = self.facts.fan_out(index);
             let broad = !self.facts.sizes[index].is_empty() || fan_out >= policy.god_file_fan_out();
             if !concentrated || !broad {
                 continue;
             }
-            let mut evidence = vec![ProblemEvidence::RatedUnits(rated)];
+            let mut evidence = vec![ProblemEvidence::RatedUnits(health.total())];
             if fan_out >= policy.god_file_fan_out() {
                 evidence.push(ProblemEvidence::FanOut(fan_out));
             }
@@ -1038,6 +1049,16 @@ mod tests {
         /// Adds one file with its rated unit counts, where `rated` is the
         /// file's total rated units.
         fn file(&mut self, path: &str, package: usize, rated: u32, high_units: u32) -> usize {
+            self.graded(
+                path,
+                package,
+                HealthCounts::new(rated.saturating_sub(high_units), 0, high_units),
+            )
+        }
+
+        /// Adds one file with an explicit split between healthy units and the
+        /// units that carry debt.
+        fn graded(&mut self, path: &str, package: usize, health: HealthCounts) -> usize {
             let index = self.files.len();
             self.files.push(
                 FileRecord::new(
@@ -1045,7 +1066,7 @@ mod tests {
                     ScopeId::from_index(0),
                     path,
                     Coverage::default(),
-                    HealthCounts::new(rated.saturating_sub(high_units), 0, high_units),
+                    health,
                 )
                 .with_package(PackageId::from_index(package)),
             );
@@ -1200,16 +1221,28 @@ mod tests {
         }
     }
 
-    /// A file carrying `high_units` High findings, a chosen rated unit total,
-    /// and a chosen fan-out, in its own package.
-    fn concentrated_file(high_units: u32, rated: u32, fan_out: usize) -> Tables {
+    /// A file carrying `high_units` High findings, `debt` units rated Watch or
+    /// High in total, and a chosen fan-out, in its own package.
+    fn concentrated_file(high_units: u32, debt: u32, fan_out: usize) -> Tables {
+        graded_file(high_units, debt, 0, fan_out)
+    }
+
+    /// The same file with a chosen number of healthy units beside its debt, so
+    /// a test can prove that length in units never satisfies the concentration
+    /// conjunct on its own.
+    fn graded_file(high_units: u32, debt: u32, healthy: u32, fan_out: usize) -> Tables {
         let mut tables = Tables::default();
         let package = tables.package("a");
-        let subject = tables.file("a/subject.rs", package, rated, high_units);
+        let watch_units = debt.saturating_sub(high_units);
+        let subject = tables.graded(
+            "a/subject.rs",
+            package,
+            HealthCounts::new(healthy, watch_units, high_units),
+        );
         for index in 0..high_units {
             tables.finding(subject, &format!("high{index}"), high(), index + 1);
         }
-        for index in 0..(rated - high_units).min(rated) {
+        for index in 0..watch_units {
             tables.finding(subject, &format!("watch{index}"), watch(), 100 + index);
         }
         for index in 0..fan_out {
@@ -1222,7 +1255,7 @@ mod tests {
     #[test]
     fn a_file_with_two_high_findings_and_no_breadth_is_not_a_god_file() {
         // Neither arm of the concentration conjunct holds: two High findings
-        // is below three, and two rated units is below eight.
+        // is below three, and two debt-carrying units is below six.
         let tables = concentrated_file(2, 2, 2);
         assert_eq!(tables.file_pattern(0), Some(ProblemPattern::Measured));
     }
@@ -1254,18 +1287,33 @@ mod tests {
     }
 
     #[test]
-    fn one_high_finding_needs_eight_rated_units_before_breadth_makes_a_god_file() {
+    fn one_high_finding_needs_six_debt_units_before_breadth_makes_a_god_file() {
         // The second arm of the concentration conjunct: one High finding is
-        // enough only once the file holds eight rated units.
+        // enough only once the file holds six units rated Watch or High.
         assert_eq!(
-            concentrated_file(1, 8, 10).file_pattern(0),
+            concentrated_file(1, 6, 10).file_pattern(0),
             Some(ProblemPattern::GodFile)
         );
-        // Seven rated units leaves the concentration conjunct unsatisfied, so
-        // the broad file is only a hub.
+        // Five debt-carrying units leaves the concentration conjunct
+        // unsatisfied, so the broad file is only a hub.
         assert_eq!(
-            concentrated_file(1, 7, 10).file_pattern(0),
+            concentrated_file(1, 5, 10).file_pattern(0),
             Some(ProblemPattern::Hub)
+        );
+    }
+
+    #[test]
+    fn healthy_units_never_satisfy_the_concentration_conjunct() {
+        // Twenty healthy units beside one debt-carrying unit is a long file
+        // with one bug, not a file that concentrates debt. Counting every
+        // rated unit would call this broad file a god file on its length
+        // alone, which is what single-file components made routine.
+        let tables = graded_file(1, 1, 20, 10);
+        assert_eq!(tables.file_pattern(0), Some(ProblemPattern::Hub));
+        // The same file with six of those units carrying debt is one.
+        assert_eq!(
+            graded_file(1, 6, 20, 10).file_pattern(0),
+            Some(ProblemPattern::GodFile)
         );
     }
 
@@ -1866,13 +1914,13 @@ mod tests {
     #[test]
     fn the_thresholds_are_named_integer_constants() {
         assert_eq!(CONCENTRATED_HIGH_FINDINGS, 3);
-        assert_eq!(BROAD_RATED_UNITS, 8);
+        assert_eq!(BROAD_DEBT_UNITS, 6);
         assert_eq!(GOD_FILE_FAN_OUT, 10);
         assert_eq!(HUB_DEGREE, 8);
         assert_eq!(HUB_MEDIAN_MULTIPLE, 4);
         let policy = ProblemPolicy::default();
         assert_eq!(policy.concentrated_high_findings(), 3);
-        assert_eq!(policy.broad_rated_units(), 8);
+        assert_eq!(policy.broad_debt_units(), 6);
         assert_eq!(policy.god_file_fan_out(), 10);
         assert_eq!(policy.hub_degree(), 8);
         assert_eq!(policy.hub_median_multiple(), 4);

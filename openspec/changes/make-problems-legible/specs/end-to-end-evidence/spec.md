@@ -113,15 +113,23 @@ without the ladder.
 
 ### Requirement: Problem cards have exact black-box evidence
 Generated repositories SHALL provide hand-calculated facts for each frozen
-pattern and exact acceptance SHALL prove them: one file with three High findings
-producing one card rather than three rows, one card per strongly connected
-component carrying the existing stacked witness, a `god_file` at each arm of its
-rule and one unit either side of each threshold, a `hub` at the degree boundary
-and at the exact median multiple in a multi-package fixture, a `hot_mess` that
-agrees with the `hot_and_complex` worst-offender reason, one card per coupling,
-concentration, and stable-dependency finding keeping that finding's exact
-operands, a `measured` card whose head equals the finding row head it replaces,
-and a `detail` card absent by default and present under `--all`.
+pattern and exact acceptance SHALL prove that each one is present: one file with
+three High findings producing one card rather than three rows, one card per
+strongly connected component carrying the existing stacked witness, a
+`god_file`, a `hub`, a `hot_mess` that agrees with the `hot_and_complex`
+worst-offender reason, one card per coupling, concentration, and
+stable-dependency finding keeping that finding's exact operands, a `measured`
+card whose head equals the finding row head it replaces, and a `detail` card
+absent by default and present under `--all`.
+
+Threshold-boundary evidence — a `god_file` at each arm of its rule with one unit
+either side of each threshold, a `hub` at the degree boundary and at the exact
+median multiple — SHALL be pure policy tests beside the rules rather than
+generated repository fixtures. A boundary is a property of the rule, and a
+fixture that pins one is a repository built to hold a number: it states the
+threshold twice, moves whenever review moves the constant, and proves nothing
+the pure test does not prove more directly. The black-box obligation for those
+patterns is presence, not the boundary.
 
 Evidence SHALL prove the ranked order across patterns, that no finding is
 claimed by two cards, that no retained finding is claimed by none, and that

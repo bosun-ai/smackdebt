@@ -59,7 +59,7 @@ pub use hotspot::{DEFAULT_MINIMUM_TOUCHES, FileDebt, Hotspot, HotspotPolicy};
 pub use instability::instability;
 pub use orphan::{ENTRY_FILENAMES, OrphanCandidate, OrphanFile, is_entry_filename, orphan_files};
 pub use problem::{
-    BROAD_RATED_UNITS, CONCENTRATED_HIGH_FINDINGS, ClaimedFinding, GOD_FILE_FAN_OUT, HUB_DEGREE,
+    BROAD_DEBT_UNITS, CONCENTRATED_HIGH_FINDINGS, ClaimedFinding, GOD_FILE_FAN_OUT, HUB_DEGREE,
     HUB_MEDIAN_MULTIPLE, ProblemAnchor, ProblemCard, ProblemEvidence, ProblemId, ProblemInput,
     ProblemPattern, ProblemPolicy, ProblemRank, ProblemVisibility, cluster_problems,
     duplicate_claim,
