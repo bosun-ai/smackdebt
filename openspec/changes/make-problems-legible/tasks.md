@@ -31,12 +31,12 @@
 
 ## 5. The problem section and the one-screen budget
 
-- [ ] 5.1 Replace the codebase finding, architecture, and history sections with one problem section built from the ranked table filtered by anchor, keeping the diff sections unchanged.
-- [ ] 5.2 Add the exact human name per pattern and the exact wording per evidence kind, with correct singular and plural form, reusing the existing row and stacked-witness machinery.
-- [ ] 5.3 Implement the slot budget and its ladder, `--top N` as cards selecting the rung `N` selects, `--all` as every card with complete evidence including the `detail` ones, and a file scope as complete evidence without the ladder.
-- [ ] 5.4 Add evidence that a directory-scope default fits the budget, that the view the `next:` line proposes fits it, that `--top 10` shows ten cards, and that one invocation states the same cards at 50 and at 120 columns.
-- [ ] 5.5 Add generated fixtures and exact acceptance for each frozen pattern, including one file with three High findings producing one card and one card per strongly connected component.
-- [ ] 5.6 Regenerate every affected terminal snapshot case by case, never as a batch, keeping the fifty-column display-width audit passing.
+- [x] 5.1 Replace the codebase finding, architecture, and history sections with one problem section built from the ranked table filtered by anchor, keeping the diff sections unchanged.
+- [x] 5.2 Add the exact human name per pattern and the exact wording per evidence kind, with correct singular and plural form, reusing the existing row and stacked-witness machinery.
+- [x] 5.3 Implement the slot budget and its ladder, `--top N` as cards selecting the rung `N` selects, `--all` as every card with complete evidence including the `detail` ones, and a file scope as complete evidence without the ladder.
+- [x] 5.4 Add evidence that a directory-scope default fits the budget, that the view the `next:` line proposes fits it, that `--top 10` shows ten cards, and that one invocation states the same cards at 50 and at 120 columns.
+- [x] 5.5 Add generated fixtures and exact acceptance for each frozen pattern, including one file with three High findings producing one card and one card per strongly connected component.
+- [x] 5.6 Regenerate every affected terminal snapshot case by case, never as a batch, keeping the fifty-column display-width audit passing.
 
 ## 6. The repository frame
 

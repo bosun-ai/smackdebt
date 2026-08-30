@@ -3,19 +3,21 @@ smackdebt · repository root
 0 high · 0 watch · 7 checked
 worst: app/main.js — package dependency cycle
 
-ARCHITECTURE
-  high package dependency cycle
+PROBLEMS
+  high circular dependency · app/main.js
+        2 files in the cycle
         app/main.js
         → core/main.js
         → app/main.js
-  watch file dependency cycle
+  watch circular dependency · app/choice.js
+        2 files in the cycle
         app/choice.js
         → app/helper.js
         → app/choice.js
-  app/main.js:2 → ./choice · matched more than one file
-  app/main.js:5 → require(moduleName) · could not be matched
 
 WARNINGS
   warning History is unavailable.
   warning 2 imports could not be followed
         1 named nothing in the repository · 1 matched more than one file
+  app/main.js:2 → ./choice · matched more than one file
+  app/main.js:5 → require(moduleName) · could not be matched

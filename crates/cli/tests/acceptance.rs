@@ -780,15 +780,18 @@ fn long_fact_families_keep_their_meaning_at_fifty_columns() {
     );
     let terminal = String::from_utf8(output.stdout).unwrap();
     assert_narrow(&terminal, 50);
-    for fact in ["method · test", "statements 56", "2 commits"] {
+    for fact in ["method · test", "statements 56"] {
         assert!(terminal.contains(fact), "missing {fact}: {terminal}");
     }
     let lines = terminal.lines().collect::<Vec<_>>();
-    let cycle = lines
+    assert!(terminal.contains("high circular dependency"), "{terminal}");
+    // The card states its member count first, then the witness step by step,
+    // and a narrow width stacks a long path over several lines.
+    let members = lines
         .iter()
-        .position(|line| line.contains("package dependency cycle"))
-        .unwrap();
-    let witness = lines[cycle + 1..]
+        .position(|line| line.trim().ends_with(" in the cycle"))
+        .unwrap_or_else(|| panic!("{terminal}"));
+    let witness = lines[members + 1..]
         .iter()
         .take_while(|line| line.starts_with("        "))
         .map(|line| line.trim().trim_start_matches("→ ").to_owned())
@@ -874,7 +877,10 @@ fn architecture_path_drill_shows_findings_without_edge_rows() {
     // through the cycle it belongs to, never as a row of its own.
     assert!(!text.contains("core/main.js → app/main.js"), "{text}");
     assert!(!text.contains("app/main.js → core/main.js"), "{text}");
-    assert!(text.contains("high package dependency cycle"), "{text}");
+    assert!(
+        text.contains("high circular dependency · app/main.js"),
+        "{text}"
+    );
     assert!(text.contains("        → core/main.js"), "{text}");
     assert!(text.contains("2 imports could not be followed"), "{text}");
     assert!(!text.contains("native/src/helper.rs"));
@@ -956,7 +962,7 @@ fn diff_and_path_views_state_findings_without_current_edges() {
         );
         assert!(!terminal.contains(" · 2 imports"), "{terminal}");
         assert!(
-            terminal.contains("high package dependency cycle"),
+            terminal.contains("high circular dependency · app/main.js"),
             "{terminal}"
         );
     }
@@ -1004,6 +1010,9 @@ fn unresolved_and_ambiguous_relations_reach_a_file_scope_and_all_only() {
         let grouped =
             String::from_utf8(run_in(project.path(), [scope, "--color", "never"])).unwrap();
         assert!(!grouped.contains("\nARCHITECTURE\n"), "{grouped}");
+        // The grouped sentence is the whole terminal presence of those
+        // imports, so the section states it and nothing per file.
+        assert!(grouped.contains("\nWARNINGS\n"), "{grouped}");
         assert!(grouped.contains(sentence), "{grouped}");
         for row in [
             "app/main.js:1 → ./choice",
@@ -1043,8 +1052,11 @@ fn unresolved_and_ambiguous_relations_reach_a_file_scope_and_all_only() {
         );
         let terminal = String::from_utf8(output.stdout).unwrap();
         assert_no_dependency_edge_rows(&terminal, &format!("case {case}"));
+        // A per-import row is diagnostic detail, so it joins the grouped
+        // sentence it explains rather than a debt section.
+        assert!(terminal.contains("\nWARNINGS\n"), "case {case}: {terminal}");
         assert!(
-            terminal.contains("\nARCHITECTURE\n"),
+            !terminal.contains("\nARCHITECTURE\n"),
             "case {case}: {terminal}"
         );
         // References outside the repository are not debt, so no external row
@@ -1252,7 +1264,9 @@ fn evolutionary_analysis_is_exact_private_and_deterministic() {
     let terminal_text = String::from_utf8(serial_terminal.clone()).unwrap();
     assert_eq!(
         terminal_text
-            .matches("a ↔ b changed together in 3 of 6 commits · 50% · no code dependency")
+            .matches(
+                "  watch changes together · a ↔ b\n        changed together in 3 of 6 commits · 50% · no code dependency\n"
+            )
             .count(),
         1
     );
@@ -1335,15 +1349,96 @@ fn an_indirect_dependency_path_is_named_without_suppressing_the_finding() {
     // intermediate on the path.
     assert!(
         terminal.contains(
-            "watch a ↔ c changed together in 4 of 4 commits · 100% · no direct dependency · linked via b"
+            "  watch changes together · a ↔ c\n        changed together in 4 of 4 commits · 100% · no direct dependency · linked via b\n"
         ),
         "{terminal}"
     );
     assert!(!terminal.contains("no code dependency"), "{terminal}");
 }
 
+/// Every frozen pattern, every anchor kind, and every evidence kind reaches a
+/// committed human view and a committed machine view together.
 #[test]
-fn default_history_snapshot_orders_strongest_actionable_findings_first() {
+fn every_problem_pattern_reaches_a_committed_terminal_and_machine_view() {
+    let project = problem_pattern_fixture();
+    let terminal = run_in(
+        project.path(),
+        [
+            "--all",
+            "--jobs",
+            "1",
+            "--color",
+            "never",
+            "--history",
+            "36500d",
+        ],
+    );
+    assert_snapshot(
+        "problem-patterns.terminal.txt",
+        &terminal,
+        include_bytes!("snapshots/problem-patterns.terminal.txt"),
+    );
+    let json = run_in(
+        project.path(),
+        ["--json", "--jobs", "1", "--history", "36500d"],
+    );
+    assert_snapshot(
+        "problem-patterns.json",
+        &json,
+        include_bytes!("snapshots/problem-patterns.json"),
+    );
+    let report: serde_json::Value = serde_json::from_slice(&json).unwrap();
+    validate_schema(&report);
+    assert_index_integrity(&report);
+    let cards = report["problems"].as_array().unwrap();
+    let value = |card: &serde_json::Value, key: &str| card[key].as_str().unwrap().to_owned();
+    let patterns: Vec<String> = cards.iter().map(|card| value(card, "pattern")).collect();
+    for pattern in ["god_file", "hub", "hot_mess", "bus_risk", "measured"] {
+        assert!(patterns.contains(&pattern.to_owned()), "{patterns:?}");
+    }
+    let anchors: Vec<String> = cards
+        .iter()
+        .map(|card| value(&card["anchor"], "kind"))
+        .collect();
+    assert!(anchors.contains(&"package".to_owned()), "{anchors:?}");
+    let evidence: Vec<String> = cards
+        .iter()
+        .flat_map(|card| card["evidence"].as_array().unwrap())
+        .map(|fact| value(fact, "kind"))
+        .collect();
+    for kind in ["fan_in", "fan_out", "hot", "rated_units", "size_findings"] {
+        assert!(evidence.contains(&kind.to_owned()), "{evidence:?}");
+    }
+
+    let text = String::from_utf8(terminal).unwrap();
+    for head in [
+        "  high does too much · god/god.js\n",
+        "  watch everything depends on this · hub/hub.js\n",
+        "  high hot and complex · hot/hot.js\n",
+        "  watch one author · hot\n",
+    ] {
+        assert!(text.contains(head), "{head}: {text}");
+    }
+    for fact in [
+        "        10 files import this\n",
+        "        imports 10 files\n",
+        "        hot (11 commits)\n",
+        "        one contributor made 11 of 11 commits\n",
+    ] {
+        assert!(text.contains(fact), "{fact}: {text}");
+    }
+    // A size finding states its subject and its measured value.
+    assert!(
+        text.lines()
+            .any(|line| line.starts_with("        file · ") && line.ends_with(" lines")),
+        "{text}"
+    );
+    // Every rated unit total reaches a reader with a noun that agrees.
+    assert!(text.contains(" rated units\n"), "{text}");
+}
+
+#[test]
+fn every_actionable_coupling_reaches_a_card_in_the_problem_rank() {
     let project = history_strength_order_fixture();
     let json = run_in(project.path(), ["--json", "--history", "36500d"]);
     let report: serde_json::Value = serde_json::from_slice(&json).unwrap();
@@ -1371,11 +1466,16 @@ fn default_history_snapshot_orders_strongest_actionable_findings_first() {
         include_bytes!("snapshots/history-strength-order.terminal.txt"),
     );
     let terminal = String::from_utf8(terminal).unwrap();
-    let strongest = terminal.find("b ↔ c").unwrap();
-    let second = terminal.find("c ↔ d").unwrap();
-    let third = terminal.find("d ↔ e").unwrap();
-    assert!(strongest < second && second < third, "{terminal}");
-    assert!(!terminal.contains("a ↔ b"), "{terminal}");
+    // Every pair is a card ranked against every other problem, so the
+    // section-local limit that hid the fourth pair is gone. The four cards
+    // tie on every rank key before the anchor, so the anchor package orders
+    // them.
+    let mut previous = 0;
+    for pair in ["a ↔ b", "b ↔ c", "c ↔ d", "d ↔ e"] {
+        let at = terminal.find(pair).unwrap_or_else(|| panic!("{terminal}"));
+        assert!(at > previous, "{pair}: {terminal}");
+        previous = at;
+    }
 }
 
 #[test]
@@ -1648,19 +1748,19 @@ fn fixture_and_generated_history_stays_descriptive_without_findings() {
         ["--color", "never", "--history", "36500d"],
     ))
     .unwrap();
-    assert!(!default.contains("a ↔ b change together"));
-    assert!(!default.contains("a ↔ c change together"));
+    assert!(!default.contains("a ↔ b"), "{default}");
+    assert!(!default.contains("a ↔ c"), "{default}");
+    // Codebase debt is problem cards, and only an actionable finding makes
+    // one, so a pair a fixture or generated role explains has no card at any
+    // detail level and stays a complete row in the machine report.
     let detailed = String::from_utf8(run_in(
         project.path(),
         ["--all", "--color", "never", "--history", "36500d"],
     ))
     .unwrap();
-    assert!(
-        detailed.contains("a ↔ b changed together in 3 of 3 commits · 100% · no code dependency")
-    );
-    assert!(
-        detailed.contains("a ↔ c changed together in 3 of 3 commits · 100% · no code dependency")
-    );
+    assert!(!detailed.contains("changes together"), "{detailed}");
+    assert!(!detailed.contains("a ↔ b"), "{detailed}");
+    assert!(!detailed.contains("a ↔ c"), "{detailed}");
 }
 
 #[test]
@@ -1769,8 +1869,9 @@ fn generated_history_cannot_change_eligible_history_or_concentration() {
     assert!(!detailed.contains("a · 8 commits"), "{detailed}");
     assert!(!detailed.contains("shared commits"));
     assert!(
-        detailed
-            .contains("watch a ↔ b changed together in 3 of 3 commits · 100% · no code dependency"),
+        detailed.contains(
+            "  watch changes together · a ↔ b\n        changed together in 3 of 3 commits · 100% · no code dependency\n"
+        ),
         "{detailed}"
     );
 }
@@ -1863,7 +1964,7 @@ fn weak_coupling_stays_in_json_only() {
 }
 
 #[test]
-fn selected_package_keeps_its_coupling_and_omits_unrelated_history() {
+fn a_selected_package_states_actionable_history_only() {
     let project = evolutionary_fixture();
     fs::write(
         project.path().join("b/main.js"),
@@ -1881,12 +1982,19 @@ fn selected_package_keeps_its_coupling_and_omits_unrelated_history() {
     );
     let text = String::from_utf8(terminal).unwrap();
     assert!(!text.contains("a/main.js · 5 commits"), "{text}");
-    assert!(
-        text.contains("a ↔ b changed together in 3 of 6 commits · 50% · code dependency exists"),
-        "{text}"
-    );
+    // Codebase debt is problem cards, and a pair a code dependency explains
+    // is not a finding, so nothing states it here; the complete pair table
+    // stays in the machine report.
+    assert!(!text.contains("a ↔ b"), "{text}");
     assert!(!text.contains("c/main.js"));
     assert!(!text.contains("  c ·"));
+    let report: serde_json::Value = serde_json::from_slice(&run_in(
+        project.path(),
+        ["a", "--json", "--history", "36500d"],
+    ))
+    .unwrap();
+    assert_eq!(report["change_coupling"].as_array().unwrap().len(), 1);
+    assert_eq!(report["change_coupling"][0]["shared_commits"], 3);
 }
 
 #[test]
@@ -2907,6 +3015,91 @@ fn evolutionary_fixture() -> tempfile::TempDir {
         "bob@example.invalid",
         "b only",
     );
+    project
+}
+
+/// A repository holding one file per frozen file pattern plus the history one
+/// package needs to concentrate its knowledge.
+///
+/// Package `god` does too much and is broad both ways, package `hub` is one
+/// widely imported file beside the nine that import it, and package `hot`
+/// carries every commit after the first, which makes its one file a hotspot
+/// and its package a single-author package.
+fn problem_pattern_fixture() -> tempfile::TempDir {
+    let project = tempfile::tempdir().unwrap();
+    git(project.path(), ["init", "-b", "main"]);
+    fs::write(
+        project.path().join(".smackdebt.toml"),
+        "[thresholds]\ncognitive = { watch = 2, high = 4 }\ncyclomatic = { watch = 2, high = 4 }\nfunction_lines = { watch = 20, high = 40 }\nfile_lines = { watch = 30, high = 200 }\n\n[hotspots]\nminimum_touches = 3\n",
+    )
+    .unwrap();
+    for package in ["god", "hub", "hot"] {
+        fs::create_dir_all(project.path().join(package)).unwrap();
+        fs::write(
+            project.path().join(package).join("package.json"),
+            format!("{{\"name\":\"{package}\",\"private\":true}}\n"),
+        )
+        .unwrap();
+    }
+    // One widely imported file with one Watch unit, and the nine files of its
+    // own package that import it.
+    fs::write(
+        project.path().join("hub/hub.js"),
+        "export function pick(value) {\n  if (value) {\n    return 1;\n  }\n  return 0;\n}\n",
+    )
+    .unwrap();
+    for index in 0..9 {
+        fs::write(
+            project.path().join(format!("hub/user-{index}.js")),
+            format!(
+                "import {{ pick }} from './hub';\n\nexport const user{index} = pick({index});\n"
+            ),
+        )
+        .unwrap();
+    }
+    // Ten imports make the concentrated file broad without its length.
+    let mut god = (0..9)
+        .map(|index| format!("import user{index} from '../hub/user-{index}';\n"))
+        .collect::<String>();
+    god.push_str("import { pick } from '../hub/hub';\n\n");
+    for name in ["first", "second", "third"] {
+        god.push_str(&format!(
+            "export function {name}(value) {{\n  if (value > 1) {{\n    if (value > 2) {{\n      if (value > 3) {{\n        return pick(value);\n      }}\n    }}\n  }}\n  return 0;\n}}\n\n"
+        ));
+    }
+    god.push_str(
+        "export const total = user0 + user1 + user2 + user3 + user4 + user5 + user6 + user7 + user8;\n",
+    );
+    fs::write(project.path().join("god/god.js"), god).unwrap();
+    // One ordinary file no named pattern claims, which the fallback measures.
+    fs::write(
+        project.path().join("god/plain.js"),
+        "export function plain(value) {\n  if (value) {\n    return 2;\n  }\n  return 0;\n}\n",
+    )
+    .unwrap();
+    let churn = |version: u32| {
+        format!(
+            "export function churn(value) {{\n  if (value > {version}) {{\n    if (value > 2) {{\n      if (value > 3) {{\n        return {version};\n      }}\n    }}\n  }}\n  return 0;\n}}\n"
+        )
+    };
+    fs::write(project.path().join("hot/hot.js"), churn(1)).unwrap();
+    commit_as(
+        project.path(),
+        "Pattern Test",
+        "pattern@example.invalid",
+        "initial",
+    );
+    // Every later commit touches one package only, so nothing couples and one
+    // author owns that package's whole history.
+    for version in 2..=11 {
+        fs::write(project.path().join("hot/hot.js"), churn(version)).unwrap();
+        commit_as(
+            project.path(),
+            "Pattern Test",
+            "pattern@example.invalid",
+            &format!("churn {version}"),
+        );
+    }
     project
 }
 

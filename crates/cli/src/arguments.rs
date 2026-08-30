@@ -67,7 +67,7 @@ pub(crate) struct Common {
     /// Show all useful terminal detail.
     #[arg(long)]
     pub(crate) all: bool,
-    /// Show up to this many findings.
+    /// Show up to this many problems or comparisons.
     #[arg(long, value_parser = parse_top, conflicts_with_all = ["json", "all"])]
     pub(crate) top: Option<usize>,
     /// Glyph color: auto, always, or never.

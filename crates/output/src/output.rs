@@ -8,11 +8,14 @@ use std::path::{Path, PathBuf};
 
 use anstyle::{Ansi256Color, AnsiColor, Style};
 use smackdebt_analysis::{
-    ArchitectureComparisonKind, ArchitectureFindingKind, CodebaseTier, Comparison,
-    ComparisonDirection, ComparisonKind, CouplingLink, DebtDiffSelection, DebtFamily, Diagnostic,
-    DiagnosticKind, DiffTier, FileId, FileRecord, Finding, Instability, Language, Measurements,
-    Rating, Report, ReportMode, ResolutionIssueKind, Scope, ScopeId, ScopeKind, Signal, SourceRole,
-    SourceTrust, UnitKind, Verdict, instability, qualifies_for_finding,
+    ArchitectureComparisonKind, ArchitectureFindingId, CodebaseTier, Comparison,
+    ComparisonDirection, ComparisonKind, CouplingLink, DebtDiffSelection, DebtFamily,
+    DependencyEdgeId, Diagnostic, DiagnosticKind, DiffTier, EvolutionaryFindingId, FileId,
+    FileRecord, Finding, FindingId, Instability, KnowledgeConcentrationFindingId, Language,
+    Measurements, PackageId, ProblemAnchor, ProblemCard, ProblemEvidence, ProblemPattern,
+    ProblemVisibility, Rating, Report, ReportMode, ResolutionIssueKind, Scope, ScopeId, ScopeKind,
+    Signal, SizeFinding, SizeFindingId, SourceRole, SourceTrust, StableDependencyFindingId,
+    UnitKind, Verdict, instability, qualifies_for_finding,
 };
 use unicode_width::{UnicodeWidthChar, UnicodeWidthStr};
 
@@ -321,11 +324,14 @@ struct Presentation {
     scope_label: String,
     verdict: Verdict,
     areas: Section,
+    /// Codebase debt detail, which is one ranked section of named problems.
+    problems: Section,
+    /// Diff debt detail, which keeps its three sections this round.
     findings: Section,
     architecture: Section,
     history: Section,
     warnings: Section,
-    /// Per-file diagnostic context, kept for `--all` and path views.
+    /// Per-file diagnostic context, kept for `--all` and a file scope.
     warning_detail: Vec<String>,
     next: Option<String>,
     /// Whether a clean diff suppresses every section after the verdict.
@@ -348,6 +354,7 @@ impl Presentation {
                 scope_label: terminal_path(".").to_owned(),
                 verdict: Verdict::default(),
                 areas: Section::new("AREAS"),
+                problems: Section::new("PROBLEMS"),
                 findings: Section::new("FINDINGS"),
                 architecture: Section::new("ARCHITECTURE"),
                 history: Section::new("HISTORY"),
@@ -376,14 +383,28 @@ impl Presentation {
             && verdict.diff_tier() == Some(DiffTier::NoDebtChange);
 
         let areas = area_rows(report, displayed);
-        let findings = match report.mode() {
-            ReportMode::Codebase => codebase_finding_rows(report, displayed, all, top),
-            ReportMode::Diff => diff_finding_rows(report, displayed, all, top, selection),
+        let codebase = report.mode() == ReportMode::Codebase;
+        // Codebase debt is one ranked section of named problems; a diff keeps
+        // its three sections this round.
+        let problems = if codebase {
+            problem_rows(report, displayed, selected, all, top)
+        } else {
+            Section::new("PROBLEMS")
         };
-        let architecture =
-            architecture_rows(report, selected, all, file_detail, verdict.selection());
-        let history = history_rows(report, selected, detail, verdict.selection());
-        let (warnings, warning_detail) = warning_rows(report, selected, detail);
+        let (findings, architecture, history) = if codebase {
+            (
+                Section::new("FINDINGS"),
+                Section::new("ARCHITECTURE"),
+                Section::new("HISTORY"),
+            )
+        } else {
+            (
+                diff_finding_rows(report, displayed, all, top, selection),
+                diff_architecture_rows(report, verdict.selection()),
+                history_rows(report, selected, detail, verdict.selection()),
+            )
+        };
+        let (warnings, warning_detail) = warning_rows(report, selected, file_detail);
         let next = (report.mode() == ReportMode::Codebase)
             .then(|| drill_path_from_visible(report, selected, areas.first()))
             .flatten()
@@ -402,6 +423,7 @@ impl Presentation {
             scope_label: terminal_path(selected.name()).to_owned(),
             verdict,
             areas: area_section,
+            problems,
             findings,
             architecture,
             history,
@@ -477,83 +499,479 @@ fn finding_limit(top: Option<NonZeroUsize>) -> usize {
     top.map_or(3, NonZeroUsize::get)
 }
 
-fn codebase_finding_rows(
+/// The slots one codebase view spends on its problem section.
+///
+/// A card costs one slot plus one slot per shown evidence line, so the budget
+/// bounds what a view states rather than how many lines a width renders it on.
+///
+/// This is a proposed value under review.
+const SCREEN_BUDGET: usize = 24;
+
+/// The card counts the budget is spent through, in the order they are tried.
+///
+/// A scope with few problems shows each in depth and a scope with many shows
+/// more of them with less evidence each.
+///
+/// These are proposed values under review.
+const PROBLEM_LADDER: [usize; 4] = [6, 8, 12, 24];
+
+/// The rung a scope holding more cards than any rung falls back to, which is
+/// also the rung that cuts the table at the budget.
+const LAST_RUNG: usize = PROBLEM_LADDER[PROBLEM_LADDER.len() - 1];
+
+/// The evidence lines a rung of `cards` allows.
+///
+/// Each card pays one slot for its head, so what is left of the budget is the
+/// depth every card of that rung can afford; every rung therefore costs
+/// exactly [`SCREEN_BUDGET`] by construction.
+const fn evidence_allowance(cards: usize) -> usize {
+    SCREEN_BUDGET / cards - 1
+}
+
+/// The first rung whose card count is at least `cards`, with its allowance.
+fn ladder_rung(cards: usize) -> (usize, usize) {
+    let limit = PROBLEM_LADDER
+        .into_iter()
+        .find(|limit| *limit >= cards)
+        .unwrap_or(LAST_RUNG);
+    (limit, evidence_allowance(limit))
+}
+
+/// How much of the ranked problem table one view shows.
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+struct ProblemDetail {
+    cards: usize,
+    evidence: usize,
+}
+
+impl ProblemDetail {
+    /// Resolves the detail level from the request and the cards in scope.
+    fn resolve(all: bool, file_scope: bool, top: Option<NonZeroUsize>, cards: usize) -> Self {
+        // `--top` names how many cards a view shows; `--all` and a selected
+        // file show every card in scope, and the budget otherwise cuts the
+        // table at its last rung.
+        let shown = match top {
+            Some(top) => top.get().min(cards),
+            None if all || file_scope => cards,
+            None => cards.min(ladder_rung(cards).0),
+        };
+        // `--all` and a selected file both ask for complete evidence, because
+        // drilling to a file is itself a request for detail; every other view
+        // buys breadth with the depth its own rung allows.
+        let evidence = if all || file_scope {
+            usize::MAX
+        } else {
+            ladder_rung(top.map_or(cards, NonZeroUsize::get)).1
+        };
+        Self {
+            cards: shown,
+            evidence,
+        }
+    }
+}
+
+/// The ranked problem cards the displayed scope holds, cut to the budget.
+///
+/// The table is ordered once by analysis, so this filters and truncates it and
+/// never sorts.
+fn problem_rows(
     report: &Report,
     displayed: &Scope,
+    selected: &Scope,
     all: bool,
     top: Option<NonZeroUsize>,
 ) -> Section {
-    let mut section = Section::new("FINDINGS");
-    let mut findings: Vec<&Finding> = displayed
-        .findings()
+    let mut section = Section::new("PROBLEMS");
+    let cards: Vec<&ProblemCard> = report
+        .problems()
         .iter()
-        .map(|id| &report.findings()[id.index()])
+        .filter(|card| card_belongs_to_scope(report, card, displayed))
+        .filter(|card| shows_card(report, card, selected, all))
         .collect();
-    if !all {
-        findings.retain(|finding| finding.affects_verdict());
-    }
-    findings.sort_by(|left, right| finding_order(report, left, right));
-    if !all && displayed.kind() != ScopeKind::File {
-        findings.truncate(finding_limit(top));
-    }
-    for finding in findings {
-        let file = &report.files()[finding.file().index()];
-        let mut facts: Vec<String> = finding
-            .assessment()
-            .signals()
-            .iter()
-            .filter(|signal| signal.rating() != Rating::Healthy)
-            // Cyclomatic complexity starts at one, so a value of one states
-            // nothing and never reaches a reader.
-            .filter(|signal| signal.signal() != Signal::CyclomaticComplexity || signal.value() != 1)
-            .map(|signal| format!("{} {}", signal_name(signal.signal()), signal.value()))
-            .collect();
-        if let Some(touches) = hotspot_touches(report, finding.file()) {
-            facts.push(format!(
-                "hot ({})",
-                Counted::new(touches as usize, "commit", "commits")
-            ));
-        } else if let Some(activity) = file.activity().filter(|activity| activity.touches() > 0) {
-            facts.push(Counted::new(activity.touches() as usize, "commit", "commits").to_string());
-        }
-        section.rows.push(
-            Row::new(
-                Some(Word::rating(finding.assessment().rating())),
-                format!(
-                    "{} · {}{}",
-                    unit_identity(finding.identity(), file.path()),
-                    unit_kind_label(finding.identity().kind()),
-                    evidence_suffix(Some(finding.role()), Some(finding.trust()))
-                ),
-            )
-            .with_location(format!("{}:{}", file.path(), finding.span().start_line()))
-            .with_facts(facts),
-        );
-    }
-    if all {
-        section.rows.extend(size_rows(report, displayed));
-    }
+    let detail = ProblemDetail::resolve(all, selected.kind() == ScopeKind::File, top, cards.len());
+    section.rows = cards
+        .into_iter()
+        .take(detail.cards)
+        .map(|card| problem_row(report, card, detail.evidence))
+        .collect();
     section
 }
 
-/// Rated file and container size findings, which measure code the unit
-/// signals cannot see and therefore stay out of the ranked default view.
-fn size_rows(report: &Report, displayed: &Scope) -> Vec<Row> {
-    report
-        .size_findings()
+/// Whether the current detail level shows this card.
+///
+/// A `detail` card is removed from a view rather than moved inside it, so the
+/// cards that remain keep the order the problem rank gave them.
+fn shows_card(report: &Report, card: &ProblemCard, selected: &Scope, all: bool) -> bool {
+    all || card.visibility() == ProblemVisibility::Default
+        || anchor_is_scope(report, card.anchor(), selected)
+}
+
+/// Whether a card's anchor is the selected scope itself, which is the one
+/// place a `detail` card reaches a default view.
+fn anchor_is_scope(report: &Report, anchor: &ProblemAnchor, selected: &Scope) -> bool {
+    match anchor {
+        ProblemAnchor::File(file) => {
+            selected.kind() == ScopeKind::File && file_belongs_to_scope(report, *file, selected)
+        }
+        ProblemAnchor::Package(package) => report
+            .packages()
+            .get(package.index())
+            .is_some_and(|record| record.scope() == selected.id()),
+        ProblemAnchor::Files(_) | ProblemAnchor::PackagePair(..) => false,
+    }
+}
+
+/// Whether a card belongs to a scope, which its anchor decides.
+fn card_belongs_to_scope(report: &Report, card: &ProblemCard, scope: &Scope) -> bool {
+    match card.anchor() {
+        ProblemAnchor::File(file) => file_belongs_to_scope(report, *file, scope),
+        ProblemAnchor::Files(files) => files
+            .iter()
+            .any(|file| file_belongs_to_scope(report, *file, scope)),
+        ProblemAnchor::Package(package) => package_meets_scope(report, *package, scope),
+        ProblemAnchor::PackagePair(left, right) => {
+            package_meets_scope(report, *left, scope) || package_meets_scope(report, *right, scope)
+        }
+    }
+}
+
+/// Whether a package lies within the selected scope or contains it, which is
+/// how a package-anchored card reaches the views above and below its package.
+fn package_meets_scope(report: &Report, package: PackageId, scope: &Scope) -> bool {
+    let Some(record) = report.packages().get(package.index()) else {
+        return false;
+    };
+    scope_within(report, record.scope(), scope.id())
+        || scope_within(report, scope.id(), record.scope())
+}
+
+/// One card: its rating word, what it is, what it is about, then a prefix of
+/// the evidence analysis ordered.
+fn problem_row(report: &Report, card: &ProblemCard, evidence: usize) -> Row {
+    // A card claiming nothing carries no rating to state, and `watch` would
+    // misstate it.
+    let word = (card.rating() != Rating::Healthy).then(|| Word::rating(card.rating()));
+    // A `measured` card heads on its first fact, so that fact adds only what
+    // the head has not already stated: each fact reaches a reader once.
+    let headed = card.pattern() == ProblemPattern::Measured;
+    let stacked = card
+        .evidence()
         .iter()
-        .filter(|finding| file_belongs_to_scope(report, finding.file(), displayed))
-        .map(|finding| {
+        .take(evidence)
+        .enumerate()
+        .flat_map(|(index, fact)| evidence_lines(report, card, *fact, headed && index == 0))
+        .collect();
+    Row::new(word, problem_head(report, card)).with_stacked(stacked)
+}
+
+/// The human name of one pattern, which is presentation and never the frozen
+/// machine id.
+///
+/// A `measured` card has no pattern of its own: its head is the identity of
+/// the top finding it claimed, which is the head a finding row states.
+const fn pattern_name(pattern: ProblemPattern) -> Option<&'static str> {
+    match pattern {
+        ProblemPattern::GodFile => Some("does too much"),
+        ProblemPattern::Hub => Some("everything depends on this"),
+        ProblemPattern::Tangle => Some("circular dependency"),
+        ProblemPattern::HotMess => Some("hot and complex"),
+        ProblemPattern::ShotgunPair => Some("changes together"),
+        ProblemPattern::BusRisk => Some("one author"),
+        ProblemPattern::UnstableDependency => Some("depends on less stable code"),
+        ProblemPattern::Measured => None,
+    }
+}
+
+fn problem_head(report: &Report, card: &ProblemCard) -> String {
+    let anchor = anchor_label(report, card);
+    match pattern_name(card.pattern()) {
+        Some(name) => format!("{name} · {anchor}"),
+        None => match measured_identity(report, card) {
+            Some(identity) => format!("{identity} · {anchor}"),
+            None => anchor,
+        },
+    }
+}
+
+/// The identity a `measured` card heads on, which is its top claimed finding.
+fn measured_identity(report: &Report, card: &ProblemCard) -> Option<String> {
+    match card.evidence().first()? {
+        ProblemEvidence::Finding(id) => {
+            let finding = report.findings().get(id.index())?;
             let path = report.files()[finding.file().index()].path();
-            let head = match finding.container() {
-                Some(container) => format!("{container} · container"),
-                None => format!("{path} · file"),
-            };
-            Row::new(Some(Word::rating(finding.rating())), head)
-                .with_location(path)
-                .with_fact(format!("{} lines", Grouped(finding.value() as usize)))
+            Some(format!(
+                "{} · {}{}",
+                unit_identity(finding.identity(), path),
+                unit_kind_label(finding.identity().kind()),
+                evidence_suffix(Some(finding.role()), Some(finding.trust()))
+            ))
+        }
+        ProblemEvidence::Size(id) => Some(size_subject(report.size_findings().get(id.index())?)),
+        _ => None,
+    }
+}
+
+/// What a size finding measures, which is a container or the file itself.
+fn size_subject(finding: &SizeFinding) -> String {
+    match finding.container() {
+        Some(container) => format!("{container} · container"),
+        None => "file".to_owned(),
+    }
+}
+
+/// The finding a card heads on when its head is a claimed finding, which is
+/// the one head that carries a span.
+fn head_finding<'a>(report: &'a Report, card: &ProblemCard) -> Option<&'a Finding> {
+    match (card.pattern(), card.evidence().first()) {
+        (ProblemPattern::Measured, Some(ProblemEvidence::Finding(id))) => {
+            report.findings().get(id.index())
+        }
+        _ => None,
+    }
+}
+
+/// What a card is about, written by the kind of its anchor.
+fn anchor_label(report: &Report, card: &ProblemCard) -> String {
+    match card.anchor() {
+        ProblemAnchor::File(file) => {
+            let path = report.files()[file.index()].path();
+            match head_finding(report, card) {
+                Some(finding) => format!("{path}:{}", finding.span().start_line()),
+                None => path.to_owned(),
+            }
+        }
+        ProblemAnchor::Files(files) => cycle_anchor(report, card, files),
+        ProblemAnchor::Package(package) => package_name(report, package.index())
+            .unwrap_or("?")
+            .to_owned(),
+        ProblemAnchor::PackagePair(left, right) => {
+            let left = package_name(report, left.index()).unwrap_or("?");
+            let right = package_name(report, right.index()).unwrap_or("?");
+            // One relationship is symmetric and the other is not, so each
+            // keeps the wording its family already accepted.
+            match card.pattern() {
+                ProblemPattern::UnstableDependency => format!("{left} → {right}"),
+                _ => format!("{left} ↔ {right}"),
+            }
+        }
+    }
+}
+
+/// A cycle's first witness path, which is the identity the worst-offender rule
+/// already names for a cycle.
+fn cycle_anchor(report: &Report, card: &ProblemCard, files: &[FileId]) -> String {
+    card.evidence()
+        .iter()
+        .find_map(|fact| match fact {
+            ProblemEvidence::Architecture(id) => report.architecture_findings().get(id.index()),
+            _ => None,
         })
+        .and_then(|finding| cycle_first_path(report, finding.witness_edges()))
+        .or_else(|| {
+            files
+                .iter()
+                .filter_map(|file| report.files().get(file.index()))
+                .map(FileRecord::path)
+                .min()
+        })
+        .unwrap_or("?")
+        .to_owned()
+}
+
+fn cycle_first_path<'a>(report: &'a Report, witness_edges: &[DependencyEdgeId]) -> Option<&'a str> {
+    let edge = report
+        .dependency_edges()
+        .get(witness_edges.first()?.index())?;
+    Some(report.files()[edge.source().index()].path())
+}
+
+/// One evidence item, stated in the words its kind owns.
+///
+/// Every kind states one line, except a cycle witness, which is one fact
+/// stated one step per line so it is never shortened with an ellipsis, and a
+/// fact the card's head already states, which adds only what is left.
+fn evidence_lines(
+    report: &Report,
+    card: &ProblemCard,
+    fact: ProblemEvidence,
+    headed: bool,
+) -> Vec<String> {
+    match fact {
+        ProblemEvidence::Finding(id) => finding_evidence(report, id, headed),
+        ProblemEvidence::Size(id) => size_evidence(report, id, headed),
+        ProblemEvidence::Architecture(id) => witness_evidence(report, id),
+        ProblemEvidence::StableDependency(id) => vec![stable_dependency_evidence(report, id)],
+        ProblemEvidence::Coupling(id) => vec![coupling_evidence(report, id)],
+        ProblemEvidence::Knowledge(id) => vec![knowledge_evidence(report, id)],
+        // The rest are integers the report already measured, so they need no
+        // finding table to be stated.
+        measured => counted_evidence(measured, anchor_is_hot(report, card))
+            .into_iter()
+            .collect(),
+    }
+}
+
+/// One integer fact, stated in the words its kind owns.
+///
+/// A fact that links a finding is stated from that finding instead and never
+/// reaches here.
+fn counted_evidence(fact: ProblemEvidence, hot: bool) -> Option<String> {
+    Some(match fact {
+        ProblemEvidence::FanIn(value) => fan_in_evidence(value),
+        ProblemEvidence::FanOut(value) => format!("imports {}", counted_files(value)),
+        ProblemEvidence::Hot(value) => heat_evidence(value, hot),
+        ProblemEvidence::RatedUnits(value) => {
+            Counted::new(value as usize, "rated unit", "rated units").to_string()
+        }
+        ProblemEvidence::Members(value) => format!("{} in the cycle", counted_files(value)),
+        _ => return None,
+    })
+}
+
+/// A count of files, which several evidence kinds state.
+const fn counted_files(value: u32) -> Counted {
+    Counted::new(value as usize, "file", "files")
+}
+
+/// The files that depend on the anchor, whose verb agrees with its count.
+fn fan_in_evidence(value: u32) -> String {
+    let verb = if value == 1 { "imports" } else { "import" };
+    format!("{} {verb} this", counted_files(value))
+}
+
+/// The cycle a card anchors, stated one step per line.
+fn witness_evidence(report: &Report, id: ArchitectureFindingId) -> Vec<String> {
+    report
+        .architecture_findings()
+        .get(id.index())
+        .map(|finding| cycle_witness_steps(report, finding.witness_edges()))
+        .unwrap_or_default()
+}
+
+/// Whether the anchor a touch count belongs to is a hotspot.
+///
+/// A file set carries the touch count of its hottest member, which the
+/// hotspot table is what produced.
+fn anchor_is_hot(report: &Report, card: &ProblemCard) -> bool {
+    match card.anchor() {
+        ProblemAnchor::File(file) => hotspot_touches(report, *file).is_some(),
+        _ => true,
+    }
+}
+
+/// A hot anchor states its heat; activity that is not a hotspot states its
+/// commits alone.
+fn heat_evidence(touches: u32, hot: bool) -> String {
+    let commits = Counted::new(touches as usize, "commit", "commits");
+    if hot {
+        format!("hot ({commits})")
+    } else {
+        commits.to_string()
+    }
+}
+
+/// One claimed finding: where it is, what kind of unit it measures, and the
+/// measurements that rated it.
+///
+/// A card whose head already names this finding states its measurements
+/// alone, and states nothing when policy rated it on no reportable value.
+fn finding_evidence(report: &Report, id: FindingId, headed: bool) -> Vec<String> {
+    let finding = &report.findings()[id.index()];
+    let measurements = finding_measurements(finding);
+    if headed {
+        return if measurements.is_empty() {
+            Vec::new()
+        } else {
+            vec![measurements.join(" · ")]
+        };
+    }
+    let file = &report.files()[finding.file().index()];
+    let mut facts = vec![
+        format!("{}:{}", file.path(), finding.span().start_line()),
+        unit_kind_label(finding.identity().kind()).to_owned(),
+    ];
+    facts.extend(evidence_facts(Some(finding.role()), Some(finding.trust())));
+    facts.extend(measurements);
+    vec![facts.join(" · ")]
+}
+
+/// The measurements one finding states, which are the signals policy rated.
+fn finding_measurements(finding: &Finding) -> Vec<String> {
+    finding
+        .assessment()
+        .signals()
+        .iter()
+        .filter(|signal| signal.rating() != Rating::Healthy)
+        // Cyclomatic complexity starts at one, so a value of one states
+        // nothing and never reaches a reader.
+        .filter(|signal| signal.signal() != Signal::CyclomaticComplexity || signal.value() != 1)
+        .map(|signal| format!("{} {}", signal_name(signal.signal()), signal.value()))
         .collect()
+}
+
+fn size_evidence(report: &Report, id: SizeFindingId, headed: bool) -> Vec<String> {
+    let finding = &report.size_findings()[id.index()];
+    let value = format!("{} lines", Grouped(finding.value() as usize));
+    vec![if headed {
+        value
+    } else {
+        format!("{} · {value}", size_subject(finding))
+    }]
+}
+
+fn stable_dependency_evidence(report: &Report, id: StableDependencyFindingId) -> String {
+    let finding = &report.stable_dependency_findings()[id.index()];
+    let evidence = finding.evidence();
+    let mut facts = Vec::new();
+    if let (Some(from), Some(to)) = (
+        package_instability(evidence.source()),
+        package_instability(evidence.target()),
+    ) {
+        facts.push(format!(
+            "instability {}/{} → {}/{}",
+            from.numerator(),
+            from.denominator(),
+            to.numerator(),
+            to.denominator()
+        ));
+    }
+    facts.push(Counted::new(evidence.references() as usize, "import", "imports").to_string());
+    facts.join(" · ")
+}
+
+fn coupling_evidence(report: &Report, id: EvolutionaryFindingId) -> String {
+    let pair = report.evolutionary_findings()[id.index()].coupling();
+    let mut facts = vec![
+        format!(
+            "changed together in {} of {} commits",
+            pair.shared_commits(),
+            pair.union_commits()
+        ),
+        format!("{}%", (pair.similarity() * 100.0).round() as u32),
+    ];
+    // The link is a recorded fact and informs wording only; the finding for an
+    // unexplained pair is created regardless of a path.
+    match report.coupling_link(pair.left(), pair.right()) {
+        CouplingLink::Direct => facts.push("code dependency exists".to_owned()),
+        CouplingLink::Indirect(via) => {
+            facts.push("no direct dependency".to_owned());
+            facts.push(format!(
+                "linked via {}",
+                package_name(report, via.index()).unwrap_or("?")
+            ));
+        }
+        CouplingLink::None => facts.push("no code dependency".to_owned()),
+    }
+    facts.join(" · ")
+}
+
+fn knowledge_evidence(report: &Report, id: KnowledgeConcentrationFindingId) -> String {
+    let concentration = report.knowledge_concentration_findings()[id.index()].concentration();
+    format!(
+        "one contributor made {} of {} commits",
+        Grouped(concentration.numerator() as usize),
+        Grouped(concentration.denominator() as usize)
+    )
 }
 
 fn diff_finding_rows(
@@ -685,70 +1103,35 @@ const fn changed_summary(kind: ComparisonKind) -> &'static str {
     }
 }
 
-fn architecture_rows(
-    report: &Report,
-    selected: &Scope,
-    all: bool,
-    file_detail: bool,
-    selection: &DebtDiffSelection,
-) -> Section {
+/// The cycle changes a diff moved, which is the only architecture movement
+/// that counts as debt.
+///
+/// Every other edge change is a graph fact the machine report keeps.
+fn diff_architecture_rows(report: &Report, selection: &DebtDiffSelection) -> Section {
     let mut section = Section::new("ARCHITECTURE");
-    match report.mode() {
-        ReportMode::Codebase => {
-            let mut findings = selected.architecture_findings().to_vec();
-            // The cap keeps the worst findings rather than the first ones a
-            // scope happened to collect. The sort is stable, so findings of one
-            // rating keep the deterministic order analysis gave them.
-            findings.sort_by_key(|id| Reverse(report.architecture_findings()[id.index()].rating()));
-            if !all {
-                findings.truncate(3);
-            }
-            for id in findings {
-                let finding = &report.architecture_findings()[id.index()];
-                section.rows.push(
-                    Row::new(
-                        Some(Word::rating(finding.rating())),
-                        architecture_finding_name(finding.kind()),
-                    )
-                    .with_stacked(cycle_witness_steps(report, finding.witness_edges())),
-                );
-            }
-            section
-                .rows
-                .extend(stable_dependency_rows(report, selected));
-        }
-        ReportMode::Diff => {
-            // Only the selected cycle changes move debt; every other edge
-            // change is context a path view or `--all` may still show.
-            for id in selection.architecture() {
-                let comparison = &report.architecture_comparisons()[id.index()];
-                let head = if comparison.kind() == ArchitectureComparisonKind::CycleIntroduced {
-                    "package dependency cycle introduced"
+    for id in selection.architecture() {
+        let comparison = &report.architecture_comparisons()[id.index()];
+        let head = if comparison.kind() == ArchitectureComparisonKind::CycleIntroduced {
+            "package dependency cycle introduced"
+        } else {
+            "package dependency cycle removed"
+        };
+        let witness = comparison
+            .witness()
+            .iter()
+            .enumerate()
+            .map(|(index, package)| {
+                let name = package_name(report, package.index()).unwrap_or("?");
+                if index == 0 {
+                    name.to_owned()
                 } else {
-                    "package dependency cycle removed"
-                };
-                let witness = comparison
-                    .witness()
-                    .iter()
-                    .enumerate()
-                    .map(|(index, package)| {
-                        let name = package_name(report, package.index()).unwrap_or("?");
-                        if index == 0 {
-                            name.to_owned()
-                        } else {
-                            format!("→ {name}")
-                        }
-                    })
-                    .collect();
-                section.rows.push(
-                    Row::new(Some(Word::direction(comparison.direction())), head)
-                        .with_stacked(witness),
-                );
-            }
-        }
-    }
-    if file_detail {
-        section.rows.extend(unmatched_import_rows(report, selected));
+                    format!("→ {name}")
+                }
+            })
+            .collect();
+        section.rows.push(
+            Row::new(Some(Word::direction(comparison.direction())), head).with_stacked(witness),
+        );
     }
     section
 }
@@ -777,48 +1160,6 @@ fn cycle_witness_steps(
         }
     }
     steps
-}
-
-fn stable_dependency_rows(report: &Report, selected: &Scope) -> Vec<Row> {
-    report
-        .stable_dependency_findings()
-        .iter()
-        .filter(|finding| {
-            finding
-                .witness_edges()
-                .iter()
-                .filter_map(|id| report.dependency_edges().get(id.index()))
-                .any(|edge| {
-                    file_belongs_to_scope(report, edge.source(), selected)
-                        || file_belongs_to_scope(report, edge.target(), selected)
-                })
-        })
-        .map(|finding| {
-            let evidence = finding.evidence();
-            let source = package_name(report, finding.source().index()).unwrap_or("?");
-            let target = package_name(report, finding.target().index()).unwrap_or("?");
-            let mut row = Row::new(
-                Some(Word::rating(finding.rating())),
-                format!("{source} → {target}"),
-            )
-            .with_fact("depends on less stable code");
-            if let (Some(from), Some(to)) = (
-                package_instability(evidence.source()),
-                package_instability(evidence.target()),
-            ) {
-                row = row.with_fact(format!(
-                    "instability {}/{} → {}/{}",
-                    from.numerator(),
-                    from.denominator(),
-                    to.numerator(),
-                    to.denominator()
-                ));
-            }
-            row.with_fact(
-                Counted::new(evidence.references() as usize, "import", "imports").to_string(),
-            )
-        })
-        .collect()
 }
 
 fn package_instability(
@@ -988,7 +1329,12 @@ fn history_rows(
     section
 }
 
-fn warning_rows(report: &Report, selected: &Scope, detail: bool) -> (Section, Vec<String>) {
+/// The grouped diagnostics, and the per-file detail behind them.
+///
+/// A grouped sentence states its kind at every scope, because a summary is
+/// what a reader above a file needs. Per-file rows are the detail `--all` and
+/// a selected file ask for.
+fn warning_rows(report: &Report, selected: &Scope, file_detail: bool) -> (Section, Vec<String>) {
     let mut section = Section::new("WARNINGS");
     let mut warnings: Vec<Row> = Vec::new();
     let warning = |text: String| Row::new(Some(Word::Warning), text);
@@ -1064,11 +1410,6 @@ fn warning_rows(report: &Report, selected: &Scope, detail: bool) -> (Section, Ve
         DiagnosticKind::UnsafeReference,
         DiagnosticKind::Other,
     ] {
-        // A pruned nested repository is disclosed even without detail,
-        // because silence there would misstate what was analyzed.
-        if !detail && kind != DiagnosticKind::NestedRepository {
-            continue;
-        }
         let count = report
             .diagnostics()
             .iter()
@@ -1080,8 +1421,13 @@ fn warning_rows(report: &Report, selected: &Scope, detail: bool) -> (Section, Ve
         }
     }
     section.rows = warnings;
+    if file_detail {
+        // An import that could not be followed is file detail; at every other
+        // scope the grouped sentence above is its whole terminal presence.
+        section.rows.extend(unmatched_import_rows(report, selected));
+    }
     let mut warning_detail = Vec::new();
-    if detail {
+    if file_detail {
         for diagnostic in report
             .diagnostics()
             .iter()
@@ -1115,12 +1461,18 @@ impl<'a, W: Write> Renderer<'a, W> {
         if view.verdict_only {
             return Ok(());
         }
-        for section in [
-            &view.areas,
-            &view.findings,
-            &view.architecture,
-            &view.history,
-        ] {
+        // Codebase debt is one ranked section of named problems; a diff keeps
+        // its three sections this round.
+        let sections: &[&Section] = match view.mode {
+            ReportMode::Codebase => &[&view.areas, &view.problems],
+            ReportMode::Diff => &[
+                &view.areas,
+                &view.findings,
+                &view.architecture,
+                &view.history,
+            ],
+        };
+        for section in sections {
             self.write_section(section)?;
         }
         if !view.warnings.is_empty() {
@@ -1390,30 +1742,37 @@ fn first_char_len(value: &str) -> usize {
 }
 
 /// One sentence per diagnostic kind, each with its own subject.
+///
+/// Every sentence agrees with its own count, because a grouped sentence now
+/// states its kind at every scope and one file is the common case.
 fn diagnostic_summary(kind: DiagnosticKind, count: usize) -> String {
     let subject = Counted::new(count, "source file", "source files");
+    let agrees = |singular: &'static str, plural: &'static str| {
+        if count == 1 { singular } else { plural }
+    };
     match kind {
         DiagnosticKind::NestedRepository => {
             let subject = Counted::new(count, "nested repository", "nested repositories");
-            let verb = if count == 1 { "was" } else { "were" };
-            format!("{subject} {verb} not analyzed.")
+            format!("{subject} {} not analyzed.", agrees("was", "were"))
         }
-        DiagnosticKind::UnsupportedLanguage => format!("{subject} use unsupported languages."),
+        DiagnosticKind::UnsupportedLanguage => format!(
+            "{subject} {} an unsupported language.",
+            agrees("uses", "use")
+        ),
         DiagnosticKind::UnreadableFile => format!("{subject} could not be read."),
-        DiagnosticKind::OversizedFile => format!("{subject} are too large to inspect."),
-        DiagnosticKind::ParseFailure => format!("{subject} could not be fully parsed."),
-        DiagnosticKind::AmbiguousIdentity => {
-            format!("{subject} contain code that could not be matched.")
+        DiagnosticKind::OversizedFile => {
+            format!("{subject} {} too large to inspect.", agrees("is", "are"))
         }
-        DiagnosticKind::UnsafeReference => format!("{subject} contain unsafe references."),
+        DiagnosticKind::ParseFailure => format!("{subject} could not be fully parsed."),
+        DiagnosticKind::AmbiguousIdentity => format!(
+            "{subject} {} code that could not be matched.",
+            agrees("contains", "contain")
+        ),
+        DiagnosticKind::UnsafeReference => format!(
+            "{subject} {} unsafe references.",
+            agrees("contains", "contain")
+        ),
         DiagnosticKind::Other => format!("{subject} could not be analyzed."),
-    }
-}
-
-fn architecture_finding_name(kind: ArchitectureFindingKind) -> &'static str {
-    match kind {
-        ArchitectureFindingKind::PackageCycle => "package dependency cycle",
-        ArchitectureFindingKind::FileCycle => "file dependency cycle",
     }
 }
 
@@ -1421,12 +1780,17 @@ fn file_belongs_to_scope(report: &Report, file: FileId, selected: &Scope) -> boo
     let Some(record) = report.files().get(file.index()) else {
         return false;
     };
-    let mut scope = Some(record.scope());
-    while let Some(id) = scope {
-        if id == selected.id() {
+    scope_within(report, record.scope(), selected.id())
+}
+
+/// Whether `scope` is `ancestor` or lies inside it.
+fn scope_within(report: &Report, scope: ScopeId, ancestor: ScopeId) -> bool {
+    let mut current = Some(scope);
+    while let Some(id) = current {
+        if id == ancestor {
             return true;
         }
-        scope = report.scopes().get(id.index()).and_then(Scope::parent);
+        current = report.scopes().get(id.index()).and_then(Scope::parent);
     }
     false
 }
@@ -1619,27 +1983,6 @@ pub(super) fn direction_name(direction: ComparisonDirection) -> &'static str {
     }
 }
 
-fn finding_order(report: &Report, left: &Finding, right: &Finding) -> std::cmp::Ordering {
-    let left_file = &report.files()[left.file().index()];
-    let right_file = &report.files()[right.file().index()];
-    smackdebt_analysis::FindingRank::new(
-        left,
-        report.is_hotspot(left.file()),
-        left_file
-            .activity()
-            .map_or(0, |activity| activity.touches()),
-        left_file.path(),
-    )
-    .cmp(&smackdebt_analysis::FindingRank::new(
-        right,
-        report.is_hotspot(right.file()),
-        right_file
-            .activity()
-            .map_or(0, |activity| activity.touches()),
-        right_file.path(),
-    ))
-}
-
 fn drill_path_from_visible(
     report: &Report,
     selected: &Scope,
@@ -1809,12 +2152,16 @@ mod tests {
     use crate::json::write_json;
     use smackdebt_analysis::{
         ArchitectureComparison, ArchitectureComparisonId, ArchitectureFinding,
-        ArchitectureFindingId, ArchitectureGraph, ArchitectureReportFacts, ChangeCoupling,
-        ComparisonId, Coverage, DependencyCoverage, DependencyEdge, DependencyEdgeId,
-        EvolutionaryFinding, EvolutionaryFindingId, EvolutionaryReportFacts, FileActivity, FileId,
-        FileRecord, FindingId, HealthCounts, HealthPolicy, HistoryCoverage, Measurements,
-        PackageEdge, PackageEdgeId, PackageId, PackageRecord, ParseStatus, Report, ReportBuilder,
-        ReportMode, Scope, ScopeId, SourceRole, SourceSpan, SourceTrust, UnitIdentity, UnitKind,
+        ArchitectureFindingId, ArchitectureFindingKind, ArchitectureGraph, ArchitectureReportFacts,
+        ChangeCoupling, ComparisonId, ContributorConcentration, Coverage, DependencyCoverage,
+        DependencyEdge, DependencyEdgeId, EvolutionaryFinding, EvolutionaryFindingId,
+        EvolutionaryReportFacts, FileActivity, FileId, FileRecord, FindingId, HealthCounts,
+        HealthPolicy, HistoryCoverage, Hotspot, KnowledgeConcentrationFinding,
+        KnowledgeConcentrationFindingId, Measurements, PackageEdge, PackageEdgeId,
+        PackageGraphMeasurement, PackageId, PackageRecord, ParseStatus, Report, ReportBuilder,
+        ReportMode, Scope, ScopeId, SizePolicy, SourceRole, SourceSpan, SourceTrust,
+        StableDependencyEvidence, StableDependencyFinding, StableDependencyFindingId, UnitIdentity,
+        UnitKind,
     };
 
     /// Every private-use codepoint, which may never reach a machine consumer.
@@ -1861,6 +2208,183 @@ mod tests {
             ));
             builder.link_finding(root, FindingId::from_index(index));
         }
+        builder.finish()
+    }
+
+    /// A report holding one card of every frozen pattern.
+    ///
+    /// Three packages keep the file patterns package-relative: `app` carries
+    /// the concentrated and the hot file, `core` carries the widely imported
+    /// one beside the nine files that import it, and `lib` carries a file
+    /// measured by one ordinary finding.
+    #[expect(
+        clippy::too_many_lines,
+        reason = "one fixture that exercises every pattern reads better whole"
+    )]
+    fn every_pattern_report() -> Report {
+        let mut builder = ReportBuilder::new(ReportMode::Codebase);
+        let root = ScopeId::from_index(0);
+        let (app, core, lib) = (
+            ScopeId::from_index(1),
+            ScopeId::from_index(2),
+            ScopeId::from_index(3),
+        );
+        let mut root_scope = Scope::new(root, ScopeKind::Repository, ".", None);
+        for child in [app, core, lib] {
+            root_scope.add_child(child);
+        }
+        builder.add_scope(root_scope);
+        for (id, name) in [(app, "app"), (core, "core"), (lib, "lib")] {
+            builder.add_scope(Scope::new(id, ScopeKind::Package, name, Some(root)));
+        }
+        builder.set_root(root);
+        builder.set_packages(vec![
+            PackageRecord::current(PackageId::from_index(0), app, "app"),
+            PackageRecord::current(PackageId::from_index(1), core, "core"),
+            PackageRecord::current(PackageId::from_index(2), lib, "lib"),
+        ]);
+        let policy = HealthPolicy::default();
+        let high = Measurements::new(30, 4, 6);
+        let watch = Measurements::new(15, 1, 1);
+        let mut file = |index: usize, scope: ScopeId, package: usize, path: &str, counts| {
+            let record = FileRecord::new(
+                FileId::from_index(index),
+                scope,
+                path,
+                Coverage::new(1, 1, 0, 0, 10, 0),
+                counts,
+            )
+            .with_package(PackageId::from_index(package));
+            builder.add_file(record);
+            builder.link_file(scope, FileId::from_index(index));
+            FileId::from_index(index)
+        };
+        // 0 concentrates three High findings and is long, 1 is hot with one,
+        // 2 is imported by nine files, 3 holds one ordinary finding, and 4 and
+        // 5 close a cycle.
+        let god = file(0, app, 0, "app/god.js", HealthCounts::new(0, 0, 3));
+        let hot = file(1, app, 0, "app/hot.js", HealthCounts::new(0, 0, 1));
+        let hub = file(2, core, 1, "core/hub.js", HealthCounts::default());
+        let plain = file(3, lib, 2, "lib/plain.js", HealthCounts::new(0, 1, 0));
+        let left = file(4, app, 0, "app/left.js", HealthCounts::default());
+        let right = file(5, app, 0, "app/right.js", HealthCounts::default());
+        for index in 0..9 {
+            file(
+                6 + index,
+                core,
+                1,
+                &format!("core/user-{index}.js"),
+                HealthCounts::default(),
+            );
+        }
+        let mut finding = |index: usize, target: FileId, name: &str, line: u32, measurements| {
+            let id = FindingId::from_index(index);
+            builder.add_finding(Finding::new(
+                id,
+                target,
+                UnitIdentity::new(name, UnitKind::Function),
+                SourceSpan::new(line, line + 2),
+                measurements,
+                policy.assess(measurements),
+            ));
+            builder.link_finding(root, id);
+        };
+        for (index, line) in [(0usize, 4u32), (1, 20), (2, 40)] {
+            finding(index, god, &format!("build-{index}"), line, high);
+        }
+        finding(3, hot, "render", 7, high);
+        finding(4, plain, "value", 2, watch);
+        // A hot file states its heat, and only the hotspot table decides it.
+        builder.set_hotspots(vec![Hotspot::new(hot, Rating::High, 14)]);
+        builder.set_size_findings(vec![
+            SizePolicy::default()
+                .rate_file(god, 520)
+                .expect("a long file is rated"),
+        ]);
+        let mut edges = vec![
+            DependencyEdge::new(
+                DependencyEdgeId::from_index(0),
+                left,
+                right,
+                1,
+                vec![SourceSpan::new(1, 1)],
+            ),
+            DependencyEdge::new(
+                DependencyEdgeId::from_index(1),
+                right,
+                left,
+                1,
+                vec![SourceSpan::new(1, 1)],
+            ),
+        ];
+        edges.extend((0..9).map(|index| {
+            DependencyEdge::new(
+                DependencyEdgeId::from_index(2 + index),
+                FileId::from_index(6 + index),
+                hub,
+                1,
+                vec![SourceSpan::new(1, 1)],
+            )
+        }));
+        builder.set_architecture(ArchitectureReportFacts::new(
+            ArchitectureGraph::new(
+                DependencyCoverage::new(15, 0, 0, 0, 0, 0, 0),
+                edges,
+                Vec::new(),
+                Vec::new(),
+                Vec::new(),
+                Vec::new(),
+            ),
+            vec![ArchitectureFinding::new(
+                ArchitectureFindingId::from_index(0),
+                ArchitectureFindingKind::FileCycle,
+                Vec::new(),
+                vec![left, right],
+                vec![
+                    DependencyEdgeId::from_index(0),
+                    DependencyEdgeId::from_index(1),
+                ],
+            )],
+            Vec::new(),
+        ));
+        builder.link_architecture_finding(root, ArchitectureFindingId::from_index(0));
+        builder.set_stable_dependency_findings(vec![StableDependencyFinding::new(
+            StableDependencyFindingId::from_index(0),
+            PackageId::from_index(0),
+            PackageId::from_index(1),
+            StableDependencyEvidence::new(
+                PackageGraphMeasurement::new(PackageId::from_index(0), 1, 1),
+                PackageGraphMeasurement::new(PackageId::from_index(1), 1, 2),
+                2,
+            ),
+            vec![DependencyEdgeId::from_index(0)],
+        )]);
+        let coupling =
+            ChangeCoupling::new(PackageId::from_index(0), PackageId::from_index(1), 4, 5);
+        builder.set_evolution(
+            EvolutionaryReportFacts::new(
+                HistoryCoverage::unavailable("test"),
+                Vec::new(),
+                Vec::new(),
+                vec![coupling],
+                vec![ContributorConcentration::new(
+                    PackageId::from_index(2),
+                    1,
+                    9,
+                    10,
+                )],
+                vec![EvolutionaryFinding::new(
+                    EvolutionaryFindingId::from_index(0),
+                    coupling,
+                )],
+                Vec::new(),
+            )
+            .with_concentration_findings(vec![KnowledgeConcentrationFinding::new(
+                KnowledgeConcentrationFindingId::from_index(0),
+                ContributorConcentration::new(PackageId::from_index(2), 1, 9, 10),
+            )]),
+        );
+        builder.link_evolutionary_finding(root, EvolutionaryFindingId::from_index(0));
         builder.finish()
     }
 
@@ -1944,6 +2468,457 @@ mod tests {
                 .link_architecture_comparison(file_scope, ArchitectureComparisonId::from_index(1));
         }
         builder.finish()
+    }
+
+    /// A report whose files each own a file scope under one directory, so a
+    /// selected file is a scope and a card's anchor can be that scope.
+    fn file_scope_report() -> Report {
+        let mut builder = ReportBuilder::new(ReportMode::Codebase);
+        let root = ScopeId::from_index(0);
+        let directory = ScopeId::from_index(1);
+        let mut root_scope = Scope::new(root, ScopeKind::Repository, ".", None);
+        root_scope.add_child(directory);
+        builder.add_scope(root_scope);
+        let mut directory_scope = Scope::new(directory, ScopeKind::Directory, "src", Some(root));
+        let paths = ["src/advisory.js", "src/plain.js"];
+        for index in 0..paths.len() {
+            directory_scope.add_child(ScopeId::from_index(2 + index));
+        }
+        builder.add_scope(directory_scope);
+        for (index, path) in paths.into_iter().enumerate() {
+            builder.add_scope(Scope::new(
+                ScopeId::from_index(2 + index),
+                ScopeKind::File,
+                path,
+                Some(directory),
+            ));
+        }
+        // The first file's whole debt is advisory, so its card is `detail`.
+        // The second holds more findings than the widest rung shows, so
+        // selecting it proves the ladder is not applied to a file.
+        add_scoped_file(&mut builder, 0, paths[0], true, 0..1);
+        add_scoped_file(&mut builder, 1, paths[1], false, 1..6);
+        builder.set_root(root);
+        builder.finish()
+    }
+
+    /// Adds one file of [`file_scope_report`] with the findings `ids` names.
+    fn add_scoped_file(
+        builder: &mut ReportBuilder,
+        index: usize,
+        path: &str,
+        advisory: bool,
+        ids: std::ops::Range<usize>,
+    ) {
+        let scope = ScopeId::from_index(2 + index);
+        let file = FileId::from_index(index);
+        // Advisory debt cannot move a verdict, so it counts no rated unit.
+        let counts = if advisory {
+            HealthCounts::default()
+        } else {
+            HealthCounts::new(0, 0, ids.len() as u32)
+        };
+        let mut record =
+            FileRecord::new(file, scope, path, Coverage::new(1, 1, 0, 0, 10, 0), counts);
+        if advisory {
+            record = record.with_source_state(SourceRole::Benchmark, ParseStatus::Recovered);
+        }
+        builder.add_file(record);
+        builder.link_file(scope, file);
+        let measurements = Measurements::new(30, 4, 6);
+        for (unit, id) in ids.enumerate() {
+            let line = 3 + unit as u32 * 10;
+            let mut finding = Finding::new(
+                FindingId::from_index(id),
+                file,
+                UnitIdentity::new(format!("work-{unit}"), UnitKind::Function),
+                SourceSpan::new(line, line + 2),
+                measurements,
+                HealthPolicy::default().assess(measurements),
+            );
+            if advisory {
+                finding = finding.with_evidence(SourceRole::Benchmark, SourceTrust::Advisory);
+            }
+            builder.add_finding(finding);
+            builder.link_finding(ScopeId::from_index(0), FindingId::from_index(id));
+        }
+    }
+
+    /// A report whose every file carries one ordinary finding, so it holds
+    /// exactly `files` `measured` cards.
+    fn report_with_measured_cards(files: usize) -> Report {
+        let mut builder = ReportBuilder::new(ReportMode::Codebase);
+        let root = ScopeId::from_index(0);
+        builder.add_scope(Scope::new(root, ScopeKind::Repository, ".", None));
+        builder.set_root(root);
+        let policy = HealthPolicy::default();
+        let measurements = Measurements::new(15, 1, 1);
+        for index in 0..files {
+            let file = FileId::from_index(index);
+            builder.add_file(FileRecord::new(
+                file,
+                root,
+                format!("file-{index:03}.rs"),
+                Coverage::new(1, 1, 0, 0, 10, 0),
+                HealthCounts::new(0, 1, 0),
+            ));
+            builder.add_finding(Finding::new(
+                FindingId::from_index(index),
+                file,
+                UnitIdentity::new(format!("unit-{index:03}"), UnitKind::Function),
+                SourceSpan::new(1, 2),
+                measurements,
+                policy.assess(measurements),
+            ));
+            builder.link_finding(root, FindingId::from_index(index));
+        }
+        builder.finish()
+    }
+
+    /// The rows of one section, read back from rendered text.
+    fn section_rows(text: &str, heading: &str) -> Vec<String> {
+        text.lines()
+            .skip_while(|line| *line != heading)
+            .skip(1)
+            .take_while(|line| !line.is_empty())
+            .map(|line| line.to_owned())
+            .collect()
+    }
+
+    /// The card heads of a rendered problem section, which are the rows that
+    /// are not indented continuations.
+    fn problem_heads(text: &str) -> Vec<String> {
+        section_rows(text, "PROBLEMS")
+            .into_iter()
+            .filter(|line| !line.starts_with("        "))
+            .collect()
+    }
+
+    #[test]
+    fn every_ladder_rung_spends_the_whole_budget() {
+        for cards in PROBLEM_LADDER {
+            assert_eq!(cards * (1 + evidence_allowance(cards)), SCREEN_BUDGET);
+        }
+        // The rungs trade depth for breadth in one direction only.
+        for pair in PROBLEM_LADDER.windows(2) {
+            assert!(pair[0] < pair[1], "{pair:?}");
+            assert!(
+                evidence_allowance(pair[0]) > evidence_allowance(pair[1]),
+                "{pair:?}"
+            );
+        }
+        assert_eq!(PROBLEM_LADDER, [6, 8, 12, 24]);
+        assert_eq!(LAST_RUNG, 24);
+    }
+
+    #[test]
+    fn the_ladder_rung_is_the_first_whose_card_count_fits() {
+        for (cards, expected) in [
+            (0, (6, 3)),
+            (5, (6, 3)),
+            (6, (6, 3)),
+            (7, (8, 2)),
+            (8, (8, 2)),
+            (9, (12, 1)),
+            (12, (12, 1)),
+            (13, (24, 0)),
+            (20, (24, 0)),
+            (24, (24, 0)),
+            (40, (24, 0)),
+        ] {
+            assert_eq!(ladder_rung(cards), expected, "{cards}");
+        }
+    }
+
+    #[test]
+    fn a_default_view_shows_the_rung_its_card_count_selects() {
+        // Five cards buy depth; the twenty-fifth card and beyond are cut.
+        let five = render(&report_with_measured_cards(5), TerminalOptions::default());
+        assert_eq!(problem_heads(&five).len(), 5, "{five}");
+        assert_eq!(section_rows(&five, "PROBLEMS").len(), 10, "{five}");
+
+        let twenty = render(&report_with_measured_cards(20), TerminalOptions::default());
+        assert_eq!(problem_heads(&twenty).len(), 20, "{twenty}");
+        // The last rung allows no evidence, so every row is a card head.
+        assert_eq!(section_rows(&twenty, "PROBLEMS").len(), 20, "{twenty}");
+
+        let forty = render(&report_with_measured_cards(40), TerminalOptions::default());
+        let heads = problem_heads(&forty);
+        assert_eq!(heads.len(), SCREEN_BUDGET, "{forty}");
+        assert_eq!(
+            section_rows(&forty, "PROBLEMS").len(),
+            SCREEN_BUDGET,
+            "{forty}"
+        );
+        // The cut takes the lowest ranked cards and writes no bookkeeping row.
+        assert!(heads[0].contains("unit-000"), "{forty}");
+        assert!(!forty.contains("unit-024"), "{forty}");
+        assert!(!forty.contains("omitted"), "{forty}");
+    }
+
+    #[test]
+    fn a_top_limit_counts_cards_and_buys_breadth_with_evidence() {
+        let report = report_with_measured_cards(12);
+        let top = |count| {
+            render(
+                &report,
+                TerminalOptions::default().with_top(NonZeroUsize::new(count)),
+            )
+        };
+        // Ten cards select the rung ten selects, which allows one line each.
+        let ten = top(10);
+        assert_eq!(problem_heads(&ten).len(), 10, "{ten}");
+        assert_eq!(section_rows(&ten, "PROBLEMS").len(), 20, "{ten}");
+        // A limit below the first rung buys depth back.
+        let four = top(4);
+        assert_eq!(problem_heads(&four).len(), 4, "{four}");
+        assert_eq!(section_rows(&four, "PROBLEMS").len(), 8, "{four}");
+        // A limit above the cards shows them all and adds no filler row.
+        let roomy = top(30);
+        assert_eq!(problem_heads(&roomy).len(), 12, "{roomy}");
+        assert_eq!(section_rows(&roomy, "PROBLEMS").len(), 12, "{roomy}");
+    }
+
+    #[test]
+    fn each_pattern_states_its_rating_its_name_and_its_anchor() {
+        let report = every_pattern_report();
+        let detailed = render(&report, TerminalOptions::new(120, true, false));
+        for head in [
+            "  high does too much · app/god.js",
+            "  high hot and complex · app/hot.js",
+            "  watch circular dependency · app/left.js",
+            "  watch changes together · app ↔ core",
+            "  watch one author · lib",
+            "  watch depends on less stable code · app → core",
+            // A `measured` card heads on its top claimed finding and anchors
+            // on the span that finding carries.
+            "  watch value · function · lib/plain.js:2",
+            // A card that claims nothing carries no rating word to state.
+            "  everything depends on this · core/hub.js",
+        ] {
+            assert!(
+                detailed.contains(&format!("{head}\n")),
+                "{head}: {detailed}"
+            );
+        }
+        // No renderer invents, renames, or composes a machine pattern id.
+        for id in ["god_file", "hot_mess", "shotgun_pair", "bus_risk", "tangle"] {
+            assert!(!detailed.contains(id), "{id}: {detailed}");
+        }
+    }
+
+    #[test]
+    fn each_evidence_kind_states_its_own_words() {
+        let report = every_pattern_report();
+        let detailed = render(&report, TerminalOptions::new(120, true, false));
+        for fact in [
+            "        3 rated units",
+            "        1 rated unit",
+            "        9 files import this",
+            "        file · 520 lines",
+            "        hot (14 commits)",
+            "        2 files in the cycle",
+            "        app/god.js:4 · function · cognitive 30",
+            "        changed together in 4 of 5 commits · 80% · no code dependency",
+            "        one contributor made 9 of 10 commits",
+            "        instability 1/2 → 2/3 · 2 imports",
+            // A cycle witness is stacked one step per line and never shortened.
+            "        app/left.js\n        → app/right.js\n        → app/left.js\n",
+        ] {
+            assert!(detailed.contains(fact), "{fact}: {detailed}");
+        }
+        assert!(!detailed.contains('…'), "{detailed}");
+    }
+
+    #[test]
+    fn singular_and_plural_evidence_wording_agree_with_their_counts() {
+        let report = every_pattern_report();
+        let one = |value| {
+            evidence_lines(
+                &report,
+                &report.problems()[0],
+                ProblemEvidence::FanIn(value),
+                false,
+            )
+        };
+        assert_eq!(one(1), vec!["1 file imports this".to_owned()]);
+        assert_eq!(one(2), vec!["2 files import this".to_owned()]);
+        for (fact, expected) in [
+            (ProblemEvidence::FanOut(1), "imports 1 file"),
+            (ProblemEvidence::FanOut(3), "imports 3 files"),
+            (ProblemEvidence::RatedUnits(1), "1 rated unit"),
+            (ProblemEvidence::RatedUnits(4), "4 rated units"),
+            (ProblemEvidence::Members(1), "1 file in the cycle"),
+            (ProblemEvidence::Members(5), "5 files in the cycle"),
+        ] {
+            assert_eq!(
+                evidence_lines(&report, &report.problems()[0], fact, false),
+                vec![expected.to_owned()],
+                "{fact:?}"
+            );
+        }
+        // A hot anchor states its heat; the same count on an anchor that is
+        // not a hotspot states its commits alone.
+        let hot = report
+            .problems()
+            .iter()
+            .find(|card| card.pattern() == ProblemPattern::HotMess)
+            .expect("the hot file has a card");
+        let cold = report
+            .problems()
+            .iter()
+            .find(|card| card.pattern() == ProblemPattern::Measured)
+            .expect("the measured file has a card");
+        assert_eq!(
+            evidence_lines(&report, hot, ProblemEvidence::Hot(1), false),
+            vec!["hot (1 commit)".to_owned()]
+        );
+        assert_eq!(
+            evidence_lines(&report, cold, ProblemEvidence::Hot(2), false),
+            vec!["2 commits".to_owned()]
+        );
+    }
+
+    #[test]
+    fn one_file_carrying_three_high_findings_is_named_once() {
+        let report = every_pattern_report();
+        let detailed = render(&report, TerminalOptions::new(120, true, false));
+        assert_eq!(
+            problem_heads(&detailed)
+                .iter()
+                .filter(|head| head.contains("app/god.js"))
+                .count(),
+            1,
+            "{detailed}"
+        );
+        // The card still claims all three, which `--all` reaches.
+        for line in ["app/god.js:4", "app/god.js:20", "app/god.js:40"] {
+            assert!(detailed.contains(line), "{line}: {detailed}");
+        }
+    }
+
+    #[test]
+    fn a_detail_card_reaches_all_and_its_own_scope_only() {
+        let report = file_scope_report();
+        let scopes = report.scopes();
+        let render_scope = |scope: ScopeId, options| {
+            let mut bytes = Vec::new();
+            write_terminal(&mut bytes, &report, Some(scope), options).unwrap();
+            String::from_utf8(bytes).unwrap()
+        };
+        let problems = |text: &str| section_rows(text, "PROBLEMS").join("\n");
+        let default = problems(&render_scope(
+            ScopeId::from_index(0),
+            TerminalOptions::default(),
+        ));
+        assert!(default.contains("src/plain.js"), "{default}");
+        assert!(!default.contains("src/advisory.js"), "{default}");
+        // `--all` shows it, and so does selecting its own file.
+        let all = problems(&render_scope(
+            ScopeId::from_index(0),
+            TerminalOptions::new(100, true, false),
+        ));
+        assert!(all.contains("src/advisory.js"), "{all}");
+        let own = problems(&render_scope(
+            ScopeId::from_index(2),
+            TerminalOptions::default(),
+        ));
+        assert!(own.contains("src/advisory.js"), "{own}");
+        // Its neighbour's card belongs to the other file scope alone.
+        assert!(!own.contains("src/plain.js"), "{own}");
+        assert_eq!(scopes[2].kind(), ScopeKind::File);
+    }
+
+    #[test]
+    fn a_selected_file_shows_complete_evidence_without_the_ladder() {
+        let report = file_scope_report();
+        let render_scope = |scope: usize| {
+            let mut bytes = Vec::new();
+            write_terminal(
+                &mut bytes,
+                &report,
+                Some(ScopeId::from_index(scope)),
+                TerminalOptions::default(),
+            )
+            .unwrap();
+            String::from_utf8(bytes).unwrap()
+        };
+        // Above the file the ladder allows three of the card's five facts.
+        let repository = render_scope(0);
+        assert_eq!(
+            section_rows(&repository, "PROBLEMS").len(),
+            4,
+            "{repository}"
+        );
+        assert!(!repository.contains("src/plain.js:33"), "{repository}");
+        // The file itself is a request for detail, so it states all five.
+        let file = render_scope(3);
+        assert_eq!(section_rows(&file, "PROBLEMS").len(), 6, "{file}");
+        // A caller-chosen limit still names how many cards a file shows.
+        let mut bytes = Vec::new();
+        write_terminal(
+            &mut bytes,
+            &report,
+            Some(ScopeId::from_index(3)),
+            TerminalOptions::default().with_top(NonZeroUsize::new(1)),
+        )
+        .unwrap();
+        let capped = String::from_utf8(bytes).unwrap();
+        assert_eq!(problem_heads(&capped).len(), 1, "{capped}");
+        assert_eq!(section_rows(&capped, "PROBLEMS").len(), 6, "{capped}");
+        for line in [
+            // The head already names the first finding, so its line adds the
+            // measurements alone.
+            "  high work-0 · function · src/plain.js:3\n        cognitive 30\n",
+            "        src/plain.js:43 · function · cognitive 30\n",
+        ] {
+            assert!(file.contains(line), "{line}: {file}");
+        }
+    }
+
+    #[test]
+    fn one_invocation_states_the_same_cards_at_every_width() {
+        let report = every_pattern_report();
+        let facts = |width| {
+            let text = render(&report, TerminalOptions::new(width, false, false));
+            let body: String = section_rows(&text, "PROBLEMS").join("\n");
+            // Stacking is the only difference a width may make, so the facts
+            // are compared with their line breaks and indentation removed.
+            body.split_whitespace().collect::<Vec<_>>().join(" ")
+        };
+        let wide = facts(120);
+        assert_eq!(facts(80), wide);
+        assert_eq!(facts(50), wide);
+        // A narrow view may still render more lines than the wide one.
+        assert!(
+            section_rows(
+                &render(&report, TerminalOptions::new(50, false, false)),
+                "PROBLEMS"
+            )
+            .len()
+                >= section_rows(
+                    &render(&report, TerminalOptions::new(120, false, false)),
+                    "PROBLEMS"
+                )
+                .len()
+        );
+    }
+
+    #[test]
+    fn a_codebase_report_writes_one_problem_section_and_a_diff_keeps_its_three() {
+        let codebase = render(&every_pattern_report(), TerminalOptions::default());
+        assert!(codebase.contains("\nPROBLEMS\n"), "{codebase}");
+        for heading in ["\nFINDINGS\n", "\nARCHITECTURE\n", "\nHISTORY\n"] {
+            assert!(!codebase.contains(heading), "{heading}: {codebase}");
+        }
+        // A diff keeps its own sections and never states a problem card.
+        let diff = render(
+            &diff_report(Some(ArchitectureComparisonKind::CycleIntroduced)),
+            TerminalOptions::new(100, true, false),
+        );
+        assert!(diff.contains("\nARCHITECTURE\n"), "{diff}");
+        assert!(!diff.contains("\nPROBLEMS\n"), "{diff}");
+        assert!(!diff.contains("circular dependency"), "{diff}");
     }
 
     #[test]
@@ -2090,6 +3065,7 @@ mod tests {
             terminal.contains("0 high · 0 watch · 0 checked"),
             "{terminal}"
         );
+        assert!(!terminal.contains("PROBLEMS"));
         assert!(!terminal.contains("FINDINGS"));
         assert!(!terminal.contains("ARCHITECTURE"));
         assert!(!terminal.contains("HISTORY"));
@@ -2268,7 +3244,7 @@ mod tests {
         assert!(!render(&report, TerminalOptions::default()).contains("broken"));
         assert!(
             render(&report, TerminalOptions::new(100, true, false))
-                .contains("  high broken · function · benchmark · advisory")
+                .contains("  high broken · function · benchmark · advisory · broken.py:1")
         );
     }
 
@@ -2343,11 +3319,11 @@ mod tests {
     }
 
     #[test]
-    fn default_architecture_orders_findings_by_rating_before_limiting() {
+    fn cycle_cards_are_ordered_by_rating_and_state_every_witness() {
         // Four cycle findings arrive in the order analysis collected them and
-        // the only High one arrives last, so a cap over that order would drop
+        // the only High one arrives last, so an order of arrival would bury
         // the worst finding in the scope. Each witness starts at its own file,
-        // which is how a rendered row is identified below.
+        // which is how a rendered card is identified below.
         let mut builder = ReportBuilder::new(ReportMode::Codebase);
         let root = ScopeId::from_index(0);
         builder.add_scope(Scope::new(root, ScopeKind::Repository, ".", None));
@@ -2381,7 +3357,7 @@ mod tests {
                 id,
                 kind,
                 Vec::new(),
-                Vec::new(),
+                vec![file, FileId::from_index((index + 1) % paths.len())],
                 vec![DependencyEdgeId::from_index(index)],
             ));
             builder.link_architecture_finding(root, id);
@@ -2400,17 +3376,18 @@ mod tests {
         ));
         let terminal = render(&builder.finish(), TerminalOptions::new(120, false, false));
         let at = |needle: &str| terminal.find(needle).expect(&terminal);
-        // The High finding survives the cap and heads the section, the two shown
-        // Watch findings keep the order analysis gave them, and the cap falls on
-        // the last of them.
-        assert!(at("high package dependency cycle") < at("watch file dependency cycle"));
+        // The High card heads the section and the Watch cards keep the order
+        // analysis gave them. Four cards buy three evidence lines each, so
+        // every witness is stated and none is cut.
+        assert!(at("high circular dependency · d.js") < at("watch circular dependency · a.js"));
         assert!(at("        d.js") < at("        a.js"), "{terminal}");
         assert!(at("        a.js") < at("        b.js"), "{terminal}");
-        assert!(!terminal.contains("        c.js"), "{terminal}");
+        assert!(terminal.contains("        c.js"), "{terminal}");
+        assert_eq!(problem_heads(&terminal).len(), 4, "{terminal}");
     }
 
     #[test]
-    fn default_history_orders_actionable_findings_by_strength_before_limiting() {
+    fn every_coupling_finding_reaches_a_card_ranked_among_the_other_problems() {
         let mut builder = ReportBuilder::new(ReportMode::Codebase);
         let root = ScopeId::from_index(0);
         builder.add_scope(Scope::new(root, ScopeKind::Repository, ".", None));
@@ -2459,26 +3436,28 @@ mod tests {
         let report = builder.finish();
 
         let default = render(&report, TerminalOptions::default());
-        let watch_rows = |text: &str| {
-            text.lines()
-                .filter(|line| line.starts_with("  watch "))
-                .count()
-        };
-        assert_eq!(watch_rows(&default), 3, "{default}");
+        // Every actionable pair is a card now: the section-local limit that
+        // hid the fourth pair competed with nothing else on the screen.
+        assert_eq!(problem_heads(&default).len(), 4, "{default}");
         assert!(
-            default
-                .contains("b ↔ c changed together in 8 of 10 commits · 80% · no code dependency")
+            default.contains(
+                "  watch changes together · b ↔ c\n        changed together in 8 of 10 commits · 80% · no code dependency\n"
+            ),
+            "{default}"
         );
         assert!(
-            default.contains("c ↔ d changed together in 3 of 4 commits · 75% · no code dependency")
+            default.contains(
+                "  watch changes together · d ↔ e\n        changed together in 3 of 5 commits · 60% · no code dependency\n"
+            ),
+            "{default}"
         );
-        assert!(!default.contains("d ↔ e"));
+        // The cards tie on every rank key before the anchor, so the anchor
+        // package path orders them.
+        assert!(default.find("a ↔ b").unwrap() < default.find("b ↔ c").unwrap());
         assert!(default.find("b ↔ c").unwrap() < default.find("c ↔ d").unwrap());
-        let detailed = render(&report, TerminalOptions::new(100, true, false));
-        assert_eq!(watch_rows(&detailed), 4, "{detailed}");
-        assert!(
-            detailed
-                .contains("d ↔ e changed together in 3 of 5 commits · 60% · no code dependency")
+        assert_eq!(
+            problem_heads(&render(&report, TerminalOptions::new(100, true, false))).len(),
+            4
         );
     }
 
@@ -2543,13 +3522,14 @@ mod tests {
 
         let terminal = render(&report, TerminalOptions::default());
         assert!(
-            terminal
-                .contains("a ↔ b changed together in 3 of 4 commits · 75% · no code dependency"),
+            terminal.contains(
+                "  watch changes together · a ↔ b\n        changed together in 3 of 4 commits · 75% · no code dependency\n"
+            ),
             "{terminal}"
         );
         assert!(
             terminal.contains(
-                "b ↔ c changed together in 3 of 4 commits · 75% · code dependency exists"
+                "  watch changes together · b ↔ c\n        changed together in 3 of 4 commits · 75% · code dependency exists\n"
             ),
             "{terminal}"
         );
@@ -2636,13 +3616,13 @@ mod tests {
         let terminal = render(&report, TerminalOptions::default());
         assert!(
             terminal.contains(
-                "a ↔ b changed together in 3 of 4 commits · 75% · code dependency exists"
+                "  watch changes together · a ↔ b\n        changed together in 3 of 4 commits · 75% · code dependency exists\n"
             ),
             "{terminal}"
         );
         assert!(
             terminal.contains(
-                "watch a ↔ c changed together in 3 of 4 commits · 75% · no direct dependency · linked via b"
+                "  watch changes together · a ↔ c\n        changed together in 3 of 4 commits · 75% · no direct dependency · linked via b\n"
             ),
             "{terminal}"
         );
@@ -2650,41 +3630,22 @@ mod tests {
     }
 
     #[test]
-    fn activity_changes_rank_and_keeps_three_findings() {
-        let report = report_with_findings(true);
-        let terminal = render(&report, TerminalOptions::default());
-        assert!(terminal.contains("FINDINGS"));
-        assert!(terminal.contains("file-10.rs"));
-        assert!(!terminal.contains("file-1.rs:"));
+    fn activity_changes_the_rank_the_cards_are_read_in() {
+        let terminal = render(&report_with_findings(true), TerminalOptions::default());
+        assert!(terminal.contains("PROBLEMS"), "{terminal}");
+        // Eleven cards buy one evidence line each, and the most recently
+        // touched file heads the section.
+        let heads = problem_heads(&terminal);
+        assert_eq!(heads.len(), 11, "{terminal}");
+        assert!(heads[0].contains("file-10.rs"), "{terminal}");
     }
 
     #[test]
-    fn absent_activity_keeps_the_findings_heading() {
-        let report = report_with_findings(false);
-        assert!(render(&report, TerminalOptions::default()).contains("FINDINGS"));
-    }
-
-    #[test]
-    fn a_top_limit_replaces_only_the_default_finding_count() {
-        let report = report_with_findings(false);
-        let finding_rows = |text: &str| {
-            text.lines()
-                .filter(|line| line.contains(" · function"))
-                .count()
-        };
-        let default = render(&report, TerminalOptions::default());
-        assert_eq!(finding_rows(&default), 3, "{default}");
-        let five = render(
-            &report,
-            TerminalOptions::default().with_top(NonZeroUsize::new(5)),
+    fn absent_activity_keeps_the_problem_heading() {
+        assert!(
+            render(&report_with_findings(false), TerminalOptions::default())
+                .contains("\nPROBLEMS\n")
         );
-        assert_eq!(finding_rows(&five), 5, "{five}");
-        // A limit above the eleven findings shows all of them and nothing more.
-        let roomy = render(
-            &report,
-            TerminalOptions::default().with_top(NonZeroUsize::new(20)),
-        );
-        assert_eq!(finding_rows(&roomy), 11, "{roomy}");
     }
 
     #[test]

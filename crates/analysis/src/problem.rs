@@ -80,23 +80,6 @@ impl ProblemPattern {
         }
     }
 
-    /// The human name a renderer may print beside the machine id.
-    ///
-    /// The name is presentation, never the contract: a machine report always
-    /// carries [`Self::id`], and a renderer may choose different words.
-    pub const fn name(self) -> &'static str {
-        match self {
-            Self::Tangle => "tangle",
-            Self::GodFile => "god file",
-            Self::Hub => "hub",
-            Self::HotMess => "hot mess",
-            Self::ShotgunPair => "shotgun pair",
-            Self::BusRisk => "bus risk",
-            Self::UnstableDependency => "unstable dependency",
-            Self::Measured => "measured",
-        }
-    }
-
     /// The position of this pattern in the frozen claiming order, which is
     /// also its rank class.
     pub const fn class(self) -> u8 {
@@ -1875,19 +1858,6 @@ mod tests {
                 "shotgun_pair",
                 "bus_risk",
                 "unstable_dependency",
-                "measured",
-            ]
-        );
-        assert_eq!(
-            patterns.map(ProblemPattern::name),
-            [
-                "tangle",
-                "god file",
-                "hub",
-                "hot mess",
-                "shotgun pair",
-                "bus risk",
-                "unstable dependency",
                 "measured",
             ]
         );

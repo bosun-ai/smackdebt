@@ -8,24 +8,17 @@ AREAS
   c · 1 watch
   e · 1 watch
 
-FINDINGS
-  high b · function
-        b/main.js:1
-        cognitive 6 · cyclomatic 4 · statements 2 · 1 commit
-  watch renamed · function
-        e/new.js:1
-        cognitive 3 · cyclomatic 3 · statements 2
-  watch c · function
-        c/main.js:2
-        statements 3 · 1 commit
-
-ARCHITECTURE
-  high package dependency cycle
+PROBLEMS
+  high circular dependency · c/main.js
+        2 files in the cycle
         c/main.js
         → d/main.js
         → c/main.js
-
-HISTORY
-  h ↔ i changed together in 4 of 4 commits · 100% · code dependency exists
+  high b · function · b/main.js:1
+        cognitive 6 · cyclomatic 4 · statements 2
+  watch renamed · function · e/new.js:1
+        cognitive 3 · cyclomatic 3 · statements 2
+  watch c · function · c/main.js:2
+        statements 3
 
   next: smackdebt b

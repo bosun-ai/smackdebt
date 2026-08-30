@@ -2,8 +2,9 @@ smackdebt · repository root
   Clean. Ship it.
 0 high · 0 watch · 6 checked
 
-ARCHITECTURE
-  watch crates/a → crates/b · depends on less stable code · instability 1/2 → 2/3 · 2 imports
+PROBLEMS
+  watch depends on less stable code · crates/a → crates/b
+        instability 1/2 → 2/3 · 2 imports
 
 WARNINGS
   warning No commits in the last 90 days.

@@ -3,12 +3,14 @@ smackdebt · repository root
 0 high · 0 watch · 7 checked
 worst: app/main.js — package dependency cycle
 
-ARCHITECTURE
-  high package dependency cycle
+PROBLEMS
+  high circular dependency · app/main.js
+        2 files in the cycle
         app/main.js
         → core/main.js
         → app/main.js
-  watch file dependency cycle
+  watch circular dependency · app/choice.js
+        2 files in the cycle
         app/choice.js
         → app/helper.js
         → app/choice.js

@@ -158,7 +158,6 @@ pub smackdebt_analysis::ProblemPattern::UnstableDependency
 impl smackdebt_analysis::ProblemPattern
 pub const fn smackdebt_analysis::ProblemPattern::class(self) -> u8
 pub const fn smackdebt_analysis::ProblemPattern::id(self) -> &'static str
-pub const fn smackdebt_analysis::ProblemPattern::name(self) -> &'static str
 pub enum smackdebt_analysis::ProblemVisibility
 pub smackdebt_analysis::ProblemVisibility::Default
 pub smackdebt_analysis::ProblemVisibility::Detail

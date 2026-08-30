@@ -32,6 +32,24 @@ struct LanguageFileFacts {
     units: Vec<(String, u64, u64, u64)>,
 }
 
+/// The rows of the problem section, which is the codebase debt body.
+fn problem_body(text: &str) -> Vec<&str> {
+    text.lines()
+        .skip_while(|line| *line != "PROBLEMS")
+        .skip(1)
+        .take_while(|line| !line.is_empty())
+        .collect()
+}
+
+/// The card heads of the problem section, which are its rows that are not
+/// indented continuations.
+fn problem_heads(text: &str) -> Vec<&str> {
+    problem_body(text)
+        .into_iter()
+        .filter(|line| !line.starts_with("        "))
+        .collect()
+}
+
 /// The repository path of one file in a report.
 fn file_path(report: &Value, file: u64) -> String {
     let file = &report["files"][file as usize];
@@ -709,24 +727,34 @@ fn unified_codebase_terminal_and_json_are_exact_and_deterministic() {
 }
 
 #[test]
-fn top_limits_only_the_displayed_findings() {
+fn top_counts_the_problem_cards_a_codebase_view_shows() {
     let repository = worktree_change_repository();
-    // A limit of one keeps the single worst finding and drops the rest.
+    // A limit of one keeps the single worst card and drops the rest.
     let top_one = Invocation::new(["--top", "1", "--history", "36500d"]).run(repository.path());
     top_one.success();
     let limited = String::from_utf8_lossy(&top_one.stdout).into_owned();
-    assert!(limited.contains("  high b · function\n"), "{limited}");
-    assert!(!limited.contains("watch renamed"), "{limited}");
-    assert!(!limited.contains("watch c"), "{limited}");
-    // The limit changes nothing else, so the architecture section survives.
-    assert!(limited.contains("ARCHITECTURE"), "{limited}");
-    // A limit above the finding count shows everything the default shows,
-    // byte for byte, with no filler or bookkeeping row.
+    assert_eq!(problem_heads(&limited).len(), 1, "{limited}");
+    assert_eq!(
+        problem_heads(&limited)[0],
+        "  high circular dependency · c/main.js",
+        "{limited}"
+    );
+    assert!(!limited.contains("renamed"), "{limited}");
+    assert!(!limited.contains("b/main.js:1"), "{limited}");
+    // A limit above the cards shows them all and adds no filler row; it buys
+    // that breadth with the evidence depth its own rung allows, so it is not
+    // the default view byte for byte.
     let concise = Invocation::new(["--history", "36500d"]).run(repository.path());
     concise.success();
+    let concise_text = String::from_utf8_lossy(&concise.stdout).into_owned();
     let top_ten = Invocation::new(["--top", "10", "--history", "36500d"]).run(repository.path());
     top_ten.success();
-    assert_eq!(top_ten.stdout, concise.stdout);
+    let ten = String::from_utf8_lossy(&top_ten.stdout).into_owned();
+    assert_eq!(problem_heads(&ten), problem_heads(&concise_text), "{ten}");
+    assert!(
+        problem_body(&ten).len() < problem_body(&concise_text).len(),
+        "{ten}"
+    );
 
     // Zero and both documented conflicts are rejected before any analysis.
     let zero = Invocation::new(["--top", "0"]).run(repository.path());
@@ -1057,6 +1085,58 @@ fn terminal_width_color_and_path_drills_have_exact_public_bytes() {
     assert_golden("unified-directory.json", &directory_json.stdout);
 }
 
+/// The one-screen invariant: zooming in changes which problems fill the
+/// budget and never how much is printed.
+#[test]
+fn every_default_codebase_view_spends_at_most_the_screen_budget() {
+    /// The slots a codebase view spends on problems, which is the renderer's
+    /// budget stated once more where the evidence is read.
+    const SCREEN_BUDGET: usize = 24;
+
+    let languages = GeneratedRepository::new("main");
+    copy_language_truth_files(&languages);
+    // A directory scope over every supported language, which is the shape the
+    // reported regression printed more than a thousand rows for.
+    let directory = Invocation::new(["src"]).run(languages.path());
+    directory.success();
+    let text = String::from_utf8(directory.stdout).unwrap();
+    // At a width nothing wraps at, one rendered row is one spent slot, so the
+    // body length is the budget a reader sees.
+    let slots = |text: &str| problem_body(text).len();
+    assert!(slots(&text) <= SCREEN_BUDGET, "{text}");
+    assert!(!problem_heads(&text).is_empty(), "{text}");
+
+    // The view the discover line proposes fits the budget too, which is what
+    // makes drilling in a step rather than a flood.
+    let hint = text
+        .lines()
+        .find_map(|line| line.trim().strip_prefix("next: smackdebt "))
+        .unwrap_or_else(|| panic!("{text}"))
+        .to_owned();
+    let target = Invocation::new([hint.as_str()]).run(languages.path());
+    target.success();
+    let target = String::from_utf8(target.stdout).unwrap();
+    assert!(slots(&target) <= SCREEN_BUDGET, "{hint}: {target}");
+
+    // One invocation states the same cards and the same evidence at every
+    // width, because the budget counts slots rather than rendered lines.
+    let facts = |width| {
+        let result = Invocation::new(["src"])
+            .columns(width)
+            .run(languages.path());
+        result.success();
+        let body = String::from_utf8(result.stdout).unwrap();
+        problem_body(&body)
+            .join(" ")
+            .split_whitespace()
+            .collect::<Vec<_>>()
+            .join(" ")
+    };
+    let wide = facts(120);
+    assert_eq!(facts(80), wide);
+    assert_eq!(facts(50), wide);
+}
+
 #[test]
 fn every_fifty_column_snapshot_respects_unicode_display_width() {
     if std::env::var_os("SMACKDEBT_UPDATE_CASE").is_some() {
@@ -1094,7 +1174,7 @@ fn no_committed_terminal_result_states_a_dependency_edge_as_a_row() {
         assert_no_dependency_edge_rows(&String::from_utf8_lossy(&bytes), &name);
         checked += 1;
     }
-    assert_eq!(checked, 36, "expected every committed terminal view");
+    assert_eq!(checked, 37, "expected every committed terminal view");
 }
 
 #[test]
@@ -1502,7 +1582,7 @@ fn help_and_version_use_the_success_stream_contract() {
                     "      --jobs <JOBS>        Number of workers to use\n",
                     "      --history <HISTORY>  Recent activity window, such as 90d\n",
                     "      --all                Show all useful terminal detail\n",
-                    "      --top <TOP>          Show up to this many findings\n",
+                    "      --top <TOP>          Show up to this many problems or comparisons\n",
                     "      --color <COLOR>      Glyph color: auto, always, or never [possible values: auto, always, never]\n",
                     "  -h, --help               Print help\n",
                     "  -V, --version            Print version\n",
@@ -1940,24 +2020,16 @@ fn declared_manifest_names_make_the_workspace_graph_and_coupling_true() {
     let terminal = Invocation::new(["--all", "--history", "36500d"]).run(repository.path());
     terminal.success();
     let text = String::from_utf8(terminal.stdout).unwrap();
+    // Codebase debt is problem cards, so the terminal states the actionable
+    // pair once and a pair a code dependency explains keeps its complete row
+    // in the machine report alone.
     let coupling_lines: Vec<_> = text.lines().filter(|line| line.contains(" ↔ ")).collect();
-    assert_eq!(
-        coupling_lines.len(),
-        unique.len(),
-        "{coupling_lines:?} must render each retained pair once"
-    );
+    assert_eq!(coupling_lines.len(), 1, "{coupling_lines:?}");
+    assert_eq!(coupling_lines[0], "  watch changes together · rb ↔ ui");
+    assert!(unique.len() > 1, "{unique:?}");
     assert!(
-        coupling_lines
-            .iter()
-            .any(|line| line.contains("crates/core ↔ crates/renamed")
-                && line.contains("code dependency exists")),
-        "{coupling_lines:?}"
-    );
-    assert!(
-        coupling_lines
-            .iter()
-            .any(|line| line.contains("rb ↔ ui") && line.contains("no code dependency")),
-        "{coupling_lines:?}"
+        text.contains(" · no code dependency\n"),
+        "{coupling_lines:?}: {text}"
     );
 }
 

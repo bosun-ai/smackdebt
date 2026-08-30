@@ -6,17 +6,11 @@ worst: very-long-source-package-name/
         very-long-source-file-name.js — most
         complex
 
-FINDINGS
-  watch ExtremelyLongContainerNameThatMustRemainRe
-        cognizable::extremelyLongMethodNameThatMus
-        tRemainRecognizable · method · test
+PROBLEMS
+  high circular dependency ·
         very-long-source-package-name/
-        very-long-source-directory-name/
-        very-long-source-file-name.js:6
-        statements 56 · 2 commits
-
-ARCHITECTURE
-  high package dependency cycle
+        very-long-source-directory-name/choice.js
+        3 files in the cycle
         very-long-source-package-name/
         very-long-source-directory-name/choice.js
         → very-long-target-package-name/
@@ -25,6 +19,18 @@ ARCHITECTURE
         → very-long-source-package-name/
         very-long-source-directory-name/
         very-long-source-file-name.js
+  watch ExtremelyLongContainerNameThatMustRemainRe
+        cognizable::extremelyLongMethodNameThatMus
+        tRemainRecognizable · method · test ·
+        very-long-source-package-name/
+        very-long-source-directory-name/
+        very-long-source-file-name.js:6
+        statements 56
+
+WARNINGS
+  warning 2 imports could not be followed
+        1 named nothing in the repository
+        1 matched more than one file
   very-long-source-package-name/
         very-long-source-directory-name/
         very-long-source-file-name.js:2 → ./choice
@@ -34,10 +40,5 @@ ARCHITECTURE
         very-long-source-file-name.js:4 →
         require(dynamicModuleName)
         could not be matched · test
-
-WARNINGS
-  warning 2 imports could not be followed
-        1 named nothing in the repository
-        1 matched more than one file
 
   next: smackdebt very-long-source-package-name

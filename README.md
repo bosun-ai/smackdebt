@@ -426,7 +426,7 @@ These short examples run against generated public repositories in the release
 evidence. Each comment declares the exact exit status, empty stderr, and the
 stable stdout fragments that must appear in the stated order.
 
-<!-- smackdebt-example fixture=evolution status=0 stderr=empty stdout=smackdebt_·_repository_root|checked|HISTORY|_a_↔_b -->
+<!-- smackdebt-example fixture=evolution status=0 stderr=empty stdout=smackdebt_·_repository_root|checked|PROBLEMS|_a_↔_b -->
 ```console
 smackdebt --color never --jobs 1 --history 36500d
 ```

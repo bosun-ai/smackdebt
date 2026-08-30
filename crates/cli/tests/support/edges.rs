@@ -13,8 +13,9 @@ const CONTINUATION: &str = "        ";
 ///
 /// Three shapes are banned: a head joining two repository file paths with an
 /// arrow, the ownership wording, and the single-reference import fact. Package
-/// identities joined by an arrow are not edges — a stable-dependency row states
-/// one — and a cycle witness legitimately stacks arrows, so both stay allowed.
+/// identities joined by an arrow are not edges — a stable-dependency card
+/// states one — and a cycle witness legitimately stacks arrows, so both stay
+/// allowed.
 pub(crate) fn assert_no_dependency_edge_rows(text: &str, context: &str) {
     for line in text.lines() {
         for fact in line.trim().split(" · ") {
@@ -26,9 +27,9 @@ pub(crate) fn assert_no_dependency_edge_rows(text: &str, context: &str) {
     }
     for row in rows(text) {
         assert!(!row.contains(" owns "), "{context}: ownership row {row}");
-        // A cycle witness is stacked evidence of one finding, so its arrows
-        // belong to the finding rather than to a row of their own.
-        if row.contains("dependency cycle") {
+        // A cycle witness is stacked evidence of one card or one comparison,
+        // so its arrows belong to that fact rather than to a row of their own.
+        if row.contains("dependency cycle") || row.contains("circular dependency") {
             continue;
         }
         for (offset, _) in row.match_indices(" → ") {
