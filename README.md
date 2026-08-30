@@ -23,43 +23,58 @@ Smackdebt runs locally and does not upload source code or analysis data.
 
 ## Check a codebase
 
-Run `smackdebt` from anywhere inside a repository:
+Run `smackdebt` from anywhere inside a repository. Every terminal example below
+is real output from the released binary reading Smackdebt's own repository, so
+the numbers are a snapshot and move as the code does:
 
 ```console
 $ smackdebt
 
 smackdebt · repository root
-This code fights back.
-12 high · 94 watch · 1,686 checked
-worst: crates/api/src/checkout.rs — hot AND complex
+  Worn in the usual places.
+20 high · 64 watch · 2,845 checked
+worst: crates/project/src/project.rs — hot AND complex
 
 AREAS
-  crates/api · 4 high · 8 watch
-  packages/web · 2 high · 9 watch
-  crates/core · 1 high · 6 watch
+  scripts · 5 high · 10 watch
+  crates/analysis · 4 high · 17 watch
+  crates/cli · 4 high · 3 watch
+  crates/languages · 3 high · 9 watch
+  crates/project · 2 high · 21 watch
 
-FINDINGS
-high process_checkout · function
-        crates/api/src/checkout.rs:42
-        cognitive 31 · cyclomatic 14 · statements 126 · hot (14 commits)
-
-ARCHITECTURE
-high package dependency cycle
-        crates/api/src/routes.rs
-        → crates/core/src/orders.rs
-        → crates/api/src/routes.rs
-watch crates/api → crates/core
-        depends on less stable code · instability 1/4 → 2/3 · 3 imports
-
-HISTORY
-watch crates/api ↔ packages/web changed together in 8 of 10 commits · 80% · no code dependency
-watch crates/billing ↔ crates/core changed together in 6 of 9 commits · 67% · no direct dependency · linked via crates/api
-watch one contributor made 34 of 36 commits to crates/api
+PROBLEMS
+  high does too much · crates/project/src/project.rs
+  high does too much · crates/languages/src/dependency.rs
+  high does too much · crates/output/src/output.rs
+  high does too much · crates/cli/tests/unified_acceptance.rs
+  high does too much · crates/analysis/src/evolution.rs
+  high does too much · crates/cli/src/app.rs
+  high does too much · crates/cli/tests/acceptance.rs
+  high does too much · crates/languages/tests/language_fixtures.rs
+  high everything depends on this · crates/analysis/src/report.rs
+  high does too much · scripts/performance/review-workloads.py
+  high ArchitectureGraph::new · method · crates/analysis/src/architecture.rs:17
+  high generic_source_roles · function · crates/discovery/src/inventory.rs:228
+  high ProblemEvidenceView::serialize · method · crates/output/src/json.rs:1412
+  high compare_units · function · crates/analysis/src/comparison.rs:123
+  high generate · function · scripts/performance/workload.py:152
+  high main · function · scripts/performance/check-report.py:75
+  high validate · function · scripts/performance/check-workload-reviews.py:71
+  high cycle_witness · function · crates/analysis/src/cycle_witness.rs:3
+  high violations · function · scripts/check-entry-modules.py:30
+  high strongly_connected_components · function · crates/analysis/src/
+        strongly_connected_components.rs:1
+  high glob_matches · function · crates/discovery/src/glob.rs:6
+  watch vue.rs · closure · crates/languages/src/vue.rs:97
+  watch language_slot · function · crates/languages/src/engine.rs:168
+  watch CodebaseRequest::with_thresholds · method · crates/project/src/requests.rs:165
 
 WARNINGS
-warning 29 imports could not be followed · 24 named nothing in the repository · 5 matched more than one file
+  warning 3 imports could not be followed
+        2 named nothing in the repository · 1 matched more than one file
+  warning 1 source file could not be fully parsed.
 
-next: smackdebt crates/api
+  next: smackdebt scripts
 ```
 
 The report opens with a verdict block: the selected scope, the sentence for its
@@ -86,34 +101,73 @@ active risks just because it is large.
 
 `AREAS` appears when debt spans several child paths and shows at most five. The
 first path is the next useful place to inspect, and `next:` names the exact
-command. Empty `AREAS`, `ARCHITECTURE`, `HISTORY`, and `WARNINGS` sections stay
-out of the way.
+command. `PROBLEMS` is the debt itself, worst first. Empty `AREAS`, `PROBLEMS`,
+and `WARNINGS` sections stay out of the way.
+
+`PROBLEMS` names problems instead of listing measurements. One card groups the
+findings the report already produced around one file, one cycle, one package, or
+one package pair, so a file carrying twenty findings is named once rather than
+twenty times. [Read the problems](#read-the-problems) lists the pattern names,
+the evidence each one needs, and the thresholds behind them.
 
 Pass a reported path to progressively inspect the next level. Repository,
 package, directory, and file scopes retain the same repository-relative paths:
 
 ```console
-$ smackdebt crates/api/src/checkout.rs
+$ smackdebt crates/analysis
 
-smackdebt · crates/api/src/checkout.rs
-This code fights back.
-1 high · 1 watch · 18 checked
-worst: crates/api/src/checkout.rs — hot AND complex
+smackdebt · crates/analysis
+  Worn in the usual places.
+  4 of the repository's 20 high live here.
+4 high · 17 watch · 1,047 checked
+worst: crates/analysis/src/evolution.rs — hot AND complex
 
-FINDINGS
-high process_checkout · function
-        crates/api/src/checkout.rs:42
-        cognitive 31 · cyclomatic 14 · statements 126 · hot (14 commits)
+PROBLEMS
+  high does too much · crates/analysis/src/evolution.rs
+        crates/analysis/src/evolution.rs:56 · method · parameters 13
+  high everything depends on this · crates/analysis/src/report.rs
+        crates/analysis/src/report.rs:1448 · method · cognitive 18 · nesting 4
+  high ArchitectureGraph::new · method · crates/analysis/src/architecture.rs:17
+        parameters 6
+  high compare_units · function · crates/analysis/src/comparison.rs:123
+        cognitive 56 · cyclomatic 25 · nesting 4
+  high cycle_witness · function · crates/analysis/src/cycle_witness.rs:3
+        cognitive 34 · cyclomatic 15 · nesting 5
+  high strongly_connected_components · function · crates/analysis/src/
+        strongly_connected_components.rs:1
+        cognitive 30 · cyclomatic 15 · nesting 4
+  watch circular dependency · crates/analysis/src/change_coupling.rs
+        2 files in the cycle
+  watch circular dependency · crates/analysis/src/comparison.rs
+        7 files in the cycle
+  watch GateSnapshot::from_report · method · crates/analysis/src/gate.rs:150
+        cognitive 15
+  watch changes together · crates/analysis ↔ crates/cli
+        changed together in 26 of 77 commits · 34% · no direct dependency · linked via crates/output
+  watch one author · crates/analysis
+        one contributor made 45 of 45 commits
+  watch OrphanCandidate<'a>::new · method · crates/analysis/src/orphan.rs:44
+        parameters 6
+
+  next: smackdebt crates/analysis/src
 ```
 
-The default terminal view shows at most five affected areas and three findings.
-`--top 10` is the middle level of detail: it raises or lowers only the number
-of displayed findings, leaving every other section at its default limit, and
-cannot be combined with `--json` or `--all`.
-Use `--all` for all useful debt without those limits. `--all` is not an export:
-raw dependency edges, references outside the repository, churn totals,
-cyclomatic-one values, weak coupling, and healthy rows never appear in any
-terminal view. JSON keeps every one of them, so `--all --json` is rejected.
+Below the repository root the verdict block gains one sentence framing how much
+of the whole problem the selected scope holds: `4 of the repository's 20 high
+live here.` The repository root prints no such sentence, because there it would
+only restate the counts on the line below it, and no sentence appears when the
+repository holds no High debt at all.
+
+The default terminal view shows at most five affected areas and spends a fixed
+one-screen budget on problems, so zooming in changes which problems fill the
+screen rather than how much is printed. `--top 10` is the middle level of
+detail: in a codebase report it shows up to ten problem cards, in a diff report
+up to ten ranked comparisons, and it cannot be combined with `--json` or
+`--all`. Use `--all` for all useful debt without those limits, `detail` cards
+included. `--all` is not an export: raw dependency edges, references outside the
+repository, churn totals, cyclomatic-one values, weak coupling, and healthy rows
+never appear in any terminal view. JSON keeps every one of them, so `--all
+--json` is rejected.
 
 The default history window is 90 days. It governs every history-derived number,
 including activity, churn, change coupling, and contributor concentration:
@@ -131,30 +185,34 @@ Compare the current worktree with the branch it came from:
 $ smackdebt diff
 
 smackdebt diff · repository root
-Better here, worse there.
-worse 3 (source, architecture) · better 1 (source) · changed 0
-worst: crates/api/src/routes.rs — package dependency cycle
+  Better here, worse there.
+worse 1 (source) · better 1 (source) · changed 2 (source)
 
 AREAS
-  crates/api · worse 2 · better 1
-  packages/web · worse 1
+  crates/output · worse 1 · better 1 · changed 1
+  crates/cli · changed 1
 
 FINDINGS
-worse process_checkout · function
-        crates/api/src/checkout.rs:42
-        cognitive 14 → 19 · cyclomatic 9 → 12 · statements 42 → 57
-better groupOrders · function
-        packages/web/src/orders.ts:18
-        cognitive 28 → 7 · cyclomatic 17 → 5 · statements 91 → 38
-worse GraphEditor.vue · closure
-        packages/web/src/GraphEditor.vue:1177
-        added
+  worse ProblemEvidenceView::serialize · method
+        crates/output/src/json.rs:1412
+        added · cognitive 12 · cyclomatic 12 · statements 23 · nesting 1 · parameters 2
+  better architecture_rows · function
+        crates/output/src/output.rs:681
+        removed · cognitive 17 · cyclomatic 10 · statements 14 · nesting 3 · parameters 5
+  changed assert_index_integrity · function
+        crates/cli/tests/unified_acceptance.rs:2436
+        statements 118 → 121
 
-ARCHITECTURE
-worse package dependency cycle introduced
-        crates/api
-        → crates/core
-        → crates/api
+HISTORY
+  watch crates/analysis ↔ crates/cli changed together in 26 of 77 commits
+        34% · no direct dependency · linked via crates/output
+  watch crates/output ↔ crates/project changed together in 19 of 65 commits
+        29% · no code dependency
+  watch one contributor made 13 of 13 commits to repository root
+
+WARNINGS
+  warning 3 imports could not be followed
+        2 named nothing in the repository · 1 matched more than one file
 ```
 
 Every diff count is labeled with its word and printed even when it is zero, and
@@ -162,6 +220,13 @@ the families that moved are named beside the count. Each changed finding shows
 `path:line` and each changed measurement as a before and after value. A unit
 without a source name of its own is written as its file and its kind, such as
 `GraphEditor.vue · closure`, so no generated internal identity reaches a reader.
+
+A diff report keeps `FINDINGS`, `ARCHITECTURE`, and `HISTORY` this release, and
+`ARCHITECTURE` appears when a cycle is introduced or removed. Codebase and diff
+output therefore speak different vocabularies for one cycle: a codebase report
+names problems, a diff report still reports movement family by family. The two
+will converge in a later release; until then, read `PROBLEMS` as "what is wrong
+here" and the diff sections as "what your change moved".
 
 The diff tiers are fixed in the same way:
 
@@ -173,13 +238,14 @@ The diff tiers are fixed in the same way:
 | `mixed` | Better here, worse there. |
 
 Adding or deleting healthy code moves no debt. A diff that moves no debt prints
-the verdict block and nothing else:
+the verdict block and nothing else — here a clean worktree against the commit it
+sits on:
 
 ```console
-$ smackdebt diff
+$ smackdebt diff HEAD
 
 smackdebt diff · repository root
-No debt changed.
+  No debt changed.
 worse 0 · better 0 · changed 0
 ```
 
@@ -191,7 +257,7 @@ Choose a ref or limit the report to a path when needed:
 
 ```console
 smackdebt diff main
-smackdebt diff main crates/api
+smackdebt diff main crates/analysis
 ```
 
 The diff report matches named functions and code containers across both sides.
@@ -225,6 +291,178 @@ fits and stacks its facts on indented lines when it does not. Nothing is
 silently clipped at any width — measurements, counts, cycle witnesses, history
 evidence, commands, and identities all survive, and a long path continues on the
 next line instead of being shortened.
+
+Width changes the shape of a report and never its content. The
+[one-screen budget](#the-one-screen-budget) counts slots rather than rendered
+lines, so the same invocation states the same problems with the same evidence at
+50 columns and at 120. A narrow terminal stacks facts onto extra indented lines
+instead of dropping them, which is why a narrow view of the same report can run
+longer than one screen.
+
+## Read the problems
+
+A codebase report names problems rather than listing measurements. A problem
+card groups findings the report already produced around one anchor — a file, a
+cycle, a package, or a package pair — and each finding belongs to at most one
+card, so a file with several findings is named once and read once. Clustering
+invents nothing: a card's rating is the highest rating among the findings it
+claims, every number on it is a number the report already measured, and no card
+changes a count or a verdict.
+
+Each row states its rating word, then the pattern name, then the anchor. A file
+anchor is its repository-relative path, written `path:line` when the card heads
+on a finding with a span; a cycle is anchored on the first step of its witness;
+a coupling pair reads `<left> ↔ <right>` and a stable-dependency pair reads
+`<source> → <target>`; a package is named by its path, written `repository root`
+for the root package. The evidence follows on indented lines: a claimed
+finding's `path:line` with its measurements, a size finding's subject and
+measured value, `<n> files import this`, `imports <n> files`, `<n> rated units`,
+`<n> files in the cycle`, `hot (<n> commits)`, a coupling pair's commit operands
+and dependency state, and a contributor concentration's counts.
+
+The pattern ids are the stable vocabulary for an integration; the words beside
+them are what a person reads:
+
+| Pattern | The terminal prints | What it needs |
+| --- | --- | --- |
+| `god_file` | `does too much` | a file that both concentrates rated debt — three High findings, or one High finding among at least eight rated units — and is broad, meaning it carries a size finding or imports at least ten files |
+| `hub` | `everything depends on this` | a file whose imports in or out reach eight and, when its package's median is not zero, reach four times that median |
+| `tangle` | `circular dependency` | one rated dependency cycle: High across packages, Watch inside one package |
+| `hot_mess` | `hot and complex` | a file that carries High debt and is a hotspot in the selected window, five touches by default |
+| `shotgun_pair` | `changes together` | two packages that keep changing together with no code dependency explaining it |
+| `bus_risk` | `one author` | a package whose commits concentrate on a single contributor |
+| `unstable_dependency` | `depends on less stable code` | a package depending on a less stable package through at least two references |
+| `measured` | the finding's own head | anything rated that no other pattern claimed |
+
+`measured` is the fallback, so nothing the report rated disappears for want of a
+pattern that recognizes it: its head is exactly the head a finding row used to
+print, such as `high compare_units · function ·
+crates/analysis/src/comparison.rs:123`. A pattern's own numbers appear as
+evidence: an `unstable_dependency` card heads `depends on less stable code ·
+crates/api → crates/core` and states `instability 1/4 → 2/3 · 3 imports` below
+it, which is the row that used to live in a separate architecture section.
+
+The thresholds behind the named patterns are published the way the rating
+thresholds are:
+
+| Rule | Value |
+| --- | ---: |
+| High findings that make a file concentrated | 3 |
+| Rated units at which one High finding makes a file concentrated | 8 |
+| Files imported that make a file broad without a size finding | 10 |
+| File imports in or out at which a file can be a hub | 8 |
+| Multiple of its package's median a hub also reaches, when that median is not zero | 4 |
+
+A `god_file` needs both halves: concentrated debt alone means a file has bugs,
+and breadth alone means a file is large. A `hub` compares a file against the
+median of its own package, so the same file is the same problem at every
+selected scope.
+
+Every card is either a `default` card or a `detail` card. A card is `default`
+when it claims at least one finding that affects the verdict, or when it anchors
+a rated architecture, coupling, contributor-concentration, or stable-dependency
+finding. Every other card is `detail`: it appears under `--all`, at its own
+anchor when that anchor is the selected scope, and always in JSON. A widely
+imported file with no debt of its own, a file whose whole debt is advisory or
+non-primary, and a file whose only evidence is its size are all `detail` cards.
+Visibility decides where a card is shown and never what it is — it moves no
+rating, no count, and no verdict, and hiding a `detail` card never reorders the
+cards that remain.
+
+Cards are ranked against each other, so the first card is the problem to look at
+first. The order is the card's rating, then how many High findings it claims,
+then hot before not hot, then how many findings it claims, then the pattern,
+then the accepted finding rank of its top claimed finding, then the anchor's
+path and line.
+
+### The one-screen budget
+
+Codebase debt detail fits about one screen at every scope, so following the
+report's own `next:` line never produces a longer report than the one that
+suggested it. The budget is 24 slots, where a card costs one slot plus one slot
+per evidence line it shows. It is spent through a ladder of card-count and
+evidence-line pairs — `(6, 3)`, `(8, 2)`, `(12, 1)`, `(24, 0)` — applying the
+first rung whose card count is at least the number of cards the displayed scope
+holds. Every rung costs exactly the budget, so showing more problems means
+showing less evidence for each. A scope holding more than twenty-four cards
+shows the twenty-four highest ranked and cuts the rest without a bookkeeping
+row; `--top` is how you lift that cut.
+
+`--top N` selects the rung `N` selects, by the same rule the default applies to
+the scope's own card count, so a larger `N` buys breadth by spending evidence
+depth and a smaller one does the reverse. The package view above holds twelve
+cards and allows one evidence line each; the same scope at `--top 6` allows
+three, and a card with less evidence than that simply states what it has:
+
+```console
+$ smackdebt --top 6 crates/analysis
+
+smackdebt · crates/analysis
+  Worn in the usual places.
+  4 of the repository's 20 high live here.
+4 high · 17 watch · 1,047 checked
+worst: crates/analysis/src/evolution.rs — hot AND complex
+
+PROBLEMS
+  high does too much · crates/analysis/src/evolution.rs
+        crates/analysis/src/evolution.rs:56 · method · parameters 13
+        124 rated units
+        file · 1,303 lines
+  high everything depends on this · crates/analysis/src/report.rs
+        crates/analysis/src/report.rs:1448 · method · cognitive 18 · nesting 4
+        imports 10 files
+        file · 2,596 lines
+  high ArchitectureGraph::new · method · crates/analysis/src/architecture.rs:17
+        parameters 6
+        file · 812 lines
+        hot (6 commits)
+  high compare_units · function · crates/analysis/src/comparison.rs:123
+        cognitive 56 · cyclomatic 25 · nesting 4
+        crates/analysis/src/comparison.rs:42 · method · parameters 7
+  high cycle_witness · function · crates/analysis/src/cycle_witness.rs:3
+        cognitive 34 · cyclomatic 15 · nesting 5
+  high strongly_connected_components · function · crates/analysis/src/
+        strongly_connected_components.rs:1
+        cognitive 30 · cyclomatic 15 · nesting 4
+
+  next: smackdebt crates/analysis/src
+```
+
+A cycle witness is the one exception to the accounting: it costs one slot
+however many steps it stacks, because eliding a witness destroys the fact rather
+than shortening it. A selected file is the other: it shows every card anchored
+on that file with complete evidence and no ladder at all, because drilling to a
+file is itself a request for detail.
+
+```console
+$ smackdebt crates/analysis/src/change_coupling.rs
+
+smackdebt · crates/analysis/src/change_coupling.rs
+  Clean. Ship it.
+  0 of the repository's 20 high live here.
+0 high · 0 watch · 22 checked
+
+PROBLEMS
+  watch circular dependency · crates/analysis/src/change_coupling.rs
+        2 files in the cycle
+        crates/analysis/src/change_coupling.rs
+        → crates/analysis/src/evolution.rs
+        → crates/analysis/src/change_coupling.rs
+        hot (9 commits)
+  watch changes together · crates/analysis ↔ crates/cli
+        changed together in 26 of 77 commits · 34% · no direct dependency · linked via crates/output
+  watch one author · crates/analysis
+        one contributor made 45 of 45 commits
+```
+
+The verdict counts rate units: `0 high · 0 watch · 22 checked` counts the
+functions, methods, and closures in scope. A cycle, a coupling pair, and a
+contributor concentration are none of those, so a scope whose units are all
+healthy can still hold problems worth reading.
+
+If you miss a per-finding row you used to see, one card now claims that file's
+findings and states them as its evidence. JSON keeps every claimed finding as
+its own row, and each card names exactly which rows it claimed.
 
 ## Read the ratings
 
@@ -292,8 +530,10 @@ them against discovered repository files:
 - `ambiguous` references match several possible internal files.
 
 Smackdebt does not guess when identity is unclear. Unmatched and ambiguous
-references are counted in one grouped warning sentence, their per-file detail
-stays in `--all` and path views, and JSON retains their locations and reasons.
+references are counted in one grouped warning sentence, their per-reference
+detail appears under `--all` or when the selected scope is a file, and JSON
+retains their locations and reasons. At every other scope that grouped sentence
+is their whole terminal presence.
 
 A reference written against the name a package declares for itself resolves
 inside the repository. When no repository path matches a reference, Smackdebt
@@ -309,11 +549,14 @@ executes build configuration and never emulates lockfiles, resolver algorithms,
 workspace inheritance, or version constraints.
 
 A cycle crossing packages is High. A file cycle contained in one package is
-Watch. A cycle prints its closed witness one step per line, so the evidence is
-never shortened away. Fan-in is the number of packages that depend on a package;
-fan-out is the number it depends on. Instability is `fan-out / (fan-in +
-fan-out)` and is printed as its exact integer fraction, so a package that
-depends on less stable code reads `instability 1/4 → 2/3`.
+Watch. Either becomes one `circular dependency` card that states how many files
+the cycle holds and carries its closed witness one step per line, so the
+evidence is never shortened away. Fan-in is the number of packages that depend
+on a package; fan-out is the number it depends on. Instability is `fan-out /
+(fan-in + fan-out)` and is printed as its exact integer fraction, so a package
+that depends on less stable code reads `instability 1/4 → 2/3`. A `hub` card
+counts files rather than packages: `<n> files import this` and `imports <n>
+files` state the anchor file's own degree.
 
 Architecture verdicts describe the code that ships. Package dependency edges,
 package and file cycles, fan-in, fan-out, instability, and stable-dependency
@@ -346,19 +589,27 @@ Code and architecture results remain separate. Lower source complexity does not
 cancel an introduced package cycle. In diff output an introduced cycle is
 worse, a removed cycle is better, and an ordinary edge change is changed.
 
-Pass a package, directory, or file path to inspect its incoming and outgoing
-relationships. Incoming references remain visible even when their source is
-outside the selected path:
+Dependency edges appear in no human view, at any scope and any detail level,
+`--all` included. A relationship reaches the terminal only as a problem card's
+aggregate evidence — a fan-in or fan-out count, a cycle's member count, or a
+cycle witness — so the JSON relation tables are the only place to read the edges
+themselves. The per-import and module-ownership rows are gone with the section
+that carried them: over a 296-file directory they produced about 1,270 unrated,
+unranked rows and named no problem, which is why zooming in used to make the
+report longer.
+
+Pass a package, directory, or file path to read the problems anchored there
+instead:
 
 ```console
-smackdebt crates/core
-smackdebt --all crates/core
+smackdebt crates/analysis
+smackdebt --all crates/analysis
 ```
 
-Human relationship rows stay direct: `source → target · 1 import`,
-`source owns target`, `could not be matched`, or `matched more than one file`.
-Non-primary roles and advisory evidence appear only when they change how the row
-should be read.
+Unresolved and ambiguous references keep their own rows — `could not be matched`
+and `matched more than one file` — under `--all` or at a file scope. Non-primary
+roles and advisory evidence appear only when they change how a row should be
+read.
 
 Static analysis does not provide compiler type resolution, runtime tracing, or
 executed build configuration. Macros, generated paths, runtime imports, and
@@ -366,7 +617,7 @@ unsupported aliases can therefore remain unresolved.
 
 ## Read the history evidence
 
-The `HISTORY` section uses locally available non-merge Git history inside the
+History evidence comes from locally available non-merge Git history inside the
 selected `--history` window. The window governs every history-derived number:
 activity, churn, change coupling, and contributor concentration all describe the
 same commits. History keeps its evidence separate from current code health and
@@ -384,22 +635,29 @@ Coupling uses Jaccard similarity: shared commits divided by commits touching
 either package. Default findings require at least three shared commits and 20%
 similarity. Weaker observations stay in JSON only. Recurrent coupling without a
 static dependency in either direction is Watch because it can reveal a missing
-or unclear package relationship. Coupling that matches a static edge remains
-descriptive and appears in `--all` and path views. Knowledge concentration is a
-Watch row stating counts only, such as
-`one contributor made 34 of 36 commits to crates/api`.
+or unclear package relationship.
 
-Default `HISTORY` shows at most three actionable rows. It orders coupling by
-shared commits, then similarity, then stable package identity. Each row includes
-the shared and total commit counts, similarity, and how the package dependency
-graph links the pair. Churn totals stay in JSON; the terminal reports activity where it
-changes a decision, as `hot (n commits)` on a finding.
+In a codebase report, actionable history is problem cards: one `changes
+together` card per unexplained coupling pair and one `one author` card per
+contributor concentration, each keeping its finding's exact evidence and each
+ranked against every other problem rather than sitting in a section of its own.
+A `one author` card states counts only, such as `one contributor made 45 of 45
+commits`. A coupling pair that a code dependency already explains is context
+rather than debt: it produces no finding, so no card names it at any scope or
+detail level, `--all` included, and its complete row stays in the machine
+report. Churn totals stay in JSON; the terminal reports activity where it
+changes a decision, as `hot (n commits)` evidence on a card.
+
+A diff report keeps its `HISTORY` section this release, with at most three
+actionable rows ordered by shared commits, then similarity, then stable package
+identity, and with the contextual pairs it shows today.
 
 A package pair is reported once. Source role and trust variants are aggregated
-into that one row, and per-role history stays in JSON. A scope and its own
+into that one card, and per-role history stays in JSON. A scope and its own
 ancestor never form a pair, because commits they share are structural rather
-than hidden coupling. Each row states how the package dependency graph links
-the pair. `code dependency exists` means a trusted eligible `uses` relation
+than hidden coupling. Every coupling evidence line states the shared and total
+commit counts, the similarity, and how the package dependency graph links the
+pair. `code dependency exists` means a trusted eligible `uses` relation
 links the pair in either direction, including relations resolved through a
 declared manifest name and relations whose role is test, example, or
 benchmark. `no direct dependency` with `linked via <package>` means no such
@@ -426,7 +684,7 @@ These short examples run against generated public repositories in the release
 evidence. Each comment declares the exact exit status, empty stderr, and the
 stable stdout fragments that must appear in the stated order.
 
-<!-- smackdebt-example fixture=evolution status=0 stderr=empty stdout=smackdebt_·_repository_root|checked|PROBLEMS|_a_↔_b -->
+<!-- smackdebt-example fixture=evolution status=0 stderr=empty stdout=smackdebt_·_repository_root|checked|PROBLEMS|changes_together_·_a_↔_b -->
 ```console
 smackdebt --color never --jobs 1 --history 36500d
 ```
@@ -531,10 +789,51 @@ terminal prints for it. In a diff the tier and sentence are the diff answer and
 path strings. Every value in the head also exists in a table, and both come from
 the same completed report.
 
+Below the repository root the verdict head also carries `verdict.share`, holding
+the same sentence the terminal prints and both integer counts behind it. The
+member is absent at the repository root and absent when the repository holds no
+High debt, the way the unsupported-coverage qualifier is:
+
+```json
+"verdict": {
+  "tier": "clean", "sentence": "Clean. Ship it.",
+  "share": { "sentence": "0 of the repository's 20 high live here.", "high": 0, "repository_high": 20 },
+  "mode": "codebase"
+}
+```
+
+The `problems` table holds every card in problem-rank order, `detail` cards
+included, and a row's position is that card's identity. `pattern` is one of the
+frozen ids, `visibility` is the string `default` or `detail` rather than a
+boolean, `anchor` names its kind and carries the file, file list, package, or
+package pair that kind implies, `evidence` preserves the order the terminal
+prints, and `claimed` names every finding the card took, table by table:
+
+```json
+{
+  "pattern": "tangle", "rating": "watch", "visibility": "default",
+  "anchor": { "kind": "files", "files": [2, 8] },
+  "evidence": [
+    { "kind": "members", "value": 2 },
+    { "kind": "architecture_findings", "index": 0 },
+    { "kind": "hot", "value": 9 }
+  ],
+  "claimed": [{ "table": "architecture_findings", "index": 0 }]
+}
+```
+
+Every index resolves inside the table it names, no finding is claimed by two
+cards, and no retained finding of a claimable table is left unclaimed — so the
+cards are a complete partition of the debt the report retained, and a consumer
+can join from a card to its rows or from a row back to its card.
+
 Behind the head, JSON contains the complete report, including everything the
 terminal leaves out: raw dependency edges, references outside the repository,
 churn totals, weak coupling, hotspots, size findings, orphan files, and healthy
-counts. One package table owns stable package IDs, repository-relative paths,
+counts. Dependency edges appear in no human view at any scope or detail level,
+so the relation tables are the only place to read them; the terminal states a
+relationship as aggregate card evidence such as a fan-in count or a cycle
+witness. One package table owns stable package IDs, repository-relative paths,
 current or base-only presence, and the name a manifest declares; machine path
 `.` stays unchanged even though terminal output calls it `repository root`.
 Files expose SourceRole, parse outcome, and trust. Recovered Watch and High
@@ -548,6 +847,12 @@ relation row, because a file that imports a module normally and again inside a
 coupling operands, and contributor concentration without contributor identity.
 Hotspots, size findings, orphan files, stable-dependency findings, and
 knowledge-concentration findings each own a table and state their own `kind`.
+
+If a row the terminal used to print has disappeared, the version-4 table that
+retains it is where to look: `dependency_edges` and `package_edges` for import
+rows, `change_coupling` for the pairs a code dependency explains, `activity` and
+`file_history` for churn, `external_dependencies` for references outside the
+repository, and `problems` for the card that now speaks for them.
 
 Every serialized value is an integer or a string. Coupling similarity and
 concentration share are published as their integer operands — shared and union

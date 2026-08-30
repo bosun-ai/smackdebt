@@ -76,7 +76,9 @@ row's position is that card's identity. Each row SHALL expose:
   `shotgun_pair`, `bus_risk`, `unstable_dependency`, `measured`;
 - `rating`, the card's rating;
 - `visibility`, either `default` or `detail`, as a string rather than a
-  boolean, because every serialized value is an integer or a string;
+  boolean, because every serialized value is an integer or a string; the value
+  is the one the visibility rule `problem-clustering` owns, and this
+  specification SHALL NOT restate that rule;
 - `anchor`, naming its kind and carrying the file index, file index list,
   package index, or package index pair that kind implies;
 - `evidence`, an ordered array preserving the order analysis stored, where each
@@ -99,7 +101,7 @@ change in the same slice as the serializer because it uses
 - **THEN** each `problems` row carries its frozen pattern, rating, visibility string, anchor, ordered evidence, and claimed findings, and validates against the schema
 
 #### Scenario: A detail card is serialized
-- **WHEN** a card claims no finding that affects the verdict
+- **WHEN** a card is `detail` under the rule `problem-clustering` owns, claiming no finding that affects the verdict and anchoring no rated architecture, coupling, knowledge-concentration, or stable-dependency finding
 - **THEN** its `visibility` is the string `detail` and it is present in the machine report at every detail level
 
 #### Scenario: An evidence index points outside its table

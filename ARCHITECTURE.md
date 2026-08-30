@@ -26,7 +26,7 @@ flowchart TD
 
 | Crate | Responsibility |
 | --- | --- |
-| `smackdebt-analysis` | Measurements, health policy, static graph algorithms, aggregation, comparisons, and report values |
+| `smackdebt-analysis` | Measurements, health policy, static graph algorithms, aggregation, comparisons, problem clustering, and report values |
 | `smackdebt-languages` | File detection, compiled parser dispatch, and grammar-specific dependency syntax |
 | `smackdebt-discovery` | One ignore-aware inventory and package assignment |
 | `smackdebt-git` | Repository facts, history, status, refs, and object reads |
@@ -117,7 +117,25 @@ family that moved. The worst offender is the top of the same finding rank with
 its path resolved once, falling back to the first witness of a package cycle.
 The root verdict completes while the report is built, and any other retained
 scope is answered by a pure function of the completed report, so no renderer
-performs analysis to get one.
+performs analysis to get one. A verdict for a scope below the repository root
+also carries a repository-share fact — both integer High counts and one frozen
+sentence — owned beside the tier sentence so every consumer prints identical
+bytes, absent at the root and when the repository holds no High debt, and proven
+never to move a tier, a count, or the worst offender.
+
+Analysis also owns the problem table: the named problems a report states, built
+once when the report is finished. Clustering reads borrowed slices of the
+completed flat tables and groups retained findings around one anchor each — a
+file, a cycle's file set, a package, or a package pair. Detectors run in a fixed
+claiming order over integer thresholds only, one claim mark per file keeps a
+file to at most one file-anchored card, and a `measured` fallback claims what no
+named pattern did, so every retained finding of a claimable family is claimed
+exactly once. A card links the findings it claims by their typed indexes and
+invents no measurement, rating, or verdict of its own: its rating is the highest
+rating among its claims. The problem rank is total and applied once, so the
+table leaves analysis in display order and no renderer sorts it, and a card's
+`default` or `detail` visibility is a display fact that changes nothing the
+report measured.
 
 ## Package discovery
 
@@ -281,10 +299,13 @@ resolution. The comparison therefore detects a changed edge that closes or
 opens a path through unchanged files. Introduced package cycles are Worse,
 removed package cycles are Better, and other edge changes are Changed.
 
-Terminal output filters graph detail to edges and findings involving the
-selected scope, including incoming edges from outside it. The retained report
-and JSON keep the complete root graph. Output borrows those facts and does not
-run resolution or graph algorithms.
+Edges are a machine fact. No human view prints one at any scope or detail level;
+a relationship reaches a reader only as aggregate problem-card evidence — a
+file's fan-in or fan-out count, a cycle's member count, or a cycle witness — so
+the relation and package-edge tables in JSON are the only place the edges
+themselves are readable. The retained report and JSON keep the complete root
+graph. Output borrows those facts and does not run resolution or graph
+algorithms.
 
 This graph is intentionally static. It does not execute build files, expand
 macros, trace runtime loading, or provide compiler-grade call or type graphs.
@@ -388,8 +409,9 @@ The verdict, its tier sentence, its counts, and the worst offender with its
 resolved path and reason are completed analysis facts. The renderer prints them
 and never composes a sentence, derives a tier, or computes a count. Terminal
 output builds private borrowed presentation rows once for the verdict block,
-affected areas, ranked findings or debt-moving comparisons, relevant
-relationships, history rows, warnings, and next command. Selection, joining, and
+affected areas, the ranked problem section, the diff finding, architecture, and
+history sections, warnings with their per-file detail, and the next command.
+Selection, joining, and
 navigation happen once in that presentation step; the renderer performs no
 filesystem, Git, parser, or analysis work, and a path view reads owned tables
 only. This seam can support a later interactive renderer without putting
@@ -431,29 +453,41 @@ cyan, Better is green, Changed uses the normal text color, and the bar uses its
 tier color. Each occupies one display cell. Undecorated output contains no
 codepoint in U+E000–U+F8FF, which every public piped flow asserts.
 
-The verdict block always appears. `AREAS` appears only for several debt-bearing
-children and shows at most five with word-labeled counts. `FINDINGS` shows at
-most three ranked source findings or debt-moving comparisons. `ARCHITECTURE`
-appears for rated graph findings, stacks each cycle witness one step per line,
-and states stable-dependency rows with their integer instability operands.
-`HISTORY` appears for at most three actionable rows, ordered by shared commits
-descending, similarity descending, then stable package names and IDs, and adds
-knowledge-concentration rows as counts. `WARNINGS` groups one sentence per kind.
-A diff that moves no debt writes the verdict block and nothing after it.
+The verdict block always appears, carrying the analysis-owned qualifier and
+repository-share bytes when the completed verdict holds them. `AREAS` appears
+only for several debt-bearing children and shows at most five with word-labeled
+counts. `WARNINGS` groups one sentence per kind. A diff that moves no debt
+writes the verdict block and nothing after it.
+
+Codebase debt is one `PROBLEMS` section rendered from the ranked problem table.
+The renderer filters that table by anchor to the displayed scope, truncates it,
+and never sorts: order is analysis policy, and the per-pattern name and
+per-evidence-kind wording are the renderer's only contribution. The section
+costs a fixed slot budget, spent through a ladder of card-count and
+evidence-line pairs where every rung costs the whole budget, so a scope with few
+problems shows each in depth and a scope with many shows more of them with less
+evidence each. Slots are counted rather than rendered lines, so the facts a view
+states are identical at every width and only row stacking differs; a cycle
+witness costs one slot however many steps it stacks. `--top N` selects the rung
+`N` selects, `--all` and a selected file show every card in scope with complete
+evidence, and a card's `detail` visibility is applied as a display filter that
+never reorders the cards that remain. Diff output keeps `FINDINGS`,
+`ARCHITECTURE`, and `HISTORY` with their accepted limits and orders this
+release, so the two modes speak different vocabularies for one cycle.
 
 Empty optional sections, healthy rows, bars, summary ratios, processing totals,
 raw dependency edges, references outside the repository, churn totals,
 cyclomatic-one values, weak coupling, and omission bookkeeping stay out of every
 human view. `--all` removes the useful-debt limits without turning the terminal
-into a complete export. Path views retain incoming and outgoing debt-bearing
-relationships. JSON remains the complete view of everything the terminal omits.
-Every coupling row in `--all` and path views retains shared commits, union
-commits, similarity, and whether a code dependency exists.
+into a complete export. JSON remains the complete view of everything the
+terminal omits. Every coupling card retains shared commits, union commits,
+similarity, and whether a code dependency exists.
 
 Human warnings group file problems and use short sentences. History and rename
-gaps and imports that could not be followed have stable wording. Detailed and
-path views may add affected-file context without repeating the same summary for
-each file. The three common input failures — a missing path, a missing Git ref,
+gaps and imports that could not be followed have stable wording. `--all` and a
+selected file scope add per-file diagnostic context without repeating the same
+summary for each file; every other scope shows the grouped sentence alone. The
+three common input failures — a missing path, a missing Git ref,
 and `--all --json` — write one exact line to standard error with no usage tail,
 no absolute path, and no operating-system or Git text.
 
@@ -476,9 +510,15 @@ History keeps eligible and context mappings separate and exposes exact churn,
 coupling, and concentration operands, plus the selected window. Hotspots, size
 findings, orphan files, stable-dependency findings, and knowledge-concentration
 findings each own their table, and each finding family states its own `kind`,
-because each owns its own identity type in analysis. Every serialized value is
-an integer or a string: similarity and concentration ratios are derived from
-serialized operands rather than published as floats. The output crate streams
+because each owns its own identity type in analysis. `problems` is the ranked
+card table: a row's position is that card's identity, its `visibility` is a
+string rather than a boolean, its evidence keeps the order analysis stored, and
+its claims name the table and position of every finding it took. Validation
+proves each index resolves, that no finding is claimed twice, and that no
+retained finding of a claimable table is unclaimed, so the cards partition the
+retained debt. Every serialized value is an integer or a string: similarity and
+concentration ratios are derived from serialized operands rather than published
+as floats. The output crate streams
 this model from borrowed report facts, and `schemas/report-v4.schema.json` plus
 black-box snapshots check it. There is no older serializer or command-line
 version selector.
@@ -486,14 +526,14 @@ version selector.
 Static architecture adds dependency coverage, file relations, package edges,
 external summaries, resolution diagnostics, package measurements, architecture
 findings, and architecture comparisons. These are flat indexed tables; source
-and architecture health remain independent. Default terminal output shows
-rated cycle witnesses without arbitrary edge samples. `--all` and path drill
-show relevant imports, ownership, external, advisory, unmatched, and
-multiple-match evidence in direct human wording. Primary and trusted labels are
-omitted; non-primary roles and advisory trust appear only when useful. Diff
-cycles use a short change line followed by the closed arrow path, and edge
-changes use arrow or ownership rows with added or removed wording. Human
-activity rows say `commit` or `commits`; retained JSON names stay unchanged.
+and architecture health remain independent. Codebase terminal output states a
+rated cycle as one problem card carrying its witness, and states no edge row and
+no edge total at any detail level; unmatched and multiple-match evidence keeps
+its own rows under `--all` or at a file scope, and the grouped warning sentence
+covers it everywhere else. Primary and trusted labels are omitted; non-primary
+roles and advisory trust appear only when useful. Diff cycles use a short change
+line followed by the closed arrow path. Human activity rows say `commit` or
+`commits`; retained JSON names stay unchanged.
 
 The release baseline workflow is `scripts/performance/release-baselines.sh`.
 It requires a clean tree, captures one revision/toolchain/host state, and then

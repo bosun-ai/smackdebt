@@ -120,9 +120,15 @@ dynamic import prints raw source, newlines included, into the terminal.
   once when sections become cards. The slices are ordered so each churn lands
   on an otherwise quiet baseline and every regenerated snapshot is reviewed per
   case. JSON snapshots churn once, in their own slice.
-- The committed ratchet baseline is untouched: the gate snapshot is built from
-  finding tables and never from presentation, so no `gate --update` is required
-  and `just gate` stays green at every slice.
+- The gate snapshot is built from finding tables and never from presentation, so
+  no rendering change moves the ratchet baseline. The baseline still gains three
+  reviewed entries across the change, each one real new source debt accepted with
+  `gate --update` in the slice that wrote it: the `tests` container in
+  `crates/output/src/output.rs` (one Watch container size, replacing one Watch
+  cognitive), the new `crates/analysis/src/problem.rs` (one High file size), and
+  the exhaustive evidence match in `crates/output/src/json.rs` (one Watch
+  cyclomatic). `just gate` is green against the committed baseline at every
+  slice.
 - `ARCHITECTURE.md` is updated under its existing accepted
   `architecture-documentation` requirements, which already require it to
   describe the analysis and presentation boundary; no delta is needed there.

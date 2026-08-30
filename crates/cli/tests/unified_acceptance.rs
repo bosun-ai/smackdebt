@@ -1650,19 +1650,31 @@ fn readme_console_examples_use_the_simple_terminal_vocabulary() {
     assert!(!inside, "README console block is not closed");
     for required in [
         "AREAS",
+        "PROBLEMS",
+        "WARNINGS",
+        // The diff report keeps its own three sections this release.
         "FINDINGS",
         "ARCHITECTURE",
         "HISTORY",
-        "WARNINGS",
-        "changed together in 8 of 10 commits · 80% · no code dependency",
-        "changed together in 6 of 9 commits · 67% · no direct dependency · linked via crates/api",
-        "source → target · 1 import",
-        "source owns target",
-        "one contributor made 34 of 36 commits to crates/api",
+        // Every frozen pattern id beside the words the terminal prints for it.
+        "| `god_file` | `does too much` |",
+        "| `hub` | `everything depends on this` |",
+        "| `tangle` | `circular dependency` |",
+        "| `hot_mess` | `hot and complex` |",
+        "| `shotgun_pair` | `changes together` |",
+        "| `bus_risk` | `one author` |",
+        "| `unstable_dependency` | `depends on less stable code` |",
+        "| `measured` |",
+        "changed together in 26 of 77 commits · 34% · no direct dependency · linked via crates/output",
+        "29% · no code dependency",
+        "one contributor made 45 of 45 commits",
         "instability 1/4 → 2/3",
-        "hot (14 commits)",
+        "hot (6 commits)",
+        "2 files in the cycle",
+        "imports 10 files",
         "GraphEditor.vue · closure",
-        "next: smackdebt crates/api",
+        "next: smackdebt scripts",
+        "4 of the repository's 20 high live here.",
         "worse 0 · better 0 · changed 0",
         "smackdebt: path not found: does/not/exist",
         "smackdebt: Git ref not found: no-such-ref",
@@ -1685,6 +1697,11 @@ fn readme_console_examples_use_the_simple_terminal_vocabulary() {
         "ASCII fallback",
         "rated units ·",
         "Policy gates belong to a later release.",
+        // The edge rows left the human terminal with the section that carried
+        // them, so the README may not document them as terminal wording.
+        "source → target · 1 import",
+        "source owns target",
+        "· 1 import",
     ] {
         assert!(!readme.contains(removed), "README contains {removed}");
     }
