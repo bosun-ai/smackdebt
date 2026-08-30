@@ -17,23 +17,23 @@
 - [x] 3.1 Add the problem module in analysis: pattern, anchor, evidence, card, policy constants, and a clustering entry point over borrowed slices.
 - [x] 3.2 Add the size-finding identity type so a card can link a size finding by index.
 - [x] 3.3 Implement the detectors in claiming order with integer-only rules, file degree over verdict-graph edges, and the package-relative nearest-rank median computed once per package.
-- [x] 3.4 Implement the descriptive-card rule so a widely imported file with no rated or size finding carries no rating and stays out of default detail.
+- [x] 3.4 Implement the two-value visibility rule so a card that claims no verdict-affecting finding and anchors no rated architecture, coupling, knowledge-concentration, or stable-dependency finding is `detail` rather than `default`.
 - [x] 3.5 Implement the problem rank and sort the table once when the report is finished, without recording an algorithm pass.
 - [x] 3.6 Add pure boundary tests per detector — two High findings producing no god file, fan-in 7 against 8, exactly four times the median — plus a claimed-once audit, an all-keys-tie rank test, and a serial-parallel equality test.
 - [x] 3.7 Regenerate the analysis API snapshot for the new surface.
 
 ## 4. Problem cards in the machine report
 
-- [ ] 4.1 Serialize the `problems` table in rank order with pattern, rating, visibility string, anchor, ordered evidence, and claimed findings, and extend the checked schema in the same commit.
-- [ ] 4.2 Serialize the size-finding position contract so evidence indexes resolve, and assert index integrity and claimed-once in JSON validation.
-- [ ] 4.3 Prove no problem value is a floating-point number or a boolean.
-- [ ] 4.4 Regenerate the JSON snapshots and review them through the JSON textconv.
+- [x] 4.1 Serialize the `problems` table in rank order with pattern, rating, visibility string, anchor, ordered evidence, and claimed findings, and extend the checked schema in the same commit.
+- [x] 4.2 Serialize the size-finding position contract so evidence indexes resolve, and assert in JSON validation that every anchor and evidence index resolves inside the table it names, that no finding is claimed twice, and that no retained finding of any claimable table is left unclaimed.
+- [x] 4.3 Prove no problem value is a floating-point number or a boolean.
+- [x] 4.4 Regenerate the JSON snapshots and review them through the JSON textconv.
 
 ## 5. The problem section and the one-screen budget
 
 - [ ] 5.1 Replace the codebase finding, architecture, and history sections with one problem section built from the ranked table filtered by anchor, keeping the diff sections unchanged.
 - [ ] 5.2 Add the exact human name per pattern and the exact wording per evidence kind, with correct singular and plural form, reusing the existing row and stacked-witness machinery.
-- [ ] 5.3 Implement the slot budget and its ladder, `--top N` as cards selecting the rung `N` selects, `--all` as every card with complete evidence including descriptive ones, and a file scope as complete evidence without the ladder.
+- [ ] 5.3 Implement the slot budget and its ladder, `--top N` as cards selecting the rung `N` selects, `--all` as every card with complete evidence including the `detail` ones, and a file scope as complete evidence without the ladder.
 - [ ] 5.4 Add evidence that a directory-scope default fits the budget, that the view the `next:` line proposes fits it, that `--top 10` shows ten cards, and that one invocation states the same cards at 50 and at 120 columns.
 - [ ] 5.5 Add generated fixtures and exact acceptance for each frozen pattern, including one file with three High findings producing one card and one card per strongly connected component.
 - [ ] 5.6 Regenerate every affected terminal snapshot case by case, never as a batch, keeping the fifty-column display-width audit passing.

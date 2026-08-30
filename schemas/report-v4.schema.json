@@ -38,7 +38,8 @@
     "stable_dependency_findings",
     "hotspots",
     "size_findings",
-    "orphan_files"
+    "orphan_files",
+    "problems"
   ],
   "properties": {
     "schema_version": {
@@ -230,6 +231,12 @@
         "$ref": "#/$defs/index"
       },
       "uniqueItems": true
+    },
+    "problems": {
+      "type": "array",
+      "items": {
+        "$ref": "#/$defs/problem"
+      }
     }
   },
   "additionalProperties": false,
@@ -2107,6 +2114,205 @@
         }
       },
       "additionalProperties": false
+    },
+    "problem": {
+      "type": "object",
+      "required": [
+        "pattern",
+        "rating",
+        "visibility",
+        "anchor",
+        "evidence",
+        "claimed"
+      ],
+      "properties": {
+        "pattern": {
+          "enum": [
+            "god_file",
+            "hub",
+            "tangle",
+            "hot_mess",
+            "shotgun_pair",
+            "bus_risk",
+            "unstable_dependency",
+            "measured"
+          ]
+        },
+        "rating": {
+          "$ref": "#/$defs/rating"
+        },
+        "visibility": {
+          "enum": [
+            "default",
+            "detail"
+          ]
+        },
+        "anchor": {
+          "$ref": "#/$defs/problem_anchor"
+        },
+        "evidence": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/problem_evidence"
+          },
+          "minItems": 1
+        },
+        "claimed": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/problem_claim"
+          }
+        }
+      },
+      "additionalProperties": false
+    },
+    "problem_anchor": {
+      "oneOf": [
+        {
+          "type": "object",
+          "required": [
+            "kind",
+            "file"
+          ],
+          "properties": {
+            "kind": {
+              "const": "file"
+            },
+            "file": {
+              "$ref": "#/$defs/index"
+            }
+          },
+          "additionalProperties": false
+        },
+        {
+          "type": "object",
+          "required": [
+            "kind",
+            "files"
+          ],
+          "properties": {
+            "kind": {
+              "const": "files"
+            },
+            "files": {
+              "type": "array",
+              "items": {
+                "$ref": "#/$defs/index"
+              },
+              "minItems": 2,
+              "uniqueItems": true
+            }
+          },
+          "additionalProperties": false
+        },
+        {
+          "type": "object",
+          "required": [
+            "kind",
+            "package"
+          ],
+          "properties": {
+            "kind": {
+              "const": "package"
+            },
+            "package": {
+              "$ref": "#/$defs/index"
+            }
+          },
+          "additionalProperties": false
+        },
+        {
+          "type": "object",
+          "required": [
+            "kind",
+            "packages"
+          ],
+          "properties": {
+            "kind": {
+              "const": "package_pair"
+            },
+            "packages": {
+              "type": "array",
+              "items": {
+                "$ref": "#/$defs/index"
+              },
+              "minItems": 2,
+              "maxItems": 2,
+              "uniqueItems": true
+            }
+          },
+          "additionalProperties": false
+        }
+      ]
+    },
+    "problem_evidence": {
+      "oneOf": [
+        {
+          "type": "object",
+          "required": [
+            "kind",
+            "index"
+          ],
+          "properties": {
+            "kind": {
+              "$ref": "#/$defs/claimable_table"
+            },
+            "index": {
+              "$ref": "#/$defs/index"
+            }
+          },
+          "additionalProperties": false
+        },
+        {
+          "type": "object",
+          "required": [
+            "kind",
+            "value"
+          ],
+          "properties": {
+            "kind": {
+              "enum": [
+                "fan_in",
+                "fan_out",
+                "hot",
+                "rated_units",
+                "members"
+              ]
+            },
+            "value": {
+              "type": "integer",
+              "minimum": 0
+            }
+          },
+          "additionalProperties": false
+        }
+      ]
+    },
+    "problem_claim": {
+      "type": "object",
+      "required": [
+        "table",
+        "index"
+      ],
+      "properties": {
+        "table": {
+          "$ref": "#/$defs/claimable_table"
+        },
+        "index": {
+          "$ref": "#/$defs/index"
+        }
+      },
+      "additionalProperties": false
+    },
+    "claimable_table": {
+      "enum": [
+        "findings",
+        "size_findings",
+        "architecture_findings",
+        "stable_dependency_findings",
+        "evolutionary_findings",
+        "knowledge_concentration_findings"
+      ]
     }
   }
 }

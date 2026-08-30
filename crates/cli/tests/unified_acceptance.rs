@@ -2093,29 +2093,34 @@ fn checked_json(bytes: &[u8]) -> Value {
         .unwrap();
     assert_index_integrity(&report);
     assert_recursive_privacy(&report);
-    assert_no_floating_point_value(&report, "$");
+    assert_no_float_or_boolean_value(&report, "$");
     assert_head_agrees_with_tables(&report);
     report
 }
 
-/// Version 4 serializes integers and strings only, so any floating-point value
-/// anywhere in the object is a contract failure.
-fn assert_no_floating_point_value(value: &Value, path: &str) {
+/// Version 4 serializes integers and strings only, so a floating-point value
+/// or a boolean anywhere in the object is a contract failure.
+///
+/// This is why a problem card states its visibility as a string: a boolean
+/// would answer one question and then have to be replaced when a third value
+/// appears.
+fn assert_no_float_or_boolean_value(value: &Value, path: &str) {
     match value {
         Value::Object(fields) => {
             for (name, value) in fields {
-                assert_no_floating_point_value(value, &format!("{path}.{name}"));
+                assert_no_float_or_boolean_value(value, &format!("{path}.{name}"));
             }
         }
         Value::Array(values) => {
             for (index, value) in values.iter().enumerate() {
-                assert_no_floating_point_value(value, &format!("{path}[{index}]"));
+                assert_no_float_or_boolean_value(value, &format!("{path}[{index}]"));
             }
         }
         Value::Number(number) => assert!(
             number.is_i64() || number.is_u64(),
             "floating-point value at {path}: {number}"
         ),
+        Value::Bool(value) => panic!("boolean value at {path}: {value}"),
         _ => {}
     }
 }
@@ -2587,6 +2592,132 @@ fn assert_index_integrity(report: &Value) {
     for package in report["packages"].as_array().unwrap() {
         if let Some(name) = package.get("manifest_name") {
             assert!(!name.as_str().unwrap().is_empty());
+        }
+    }
+    assert_problem_integrity(report);
+}
+
+/// The tables a problem card may claim from, named the way the report names
+/// them, so a claim resolves with one lookup.
+const CLAIMABLE_TABLES: [&str; 6] = [
+    "findings",
+    "size_findings",
+    "architecture_findings",
+    "stable_dependency_findings",
+    "evolutionary_findings",
+    "knowledge_concentration_findings",
+];
+
+/// The frozen pattern ids, which are the only names a card may carry.
+const PROBLEM_PATTERNS: [&str; 8] = [
+    "god_file",
+    "hub",
+    "tangle",
+    "hot_mess",
+    "shotgun_pair",
+    "bus_risk",
+    "unstable_dependency",
+    "measured",
+];
+
+/// Validates the problem table: every anchor and evidence index resolves into
+/// the table it names, every pattern and visibility is a frozen id, and the
+/// claims cover the claimable tables exactly once each.
+///
+/// The claim audit has two halves and both are contract failures: a finding
+/// claimed by two cards would count one problem twice, and a retained finding
+/// claimed by no card would be a problem the report measured and then dropped.
+fn assert_problem_integrity(report: &Value) {
+    let mut claims: HashSet<(&str, u64)> = HashSet::new();
+    for problem in report["problems"].as_array().unwrap() {
+        let pattern = problem["pattern"].as_str().unwrap();
+        assert!(
+            PROBLEM_PATTERNS.contains(&pattern),
+            "unknown problem pattern {pattern}"
+        );
+        let visibility = problem["visibility"].as_str().unwrap();
+        assert!(
+            visibility == "default" || visibility == "detail",
+            "unknown problem visibility {visibility}"
+        );
+        assert_problem_anchor(report, &problem["anchor"]);
+        assert_problem_evidence(report, &problem["evidence"]);
+        for claim in problem["claimed"].as_array().unwrap() {
+            let table = claimable_table(claim["table"].as_str().unwrap());
+            let index = claim["index"].as_u64().unwrap();
+            let rows = report[table].as_array().unwrap().len();
+            assert!(
+                (index as usize) < rows,
+                "claim {table} {index} of {rows} rows"
+            );
+            assert!(
+                claims.insert((table, index)),
+                "{table} row {index} is claimed twice"
+            );
+        }
+    }
+    for table in CLAIMABLE_TABLES {
+        for index in 0..report[table].as_array().unwrap().len() as u64 {
+            assert!(
+                claims.contains(&(table, index)),
+                "{table} row {index} reached no problem card"
+            );
+        }
+    }
+}
+
+/// The frozen name of the claimable table one claim indexes.
+fn claimable_table(name: &str) -> &'static str {
+    CLAIMABLE_TABLES
+        .into_iter()
+        .find(|table| *table == name)
+        .unwrap_or_else(|| panic!("unclaimable table {name}"))
+}
+
+/// A card's anchor names its kind and carries only the indexes that kind
+/// implies, each resolving into the table it names.
+fn assert_problem_anchor(report: &Value, anchor: &Value) {
+    let files = report["files"].as_array().unwrap().len();
+    let packages = report["packages"].as_array().unwrap().len();
+    match anchor["kind"].as_str().unwrap() {
+        "file" => assert!((anchor["file"].as_u64().unwrap() as usize) < files),
+        "files" => {
+            let members = anchor["files"].as_array().unwrap();
+            assert!(members.len() >= 2, "a file set anchors more than one file");
+            for file in members {
+                assert!((file.as_u64().unwrap() as usize) < files);
+            }
+        }
+        "package" => assert!((anchor["package"].as_u64().unwrap() as usize) < packages),
+        "package_pair" => {
+            let pair = anchor["packages"].as_array().unwrap();
+            assert_eq!(pair.len(), 2, "a package pair names two packages");
+            assert_ne!(pair[0], pair[1]);
+            for package in pair {
+                assert!((package.as_u64().unwrap() as usize) < packages);
+            }
+        }
+        kind => panic!("unknown anchor kind {kind}"),
+    }
+}
+
+/// A card's facts are either a link that resolves into the table its kind
+/// names or a measured integer, and a card states at least one of them.
+fn assert_problem_evidence(report: &Value, evidence: &Value) {
+    let evidence = evidence.as_array().unwrap();
+    assert!(!evidence.is_empty(), "a card states at least one fact");
+    for fact in evidence {
+        let kind = fact["kind"].as_str().unwrap();
+        if CLAIMABLE_TABLES.contains(&kind) {
+            let index = fact["index"].as_u64().unwrap() as usize;
+            let rows = report[kind].as_array().unwrap().len();
+            assert!(index < rows, "evidence {kind} {index} of {rows} rows");
+        } else {
+            assert!(
+                ["fan_in", "fan_out", "hot", "rated_units", "members"].contains(&kind),
+                "unknown evidence kind {kind}"
+            );
+            fact["value"].as_u64().expect("a fact carries an integer");
         }
     }
 }

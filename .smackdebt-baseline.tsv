@@ -61,6 +61,7 @@ crates/languages/src/vue.rs	cyclomatic	0	1
 crates/languages/src/vue.rs	parameters	0	1
 crates/languages/tests/language_fixtures.rs	file_size	1	0
 crates/languages/tests/language_fixtures.rs	parameters	1	0
+crates/output/src/json.rs	cyclomatic	0	1
 crates/output/src/json.rs	file_size	1	0
 crates/output/src/output.rs	cognitive	1	1
 crates/output/src/output.rs	container_size	0	1

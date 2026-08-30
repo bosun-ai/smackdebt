@@ -15,8 +15,8 @@ use crate::output::{
     scope_kind,
 };
 use smackdebt_analysis::{
-    Hotspot, KnowledgeConcentrationFinding, OrphanFile, SizeFinding, SizeSubject,
-    StableDependencyFinding, Verdict, WorstOffender,
+    ClaimedFinding, Hotspot, KnowledgeConcentrationFinding, OrphanFile, ProblemAnchor, ProblemCard,
+    ProblemEvidence, SizeFinding, SizeSubject, StableDependencyFinding, Verdict, WorstOffender,
 };
 
 /// Streams JSON schema version 4 without cloning report strings or arrays.
@@ -49,7 +49,7 @@ impl Serialize for ReportView<'_> {
                 .cloned()
                 .expect("a built report always carries a root verdict"),
         };
-        let mut map = serializer.serialize_map(Some(35))?;
+        let mut map = serializer.serialize_map(Some(36))?;
         map.serialize_entry("schema_version", &report.schema_version())?;
         map.serialize_entry("mode", mode_name(report.mode()))?;
         // The head is written before every table so `--json | head` answers the
@@ -129,6 +129,7 @@ impl Serialize for ReportView<'_> {
         map.serialize_entry("hotspots", &Hotspots(report.hotspots()))?;
         map.serialize_entry("size_findings", &SizeFindings(report.size_findings()))?;
         map.serialize_entry("orphan_files", &OrphanFiles(report.orphan_files()))?;
+        map.serialize_entry("problems", &Problems(report.problems()))?;
         map.end()
     }
 }
@@ -1307,6 +1308,168 @@ impl Serialize for KnowledgeConcentrationFindingView {
         map.serialize_entry("contributor_count", &concentration.contributor_count())?;
         map.serialize_entry("numerator", &concentration.numerator())?;
         map.serialize_entry("denominator", &concentration.denominator())?;
+        map.end()
+    }
+}
+
+/// The ranked problem table, where a row's position is that card's identity.
+struct Problems<'a>(&'a [ProblemCard]);
+impl Serialize for Problems<'_> {
+    fn serialize<S: Serializer>(&self, serializer: S) -> Result<S::Ok, S::Error> {
+        let mut sequence = serializer.serialize_seq(Some(self.0.len()))?;
+        for card in self.0 {
+            sequence.serialize_element(&ProblemView(card))?;
+        }
+        sequence.end()
+    }
+}
+
+/// One problem card, which links findings the report already holds rather than
+/// restating them, so every value here is an index, a count, or a frozen id.
+struct ProblemView<'a>(&'a ProblemCard);
+impl Serialize for ProblemView<'_> {
+    fn serialize<S: Serializer>(&self, serializer: S) -> Result<S::Ok, S::Error> {
+        let card = self.0;
+        let mut map = serializer.serialize_map(Some(6))?;
+        map.serialize_entry("pattern", card.pattern().id())?;
+        map.serialize_entry("rating", rating_name(card.rating()))?;
+        // Visibility is a string because version 4 serializes integers and
+        // strings only, and because a third value would otherwise open a
+        // version rather than a member.
+        map.serialize_entry("visibility", card.visibility().id())?;
+        map.serialize_entry("anchor", &ProblemAnchorView(card.anchor()))?;
+        map.serialize_entry("evidence", &ProblemEvidenceList(card.evidence()))?;
+        map.serialize_entry("claimed", &ClaimedFindings(card.claimed_findings()))?;
+        map.end()
+    }
+}
+
+/// What a card is about, naming its kind and carrying only the indexes that
+/// kind implies.
+struct ProblemAnchorView<'a>(&'a ProblemAnchor);
+impl Serialize for ProblemAnchorView<'_> {
+    fn serialize<S: Serializer>(&self, serializer: S) -> Result<S::Ok, S::Error> {
+        let mut map = serializer.serialize_map(Some(2))?;
+        match self.0 {
+            ProblemAnchor::File(file) => {
+                map.serialize_entry("kind", "file")?;
+                map.serialize_entry("file", &file.get())?;
+            }
+            ProblemAnchor::Files(files) => {
+                map.serialize_entry("kind", "files")?;
+                map.serialize_entry("files", &FileIds(files))?;
+            }
+            ProblemAnchor::Package(package) => {
+                map.serialize_entry("kind", "package")?;
+                map.serialize_entry("package", &package.get())?;
+            }
+            ProblemAnchor::PackagePair(left, right) => {
+                map.serialize_entry("kind", "package_pair")?;
+                map.serialize_entry("packages", &[left.get(), right.get()])?;
+            }
+        }
+        map.end()
+    }
+}
+
+/// The card's facts in the order analysis stored them, head first.
+struct ProblemEvidenceList<'a>(&'a [ProblemEvidence]);
+impl Serialize for ProblemEvidenceList<'_> {
+    fn serialize<S: Serializer>(&self, serializer: S) -> Result<S::Ok, S::Error> {
+        let mut sequence = serializer.serialize_seq(Some(self.0.len()))?;
+        for fact in self.0 {
+            sequence.serialize_element(&ProblemEvidenceView(*fact))?;
+        }
+        sequence.end()
+    }
+}
+
+/// One fact a card states.
+///
+/// A fact that links a finding names the table it indexes, so a consumer
+/// resolves it with one lookup; a fact the report already measured carries its
+/// integer instead.
+struct ProblemEvidenceView(ProblemEvidence);
+impl Serialize for ProblemEvidenceView {
+    fn serialize<S: Serializer>(&self, serializer: S) -> Result<S::Ok, S::Error> {
+        let mut map = serializer.serialize_map(Some(2))?;
+        match self.0 {
+            ProblemEvidence::Finding(id) => {
+                map.serialize_entry("kind", "findings")?;
+                map.serialize_entry("index", &id.get())?;
+            }
+            ProblemEvidence::Size(id) => {
+                map.serialize_entry("kind", "size_findings")?;
+                map.serialize_entry("index", &id.get())?;
+            }
+            ProblemEvidence::Architecture(id) => {
+                map.serialize_entry("kind", "architecture_findings")?;
+                map.serialize_entry("index", &id.get())?;
+            }
+            ProblemEvidence::StableDependency(id) => {
+                map.serialize_entry("kind", "stable_dependency_findings")?;
+                map.serialize_entry("index", &id.get())?;
+            }
+            ProblemEvidence::Coupling(id) => {
+                map.serialize_entry("kind", "evolutionary_findings")?;
+                map.serialize_entry("index", &id.get())?;
+            }
+            ProblemEvidence::Knowledge(id) => {
+                map.serialize_entry("kind", "knowledge_concentration_findings")?;
+                map.serialize_entry("index", &id.get())?;
+            }
+            ProblemEvidence::FanIn(value) => {
+                map.serialize_entry("kind", "fan_in")?;
+                map.serialize_entry("value", &value)?;
+            }
+            ProblemEvidence::FanOut(value) => {
+                map.serialize_entry("kind", "fan_out")?;
+                map.serialize_entry("value", &value)?;
+            }
+            ProblemEvidence::Hot(value) => {
+                map.serialize_entry("kind", "hot")?;
+                map.serialize_entry("value", &value)?;
+            }
+            ProblemEvidence::RatedUnits(value) => {
+                map.serialize_entry("kind", "rated_units")?;
+                map.serialize_entry("value", &value)?;
+            }
+            ProblemEvidence::Members(value) => {
+                map.serialize_entry("kind", "members")?;
+                map.serialize_entry("value", &value)?;
+            }
+        }
+        map.end()
+    }
+}
+
+/// The findings one card claimed, each naming the table it indexes and its
+/// position in that table, so the claim audit resolves without a join.
+struct ClaimedFindings<'a>(&'a [ClaimedFinding]);
+impl Serialize for ClaimedFindings<'_> {
+    fn serialize<S: Serializer>(&self, serializer: S) -> Result<S::Ok, S::Error> {
+        let mut sequence = serializer.serialize_seq(Some(self.0.len()))?;
+        for claim in self.0 {
+            sequence.serialize_element(&ClaimedFindingView(*claim))?;
+        }
+        sequence.end()
+    }
+}
+
+struct ClaimedFindingView(ClaimedFinding);
+impl Serialize for ClaimedFindingView {
+    fn serialize<S: Serializer>(&self, serializer: S) -> Result<S::Ok, S::Error> {
+        let (table, index) = match self.0 {
+            ClaimedFinding::Source(id) => ("findings", id.get()),
+            ClaimedFinding::Size(id) => ("size_findings", id.get()),
+            ClaimedFinding::Architecture(id) => ("architecture_findings", id.get()),
+            ClaimedFinding::StableDependency(id) => ("stable_dependency_findings", id.get()),
+            ClaimedFinding::Coupling(id) => ("evolutionary_findings", id.get()),
+            ClaimedFinding::Knowledge(id) => ("knowledge_concentration_findings", id.get()),
+        };
+        let mut map = serializer.serialize_map(Some(2))?;
+        map.serialize_entry("table", table)?;
+        map.serialize_entry("index", &index)?;
         map.end()
     }
 }
