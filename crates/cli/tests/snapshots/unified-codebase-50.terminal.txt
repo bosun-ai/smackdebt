@@ -10,10 +10,10 @@ AREAS
 
 PROBLEMS
   high circular dependency · c/main.js
-        2 files in the cycle
         c/main.js
         → d/main.js
         → c/main.js
+        2 files in the cycle
   high b · function · b/main.js:1
         cognitive 6 · cyclomatic 4 · statements 2
   watch renamed · function · e/new.js:1

@@ -892,15 +892,20 @@ fn long_fact_families_keep_their_meaning_at_fifty_columns() {
     }
     let lines = terminal.lines().collect::<Vec<_>>();
     assert!(terminal.contains("high circular dependency"), "{terminal}");
-    // The card states its member count first, then the witness step by step,
-    // and a narrow width stacks a long path over several lines.
-    let members = lines
+    // The card states the witness step by step first and its member count
+    // last, and a narrow width stacks a long path over several lines.
+    let head = lines
+        .iter()
+        .position(|line| line.contains("circular dependency"))
+        .unwrap_or_else(|| panic!("{terminal}"));
+    let members = lines[head..]
         .iter()
         .position(|line| line.trim().ends_with(" in the cycle"))
+        .map(|offset| head + offset)
         .unwrap_or_else(|| panic!("{terminal}"));
-    let witness = lines[members + 1..]
+    assert!(members > head + 1, "{terminal}");
+    let witness = lines[head + 1..members]
         .iter()
-        .take_while(|line| line.starts_with("        "))
         .map(|line| line.trim().trim_start_matches("→ ").to_owned())
         .collect::<Vec<_>>()
         .join("");

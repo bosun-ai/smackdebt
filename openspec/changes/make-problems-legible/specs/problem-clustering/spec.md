@@ -228,9 +228,13 @@ finding among the facts that made it fire, directly after its rated unit total
 and its fan-out, rather than after the findings it enumerates: the size finding
 is the reason the card exists, not a trailing detail.
 
-A `tangle` card SHALL state its member count, then its architecture finding, then
-the touch count of its hottest member when one is hot. A `shotgun_pair`,
-`bus_risk`, or `unstable_dependency` card SHALL state its one finding.
+A `tangle` card SHALL state its architecture finding, then its member count,
+then the touch count of its hottest member when one is hot. The witness comes
+first because a renderer under a budget shows a prefix of the evidence: the
+cycle is what the card is about, so it SHALL survive every rung that allows one
+evidence line at all, while the member count is the fact the budget may drop.
+A `shotgun_pair`, `bus_risk`, or `unstable_dependency` card SHALL state its one
+finding.
 
 #### Scenario: A god file is oversized
 - **WHEN** a `god_file` fires because the file carries a size finding

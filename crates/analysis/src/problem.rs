@@ -638,12 +638,16 @@ fn nearest_rank_median(sorted: &[u32]) -> u32 {
 /// finding rather than a card per member, per witness step, or per edge. The
 /// member files keep their own findings for the file patterns, because being
 /// inside a cycle and doing too much are two different problems.
+///
+/// The witness is stated first, ahead of the member count, because a renderer
+/// under a budget shows a prefix of the evidence: the cycle itself is what the
+/// card is about, and it survives every rung that allows one line at all.
 fn tangles(input: &ProblemInput<'_>, cards: &mut Vec<ProblemCard>) {
     for finding in input.architecture_findings {
         let members = finding.files();
         let mut evidence = vec![
-            ProblemEvidence::Members(members.len() as u32),
             ProblemEvidence::Architecture(finding.id()),
+            ProblemEvidence::Members(members.len() as u32),
         ];
         if let Some(touches) = members
             .iter()
@@ -1589,11 +1593,13 @@ mod tests {
                 ArchitectureFindingId::from_index(0)
             )]
         );
+        // The witness comes first, so the one evidence line a tight rung
+        // allows is the cycle itself rather than its member count.
         assert_eq!(
             tangles[0].evidence(),
             [
-                ProblemEvidence::Members(5),
                 ProblemEvidence::Architecture(ArchitectureFindingId::from_index(0)),
+                ProblemEvidence::Members(5),
                 ProblemEvidence::Hot(9),
             ]
         );

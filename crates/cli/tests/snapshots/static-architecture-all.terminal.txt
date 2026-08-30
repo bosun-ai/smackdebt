@@ -5,15 +5,15 @@ worst: app/main.js — package dependency cycle
 
 PROBLEMS
   high circular dependency · app/main.js
-        2 files in the cycle
         app/main.js
         → core/main.js
         → app/main.js
-  watch circular dependency · app/choice.js
         2 files in the cycle
+  watch circular dependency · app/choice.js
         app/choice.js
         → app/helper.js
         → app/choice.js
+        2 files in the cycle
 
 WARNINGS
   warning History is unavailable.

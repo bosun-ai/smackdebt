@@ -10,7 +10,6 @@ PROBLEMS
   high circular dependency ·
         very-long-source-package-name/
         very-long-source-directory-name/choice.js
-        3 files in the cycle
         very-long-source-package-name/
         very-long-source-directory-name/choice.js
         → very-long-target-package-name/
@@ -19,6 +18,7 @@ PROBLEMS
         → very-long-source-package-name/
         very-long-source-directory-name/
         very-long-source-file-name.js
+        3 files in the cycle
   watch ExtremelyLongContainerNameThatMustRemainRe
         cognizable::extremelyLongMethodNameThatMus
         tRemainRecognizable · method · test ·
