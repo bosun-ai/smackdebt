@@ -691,6 +691,62 @@ fn external_and_dynamic_references_remain_explicit() {
 }
 
 #[test]
+fn a_dynamic_import_spanning_several_lines_records_a_single_line_target() {
+    let mut analyzer = Analyzer::default();
+    let analysis = analyzer
+        .analyze(
+            Path::new("x.ts"),
+            b"const value = import(`\n  ${moduleId}\n`);\n".to_vec(),
+        )
+        .unwrap();
+    assert_eq!(analysis.dependencies().len(), 1);
+    let dependency = &analysis.dependencies()[0];
+    assert_eq!(
+        dependency.state(),
+        &DependencySyntaxState::Unresolved("dependency target is dynamic".to_owned())
+    );
+    assert_eq!(dependency.target(), "import(`");
+    assert!(!dependency.target().contains('\n'));
+}
+
+#[test]
+fn a_template_literal_without_interpolation_spanning_lines_still_records_a_single_line_target() {
+    let mut analyzer = Analyzer::default();
+    let analysis = analyzer
+        .analyze(Path::new("x.ts"), b"import(`\n  ./local\n`);\n".to_vec())
+        .unwrap();
+    assert_eq!(analysis.dependencies().len(), 1);
+    let dependency = &analysis.dependencies()[0];
+    // A literal spanning lines is not a static specifier either, so it falls
+    // to the same dynamic diagnostic as an interpolated template literal.
+    assert_eq!(
+        dependency.state(),
+        &DependencySyntaxState::Unresolved("dependency target is dynamic".to_owned())
+    );
+    assert_eq!(dependency.target(), "import(`");
+    assert!(!dependency.target().contains('\n'));
+}
+
+#[test]
+fn a_rust_macro_include_spanning_several_lines_records_a_single_line_target() {
+    let analysis = Analyzer::default()
+        .analyze(
+            Path::new("x.rs"),
+            b"include!(concat!(\n    env!(\"OUT_DIR\"),\n    \"/generated.rs\"\n));\nfn x() {}\n"
+                .to_vec(),
+        )
+        .unwrap();
+    assert_eq!(analysis.dependencies().len(), 1);
+    let dependency = &analysis.dependencies()[0];
+    assert_eq!(
+        dependency.state(),
+        &DependencySyntaxState::Unresolved("dependency target is dynamic".to_owned())
+    );
+    assert_eq!(dependency.target(), "include!(concat!(");
+    assert!(!dependency.target().contains('\n'));
+}
+
+#[test]
 fn root_package_malformed_and_unsupported_forms_do_not_guess() {
     let mut analyzer = Analyzer::default();
     let rust = analyzer

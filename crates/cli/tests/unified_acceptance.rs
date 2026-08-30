@@ -2432,12 +2432,14 @@ fn assert_index_integrity(report: &Value) {
         assert!(file < files);
         assert_evidence_role(&dependency["role"], &report["files"][file]["role"]);
         assert_eq!(dependency["trust"], report["files"][file]["trust"]);
+        assert_single_line_target(&dependency["target"]);
     }
     for diagnostic in report["resolution_diagnostics"].as_array().unwrap() {
         let file = diagnostic["file"].as_u64().unwrap() as usize;
         assert!(file < files);
         assert_evidence_role(&diagnostic["role"], &report["files"][file]["role"]);
         assert_eq!(diagnostic["trust"], report["files"][file]["trust"]);
+        assert_single_line_target(&diagnostic["target"]);
     }
     for finding in report["architecture_findings"].as_array().unwrap() {
         for package in finding["packages"].as_array().unwrap() {
@@ -2582,6 +2584,17 @@ fn strings<'a>(values: &'a Value, field: &str) -> HashSet<&'a str> {
         .iter()
         .filter_map(|value| value[field].as_str())
         .collect()
+}
+
+/// A dependency-target string must be legible on a single line: the
+/// language layer collapses any raw multi-line syntax before a target is
+/// retained, so no newline reaches the machine report.
+fn assert_single_line_target(target: &Value) {
+    let target = target.as_str().unwrap();
+    assert!(
+        !target.contains('\n'),
+        "dependency target spans lines: {target:?}"
+    );
 }
 
 /// A relation's role is its file's role unless a test scope demoted it.

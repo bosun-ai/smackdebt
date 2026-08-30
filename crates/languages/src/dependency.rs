@@ -14,7 +14,12 @@ pub(super) fn quoted(
     let text = node.utf8_text(source).ok()?;
     let target = string_value(text);
     let Some(target) = target else {
-        return Some(unresolved(node, kind, text, "dependency target is dynamic"));
+        return Some(unresolved(
+            node,
+            kind,
+            specifier_text(text),
+            "dependency target is dynamic",
+        ));
     };
     if relative_only && !target.starts_with('.') {
         return Some(external(node, kind, target));
@@ -172,7 +177,13 @@ fn rust_reference(node: Node<'_>, source: &[u8]) -> Option<DependencySyntax> {
             .filter(|target| argument.is_some_and(|value| value.len() == target.len() + 2))
         else {
             return Some(
-                unresolved(node, kind, text, "dependency target is dynamic").with_internal_intent(),
+                unresolved(
+                    node,
+                    kind,
+                    specifier_text(text),
+                    "dependency target is dynamic",
+                )
+                .with_internal_intent(),
             );
         };
         if target.starts_with('/') {
@@ -589,18 +600,36 @@ fn path_candidates(target: &str, extensions: &[&str]) -> Vec<String> {
     values
 }
 
+/// Reads a simple quoted specifier: a literal value between one pair of
+/// matching quote characters, with no interpolation and no embedded
+/// newline. A quoted value carrying either is not a static specifier, so
+/// callers fall back to `specifier_text` over the raw declaration text.
 fn string_value(text: &str) -> Option<&str> {
     for quote in ['\'', '"', '`'] {
         if let Some(start) = text.find(quote) {
             let rest = &text[start + 1..];
             let end = rest.find(quote)?;
             let value = &rest[..end];
-            if !value.contains("${") {
+            if !value.contains("${") && !value.contains('\n') {
                 return Some(value);
             }
         }
     }
     None
+}
+
+/// Reduces syntax text to one legible line for a diagnostic target: the
+/// first line, with internal whitespace runs collapsed to a single space,
+/// trimmed of leading and trailing whitespace.
+///
+/// Never truncates — a long single line is left for the renderer to wrap.
+fn specifier_text(text: &str) -> String {
+    text.lines()
+        .next()
+        .unwrap_or("")
+        .split_whitespace()
+        .collect::<Vec<_>>()
+        .join(" ")
 }
 
 fn candidates(
@@ -640,4 +669,15 @@ fn span(node: Node<'_>) -> SourceSpan {
         node.start_position().row as u32 + 1,
         node.end_position().row as u32 + 1,
     )
+}
+
+#[cfg(test)]
+mod tests {
+    use super::specifier_text;
+
+    #[test]
+    fn specifier_text_takes_the_first_line_and_collapses_whitespace() {
+        let text = "  first \t line   here\n\tsecond line\n        third";
+        assert_eq!(specifier_text(text), "first line here");
+    }
 }

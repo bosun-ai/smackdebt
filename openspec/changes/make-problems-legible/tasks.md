@@ -1,8 +1,8 @@
 ## 1. Single-line dependency specifiers
 
-- [ ] 1.1 Reduce an extracted dependency target to its first line with collapsed whitespace and no shortening, wherever a language falls back to the declaration node it read.
-- [ ] 1.2 Add a language fixture with a three-line template-literal dynamic import and assert that no retained resolution diagnostic target contains a newline, carriage return, or tab.
-- [ ] 1.3 Regenerate any snapshot the fix moves, per case.
+- [x] 1.1 Reduce an extracted dependency target to its first line with collapsed whitespace and no shortening, wherever a language falls back to the declaration node it read.
+- [x] 1.2 Add a language fixture with a three-line template-literal dynamic import and assert that no retained resolution diagnostic target contains a newline, carriage return, or tab.
+- [x] 1.3 Regenerate any snapshot the fix moves, per case.
 
 ## 2. Dependency edges leave the human terminal
 
