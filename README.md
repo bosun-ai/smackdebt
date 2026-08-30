@@ -32,7 +32,7 @@ $ smackdebt
 
 smackdebt · repository root
   Worn in the usual places.
-20 high · 64 watch · 2,845 checked
+20 high · 64 watch · 2,852 checked
 worst: crates/project/src/project.rs — hot AND complex
 
 AREAS
@@ -44,15 +44,15 @@ AREAS
 
 PROBLEMS
   high does too much · crates/project/src/project.rs
-  high does too much · crates/languages/src/dependency.rs
-  high does too much · crates/output/src/output.rs
-  high does too much · crates/cli/tests/unified_acceptance.rs
-  high does too much · crates/analysis/src/evolution.rs
-  high does too much · crates/cli/src/app.rs
-  high does too much · crates/cli/tests/acceptance.rs
-  high does too much · crates/languages/tests/language_fixtures.rs
+  high hot and complex · crates/languages/src/dependency.rs
+  high hot and complex · crates/output/src/output.rs
+  high hot and complex · crates/cli/tests/unified_acceptance.rs
+  high hot and complex · crates/analysis/src/evolution.rs
+  high hot and complex · crates/cli/src/app.rs
+  high hot and complex · crates/cli/tests/acceptance.rs
+  high hot and complex · crates/languages/tests/language_fixtures.rs
   high everything depends on this · crates/analysis/src/report.rs
-  high does too much · scripts/performance/review-workloads.py
+  high hot and complex · scripts/performance/review-workloads.py
   high ArchitectureGraph::new · method · crates/analysis/src/architecture.rs:17
   high generic_source_roles · function · crates/discovery/src/inventory.rs:228
   high ProblemEvidenceView::serialize · method · crates/output/src/json.rs:1412
@@ -119,11 +119,11 @@ $ smackdebt crates/analysis
 smackdebt · crates/analysis
   Worn in the usual places.
   4 of the repository's 20 high live here.
-4 high · 17 watch · 1,047 checked
+4 high · 17 watch · 1,049 checked
 worst: crates/analysis/src/evolution.rs — hot AND complex
 
 PROBLEMS
-  high does too much · crates/analysis/src/evolution.rs
+  high hot and complex · crates/analysis/src/evolution.rs
         crates/analysis/src/evolution.rs:56 · method · parameters 13
   high everything depends on this · crates/analysis/src/report.rs
         crates/analysis/src/report.rs:1448 · method · cognitive 18 · nesting 4
@@ -137,15 +137,19 @@ PROBLEMS
         strongly_connected_components.rs:1
         cognitive 30 · cyclomatic 15 · nesting 4
   watch circular dependency · crates/analysis/src/change_coupling.rs
-        2 files in the cycle
+        crates/analysis/src/change_coupling.rs
+        → crates/analysis/src/evolution.rs
+        → crates/analysis/src/change_coupling.rs
   watch circular dependency · crates/analysis/src/comparison.rs
-        7 files in the cycle
+        crates/analysis/src/comparison.rs
+        → crates/analysis/src/report.rs
+        → crates/analysis/src/comparison.rs
   watch GateSnapshot::from_report · method · crates/analysis/src/gate.rs:150
         cognitive 15
   watch changes together · crates/analysis ↔ crates/cli
-        changed together in 26 of 77 commits · 34% · no direct dependency · linked via crates/output
+        changed together in 27 of 83 commits · 33% · no direct dependency · linked via crates/output
   watch one author · crates/analysis
-        one contributor made 45 of 45 commits
+        one contributor made 48 of 48 commits
   watch OrphanCandidate<'a>::new · method · crates/analysis/src/orphan.rs:44
         parameters 6
 
@@ -325,7 +329,7 @@ them are what a person reads:
 
 | Pattern | The terminal prints | What it needs |
 | --- | --- | --- |
-| `god_file` | `does too much` | a file that both concentrates rated debt — three High findings, or one High finding among at least eight rated units — and is broad, meaning it carries a size finding or imports at least ten files |
+| `god_file` | `does too much` | a file that both concentrates rated debt — three High findings, or one High finding among at least six units rated Watch or High — and is broad, meaning it carries a size finding or imports at least ten files |
 | `hub` | `everything depends on this` | a file whose imports in or out reach eight and, when its package's median is not zero, reach four times that median |
 | `tangle` | `circular dependency` | one rated dependency cycle: High across packages, Watch inside one package |
 | `hot_mess` | `hot and complex` | a file that carries High debt and is a hotspot in the selected window, five touches by default |
@@ -348,7 +352,7 @@ thresholds are:
 | Rule | Value |
 | --- | ---: |
 | High findings that make a file concentrated | 3 |
-| Rated units at which one High finding makes a file concentrated | 8 |
+| Units rated Watch or High at which one High finding makes a file concentrated | 6 |
 | Files imported that make a file broad without a size finding | 10 |
 | File imports in or out at which a file can be a hub | 8 |
 | Multiple of its package's median a hub also reaches, when that median is not zero | 4 |
@@ -400,11 +404,11 @@ $ smackdebt --top 6 crates/analysis
 smackdebt · crates/analysis
   Worn in the usual places.
   4 of the repository's 20 high live here.
-4 high · 17 watch · 1,047 checked
+4 high · 17 watch · 1,049 checked
 worst: crates/analysis/src/evolution.rs — hot AND complex
 
 PROBLEMS
-  high does too much · crates/analysis/src/evolution.rs
+  high hot and complex · crates/analysis/src/evolution.rs
         crates/analysis/src/evolution.rs:56 · method · parameters 13
         124 rated units
         file · 1,303 lines
@@ -444,15 +448,15 @@ smackdebt · crates/analysis/src/change_coupling.rs
 
 PROBLEMS
   watch circular dependency · crates/analysis/src/change_coupling.rs
-        2 files in the cycle
         crates/analysis/src/change_coupling.rs
         → crates/analysis/src/evolution.rs
         → crates/analysis/src/change_coupling.rs
+        2 files in the cycle
         hot (9 commits)
   watch changes together · crates/analysis ↔ crates/cli
-        changed together in 26 of 77 commits · 34% · no direct dependency · linked via crates/output
+        changed together in 27 of 83 commits · 33% · no direct dependency · linked via crates/output
   watch one author · crates/analysis
-        one contributor made 45 of 45 commits
+        one contributor made 48 of 48 commits
 ```
 
 The verdict counts rate units: `0 high · 0 watch · 22 checked` counts the
@@ -641,7 +645,7 @@ In a codebase report, actionable history is problem cards: one `changes
 together` card per unexplained coupling pair and one `one author` card per
 contributor concentration, each keeping its finding's exact evidence and each
 ranked against every other problem rather than sitting in a section of its own.
-A `one author` card states counts only, such as `one contributor made 45 of 45
+A `one author` card states counts only, such as `one contributor made 48 of 48
 commits`. A coupling pair that a code dependency already explains is context
 rather than debt: it produces no finding, so no card names it at any scope or
 detail level, `--all` included, and its complete row stays in the machine
