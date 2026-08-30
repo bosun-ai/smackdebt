@@ -1,5 +1,6 @@
 smackdebt · src
   The code is winning.
+  25 of the repository's 25 high live here.
 25 high · 2 watch · 27 checked
 worst: src/c.c — most complex
 

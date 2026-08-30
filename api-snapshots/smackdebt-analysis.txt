@@ -1002,8 +1002,10 @@ pub const fn smackdebt_analysis::Verdict::facts(&self) -> smackdebt_analysis::De
 pub const fn smackdebt_analysis::Verdict::qualifier(&self) -> core::option::Option<&smackdebt_analysis::CoverageQualifier>
 pub const fn smackdebt_analysis::Verdict::selection(&self) -> &smackdebt_analysis::DebtDiffSelection
 pub const fn smackdebt_analysis::Verdict::sentence(&self) -> &'static str
+pub const fn smackdebt_analysis::Verdict::share(&self) -> core::option::Option<smackdebt_analysis::VerdictShare>
 pub const fn smackdebt_analysis::Verdict::tier(&self) -> smackdebt_analysis::CodebaseTier
 pub fn smackdebt_analysis::Verdict::with_qualifier(self, core::option::Option<smackdebt_analysis::CoverageQualifier>) -> Self
+pub const fn smackdebt_analysis::Verdict::with_share(self, core::option::Option<smackdebt_analysis::VerdictShare>) -> Self
 pub fn smackdebt_analysis::Verdict::worst(&self) -> &[smackdebt_analysis::WorstOffender]
 pub fn smackdebt_analysis::Verdict::worst_offender(&self) -> core::option::Option<&smackdebt_analysis::WorstOffender>
 pub struct smackdebt_analysis::VerdictCounts
@@ -1014,6 +1016,12 @@ pub const fn smackdebt_analysis::VerdictCounts::high_architecture_findings(self)
 pub const fn smackdebt_analysis::VerdictCounts::high_permille(self) -> u32
 pub const fn smackdebt_analysis::VerdictCounts::new(smackdebt_analysis::HealthCounts, u32) -> Self
 pub const fn smackdebt_analysis::VerdictCounts::watch(self) -> u32
+pub struct smackdebt_analysis::VerdictShare
+impl smackdebt_analysis::VerdictShare
+pub const fn smackdebt_analysis::VerdictShare::from_counts(u32, u32) -> core::option::Option<Self>
+pub const fn smackdebt_analysis::VerdictShare::high(self) -> u32
+pub const fn smackdebt_analysis::VerdictShare::repository_high(self) -> u32
+pub fn smackdebt_analysis::VerdictShare::sentence(self) -> alloc::string::String
 pub struct smackdebt_analysis::WorstOffender
 impl smackdebt_analysis::WorstOffender
 pub const fn smackdebt_analysis::WorstOffender::identity(&self) -> core::option::Option<&smackdebt_analysis::UnitIdentity>

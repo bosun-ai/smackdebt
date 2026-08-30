@@ -1837,6 +1837,29 @@
           },
           "additionalProperties": false
         },
+        "share": {
+          "type": "object",
+          "required": [
+            "sentence",
+            "high",
+            "repository_high"
+          ],
+          "properties": {
+            "sentence": {
+              "type": "string",
+              "pattern": "^[0-9]+ of the repository's [0-9]+ high live here\\.$"
+            },
+            "high": {
+              "type": "integer",
+              "minimum": 0
+            },
+            "repository_high": {
+              "type": "integer",
+              "minimum": 1
+            }
+          },
+          "additionalProperties": false
+        },
         "mode": {
           "enum": [
             "codebase",

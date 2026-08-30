@@ -698,6 +698,113 @@ fn a_marginal_unsupported_share_leaves_the_verdict_head_unqualified() {
     );
 }
 
+/// A sub-scope verdict answers about that scope, which leaves the reader
+/// without a sense of proportion; the share states it in analysis-owned bytes,
+/// and the root, which would only restate its own counts, carries none.
+#[test]
+fn a_sub_scope_verdict_frames_the_repositorys_high_debt() {
+    let packages = problem_pattern_fixture();
+    let root = packages.path().to_str().unwrap().to_owned();
+    let god = packages.path().join("god");
+    let god = god.to_str().unwrap();
+
+    let root_terminal = String::from_utf8(run(["--color", "never", &root])).unwrap();
+    assert!(
+        !root_terminal.contains("live here."),
+        "the repository root frames nothing: {root_terminal}"
+    );
+    let root_report: serde_json::Value = serde_json::from_slice(&run(["--json", &root])).unwrap();
+    validate_schema(&root_report);
+    assert!(
+        root_report["verdict"].get("share").is_none(),
+        "{}",
+        root_report["verdict"]
+    );
+
+    // The share row sits inside the verdict block, under the tier sentence and
+    // above the counts, at package scope.
+    let package_terminal = String::from_utf8(run(["--color", "never", god])).unwrap();
+    let package_lines: Vec<&str> = package_terminal.lines().collect();
+    assert_eq!(package_lines[0], "smackdebt · god");
+    assert_eq!(package_lines[1], "  Worn in the usual places.");
+    assert_eq!(
+        package_lines[2],
+        "  3 of the repository's 4 high live here."
+    );
+    assert!(package_lines[3].contains(" high · "), "{package_terminal}");
+    let package_report: serde_json::Value = serde_json::from_slice(&run(["--json", god])).unwrap();
+    validate_schema(&package_report);
+    let share = &package_report["verdict"]["share"];
+    assert_eq!(share["sentence"], "3 of the repository's 4 high live here.");
+    assert_eq!(share["high"], 3);
+    assert_eq!(share["repository_high"], 4);
+    // Both consumers state the analysis-owned bytes, never their own.
+    assert!(
+        package_terminal.contains(share["sentence"].as_str().unwrap()),
+        "{package_terminal}"
+    );
+    // The frame informs the reader and decides nothing.
+    assert_eq!(package_report["summary"]["high"], 3);
+    assert_eq!(root_report["summary"]["high"], 4);
+    assert_eq!(package_report["verdict"]["tier"], "worn");
+
+    // A directory below a package states the same fact about itself.
+    let split = split_debt_fixture();
+    let messy = split.path().join("messy");
+    let messy = messy.to_str().unwrap();
+    let clean = split.path().join("clean");
+    let clean = clean.to_str().unwrap();
+    let messy_terminal = String::from_utf8(run(["--color", "never", messy])).unwrap();
+    assert!(
+        messy_terminal.contains("\n  4 of the repository's 4 high live here.\n"),
+        "{messy_terminal}"
+    );
+    let messy_report: serde_json::Value = serde_json::from_slice(&run(["--json", messy])).unwrap();
+    validate_schema(&messy_report);
+    let messy_share = &messy_report["verdict"]["share"];
+    assert_eq!(
+        messy_share["sentence"],
+        "4 of the repository's 4 high live here."
+    );
+    assert_eq!(messy_share["high"], 4);
+    assert_eq!(messy_share["repository_high"], 4);
+    // A sub-scope holding none of it says so rather than staying silent.
+    let clean_report: serde_json::Value = serde_json::from_slice(&run(["--json", clean])).unwrap();
+    validate_schema(&clean_report);
+    assert_eq!(
+        clean_report["verdict"]["share"]["sentence"],
+        "0 of the repository's 4 high live here."
+    );
+}
+
+/// A repository without High debt has no fraction to divide, so no sub-scope
+/// states a zero-of-zero sentence.
+#[test]
+fn a_repository_without_high_debt_frames_no_sub_scope() {
+    let project = tempfile::tempdir().unwrap();
+    fs::create_dir(project.path().join("src")).unwrap();
+    fs::write(
+        project.path().join("src/kept.js"),
+        "export function kept() {\n  return 1;\n}\n",
+    )
+    .unwrap();
+    let terminal = String::from_utf8(run_in(
+        project.path(),
+        ["--color", "never", "--jobs", "1", "src"],
+    ))
+    .unwrap();
+    assert!(!terminal.contains("live here."), "{terminal}");
+    let report: serde_json::Value =
+        serde_json::from_slice(&run_in(project.path(), ["--json", "--jobs", "1", "src"])).unwrap();
+    validate_schema(&report);
+    assert_eq!(report["summary"]["high"], 0);
+    assert!(
+        report["verdict"].get("share").is_none(),
+        "{}",
+        report["verdict"]
+    );
+}
+
 #[test]
 fn static_architecture_codebase_snapshots_are_reviewed() {
     let project = static_architecture_fixture();

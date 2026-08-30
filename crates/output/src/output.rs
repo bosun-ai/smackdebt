@@ -1509,6 +1509,12 @@ impl<'a, W: Write> Renderer<'a, W> {
             write!(self.writer, "  ")?;
             self.write_text(&format!("{} {}", qualifier.sentence(), qualifier.fact()), 2)?;
         }
+        // A sub-scope answers about itself; the analysis-owned share states
+        // what fraction of the whole that is, verbatim.
+        if let Some(share) = view.verdict.share() {
+            write!(self.writer, "  ")?;
+            self.write_text(&share.sentence(), 2)?;
+        }
         self.write_text(&verdict_counts(&view.verdict, view.mode), 0)?;
         if let Some(worst) = view.verdict.worst_offender()
             && view.verdict.diff_tier() != Some(DiffTier::NoDebtChange)

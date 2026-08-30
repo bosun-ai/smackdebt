@@ -40,9 +40,9 @@
 
 ## 6. The repository frame
 
-- [ ] 6.1 Add the analysis-owned repository-share fact with its frozen sentence, absent at the repository root and when the repository holds no High debt, proven never to move the tier.
-- [ ] 6.2 Render the share row inside the sub-scope verdict block from the analysis-owned bytes.
-- [ ] 6.3 Serialize the share beside the tier and sentence, extend the schema, and add exact acceptance at package and directory scope and for its absence at the root.
+- [x] 6.1 Add the analysis-owned repository-share fact with its frozen sentence, absent at the repository root and when the repository holds no High debt, proven never to move the tier.
+- [x] 6.2 Render the share row inside the sub-scope verdict block from the analysis-owned bytes.
+- [x] 6.3 Serialize the share beside the tier and sentence, extend the schema, and add exact acceptance at package and directory scope and for its absence at the root.
 
 ## 7. Calibration, documentation, and close-out
 

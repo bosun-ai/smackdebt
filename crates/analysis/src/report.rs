@@ -6,8 +6,8 @@ use crate::problem::{ProblemCard, ProblemInput, cluster_problems};
 use crate::size::SizeFinding;
 use crate::source::{Language, ParseStatus, SourceRole, SourceSpan, SourceTrust, UnitIdentity};
 use crate::verdict::{
-    CoverageQualifier, DebtDiffSelection, Verdict, VerdictCounts, WORST_OFFENDER_LIMIT,
-    WorstOffender, WorstOffenderReason,
+    CoverageQualifier, DebtDiffSelection, Verdict, VerdictCounts, VerdictShare,
+    WORST_OFFENDER_LIMIT, WorstOffender, WorstOffenderReason,
 };
 use crate::{
     ArchitectureComparison, ArchitectureComparisonId, ArchitectureFinding, ArchitectureFindingId,
@@ -1219,15 +1219,33 @@ impl Report {
     ///
     /// This reads owned tables only: no filesystem, Git, parser, or analysis
     /// work runs, so a renderer can drill into a path without reanalyzing it.
-    pub fn scope_verdict(&self, scope: ScopeId) -> Verdict {
-        let scope = &self.scopes[scope.index()];
+    pub fn scope_verdict(&self, selected: ScopeId) -> Verdict {
+        let scope = &self.scopes[selected.index()];
         let counts = VerdictCounts::new(scope.health(), self.high_architecture_findings(scope));
         let worst = self.worst_offenders(scope);
         let verdict = match self.mode {
             ReportMode::Codebase => Verdict::codebase(counts, worst),
             ReportMode::Diff => Verdict::diff(counts, self.debt_diff(scope), worst),
         };
-        verdict.with_qualifier(self.coverage_qualifier(scope))
+        verdict
+            .with_qualifier(self.coverage_qualifier(scope))
+            .with_share(self.repository_share(selected))
+    }
+
+    /// The frame a scope below the repository root carries.
+    ///
+    /// The root would restate the counts it already prints, so it carries no
+    /// share. Both counts are already aggregated, so framing a scope reads two
+    /// health totals and does no work.
+    fn repository_share(&self, selected: ScopeId) -> Option<VerdictShare> {
+        let root = self.root?;
+        if root == selected {
+            return None;
+        }
+        VerdictShare::from_counts(
+            self.scopes[selected.index()].health().high(),
+            self.scopes[root.index()].health().high(),
+        )
     }
 
     /// The coverage qualifier one scope's byte totals earn, when they earn
@@ -1873,6 +1891,48 @@ mod tests {
         assert_eq!(
             report.scope_verdict(heavy).worst_offender().unwrap().path(),
             "src/heavy.rs"
+        );
+    }
+
+    #[test]
+    fn a_sub_scope_verdict_frames_the_repository_and_the_root_states_no_share() {
+        let mut fixture = ReportFixture::new(ReportMode::Codebase);
+        let (heavy, heavy_file) = fixture.add_file("src/heavy.rs", HealthCounts::new(0, 0, 2));
+        fixture.add_finding(heavy, heavy_file, "heavy", 25);
+        let (light, light_file) = fixture.add_file("src/light.rs", HealthCounts::new(9, 0, 1));
+        fixture.add_finding(light, light_file, "light", 25);
+        let report = fixture.finish();
+        assert!(
+            report.verdict().unwrap().share().is_none(),
+            "the root would restate the counts it already prints"
+        );
+        let share = report
+            .scope_verdict(heavy)
+            .share()
+            .expect("a sub-scope frames the repository");
+        assert_eq!(share.high(), 2);
+        assert_eq!(share.repository_high(), 3);
+        assert_eq!(share.sentence(), "2 of the repository's 3 high live here.");
+        assert_eq!(
+            report
+                .scope_verdict(light)
+                .share()
+                .map(|share| share.sentence()),
+            Some("1 of the repository's 3 high live here.".to_owned())
+        );
+        // The frame informs the reader and decides nothing.
+        assert_eq!(report.scope_verdict(light).tier(), CodebaseTier::Worn);
+        assert_eq!(report.scope_verdict(light).counts().high(), 1);
+    }
+
+    #[test]
+    fn a_repository_without_high_debt_frames_no_sub_scope() {
+        let mut fixture = ReportFixture::new(ReportMode::Codebase);
+        let (scope, _) = fixture.add_file("src/work.rs", HealthCounts::new(9, 1, 0));
+        let report = fixture.finish();
+        assert!(
+            report.scope_verdict(scope).share().is_none(),
+            "a zero-of-zero sentence states nothing"
         );
     }
 

@@ -1102,6 +1102,9 @@ impl Serialize for VerdictView<'_> {
         if let Some(qualifier) = self.0.qualifier() {
             map.serialize_entry("qualifier", &QualifierView(qualifier))?;
         }
+        if let Some(share) = self.0.share() {
+            map.serialize_entry("share", &ShareView(share))?;
+        }
         map.serialize_entry("mode", mode_name(self.1))?;
         map.end()
     }
@@ -1118,6 +1121,21 @@ impl Serialize for QualifierView<'_> {
         map.serialize_entry("sentence", self.0.sentence())?;
         map.serialize_entry("share_permille", &self.0.share_permille())?;
         map.serialize_entry("largest_language", self.0.largest_language())?;
+        map.end()
+    }
+}
+
+/// The repository frame a sub-scope verdict carries.
+///
+/// The sentence bytes are analysis-owned, so a machine consumer and the
+/// terminal state the same fraction for the same scope.
+struct ShareView(smackdebt_analysis::VerdictShare);
+impl Serialize for ShareView {
+    fn serialize<S: Serializer>(&self, serializer: S) -> Result<S::Ok, S::Error> {
+        let mut map = serializer.serialize_map(Some(3))?;
+        map.serialize_entry("sentence", &self.0.sentence())?;
+        map.serialize_entry("high", &self.0.high())?;
+        map.serialize_entry("repository_high", &self.0.repository_high())?;
         map.end()
     }
 }

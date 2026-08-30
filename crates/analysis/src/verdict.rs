@@ -175,6 +175,53 @@ impl CoverageQualifier {
     }
 }
 
+/// How much of the repository's High debt one sub-scope holds.
+///
+/// A scope verdict answers about that scope, which is right and leaves the
+/// reader without a sense of proportion. The sentence is copy owned by
+/// analysis, so a terminal renderer and a machine consumer print the same
+/// bytes for the same scope. The share informs the reader only — it never
+/// moves the selected tier, exactly as the coverage qualifier never does.
+#[derive(Clone, Copy, Debug, Eq, Hash, PartialEq)]
+pub struct VerdictShare {
+    high: u32,
+    repository_high: u32,
+}
+
+impl VerdictShare {
+    /// Completes a share when the repository holds High debt to divide.
+    ///
+    /// A repository without High debt has no fraction to state, so it carries
+    /// no share rather than a zero-of-zero sentence.
+    pub const fn from_counts(high: u32, repository_high: u32) -> Option<Self> {
+        if repository_high == 0 {
+            return None;
+        }
+        Some(Self {
+            high,
+            repository_high,
+        })
+    }
+
+    /// The exact sentence every consumer prints for this share.
+    pub fn sentence(self) -> String {
+        format!(
+            "{} of the repository's {} high live here.",
+            self.high, self.repository_high
+        )
+    }
+
+    /// The High units this scope holds.
+    pub const fn high(self) -> u32 {
+        self.high
+    }
+
+    /// The High units the whole repository holds.
+    pub const fn repository_high(self) -> u32 {
+        self.repository_high
+    }
+}
+
 impl VerdictCounts {
     /// Retains one scope's rated unit counts and its High architecture
     /// findings, which are the package dependency cycles.
@@ -548,6 +595,7 @@ pub struct Verdict {
     selection: DebtDiffSelection,
     worst: Vec<WorstOffender>,
     qualifier: Option<CoverageQualifier>,
+    share: Option<VerdictShare>,
 }
 
 impl Verdict {
@@ -560,6 +608,7 @@ impl Verdict {
             selection: DebtDiffSelection::default(),
             worst,
             qualifier: None,
+            share: None,
         }
     }
 
@@ -576,6 +625,7 @@ impl Verdict {
             selection,
             worst,
             qualifier: None,
+            share: None,
         }
     }
 
@@ -592,6 +642,21 @@ impl Verdict {
     /// share is material.
     pub const fn qualifier(&self) -> Option<&CoverageQualifier> {
         self.qualifier.as_ref()
+    }
+
+    /// Returns the same verdict carrying a repository-share fact.
+    ///
+    /// The tier was already selected; the share never changes it.
+    #[must_use]
+    pub const fn with_share(mut self, share: Option<VerdictShare>) -> Self {
+        self.share = share;
+        self
+    }
+
+    /// How much of the repository's High debt this scope holds, present only
+    /// for a scope below the repository root.
+    pub const fn share(&self) -> Option<VerdictShare> {
+        self.share
     }
 
     pub const fn tier(&self) -> CodebaseTier {
@@ -718,6 +783,46 @@ mod tests {
             CoverageQualifier::from_shares(0, 0, "Go").is_none(),
             "a scope without selected bytes has no share to state"
         );
+    }
+
+    #[test]
+    fn the_repository_share_states_both_counts_in_frozen_bytes() {
+        let share =
+            VerdictShare::from_counts(42, 136).expect("a repository with High debt has a share");
+        assert_eq!(share.high(), 42);
+        assert_eq!(share.repository_high(), 136);
+        assert_eq!(
+            share.sentence(),
+            "42 of the repository's 136 high live here."
+        );
+        let none_here =
+            VerdictShare::from_counts(0, 4).expect("a scope without debt still frames the whole");
+        assert_eq!(
+            none_here.sentence(),
+            "0 of the repository's 4 high live here."
+        );
+        assert!(
+            VerdictShare::from_counts(0, 0).is_none(),
+            "a repository without High debt has no share to divide"
+        );
+    }
+
+    #[test]
+    fn a_repository_share_never_moves_the_selected_tier() {
+        let counts = VerdictCounts::new(HealthCounts::new(3, 1, 1), 0);
+        let bare = Verdict::codebase(
+            counts,
+            vec![WorstOffender::new(
+                "src/work.rs",
+                WorstOffenderReason::MostComplex,
+            )],
+        );
+        let framed = bare.clone().with_share(VerdictShare::from_counts(1, 9));
+        assert_eq!(framed.tier(), bare.tier());
+        assert_eq!(framed.sentence(), bare.sentence());
+        assert_eq!(framed.counts(), bare.counts());
+        assert_eq!(framed.worst_offender(), bare.worst_offender());
+        assert!(framed.share().is_some());
     }
 
     #[test]
