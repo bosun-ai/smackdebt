@@ -334,7 +334,7 @@ impl<'a> ProblemRank<'a> {
         start_line: u32,
     ) -> Self {
         Self {
-            rating: Reverse(rating_rank(card.rating())),
+            rating: Reverse(card.rating().rank()),
             claimed_high: Reverse(claimed_high),
             hot: Reverse(card.is_hot()),
             claimed: Reverse(card.claimed_findings().len() as u32),
@@ -343,16 +343,6 @@ impl<'a> ProblemRank<'a> {
             path,
             start_line,
         }
-    }
-}
-
-/// The severity order used by the rank, kept here so the rank does not depend
-/// on a crate-private accessor.
-const fn rating_rank(rating: Rating) -> u8 {
-    match rating {
-        Rating::Healthy => 0,
-        Rating::Watch => 1,
-        Rating::High => 2,
     }
 }
 
