@@ -3,8 +3,8 @@
 ### Requirement: Problems cluster existing findings without new measurement
 Analysis SHALL group the findings a completed report already holds into problem
 cards. A problem card SHALL carry a pattern id, a rating, one anchor, ordered
-evidence, the identities of the findings it claimed, and whether it is
-descriptive. Every value on a card SHALL be read from a table the report already
+evidence, the identities of the findings it claimed, and its visibility. Every
+value on a card SHALL be read from a table the report already
 built: clustering SHALL NOT measure source, rate a unit, create a finding,
 change a verdict, read a file, walk the filesystem, start a Git process, visit a
 parser, or record an algorithm pass.
@@ -49,16 +49,29 @@ named pattern claimed still reaches a card rather than disappearing.
 - **WHEN** a file carries a verdict-affecting finding that no named pattern claims
 - **THEN** a `measured` card claims it
 
-### Requirement: Every finding is claimed by at most one card
+### Requirement: Every finding is claimed by exactly one card
 Clustering SHALL claim findings in exactly this order: `tangle`, `god_file`,
 `hub`, `hot_mess`, `shotgun_pair`, `bus_risk`, `unstable_dependency`,
 `measured`. A finding already claimed by an earlier pattern SHALL NOT be claimed
 again, and an index-integrity audit SHALL fail when one finding is claimed
 twice.
 
-Because every file-anchored pattern claims that file's findings, at most one
-file-anchored card SHALL exist for a file. This replaces the behavior where one
-file with several findings produced one displayed row per finding.
+A file-anchored pattern SHALL claim every retained finding of its file and every
+size finding of its file, whether or not those findings affect the verdict.
+Claiming SHALL therefore be blind to source role and to parse trust: advisory
+trust and non-primary roles decide what a card is worth showing by default, never
+whether its evidence survives clustering. Because every file-anchored pattern
+claims that file's findings, at most one file-anchored card SHALL exist for a
+file. This replaces the behavior where one file with several findings produced
+one displayed row per finding.
+
+Clustering SHALL leave no retained finding and no size finding unclaimed: with
+`measured` as the fallback, every row of the source finding table, the size
+finding table, the architecture finding table, the evolutionary finding table,
+the knowledge-concentration finding table, and the stable-dependency finding
+table SHALL be claimed by exactly one card. A coverage audit SHALL fail when a
+retained finding reaches no card, for the same reason the index-integrity audit
+fails when one reaches two.
 
 #### Scenario: One file carries three High findings
 - **WHEN** the file is clustered
@@ -71,6 +84,14 @@ file with several findings produced one displayed row per finding.
 #### Scenario: A finding is claimed twice
 - **WHEN** clustering would attach one finding to two cards
 - **THEN** the index-integrity audit fails
+
+#### Scenario: A file's only debt is advisory
+- **WHEN** a recovered file carries rated findings that cannot affect the verdict
+- **THEN** a card claims all of them rather than leaving them unclaimed, and the coverage audit passes
+
+#### Scenario: Every retained finding is accounted for
+- **WHEN** a completed report is clustered
+- **THEN** the number of distinct claimed findings equals the number of retained findings across every finding table, including size findings
 
 ### Requirement: File patterns are integer-only and package-relative
 Every file pattern SHALL be decided from integer facts the report already owns,
@@ -100,12 +121,24 @@ nothing to a file's fan-in or fan-out.
   The median SHALL be the nearest-rank median of the files of that file's own
   package, computed once per package, so it is an integer and does not depend on
   the selected scope. A `hub` card's rating SHALL be the highest rating among
-  the findings it claims, and `healthy` when it claims none, which is the
-  descriptive case defined below.
+  the findings it claims, whether or not those findings affect the verdict, and
+  `healthy` only when it claims none. A generated, fixture, or recovered file
+  that many primary files import SHALL therefore claim its own rated findings and
+  carry their highest rating rather than being called healthy, and its visibility
+  SHALL be `detail`.
 - **`hot_mess`**: a file that no earlier file pattern claimed SHALL be a
   `hot_mess` when it is a hotspot and carries at least one High finding. Its
   rating SHALL be High, which agrees with the accepted `hot_and_complex`
   worst-offender reason.
+
+The High findings the `god_file` and `hot_mess` rules count SHALL be findings
+that affect the verdict, and the rated units the `god_file` rule counts SHALL be
+the file's rated unit total, which analysis already keeps at zero for source
+that cannot move a verdict. A file whose debt cannot move a verdict SHALL
+therefore never be named a `god_file` or a `hot_mess`; it reaches a `hub` or a
+`measured` card instead, which is what keeps those two names meaningful. Every
+other decision a file pattern makes — what it claims, what rating it carries,
+and what it states as evidence — SHALL be blind to role and trust.
 
 The five thresholds — 3 High findings, 8 rated units, fan-out 10, degree 8, and
 the 4-times median multiple — are proposed values under review and SHALL be
@@ -151,10 +184,18 @@ finding's rating and its existing operands as evidence, with no change to the
 facts those findings already state.
 
 `measured` SHALL produce one card per file that still holds at least one
-unclaimed verdict-affecting finding. Its head SHALL be the identity of that
-file's top finding under the accepted finding rank, so a `measured` card states
-exactly what a displayed finding row states today. Its rating SHALL be the
-highest rating among the findings it claims.
+unclaimed retained finding or at least one unclaimed size finding, and SHALL
+claim all of them. Its head SHALL be the identity of that file's top finding
+under the accepted finding rank, so a `measured` card states exactly what a
+displayed finding row states today, and SHALL be that file's first size finding
+when it claims no source finding at all. Its rating SHALL be the highest rating
+among the findings it claims.
+
+A file whose only unclaimed evidence is a size finding SHALL therefore reach a
+`measured` card carrying that size finding, so the size row today's `--all` view
+prints keeps a home. A file whose only unclaimed findings are advisory or
+non-primary SHALL likewise reach a `measured` card, so recovered and non-primary
+debt keeps the ranking it has today inside `--all` instead of disappearing.
 
 #### Scenario: A coupling finding is clustered
 - **WHEN** an unexplained coupling finding exists for a package pair
@@ -166,25 +207,82 @@ highest rating among the findings it claims.
 
 #### Scenario: A file has one ordinary Watch finding
 - **WHEN** no named pattern claims the file
-- **THEN** one `measured` card names that file's top ranked finding and claims its remaining verdict-affecting findings
+- **THEN** one `measured` card names that file's top ranked finding and claims its remaining findings
 
-### Requirement: Descriptive cards carry no rating and stay out of default detail
-A `hub` card whose file carries no rated finding and no size finding SHALL be
-descriptive: its rating SHALL be `healthy`, it SHALL claim no finding, and it
-SHALL be excluded from default terminal detail while remaining available in
-`--all` and in the machine report. A descriptive card SHALL NOT affect any
-verdict, count, or rank position of a rated card.
+#### Scenario: A file's only unclaimed evidence is its size
+- **WHEN** a file carries a size finding and no unclaimed source finding
+- **THEN** one `measured` card claims that size finding, heads on it, and takes its rating
 
-Every other pattern SHALL produce a rated card, because each of them requires a
-rated or size finding to exist.
+### Requirement: Card evidence is ordered head first
+A file-anchored card SHALL state its evidence in exactly this order: the top
+claimed source finding when it claims one, then the integer facts that made its
+pattern fire, then each claimed size finding in table order, then the anchor's
+touch count when the file is hot, then its remaining claimed source findings in
+the accepted finding rank. A renderer under a budget shows a prefix of that
+order, so the head names the problem, the next lines say why the pattern fired,
+and the enumeration of every remaining finding comes last where `--all` reaches
+it.
+
+A `god_file` that fired on the size conjunct SHALL therefore state its size
+finding among the facts that made it fire, directly after its rated unit total
+and its fan-out, rather than after the findings it enumerates: the size finding
+is the reason the card exists, not a trailing detail.
+
+A `tangle` card SHALL state its member count, then its architecture finding, then
+the touch count of its hottest member when one is hot. A `shotgun_pair`,
+`bus_risk`, or `unstable_dependency` card SHALL state its one finding.
+
+#### Scenario: A god file is oversized
+- **WHEN** a `god_file` fires because the file carries a size finding
+- **THEN** its evidence reads top finding, rated units, size finding, and only then its remaining findings
+
+#### Scenario: A card is rendered under a tight budget
+- **WHEN** a rung allows one evidence line
+- **THEN** the line shown is the card's head, which is its top claimed finding or, for a card claiming no source finding, its first other fact
+
+### Requirement: A card's visibility decides where it is shown, never what it is
+Every card SHALL carry a visibility of exactly one of two values, `default` or
+`detail`. A card SHALL be `default` when it claims at least one finding that
+affects the verdict, or when it anchors an architecture, coupling,
+knowledge-concentration, or stable-dependency finding, all of which are rated by
+the analyses that own them. Every other card SHALL be `detail`.
+
+A `detail` card SHALL be shown only when `--all` is supplied or when the card's
+anchor is the selected scope itself, and SHALL remain present in the machine
+report at every detail level. This replaces the earlier boolean that called one
+card shape descriptive: the healthy `hub` that claims nothing is now the
+`detail` card that happens to be `healthy`, and it is no longer the only card
+kept out of default detail. A file whose whole debt is advisory, non-primary, or
+a size measurement also carries a `detail` card, which is exactly the content
+today's default view already withholds and today's `--all` view already shows.
+
+Visibility SHALL NOT be a key of the problem rank and SHALL NOT change a rating,
+a count, or a verdict. A view SHALL apply it by filtering the ranked table, so
+removing a `detail` card never changes the relative order of the cards that
+remain.
+
+Every card SHALL be rated by the findings it claims, so a card is `healthy` only
+when it claims nothing, which only `hub` can do.
 
 #### Scenario: A healthy utility is imported everywhere
-- **WHEN** a file with 40 importers carries no rated finding and no size finding
-- **THEN** its `hub` card is descriptive, carries rating `healthy`, and is absent from default terminal detail
+- **WHEN** a file with 40 importers carries no finding and no size finding
+- **THEN** its `hub` card claims nothing, carries rating `healthy` and visibility `detail`, and is absent from default terminal detail
 
 #### Scenario: A widely imported file also carries debt
-- **WHEN** a file that satisfies the `hub` rule carries a High finding
-- **THEN** its card is rated High and appears in default detail
+- **WHEN** a file that satisfies the `hub` rule carries a High finding that affects the verdict
+- **THEN** its card is rated High, carries visibility `default`, and appears in default detail
+
+#### Scenario: A generated file is imported everywhere
+- **WHEN** a generated file that satisfies the `hub` rule carries rated findings that cannot affect the verdict
+- **THEN** its card claims them, carries their highest rating rather than `healthy`, and carries visibility `detail`
+
+#### Scenario: A file's whole debt is advisory
+- **WHEN** a recovered file carries only advisory findings
+- **THEN** its `measured` card carries visibility `detail` and appears under `--all` in the accepted finding rank
+
+#### Scenario: Visibility is filtered rather than ranked
+- **WHEN** a `detail` card ranks between two `default` cards and default detail is rendered
+- **THEN** the two `default` cards keep the order the rank gave them and no card is re-ranked
 
 ### Requirement: Problem rank is total and built once
 Analysis SHALL order the problem table by rating descending, claimed High count

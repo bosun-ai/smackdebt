@@ -125,7 +125,7 @@ or a cycle witness. Complete relation tables SHALL remain in the machine report.
 - **THEN** no row heads two repository file paths with an arrow or with ` owns `, no line states the single-reference import fact `· 1 import`, and the only arrows joining two repository file paths are cycle-witness evidence
 
 ### Requirement: Detailed and path views remain useful
-`--all` SHALL show all useful debt, including descriptive problem cards, and SHALL NOT show raw dependency
+`--all` SHALL show all useful debt, including `detail` problem cards, and SHALL NOT show raw dependency
 edges, standard-library externals, churn dumps, cyclomatic-1 rows, weak
 coupling, or healthy rows; those SHALL remain available only in JSON.
 
@@ -160,7 +160,7 @@ unit kind for an anonymous unit. Generated internal identities such as
 
 #### Scenario: User requests all detail
 - **WHEN** `--all` is supplied
-- **THEN** count limits on useful debt are removed, descriptive cards become visible, and raw edges, standard-library externals, churn dumps, cyclomatic-1 rows, weak coupling, and healthy rows remain absent
+- **THEN** count limits on useful debt are removed, `detail` cards become visible, and raw edges, standard-library externals, churn dumps, cyclomatic-1 rows, weak coupling, and healthy rows remain absent
 
 #### Scenario: User drills into a path
 - **WHEN** a dependency relationship crosses the selected path boundary

@@ -32,7 +32,7 @@ private-use codepoint. It SHALL explain `--color`, `NO_COLOR`, width behavior,
 content-aware row stacking, `--top N` as a middle level of detail — problem
 cards in a codebase report and ranked comparisons in a diff report — that
 conflicts with `--json` and `--all`, `--all` as all useful debt including
-descriptive problem cards, and JSON as the complete machine-readable view of
+`detail` problem cards, and JSON as the complete machine-readable view of
 everything the terminal omits. It SHALL state that there is no icon option,
 emoji mode, or theme setting.
 
@@ -68,7 +68,7 @@ summaries, while healthy units are represented through aggregate counts. It
 SHALL also state that JSON is the complete view of every fact the terminal
 omits, including raw dependency edges, external references, churn detail, weak
 coupling, hotspots, size findings, orphan files, and every problem card
-including descriptive ones.
+including `detail` ones.
 
 It SHALL state that dependency edges appear in no human view at any scope or
 detail level, that the terminal states a relationship only as aggregate problem
@@ -101,10 +101,12 @@ It SHALL list the frozen pattern ids `god_file`, `hub`, `tangle`, `hot_mess`,
 words the terminal prints for each, explain in product language what evidence
 each one needs, and publish the threshold behind every named pattern the way the
 existing rating thresholds are published. It SHALL explain that `measured` is
-the fallback so nothing rated disappears, that a widely imported file with no
-debt of its own is a descriptive card shown only under `--all` and in JSON, and
-that cards are ranked against each other so the first card is the problem to
-look at first.
+the fallback so nothing rated disappears, that every card is either a `default`
+card or a `detail` card shown only under `--all`, at its own anchor, and in
+JSON — a widely imported file with no debt of its own, a file whose whole debt
+is advisory or non-primary, and a file whose only evidence is its size are all
+`detail` cards — and that cards are ranked against each other so the first card
+is the problem to look at first.
 
 It SHALL document the repository-share sentence in a package, directory, or file
 verdict, state that it is absent at the repository root, and explain that it

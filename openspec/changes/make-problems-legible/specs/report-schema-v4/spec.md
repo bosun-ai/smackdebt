@@ -75,7 +75,7 @@ row's position is that card's identity. Each row SHALL expose:
 - `pattern`, one of the frozen ids `god_file`, `hub`, `tangle`, `hot_mess`,
   `shotgun_pair`, `bus_risk`, `unstable_dependency`, `measured`;
 - `rating`, the card's rating;
-- `visibility`, either `default` or `descriptive`, as a string rather than a
+- `visibility`, either `default` or `detail`, as a string rather than a
   boolean, because every serialized value is an integer or a string;
 - `anchor`, naming its kind and carrying the file index, file index list,
   package index, or package index pair that kind implies;
@@ -86,8 +86,9 @@ row's position is that card's identity. Each row SHALL expose:
   its position in that table.
 
 No serialized problem value SHALL be a floating-point number or a boolean. Every
-index SHALL resolve inside the table it names, and no finding SHALL be claimed
-by two rows; validation SHALL fail before exact-byte approval when either holds.
+index SHALL resolve inside the table it names, no finding SHALL be claimed by two
+rows, and no retained finding of any claimable table SHALL be left unclaimed;
+validation SHALL fail before exact-byte approval when any of the three holds.
 
 The checked version-4 schema SHALL validate the table, and the schema file SHALL
 change in the same slice as the serializer because it uses
@@ -97,9 +98,9 @@ change in the same slice as the serializer because it uses
 - **WHEN** any version-4 report is emitted
 - **THEN** each `problems` row carries its frozen pattern, rating, visibility string, anchor, ordered evidence, and claimed findings, and validates against the schema
 
-#### Scenario: A descriptive card is serialized
-- **WHEN** a card is descriptive
-- **THEN** its `visibility` is the string `descriptive`, its rating is `healthy`, and it claims no finding
+#### Scenario: A detail card is serialized
+- **WHEN** a card claims no finding that affects the verdict
+- **THEN** its `visibility` is the string `detail` and it is present in the machine report at every detail level
 
 #### Scenario: An evidence index points outside its table
 - **WHEN** acceptance validates the result
@@ -107,6 +108,10 @@ change in the same slice as the serializer because it uses
 
 #### Scenario: One finding is claimed twice
 - **WHEN** two rows claim the same finding of the same table
+- **THEN** index-integrity validation fails before exact-byte approval
+
+#### Scenario: One finding is claimed by no row
+- **WHEN** a retained finding of a claimable table appears in no row's `claimed`
 - **THEN** index-integrity validation fails before exact-byte approval
 
 ### Requirement: Version 4 frames a sub-scope verdict

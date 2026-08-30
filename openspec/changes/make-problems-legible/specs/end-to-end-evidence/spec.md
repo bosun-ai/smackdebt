@@ -48,7 +48,7 @@ the five-area limit and each ladder rung of the problem budget, hot evidence,
 ranked card order, stacked cycle witnesses, stable-dependency card evidence, one
 card per coupling pair, knowledge-concentration card evidence without identity,
 grouped warnings, actionable diff findings, the `next: smackdebt <path>`
-discover line, and `--all` as all useful debt including descriptive cards and
+discover line, and `--all` as all useful debt including `detail` cards and
 without raw edges, standard-library externals, churn dumps, cyclomatic-1 rows,
 weak coupling, or healthy rows.
 
@@ -121,19 +121,28 @@ and at the exact median multiple in a multi-package fixture, a `hot_mess` that
 agrees with the `hot_and_complex` worst-offender reason, one card per coupling,
 concentration, and stable-dependency finding keeping that finding's exact
 operands, a `measured` card whose head equals the finding row head it replaces,
-and a descriptive card absent by default and present under `--all`.
+and a `detail` card absent by default and present under `--all`.
 
 Evidence SHALL prove the ranked order across patterns, that no finding is
-claimed by two cards, and that serial and parallel runs produce identical cards
-in identical order.
+claimed by two cards, that no retained finding is claimed by none, and that
+serial and parallel runs produce identical cards in identical order.
+
+Evidence SHALL also cover the content that used to be dropped when no card
+claimed it: a file whose whole debt is advisory or non-primary, and a file whose
+only evidence is its size, each reaching a `detail` card that the default view
+withholds and `--all` states with the size finding's subject and measured value.
 
 #### Scenario: Card fixtures run
 - **WHEN** the real CLI analyzes the card fixtures
 - **THEN** every expected pattern, rating, evidence value, and rank position matches its hand-calculated value
 
-#### Scenario: A descriptive card is requested
+#### Scenario: A detail card is requested
 - **WHEN** the same fixture is rendered by default and with `--all`
-- **THEN** the descriptive card is absent from the first and present in the second
+- **THEN** the `detail` card is absent from the first and present in the second
+
+#### Scenario: Advisory and size-only debt is requested
+- **WHEN** a fixture holding a recovered file and an oversized file with no unit debt is rendered with `--all`
+- **THEN** both reach a card, the advisory card shows its advisory trust, and the size card shows the size finding's subject and measured value
 
 #### Scenario: Worker policy changes
 - **WHEN** a card fixture runs with one worker and with automatic parallelism

@@ -41,7 +41,7 @@ raise or lower only the number of displayed ranked comparisons to `N`, leaving
 the architecture and history section limits unchanged. `N` SHALL be a positive
 integer, and `--top` SHALL conflict with `--json` and with `--all`.
 
-`--all` SHALL show every problem card, descriptive cards included, with complete
+`--all` SHALL show every problem card, `detail` cards included, with complete
 evidence and without count limits, and SHALL NOT show raw dependency edges,
 standard-library externals, churn dumps, cyclomatic-1 rows, weak coupling, or
 healthy rows; JSON remains the complete view of those facts.
@@ -72,7 +72,7 @@ to a file is itself a request for detail.
 
 #### Scenario: User requests complete useful terminal detail
 - **WHEN** the user supplies `--all`
-- **THEN** terminal output shows every card including descriptive ones with complete evidence, and no raw edges, standard-library externals, churn dumps, cyclomatic-1 rows, weak coupling, or healthy rows
+- **THEN** terminal output shows every card including `detail` ones with complete evidence, and no raw edges, standard-library externals, churn dumps, cyclomatic-1 rows, weak coupling, or healthy rows
 
 #### Scenario: Optional section has no finding
 - **WHEN** the displayed scope holds no card the current detail level shows
@@ -132,8 +132,13 @@ described neither the child rows nor the finding rows as implemented.
 Every displayed problem card whose head or evidence names a finding SHALL show
 that finding's unit kind and SHALL show SourceRole whenever the role is not
 primary. Recovered advisory findings SHALL use the same ranking inside `--all`
-but SHALL remain absent from default detail, and descriptive cards SHALL be
-absent from default detail for the same reason.
+but SHALL remain absent from default detail. Clustering SHALL make that sentence
+hold rather than contradict it: a card claims a file's advisory and non-primary
+findings like any other, and the card carrying only such findings is the `detail`
+card `problem-clustering` defines, so the content it names is ranked and reachable
+under `--all` instead of being dropped when no card claims it. Every `detail`
+card SHALL be absent from default detail for that one reason, and this
+specification SHALL NOT restate the rule that decides visibility.
 
 #### Scenario: A benchmark function is High
 - **WHEN** its card appears in default detail
@@ -141,11 +146,11 @@ absent from default detail for the same reason.
 
 #### Scenario: A recovered method is Watch
 - **WHEN** detailed output is requested
-- **THEN** its unit kind, role when non-primary, and advisory trust are visible
+- **THEN** its card is present, its unit kind, role when non-primary, and advisory trust are visible, and it holds the position the accepted finding rank gives it
 
 #### Scenario: A healthy file is imported everywhere
 - **WHEN** default detail is rendered
-- **THEN** its descriptive card is absent and `--all` shows it
+- **THEN** its `detail` card is absent and `--all` shows it
 
 ### Requirement: Codebase summary states rated quality and coverage
 The terminal SHALL open with a verdict block stating the selected scope, the analysis-owned
