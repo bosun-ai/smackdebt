@@ -58,9 +58,14 @@ ref not found: <ref>`, and `smackdebt: --all cannot be used with --json`, with
 no usage or help tail and no leaked absolute path, operating-system code, Git
 command, status, fatal output, parser text, or process text.
 
-The current JSON contract's bytes, report facts, status classes, stream placement, rank,
-serial and automatic bytes, work totals, analysis, allocation, and performance
-evidence SHALL prove unchanged behavior.
+The current JSON contract's existing members' bytes and report facts, status
+classes, stream placement, the accepted finding rank, serial and automatic
+bytes, work totals, analysis, allocation, and performance evidence SHALL prove
+unchanged behavior. The additive problem table and the verdict share are the
+only JSON members this change introduces, and no existing member SHALL be
+removed or change meaning; evidence SHALL prove that too. Where this requirement
+says rank, it means the accepted finding rank, which is unchanged; the problem
+rank is a separate order over the new table.
 
 #### Scenario: Human output is audited
 - **WHEN** snapshots, help, errors, warnings, and README examples are checked
@@ -72,7 +77,11 @@ evidence SHALL prove unchanged behavior.
 
 #### Scenario: Machine and analysis output is audited
 - **WHEN** redesigned terminal flows run through the complete public matrix
-- **THEN** JSON bytes, report facts, exit classes, streams, rank, work counts, allocations, and resource evidence remain unchanged
+- **THEN** every JSON member that existed before this change keeps its bytes and report facts, and exit classes, streams, the accepted finding rank, work counts, allocations, and resource evidence remain unchanged
+
+#### Scenario: The added JSON members are audited
+- **WHEN** a result from before this change is compared with a result from after it
+- **THEN** the only differences are the added problem table and the verdict share, and no existing member was removed or redefined
 
 ## ADDED Requirements
 
@@ -132,11 +141,18 @@ in identical order.
 
 ### Requirement: Human views carry no dependency edge rows
 Every committed human view, at every scope and every detail level, SHALL be
-proven free of dependency-edge rows: no line stating an import count such as
-`· 1 import`, no line stating `<source> owns <target>`, and no arrow joining two
-repository paths outside a cycle witness. The check SHALL be an invariant over
-every committed terminal snapshot rather than an assertion on selected cases,
-so a future view cannot reintroduce the rows quietly.
+proven free of dependency-edge rows: no row heading two repository file paths
+with an arrow or with ` owns `, no line stating the single-reference import fact
+`· 1 import`, and no arrow joining two repository file paths outside a cycle
+witness. The check SHALL be an invariant over every committed terminal snapshot
+rather than an assertion on selected cases, so a future view cannot reintroduce
+the rows quietly.
+
+The check SHALL be written against file paths, because two package identities
+joined by an arrow are not an edge row: an `unstable_dependency` card head keeps
+the accepted `<source> → <target>` package wording, and its reference-count
+evidence is never the single-reference form, since a stable-dependency finding
+requires at least two references.
 
 Evidence SHALL prove that unresolved and ambiguous rows appear at a file scope
 and under `--all`, and that at every other scope the grouped warning sentence is
@@ -144,7 +160,7 @@ their whole terminal presence.
 
 #### Scenario: Every snapshot is scanned
 - **WHEN** the committed terminal snapshots are scanned as a set
-- **THEN** none contains an import-count fact, an ownership row, or a path-to-path arrow outside a cycle witness
+- **THEN** none heads two repository file paths with an arrow or with ` owns `, none states `· 1 import`, and none joins two repository file paths with an arrow outside a cycle witness
 
 #### Scenario: An unfollowed import is inspected
 - **WHEN** the same fixture is rendered at a directory scope, at a file scope, and with `--all`

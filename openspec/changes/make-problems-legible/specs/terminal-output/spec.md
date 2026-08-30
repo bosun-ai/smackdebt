@@ -30,14 +30,30 @@ problem once. `PROBLEMS` SHALL appear only when the displayed scope holds at
 least one card that the current detail level shows.
 
 Each problem row SHALL state its rating word, then its pattern name, then its
-anchor as a repository-relative path, using `path:line` when the card's head is
-a claimed finding that carries a span. Pattern names SHALL be exactly
-`does too much` for `god_file`, `everything depends on this` for `hub`,
-`circular dependency` for `tangle`, `hot and complex` for `hot_mess`,
-`changes together` for `shotgun_pair`, `one author` for `bus_risk`, and
-`depends on less stable code` for `unstable_dependency`. A `measured` card's
-head SHALL be the identity of its top claimed finding, which is the head a
-finding row states today.
+anchor. Pattern names SHALL be exactly `does too much` for `god_file`,
+`everything depends on this` for `hub`, `circular dependency` for `tangle`,
+`hot and complex` for `hot_mess`, `changes together` for `shotgun_pair`,
+`one author` for `bus_risk`, and `depends on less stable code` for
+`unstable_dependency`. A `measured` card's head SHALL be the identity of its top
+claimed finding, which is the head a finding row states today.
+
+An anchor SHALL be written by its kind, reusing the identity the accepted specs
+already give that kind:
+
+- **A single file** — `god_file`, `hub`, `hot_mess`, and `measured` — SHALL be
+  its repository-relative file path, written `path:line` when the card's head is
+  a claimed finding that carries a span.
+- **A file set** — `tangle` — SHALL be the cycle's first witness path, the same
+  identity the accepted worst-offender rule names for a cycle, with the complete
+  witness following as stacked evidence.
+- **A package pair** SHALL keep its family's accepted wording, because one
+  relationship is symmetric and the other is not: `shotgun_pair` SHALL read
+  `<left> ↔ <right>` as the accepted coupling wording does, and
+  `unstable_dependency` SHALL read `<source> → <target>` as the accepted
+  stable-dependency row does.
+- **A single package** — `bus_risk` — SHALL be its repository-relative package
+  name, written `repository root` for package path `.` as every other heading,
+  row, and breadcrumb writes it.
 
 Card evidence SHALL render one indented line per shown evidence item, in the
 order analysis stored it, with one exact wording per evidence kind:
@@ -106,7 +122,7 @@ or a cycle witness. Complete relation tables SHALL remain in the machine report.
 
 #### Scenario: Every human view is scanned for edge rows
 - **WHEN** every committed human view is scanned at every scope and detail level
-- **THEN** no line states an import count such as `· 1 import`, no line states `<source> owns <target>`, and the only arrows joining two repository paths are cycle-witness evidence
+- **THEN** no row heads two repository file paths with an arrow or with ` owns `, no line states the single-reference import fact `· 1 import`, and the only arrows joining two repository file paths are cycle-witness evidence
 
 ### Requirement: Detailed and path views remain useful
 `--all` SHALL show all useful debt, including descriptive problem cards, and SHALL NOT show raw dependency

@@ -88,16 +88,20 @@ nothing to a file's fan-in or fan-out.
   the source findings of its member files SHALL remain available to the file
   patterns, because being inside a cycle and doing too much are two different
   problems.
-- **`god_file`**: a file SHALL be a `god_file` when it has at least 3 High
-  findings, or at least 1 High finding and at least 8 rated units, and it either
-  carries a size finding or has a fan-out of at least 10. Its rating SHALL be
-  High.
+- **`god_file`**: a file SHALL be a `god_file` when both of these hold:
+  (a) it has at least 3 High findings, or at least 1 High finding and at least 8
+  rated units; **and** (b) it carries a size finding or has a fan-out of at
+  least 10. Concentrated debt alone SHALL NOT be enough — conjunct (b) is what
+  makes the pattern mean "does too much" rather than "has bugs" — and breadth
+  alone SHALL NOT be enough either. Its rating SHALL be High.
 - **`hub`**: a file that no earlier file pattern claimed SHALL be a `hub` when
   its fan-in is at least 8 and either its package's median fan-in is zero or its
   fan-in is at least 4 times that median; the same rule SHALL apply to fan-out.
   The median SHALL be the nearest-rank median of the files of that file's own
   package, computed once per package, so it is an integer and does not depend on
-  the selected scope.
+  the selected scope. A `hub` card's rating SHALL be the highest rating among
+  the findings it claims, and `healthy` when it claims none, which is the
+  descriptive case defined below.
 - **`hot_mess`**: a file that no earlier file pattern claimed SHALL be a
   `hot_mess` when it is a hotspot and carries at least one High finding. Its
   rating SHALL be High, which agrees with the accepted `hot_and_complex`
@@ -109,7 +113,15 @@ implemented as named integer constants so review can move them in one place.
 
 #### Scenario: A file has two High findings and nothing else
 - **WHEN** the file has 2 High findings, no size finding, and fan-out 2
-- **THEN** it is not a `god_file`
+- **THEN** it is not a `god_file`, because neither arm of conjunct (a) holds
+
+#### Scenario: A small file concentrates three High findings
+- **WHEN** the file has 3 High findings, no size finding, and fan-out 2
+- **THEN** it is not a `god_file`, because conjunct (b) fails even though conjunct (a) holds
+
+#### Scenario: A file is both concentrated and broad
+- **WHEN** the file has 3 High findings and a fan-out of 10
+- **THEN** it is a `god_file` rated High
 
 #### Scenario: A file is at the degree boundary
 - **WHEN** one file has fan-in 7 and another has fan-in 8 in a package whose median fan-in is zero
