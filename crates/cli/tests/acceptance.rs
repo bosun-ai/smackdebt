@@ -2618,7 +2618,16 @@ fn smackdebt() -> assert_cmd::Command {
 }
 
 fn run<const N: usize>(arguments: [&str; N]) -> Vec<u8> {
-    smackdebt().args(arguments).output().unwrap().stdout
+    let stdout = smackdebt().args(arguments).output().unwrap().stdout;
+    // Every human result this suite produces carries the invariant, so a flow
+    // without a committed result cannot reintroduce edge rows either.
+    if !arguments.contains(&"--json") {
+        assert_no_dependency_edge_rows(
+            &String::from_utf8_lossy(&stdout),
+            &format!("{arguments:?}"),
+        );
+    }
+    stdout
 }
 
 fn run_in<const N: usize>(directory: &Path, arguments: [&str; N]) -> Vec<u8> {

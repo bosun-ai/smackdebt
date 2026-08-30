@@ -2343,6 +2343,73 @@ mod tests {
     }
 
     #[test]
+    fn default_architecture_orders_findings_by_rating_before_limiting() {
+        // Four cycle findings arrive in the order analysis collected them and
+        // the only High one arrives last, so a cap over that order would drop
+        // the worst finding in the scope. Each witness starts at its own file,
+        // which is how a rendered row is identified below.
+        let mut builder = ReportBuilder::new(ReportMode::Codebase);
+        let root = ScopeId::from_index(0);
+        builder.add_scope(Scope::new(root, ScopeKind::Repository, ".", None));
+        builder.set_root(root);
+        let paths = ["a.js", "b.js", "c.js", "d.js"];
+        let mut edges = Vec::new();
+        let mut findings = Vec::new();
+        for (index, path) in paths.into_iter().enumerate() {
+            let file = FileId::from_index(index);
+            let id = ArchitectureFindingId::from_index(index);
+            let kind = if index + 1 == paths.len() {
+                ArchitectureFindingKind::PackageCycle
+            } else {
+                ArchitectureFindingKind::FileCycle
+            };
+            builder.add_file(FileRecord::new(
+                file,
+                root,
+                path,
+                Coverage::new(1, 1, 0, 0, 1, 0),
+                HealthCounts::default(),
+            ));
+            edges.push(DependencyEdge::new(
+                DependencyEdgeId::from_index(index),
+                file,
+                FileId::from_index((index + 1) % paths.len()),
+                1,
+                vec![SourceSpan::new(1, 1)],
+            ));
+            findings.push(ArchitectureFinding::new(
+                id,
+                kind,
+                Vec::new(),
+                Vec::new(),
+                vec![DependencyEdgeId::from_index(index)],
+            ));
+            builder.link_architecture_finding(root, id);
+        }
+        builder.set_architecture(ArchitectureReportFacts::new(
+            ArchitectureGraph::new(
+                DependencyCoverage::new(4, 0, 0, 0, 0, 0, 0),
+                edges,
+                Vec::new(),
+                Vec::new(),
+                Vec::new(),
+                Vec::new(),
+            ),
+            findings,
+            Vec::new(),
+        ));
+        let terminal = render(&builder.finish(), TerminalOptions::new(120, false, false));
+        let at = |needle: &str| terminal.find(needle).expect(&terminal);
+        // The High finding survives the cap and heads the section, the two shown
+        // Watch findings keep the order analysis gave them, and the cap falls on
+        // the last of them.
+        assert!(at("high package dependency cycle") < at("watch file dependency cycle"));
+        assert!(at("        d.js") < at("        a.js"), "{terminal}");
+        assert!(at("        a.js") < at("        b.js"), "{terminal}");
+        assert!(!terminal.contains("        c.js"), "{terminal}");
+    }
+
+    #[test]
     fn default_history_orders_actionable_findings_by_strength_before_limiting() {
         let mut builder = ReportBuilder::new(ReportMode::Codebase);
         let root = ScopeId::from_index(0);
