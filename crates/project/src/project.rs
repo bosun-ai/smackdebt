@@ -4535,6 +4535,24 @@ mod tests {
                 .any(|card| card.pattern() == ProblemPattern::HotMess),
             "the file that changes often carries its heat into a card"
         );
+        // Coverage over a real report: every retained finding of every
+        // claimable table reaches exactly one card, so no table can be dropped
+        // from the clustering input without this failing.
+        let report = serial.report();
+        let claimed: BTreeSet<_> = cards
+            .iter()
+            .flat_map(|card| card.claimed_findings().iter().copied())
+            .collect();
+        assert_eq!(
+            claimed.len(),
+            report.findings().len()
+                + report.size_findings().len()
+                + report.architecture_findings().len()
+                + report.evolutionary_findings().len()
+                + report.knowledge_concentration_findings().len()
+                + report.stable_dependency_findings().len()
+        );
+        assert!(!report.size_findings().is_empty());
     }
 
     #[test]

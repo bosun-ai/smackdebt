@@ -159,6 +159,11 @@ impl smackdebt_analysis::ProblemPattern
 pub const fn smackdebt_analysis::ProblemPattern::class(self) -> u8
 pub const fn smackdebt_analysis::ProblemPattern::id(self) -> &'static str
 pub const fn smackdebt_analysis::ProblemPattern::name(self) -> &'static str
+pub enum smackdebt_analysis::ProblemVisibility
+pub smackdebt_analysis::ProblemVisibility::Default
+pub smackdebt_analysis::ProblemVisibility::Detail
+impl smackdebt_analysis::ProblemVisibility
+pub const fn smackdebt_analysis::ProblemVisibility::id(self) -> &'static str
 pub enum smackdebt_analysis::Rating
 pub smackdebt_analysis::Rating::Healthy
 pub smackdebt_analysis::Rating::High
@@ -770,11 +775,11 @@ pub struct smackdebt_analysis::ProblemCard
 impl smackdebt_analysis::ProblemCard
 pub const fn smackdebt_analysis::ProblemCard::anchor(&self) -> &smackdebt_analysis::ProblemAnchor
 pub fn smackdebt_analysis::ProblemCard::claimed_findings(&self) -> &[smackdebt_analysis::ClaimedFinding]
-pub const fn smackdebt_analysis::ProblemCard::descriptive(&self) -> bool
 pub fn smackdebt_analysis::ProblemCard::evidence(&self) -> &[smackdebt_analysis::ProblemEvidence]
 pub fn smackdebt_analysis::ProblemCard::is_hot(&self) -> bool
 pub const fn smackdebt_analysis::ProblemCard::pattern(&self) -> smackdebt_analysis::ProblemPattern
 pub const fn smackdebt_analysis::ProblemCard::rating(&self) -> smackdebt_analysis::Rating
+pub const fn smackdebt_analysis::ProblemCard::visibility(&self) -> smackdebt_analysis::ProblemVisibility
 pub struct smackdebt_analysis::ProblemId(_)
 impl smackdebt_analysis::ProblemId
 pub const fn smackdebt_analysis::ProblemId::from_index(usize) -> Self

@@ -162,6 +162,30 @@ pub enum ClaimedFinding {
     Knowledge(KnowledgeConcentrationFindingId),
 }
 
+/// Where a card is shown.
+///
+/// Visibility is a display filter and never a rank key: a `detail` card is
+/// removed from a view rather than moved inside it, so the cards that remain
+/// keep the order the problem rank gave them.
+#[derive(Clone, Copy, Debug, Eq, Hash, Ord, PartialEq, PartialOrd)]
+pub enum ProblemVisibility {
+    /// Shown wherever problems are shown.
+    Default,
+    /// Shown only under `--all` or when the card's anchor is the selected
+    /// scope, and always present in the machine report.
+    Detail,
+}
+
+impl ProblemVisibility {
+    /// The frozen machine string a report serializes.
+    pub const fn id(self) -> &'static str {
+        match self {
+            Self::Default => "default",
+            Self::Detail => "detail",
+        }
+    }
+}
+
 /// One named problem, clustered from findings the report already holds.
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct ProblemCard {
@@ -170,7 +194,7 @@ pub struct ProblemCard {
     anchor: ProblemAnchor,
     evidence: Vec<ProblemEvidence>,
     claimed_findings: Vec<ClaimedFinding>,
-    descriptive: bool,
+    visibility: ProblemVisibility,
 }
 
 impl ProblemCard {
@@ -191,12 +215,13 @@ impl ProblemCard {
     pub fn claimed_findings(&self) -> &[ClaimedFinding] {
         &self.claimed_findings
     }
-    /// Whether this card describes a shape rather than rating debt.
+    /// Where this card is shown.
     ///
-    /// A descriptive card claims no finding, carries `healthy`, and stays out
-    /// of default terminal detail.
-    pub const fn descriptive(&self) -> bool {
-        self.descriptive
+    /// A card is `default` when it claims a finding that affects the verdict
+    /// or anchors a rated architecture, coupling, knowledge-concentration, or
+    /// stable-dependency finding, and `detail` otherwise.
+    pub const fn visibility(&self) -> ProblemVisibility {
+        self.visibility
     }
     /// Whether the card's anchor is hot, which it states by carrying a touch
     /// count as evidence.
@@ -508,12 +533,19 @@ struct FileFacts {
     degrees: Vec<(u32, u32)>,
     /// The nearest-rank median fan-in and fan-out of each package.
     medians: BTreeMap<Option<PackageId>, (u32, u32)>,
-    /// The verdict-affecting findings of each file, best first.
+    /// Every retained finding of each file, best first.
+    ///
+    /// Claiming is blind to role and trust, so advisory and non-primary debt
+    /// reaches a card instead of disappearing when no pattern claims it.
     findings: Vec<Vec<FindingId>>,
     /// The size findings of each file, in table order.
     sizes: Vec<Vec<SizeFindingId>>,
-    /// High findings among the verdict-affecting findings of each file.
+    /// High findings that affect the verdict, which is what the `god_file` and
+    /// `hot_mess` rules count.
     high: Vec<u32>,
+    /// Whether a file holds at least one finding that affects the verdict,
+    /// which is what decides a file card's visibility.
+    verdict_affecting: Vec<bool>,
 }
 
 impl FileFacts {
@@ -522,12 +554,19 @@ impl FileFacts {
         let medians = package_medians(input, &degrees);
         let mut findings = vec![Vec::new(); input.files.len()];
         let mut high = vec![0u32; input.files.len()];
-        for finding in input.findings.iter().filter(|finding| {
-            finding.affects_verdict() && finding.file().index() < input.files.len()
-        }) {
-            findings[finding.file().index()].push(finding.id());
-            if finding.assessment().rating() == Rating::High {
-                high[finding.file().index()] += 1;
+        let mut verdict_affecting = vec![false; input.files.len()];
+        for finding in input
+            .findings
+            .iter()
+            .filter(|finding| finding.file().index() < input.files.len())
+        {
+            let file = finding.file().index();
+            findings[file].push(finding.id());
+            if finding.affects_verdict() {
+                verdict_affecting[file] = true;
+                if finding.assessment().rating() == Rating::High {
+                    high[file] += 1;
+                }
             }
         }
         for (index, file) in findings.iter_mut().enumerate() {
@@ -552,6 +591,7 @@ impl FileFacts {
             findings,
             sizes,
             high,
+            verdict_affecting,
         }
     }
 
@@ -645,7 +685,7 @@ fn tangles(input: &ProblemInput<'_>, cards: &mut Vec<ProblemCard>) {
             anchor: ProblemAnchor::Files(members.to_vec()),
             evidence,
             claimed_findings: vec![ClaimedFinding::Architecture(finding.id())],
-            descriptive: false,
+            visibility: ProblemVisibility::Default,
         });
     }
 }
@@ -752,11 +792,14 @@ impl<'a, 'b> FilePass<'a, 'b> {
         }
     }
 
-    /// The fallback: one card per file that still holds an unclaimed
-    /// verdict-affecting finding, so no such finding disappears.
+    /// The fallback: one card per file that still holds an unclaimed retained
+    /// finding or an unclaimed size finding, so nothing the report measured
+    /// disappears for want of a pattern that recognises it.
     fn measured(&mut self, cards: &mut Vec<ProblemCard>) {
         for index in 0..self.input.files.len() {
-            if self.claimed[index] || self.facts.findings[index].is_empty() {
+            if self.claimed[index]
+                || (self.facts.findings[index].is_empty() && self.facts.sizes[index].is_empty())
+            {
                 continue;
             }
             let rating = self.claimed_rating(index);
@@ -777,13 +820,16 @@ impl<'a, 'b> FilePass<'a, 'b> {
         findings.chain(sizes).max().unwrap_or(Rating::Healthy)
     }
 
-    /// Builds one file-anchored card, claiming every finding and size finding
-    /// the file holds.
+    /// Builds one file-anchored card, claiming every retained finding and
+    /// every size finding the file holds, whether or not they affect the
+    /// verdict.
     ///
-    /// Evidence is stated head first: the file's top finding, then the facts
-    /// that made the pattern fire, then the file's remaining findings and its
-    /// size findings, so a budgeted renderer states the problem before it
-    /// enumerates.
+    /// Evidence is stated head first: the file's top finding, the facts that
+    /// made the pattern fire, its size findings, its heat, and only then its
+    /// remaining findings — so a budgeted renderer states the problem and its
+    /// reason before it enumerates, and `--all` still reaches every claim. A
+    /// card claiming no source finding heads on its first other fact, which is
+    /// its size finding for a file measured only by its length.
     fn card(
         &mut self,
         index: usize,
@@ -801,11 +847,11 @@ impl<'a, 'b> FilePass<'a, 'b> {
             evidence.push(ProblemEvidence::Finding(top));
         }
         evidence.extend(pattern_facts);
+        evidence.extend(sizes.iter().map(|&id| ProblemEvidence::Size(id)));
         if let Some(touches) = self.input.hot_touches(FileId::from_index(index)) {
             evidence.push(ProblemEvidence::Hot(touches));
         }
         evidence.extend(rest.map(|&id| ProblemEvidence::Finding(id)));
-        evidence.extend(sizes.iter().map(|&id| ProblemEvidence::Size(id)));
         let claimed_findings = findings
             .iter()
             .map(|&id| ClaimedFinding::Source(id))
@@ -816,7 +862,11 @@ impl<'a, 'b> FilePass<'a, 'b> {
             rating,
             anchor: ProblemAnchor::File(FileId::from_index(index)),
             evidence,
-            descriptive: claimed_findings.is_empty(),
+            visibility: if self.facts.verdict_affecting[index] {
+                ProblemVisibility::Default
+            } else {
+                ProblemVisibility::Detail
+            },
             claimed_findings,
         }
     }
@@ -832,7 +882,7 @@ fn shotgun_pairs(input: &ProblemInput<'_>, cards: &mut Vec<ProblemCard>) {
             anchor: ProblemAnchor::PackagePair(coupling.left(), coupling.right()),
             evidence: vec![ProblemEvidence::Coupling(finding.id())],
             claimed_findings: vec![ClaimedFinding::Coupling(finding.id())],
-            descriptive: false,
+            visibility: ProblemVisibility::Default,
         });
     }
 }
@@ -846,7 +896,7 @@ fn bus_risks(input: &ProblemInput<'_>, cards: &mut Vec<ProblemCard>) {
             anchor: ProblemAnchor::Package(finding.concentration().package()),
             evidence: vec![ProblemEvidence::Knowledge(finding.id())],
             claimed_findings: vec![ClaimedFinding::Knowledge(finding.id())],
-            descriptive: false,
+            visibility: ProblemVisibility::Default,
         });
     }
 }
@@ -860,7 +910,7 @@ fn unstable_dependencies(input: &ProblemInput<'_>, cards: &mut Vec<ProblemCard>)
             anchor: ProblemAnchor::PackagePair(finding.source(), finding.target()),
             evidence: vec![ProblemEvidence::StableDependency(finding.id())],
             claimed_findings: vec![ClaimedFinding::StableDependency(finding.id())],
-            descriptive: false,
+            visibility: ProblemVisibility::Default,
         });
     }
 }
@@ -1043,6 +1093,22 @@ mod tests {
                 .push(policy.rate_file(FileId::from_index(file), lines).unwrap());
         }
 
+        /// Adds one finding whose role and trust keep it out of the verdict,
+        /// which is how recovered, fixture, and generated debt reaches the
+        /// report.
+        fn finding_outside_the_verdict(
+            &mut self,
+            file: usize,
+            name: &str,
+            measurements: Measurements,
+            evidence: (SourceRole, SourceTrust),
+        ) {
+            self.finding(file, name, measurements, 7);
+            let finding = self.findings.pop().unwrap();
+            self.findings
+                .push(finding.with_evidence(evidence.0, evidence.1));
+        }
+
         fn link(&mut self, source: usize, target: usize) {
             self.edges.push(DependencyEdge::new(
                 DependencyEdgeId::from_index(self.edges.len()),
@@ -1099,6 +1165,46 @@ mod tests {
 
         fn cluster(&self) -> Vec<ProblemCard> {
             cluster_problems(self.input())
+        }
+
+        /// Asserts the coverage half of the index-integrity audit: every
+        /// retained finding of every claimable table reaches exactly one card.
+        fn assert_every_finding_is_claimed_once(&self) {
+            let cards = self.cluster();
+            assert_eq!(duplicate_claim(&cards), None, "a finding was claimed twice");
+            let mut expected: BTreeSet<ClaimedFinding> = BTreeSet::new();
+            expected.extend(
+                (0..self.findings.len())
+                    .map(|id| ClaimedFinding::Source(FindingId::from_index(id))),
+            );
+            expected.extend(
+                (0..self.sizes.len()).map(|id| ClaimedFinding::Size(SizeFindingId::from_index(id))),
+            );
+            expected.extend(
+                (0..self.architecture.len())
+                    .map(|id| ClaimedFinding::Architecture(ArchitectureFindingId::from_index(id))),
+            );
+            expected.extend(
+                (0..self.coupling.len())
+                    .map(|id| ClaimedFinding::Coupling(EvolutionaryFindingId::from_index(id))),
+            );
+            expected.extend((0..self.concentration.len()).map(|id| {
+                ClaimedFinding::Knowledge(KnowledgeConcentrationFindingId::from_index(id))
+            }));
+            expected.extend((0..self.stable.len()).map(|id| {
+                ClaimedFinding::StableDependency(StableDependencyFindingId::from_index(id))
+            }));
+            let claimed = distinct_claims(&cards);
+            assert_eq!(
+                claimed.difference(&expected).collect::<Vec<_>>(),
+                Vec::<&ClaimedFinding>::new(),
+                "a card claimed something the report does not hold"
+            );
+            assert_eq!(
+                expected.difference(&claimed).collect::<Vec<_>>(),
+                Vec::<&ClaimedFinding>::new(),
+                "a retained finding reached no card"
+            );
         }
 
         /// The pattern of the single card anchored on one file, when there is
@@ -1160,7 +1266,7 @@ mod tests {
         assert_eq!(card.pattern(), ProblemPattern::GodFile);
         assert_eq!(card.rating(), Rating::High);
         assert_eq!(card.anchor(), &ProblemAnchor::File(FileId::from_index(0)));
-        assert!(!card.descriptive());
+        assert_eq!(card.visibility(), ProblemVisibility::Default);
         // A fan-out of nine leaves the same file outside the pattern. It is
         // still unusually broad for its package, so the next pattern in
         // claiming order takes it.
@@ -1196,15 +1302,26 @@ mod tests {
             card.claimed_findings()
                 .contains(&ClaimedFinding::Size(SizeFindingId::from_index(0)))
         );
+        // The size finding is the reason the card exists, so it is stated
+        // among the facts that made the pattern fire rather than after the
+        // findings the card enumerates.
+        assert_eq!(
+            &card.evidence()[..3],
+            [
+                ProblemEvidence::Finding(FindingId::from_index(0)),
+                ProblemEvidence::RatedUnits(3),
+                ProblemEvidence::Size(SizeFindingId::from_index(0)),
+            ]
+        );
     }
 
     #[test]
     fn breadth_alone_is_never_a_god_file() {
         // Ten outgoing dependencies and no rated debt at all: the file is
-        // broad, so it is a descriptive hub rather than a god file.
+        // broad, so it is a `detail` hub rather than a god file.
         let tables = concentrated_file(0, 0, 10);
         assert_eq!(tables.file_pattern(0), Some(ProblemPattern::Hub));
-        assert!(tables.cluster()[0].descriptive());
+        assert_eq!(tables.cluster()[0].visibility(), ProblemVisibility::Detail);
     }
 
     /// A package whose median fan-in is zero, where `importers` files import
@@ -1307,25 +1424,25 @@ mod tests {
     }
 
     #[test]
-    fn a_widely_imported_file_without_rated_or_size_debt_is_descriptive() {
+    fn a_widely_imported_file_without_any_debt_claims_nothing_and_is_detail() {
         let cards = imported_file(8).cluster();
         let card = &cards[0];
         assert_eq!(card.pattern(), ProblemPattern::Hub);
         assert_eq!(card.rating(), Rating::Healthy);
-        assert!(card.descriptive());
+        assert_eq!(card.visibility(), ProblemVisibility::Detail);
         assert!(card.claimed_findings().is_empty());
         assert_eq!(card.evidence(), [ProblemEvidence::FanIn(8)]);
     }
 
     #[test]
-    fn a_widely_imported_file_that_also_carries_debt_is_rated_and_not_descriptive() {
+    fn a_widely_imported_file_that_also_carries_verdict_debt_is_a_default_card() {
         let mut tables = imported_file(8);
         tables.finding(0, "work", high(), 12);
         let cards = tables.cluster();
         let card = &cards[0];
         assert_eq!(card.pattern(), ProblemPattern::Hub);
         assert_eq!(card.rating(), Rating::High);
-        assert!(!card.descriptive());
+        assert_eq!(card.visibility(), ProblemVisibility::Default);
         assert_eq!(
             card.claimed_findings(),
             [ClaimedFinding::Source(FindingId::from_index(0))]
@@ -1333,12 +1450,101 @@ mod tests {
     }
 
     #[test]
-    fn a_size_finding_alone_is_enough_to_rate_a_hub() {
+    fn a_generated_file_that_is_imported_everywhere_keeps_its_own_rating() {
+        // The paradox the boolean flag produced: a file with rated findings
+        // that cannot move a verdict was called healthy because nothing
+        // claimed those findings.
+        for evidence in [
+            (SourceRole::Generated, SourceTrust::Trusted),
+            (SourceRole::Fixture, SourceTrust::Trusted),
+            (SourceRole::Primary, SourceTrust::Advisory),
+        ] {
+            let mut tables = imported_file(8);
+            tables.finding_outside_the_verdict(0, "work", high(), evidence);
+            let cards = tables.cluster();
+            let card = &cards[0];
+            assert_eq!(card.pattern(), ProblemPattern::Hub, "{evidence:?}");
+            assert_eq!(card.rating(), Rating::High, "{evidence:?}");
+            assert_eq!(card.visibility(), ProblemVisibility::Detail, "{evidence:?}");
+            assert_eq!(
+                card.claimed_findings(),
+                [ClaimedFinding::Source(FindingId::from_index(0))],
+                "{evidence:?}"
+            );
+        }
+    }
+
+    #[test]
+    fn a_size_finding_alone_rates_a_hub_and_keeps_it_out_of_default_detail() {
         let mut tables = imported_file(8);
         tables.size(0, 15);
         let cards = tables.cluster();
         assert_eq!(cards[0].rating(), Rating::Watch);
-        assert!(!cards[0].descriptive());
+        // A size finding is not a verdict-affecting finding, so the card is
+        // rated but stays where today's size rows already live.
+        assert_eq!(cards[0].visibility(), ProblemVisibility::Detail);
+        assert_eq!(
+            cards[0].claimed_findings(),
+            [ClaimedFinding::Size(SizeFindingId::from_index(0))]
+        );
+    }
+
+    #[test]
+    fn a_file_whose_only_evidence_is_its_size_still_reaches_a_card() {
+        let mut tables = Tables::default();
+        let package = tables.package("a");
+        let file = tables.file("a/long.rs", package, 0, 0);
+        tables.size(file, 15);
+        let cards = tables.cluster();
+        assert_eq!(cards.len(), 1);
+        assert_eq!(cards[0].pattern(), ProblemPattern::Measured);
+        assert_eq!(cards[0].rating(), Rating::Watch);
+        assert_eq!(cards[0].visibility(), ProblemVisibility::Detail);
+        assert_eq!(
+            cards[0].evidence(),
+            [ProblemEvidence::Size(SizeFindingId::from_index(0))],
+            "the head of a card claiming no source finding is its size finding"
+        );
+    }
+
+    #[test]
+    fn a_file_whose_whole_debt_is_advisory_still_reaches_a_card() {
+        let mut tables = Tables::default();
+        let package = tables.package("a");
+        let file = tables.file("a/recovered.rs", package, 0, 0);
+        tables.finding_outside_the_verdict(
+            file,
+            "work",
+            watch(),
+            (SourceRole::Primary, SourceTrust::Advisory),
+        );
+        let cards = tables.cluster();
+        assert_eq!(cards.len(), 1);
+        assert_eq!(cards[0].pattern(), ProblemPattern::Measured);
+        assert_eq!(cards[0].rating(), Rating::Watch);
+        assert_eq!(cards[0].visibility(), ProblemVisibility::Detail);
+        assert_eq!(
+            cards[0].claimed_findings(),
+            [ClaimedFinding::Source(FindingId::from_index(0))]
+        );
+    }
+
+    #[test]
+    fn a_file_mixing_verdict_and_advisory_debt_claims_both_on_one_default_card() {
+        let mut tables = Tables::default();
+        let package = tables.package("a");
+        let file = tables.file("a/work.rs", package, 1, 1);
+        tables.finding(file, "counts", high(), 4);
+        tables.finding_outside_the_verdict(
+            file,
+            "advisory",
+            watch(),
+            (SourceRole::Test, SourceTrust::Advisory),
+        );
+        let cards = tables.cluster();
+        assert_eq!(cards.len(), 1);
+        assert_eq!(cards[0].claimed_findings().len(), 2);
+        assert_eq!(cards[0].visibility(), ProblemVisibility::Default);
     }
 
     #[test]
@@ -1530,16 +1736,86 @@ mod tests {
         let cards = tables.cluster();
         assert_eq!(duplicate_claim(&cards), None);
         let claimed: usize = cards.iter().map(|card| card.claimed_findings().len()).sum();
-        let distinct: BTreeSet<ClaimedFinding> = cards
+        assert_eq!(claimed, distinct_claims(&cards).len());
+        tables.assert_every_finding_is_claimed_once();
+    }
+
+    #[test]
+    fn every_retained_finding_reaches_exactly_one_card() {
+        // A repository holding one of everything, including the debt that
+        // cannot move a verdict and the file whose only evidence is its size.
+        let mut tables = Tables::default();
+        let left = tables.package("a");
+        let right = tables.package("b");
+        let god = tables.file("a/god.rs", left, 9, 3);
+        for index in 0..3 {
+            tables.finding(god, &format!("god{index}"), high(), index + 1);
+        }
+        tables.size(god, 40);
+        let advisory = tables.file("a/recovered.rs", left, 0, 0);
+        tables.finding_outside_the_verdict(
+            advisory,
+            "advisory",
+            watch(),
+            (SourceRole::Primary, SourceTrust::Advisory),
+        );
+        let generated = tables.file("a/generated.rs", left, 0, 0);
+        tables.finding_outside_the_verdict(
+            generated,
+            "generated",
+            high(),
+            (SourceRole::Generated, SourceTrust::Trusted),
+        );
+        let sized = tables.file("b/long.rs", right, 0, 0);
+        tables.size(sized, 30);
+        let ordinary = tables.file("b/work.rs", right, 2, 1);
+        tables.finding(ordinary, "work", high(), 2);
+        tables.finding(ordinary, "lesser", watch(), 40);
+        tables.cycle(&[god, ordinary]);
+        tables.coupling.push(EvolutionaryFinding::new(
+            EvolutionaryFindingId::from_index(0),
+            ChangeCoupling::new(
+                PackageId::from_index(left),
+                PackageId::from_index(right),
+                7,
+                9,
+            ),
+        ));
+        tables
+            .concentration
+            .push(KnowledgeConcentrationFinding::new(
+                KnowledgeConcentrationFindingId::from_index(0),
+                ContributorConcentration::new(PackageId::from_index(left), 1, 10, 10),
+            ));
+        tables.assert_every_finding_is_claimed_once();
+        // Nothing that cannot move a verdict slipped into default detail.
+        let cards = tables.cluster();
+        for (path, expected) in [
+            ("a/god.rs", ProblemVisibility::Default),
+            ("a/recovered.rs", ProblemVisibility::Detail),
+            ("a/generated.rs", ProblemVisibility::Detail),
+            ("b/long.rs", ProblemVisibility::Detail),
+            ("b/work.rs", ProblemVisibility::Default),
+        ] {
+            let index = tables
+                .files
+                .iter()
+                .position(|file| file.path() == path)
+                .unwrap();
+            let card = cards
+                .iter()
+                .find(|card| card.anchor() == &ProblemAnchor::File(FileId::from_index(index)))
+                .unwrap_or_else(|| panic!("no card for {path}"));
+            assert_eq!(card.visibility(), expected, "{path}");
+        }
+    }
+
+    /// Every claimed identity across a table of cards.
+    fn distinct_claims(cards: &[ProblemCard]) -> BTreeSet<ClaimedFinding> {
+        cards
             .iter()
             .flat_map(|card| card.claimed_findings().iter().copied())
-            .collect();
-        assert_eq!(claimed, distinct.len());
-        // Every source finding and the size finding reached exactly one card.
-        assert_eq!(
-            distinct.len(),
-            tables.findings.len() + tables.sizes.len() + 1
-        );
+            .collect()
     }
 
     #[test]
@@ -1551,7 +1827,7 @@ mod tests {
             anchor: ProblemAnchor::File(FileId::from_index(0)),
             evidence: Vec::new(),
             claimed_findings: vec![claim],
-            descriptive: false,
+            visibility: ProblemVisibility::Default,
         };
         assert_eq!(
             duplicate_claim(&[card(ProblemPattern::GodFile), card(ProblemPattern::Hub)]),
@@ -1650,7 +1926,7 @@ mod tests {
             claimed_findings: (0..claims)
                 .map(|index| ClaimedFinding::Source(FindingId::from_index(index)))
                 .collect(),
-            descriptive: false,
+            visibility: ProblemVisibility::Default,
         }
     }
 

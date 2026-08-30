@@ -61,7 +61,8 @@ pub use orphan::{ENTRY_FILENAMES, OrphanCandidate, OrphanFile, is_entry_filename
 pub use problem::{
     BROAD_RATED_UNITS, CONCENTRATED_HIGH_FINDINGS, ClaimedFinding, GOD_FILE_FAN_OUT, HUB_DEGREE,
     HUB_MEDIAN_MULTIPLE, ProblemAnchor, ProblemCard, ProblemEvidence, ProblemId, ProblemInput,
-    ProblemPattern, ProblemPolicy, ProblemRank, cluster_problems, duplicate_claim,
+    ProblemPattern, ProblemPolicy, ProblemRank, ProblemVisibility, cluster_problems,
+    duplicate_claim,
 };
 pub use size::{SizeFinding, SizeFindingId, SizePolicy, SizeSubject};
 pub use stable_dependencies::{MINIMUM_STABLE_DEPENDENCY_REFERENCES, stable_dependency_findings};
