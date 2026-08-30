@@ -27,27 +27,6 @@ ARCHITECTURE
         very-long-source-file-name.js
   very-long-source-package-name/
         very-long-source-directory-name/
-        choice.js →
-        very-long-target-package-name/
-        very-long-target-directory-name/
-        very-long-target-file-name.js
-        1 import
-  very-long-source-package-name/
-        very-long-source-directory-name/
-        very-long-source-file-name.js →
-        very-long-target-package-name/
-        very-long-target-directory-name/
-        very-long-target-file-name.js
-        1 import · test
-  very-long-target-package-name/
-        very-long-target-directory-name/
-        very-long-target-file-name.js →
-        very-long-source-package-name/
-        very-long-source-directory-name/
-        very-long-source-file-name.js
-        1 import
-  very-long-source-package-name/
-        very-long-source-directory-name/
         very-long-source-file-name.js:2 → ./choice
         matched more than one file · test
   very-long-source-package-name/

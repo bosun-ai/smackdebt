@@ -1,5 +1,8 @@
-// The hermetic pinning is shared with the unified suite; only that helper is
-// mapped in, because this suite builds its commands directly.
+// The hermetic pinning and the edge-row invariant are shared with the unified
+// suite; only those helpers are mapped in, because this suite builds its
+// commands directly.
+#[path = "support/edges.rs"]
+mod edges;
 #[path = "support/hermetic.rs"]
 mod support;
 
@@ -8,6 +11,7 @@ use std::fs;
 use std::path::Path;
 use std::process::Command;
 
+use edges::assert_no_dependency_edge_rows;
 use support::hermetic_env;
 
 const SOURCE_ENGINE_FIXTURE: &str =
@@ -749,11 +753,9 @@ fn static_architecture_codebase_snapshots_are_reviewed() {
             .iter()
             .any(|package| package["fan_in"] == 1 && package["fan_out"] == 1)
     );
-    // `--all` shows all useful debt; raw dependency edges live in JSON and in
-    // the path views that exist to explain one path's relationships.
+    // `--all` shows all useful debt; raw dependency edges live in JSON only,
+    // which every terminal result in this suite carries as an invariant.
     let detailed_text = String::from_utf8(detailed).unwrap();
-    assert!(!detailed_text.contains("· 1 import"), "{detailed_text}");
-    assert!(!detailed_text.contains(" owns "), "{detailed_text}");
     assert!(!detailed_text.contains("primary/trusted"));
 }
 
@@ -828,16 +830,16 @@ fn long_fact_families_keep_their_meaning_at_fifty_columns() {
     );
     let path = String::from_utf8(path.stdout).unwrap();
     assert_narrow(&path, 50);
-    for fact in [
-        "1 import",
-        "could not be matched",
-        "matched more than one file",
-    ] {
+    // `--all` keeps the imports that could not be followed; the resolved uses
+    // beside them are graph facts and stay in the machine report.
+    for fact in ["could not be matched", "matched more than one file"] {
         assert!(path.contains(fact), "missing {fact}: {path}");
     }
+    assert_no_dependency_edge_rows(&path, "long responsive path view");
     // References outside the repository are not debt and never reach a human.
     assert!(!path.contains("external"), "{path}");
 
+    // Module wiring is a relationship too, so no ownership row survives.
     let owned = String::from_utf8(run_in(
         project.path(),
         [
@@ -848,7 +850,7 @@ fn long_fact_families_keep_their_meaning_at_fifty_columns() {
         ],
     ))
     .unwrap();
-    assert!(owned.contains(" owns "), "{owned}");
+    assert!(!owned.contains(" owns "), "{owned}");
 }
 
 /// Every line fits the requested width and none reached the safety shortening.
@@ -863,27 +865,28 @@ fn assert_narrow(terminal: &str, width: usize) {
 }
 
 #[test]
-fn architecture_path_drill_keeps_incoming_edges_and_omits_unrelated_regions() {
+fn architecture_path_drill_shows_findings_without_edge_rows() {
     let project = static_architecture_fixture();
     git(project.path(), ["init", "-b", "main"]);
     let output = run_in(project.path(), ["app", "--all", "--color", "never"]);
     let text = String::from_utf8(output).unwrap();
-    assert!(text.contains("core/main.js → app/main.js"), "{text}");
-    assert!(
-        text.contains("app/main.js → core/main.js · 1 import"),
-        "{text}"
-    );
+    // The relationship that crosses the selected path reaches the reader
+    // through the cycle it belongs to, never as a row of its own.
+    assert!(!text.contains("core/main.js → app/main.js"), "{text}");
+    assert!(!text.contains("app/main.js → core/main.js"), "{text}");
+    assert!(text.contains("high package dependency cycle"), "{text}");
+    assert!(text.contains("        → core/main.js"), "{text}");
+    assert!(text.contains("2 imports could not be followed"), "{text}");
     assert!(!text.contains("native/src/helper.rs"));
 
+    // Module wiring is a relationship too: a Rust package states no ownership.
     let native = String::from_utf8(run_in(
         project.path(),
         ["native", "--all", "--color", "never"],
     ))
     .unwrap();
-    assert!(
-        native.contains("native/src/lib.rs owns native/src/helper.rs"),
-        "{native}"
-    );
+    assert!(!native.contains(" owns "), "{native}");
+    assert!(!native.contains("native/src/helper.rs"), "{native}");
 }
 
 #[test]
@@ -911,7 +914,7 @@ fn selected_path_scopes_import_warning_counts() {
 }
 
 #[test]
-fn diff_detail_and_path_views_show_current_edges_without_an_empty_heading() {
+fn diff_and_path_views_state_findings_without_current_edges() {
     let project = static_architecture_fixture();
     git(project.path(), ["init", "-b", "main"]);
     git(project.path(), ["config", "user.name", "Smackdebt Test"]);
@@ -943,21 +946,24 @@ fn diff_detail_and_path_views_show_current_edges_without_an_empty_heading() {
         assert!(!terminal.contains("HISTORY"), "{terminal}");
         assert!(!terminal.contains("WARNINGS"), "{terminal}");
     }
-    // The current relationship stays inspectable from either endpoint.
+    // The current relationship is a graph fact: either endpoint states the
+    // cycle it belongs to and no edge row at all.
     for arguments in [["app", "--color", "never"], ["core", "--color", "never"]] {
         let terminal = String::from_utf8(run_in(project.path(), arguments)).unwrap();
-        assert_eq!(
-            terminal
-                .matches("app/main.js → core/main.js · 2 imports")
-                .count(),
-            1,
+        assert!(
+            !terminal.contains("app/main.js → core/main.js"),
+            "{terminal}"
+        );
+        assert!(!terminal.contains(" · 2 imports"), "{terminal}");
+        assert!(
+            terminal.contains("high package dependency cycle"),
             "{terminal}"
         );
     }
 }
 
 #[test]
-fn diff_detail_renders_external_unresolved_and_ambiguous_relations_once() {
+fn unresolved_and_ambiguous_relations_reach_a_file_scope_and_all_only() {
     let project = tempfile::tempdir().unwrap();
     fs::create_dir(project.path().join("app")).unwrap();
     fs::write(project.path().join("app/package.json"), "{}\n").unwrap();
@@ -968,6 +974,13 @@ fn diff_detail_renders_external_unresolved_and_ambiguous_relations_once() {
     .unwrap();
     fs::write(project.path().join("app/choice.js"), "export default 1;\n").unwrap();
     fs::write(project.path().join("app/choice.ts"), "export default 2;\n").unwrap();
+    // A directory inside the package gives the third scope kind the rule names.
+    fs::create_dir(project.path().join("app/inner")).unwrap();
+    fs::write(
+        project.path().join("app/inner/main.js"),
+        "import missing from './missing';\nexport function inner() { return missing; }\n",
+    )
+    .unwrap();
     git(project.path(), ["init", "-b", "main"]);
     git(project.path(), ["config", "user.name", "Smackdebt Test"]);
     git(
@@ -982,8 +995,37 @@ fn diff_detail_renders_external_unresolved_and_ambiguous_relations_once() {
     )
     .unwrap();
 
+    // A file scope and `--all` state each import that could not be followed;
+    // a package and a directory scope keep the grouped sentence alone.
+    for (scope, sentence) in [
+        ("app", "warning 3 imports could not be followed"),
+        ("app/inner", "warning 1 import could not be followed"),
+    ] {
+        let grouped =
+            String::from_utf8(run_in(project.path(), [scope, "--color", "never"])).unwrap();
+        assert!(!grouped.contains("\nARCHITECTURE\n"), "{grouped}");
+        assert!(grouped.contains(sentence), "{grouped}");
+        for row in [
+            "app/main.js:1 → ./choice",
+            "app/main.js:3 → require(",
+            "app/inner/main.js:1 → ./missing",
+        ] {
+            assert!(!grouped.contains(row), "{grouped}");
+        }
+    }
+    // The same directory states its rows once `--all` is asked for.
+    let detailed = String::from_utf8(run_in(
+        project.path(),
+        ["app/inner", "--all", "--color", "never"],
+    ))
+    .unwrap();
+    assert!(
+        detailed.contains("app/inner/main.js:1 → ./missing · could not be matched"),
+        "{detailed}"
+    );
+
     for (case, arguments) in [
-        vec!["app", "--color", "never"],
+        vec!["app/main.js", "--color", "never"],
         vec!["app", "--all", "--color", "never"],
     ]
     .into_iter()
@@ -1000,6 +1042,7 @@ fn diff_detail_renders_external_unresolved_and_ambiguous_relations_once() {
             String::from_utf8_lossy(&output.stderr)
         );
         let terminal = String::from_utf8(output.stdout).unwrap();
+        assert_no_dependency_edge_rows(&terminal, &format!("case {case}"));
         assert!(
             terminal.contains("\nARCHITECTURE\n"),
             "case {case}: {terminal}"
@@ -2042,6 +2085,9 @@ fn a_report_piped_into_head_is_quiet_and_successful() {
 }
 
 fn assert_snapshot(name: &str, actual: &[u8], expected: &[u8]) {
+    if name.ends_with(".terminal.txt") {
+        assert_no_dependency_edge_rows(&String::from_utf8_lossy(actual), name);
+    }
     if std::env::var_os("SMACKDEBT_UPDATE_SNAPSHOTS").is_some() {
         assert_eq!(
             std::env::var_os("SMACKDEBT_UPDATE_COMMAND").as_deref(),
@@ -2576,12 +2622,21 @@ fn run<const N: usize>(arguments: [&str; N]) -> Vec<u8> {
 }
 
 fn run_in<const N: usize>(directory: &Path, arguments: [&str; N]) -> Vec<u8> {
-    smackdebt()
+    let stdout = smackdebt()
         .current_dir(directory)
         .args(arguments)
         .output()
         .unwrap()
-        .stdout
+        .stdout;
+    // Every human result this suite produces carries the invariant, so a flow
+    // without a committed result cannot reintroduce edge rows either.
+    if !arguments.contains(&"--json") {
+        assert_no_dependency_edge_rows(
+            &String::from_utf8_lossy(&stdout),
+            &format!("{arguments:?}"),
+        );
+    }
+    stdout
 }
 
 fn source_engine_fixture() -> tempfile::TempDir {

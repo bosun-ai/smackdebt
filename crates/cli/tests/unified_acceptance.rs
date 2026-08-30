@@ -11,6 +11,7 @@ use unicode_width::UnicodeWidthStr;
 
 #[cfg(unix)]
 use support::coverage_failure_repository;
+use support::edges::assert_no_dependency_edge_rows;
 use support::hermetic::hermetic_env;
 use support::{
     GeneratedRepository, Invocation, copy_language_truth_files, deepened_signal_repository,
@@ -1074,6 +1075,26 @@ fn every_fifty_column_snapshot_respects_unicode_display_width() {
         checked += 1;
     }
     assert_eq!(checked, 7, "expected every reviewed 50-column view");
+}
+
+/// Both suites commit their terminal results here, so one scan proves the
+/// invariant over every reviewed human view at every scope and detail level.
+#[test]
+fn no_committed_terminal_result_states_a_dependency_edge_as_a_row() {
+    let snapshots = Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/snapshots");
+    let mut checked = 0;
+    for entry in fs::read_dir(snapshots).unwrap() {
+        let entry = entry.unwrap();
+        let name = entry.file_name();
+        let name = name.to_string_lossy();
+        if !name.ends_with(".terminal.txt") {
+            continue;
+        }
+        let bytes = strip_decorations(&strip_ansi(&fs::read(entry.path()).unwrap()));
+        assert_no_dependency_edge_rows(&String::from_utf8_lossy(&bytes), &name);
+        checked += 1;
+    }
+    assert_eq!(checked, 36, "expected every committed terminal view");
 }
 
 #[test]

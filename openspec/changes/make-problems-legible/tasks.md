@@ -6,11 +6,11 @@
 
 ## 2. Dependency edges leave the human terminal
 
-- [ ] 2.1 Delete the relationship rows and the scope-derived gate that switched them on, and reduce the remaining detail gate to `--all`.
-- [ ] 2.2 Gate the unresolved and ambiguous rows on `--all` or a file scope, keeping the grouped warning sentence at every scope.
-- [ ] 2.3 Invert the acceptance tests that asserted retained incoming edges, current diff edges, and external unresolved rows above a file scope, and drop the import-count fact from the long-fact family case.
-- [ ] 2.4 Promote the absence of an import-count fact, an ownership row, and a path-to-path arrow outside a cycle witness to an invariant over every committed terminal snapshot.
-- [ ] 2.5 Regenerate the affected terminal snapshots one by one and record the expected diff shape in the commit body.
+- [x] 2.1 Delete the relationship rows and the scope-derived gate that switched them on, and reduce the remaining detail gate to `--all`.
+- [x] 2.2 Gate the unresolved and ambiguous rows on `--all` or a file scope, keeping the grouped warning sentence at every scope.
+- [x] 2.3 Invert the acceptance tests that asserted retained incoming edges, current diff edges, and external unresolved rows above a file scope, and drop the import-count fact from the long-fact family case.
+- [x] 2.4 Promote the absence of an import-count fact, an ownership row, and a path-to-path arrow outside a cycle witness to an invariant over every committed terminal snapshot.
+- [x] 2.5 Regenerate the affected terminal snapshots one by one and record the expected diff shape in the commit body.
 
 ## 3. The problem card model and its detectors
 

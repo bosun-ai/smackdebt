@@ -2,10 +2,6 @@ smackdebt diff · b
   You made it better.
 worse 0 · better 1 (evolutionary) · changed 0
 
-ARCHITECTURE
-  b/main.js → a/main.js · added
-  b/main.js → a/main.js · 1 import
-
 HISTORY
   a ↔ b changed together in 3 of 6 commits · 50% · code dependency exists
   better a ↔ b no longer change together without a code dependency

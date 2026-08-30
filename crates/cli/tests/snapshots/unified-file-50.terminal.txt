@@ -1,6 +1,3 @@
 smackdebt · a/main.js
   Clean. Ship it.
 0 high · 0 watch · 1 checked
-
-ARCHITECTURE
-  a/main.js → c/main.js · 1 import

@@ -46,11 +46,6 @@ ARCHITECTURE
         a
         → b
         → a
-  a/main.js → b/main.js · removed
-  a/main.js → c/main.js · added
-  b/main.js → a/main.js · removed
-  d/main.js → c/main.js · added
-  h/main.js → i/main.js · added
 
 HISTORY
   h ↔ i changed together in 4 of 4 commits

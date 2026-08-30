@@ -1,3 +1,4 @@
+pub(crate) mod edges;
 pub(crate) mod hermetic;
 
 use std::ffi::OsString;
@@ -6,6 +7,7 @@ use std::path::Path;
 use std::process::{Command, ExitStatus};
 
 use assert_cmd::cargo::cargo_bin;
+use edges::assert_no_dependency_edge_rows;
 use hermetic::hermetic_env;
 
 #[derive(Clone, Copy, Debug)]
@@ -191,6 +193,14 @@ impl Invocation {
             command.env("SMACKDEBT_EVIDENCE_STATS", "1");
         }
         let output = command.output().expect("run built command");
+        // Every human result this suite produces carries the invariant, so a
+        // flow without a committed result cannot reintroduce edge rows either.
+        if !self.arguments.iter().any(|value| value == "--json") {
+            assert_no_dependency_edge_rows(
+                &String::from_utf8_lossy(&output.stdout),
+                &format!("{:?}", self.arguments),
+            );
+        }
         ProcessResult {
             status: output.status,
             stdout: output.stdout,

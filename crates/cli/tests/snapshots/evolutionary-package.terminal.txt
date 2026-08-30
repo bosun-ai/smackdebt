@@ -2,8 +2,5 @@ smackdebt · a
   Nothing was checked.
 0 high · 0 watch · 0 checked
 
-ARCHITECTURE
-  b/main.js → a/main.js · 1 import
-
 HISTORY
   a ↔ b changed together in 3 of 6 commits · 50% · code dependency exists

@@ -12,7 +12,7 @@ use smackdebt_analysis::{
     ComparisonDirection, ComparisonKind, CouplingLink, DebtDiffSelection, DebtFamily, Diagnostic,
     DiagnosticKind, DiffTier, FileId, FileRecord, Finding, Instability, Language, Measurements,
     Rating, Report, ReportMode, ResolutionIssueKind, Scope, ScopeId, ScopeKind, Signal, SourceRole,
-    SourceTrust, StaticRelationKind, UnitKind, Verdict, instability, qualifies_for_finding,
+    SourceTrust, UnitKind, Verdict, instability, qualifies_for_finding,
 };
 use unicode_width::{UnicodeWidthChar, UnicodeWidthStr};
 
@@ -365,6 +365,12 @@ impl Presentation {
             report.scope_verdict(displayed.id())
         };
         let selection = displayed_verdict.selection();
+        // A relationship that could not be followed is file detail: it reaches
+        // a reader with `--all` or at a file scope, and at every other scope
+        // the grouped warning sentence is its whole terminal presence.
+        let file_detail = all || selected.kind() == ScopeKind::File;
+        // History context still belongs to a path view, which is the view it
+        // exists to explain.
         let detail = all || selected.kind() != ScopeKind::Repository;
         let verdict_only = report.mode() == ReportMode::Diff
             && verdict.diff_tier() == Some(DiffTier::NoDebtChange);
@@ -374,7 +380,8 @@ impl Presentation {
             ReportMode::Codebase => codebase_finding_rows(report, displayed, all, top),
             ReportMode::Diff => diff_finding_rows(report, displayed, all, top, selection),
         };
-        let architecture = architecture_rows(report, selected, all, detail, verdict.selection());
+        let architecture =
+            architecture_rows(report, selected, all, file_detail, verdict.selection());
         let history = history_rows(report, selected, detail, verdict.selection());
         let (warnings, warning_detail) = warning_rows(report, selected, detail);
         let next = (report.mode() == ReportMode::Codebase)
@@ -682,14 +689,17 @@ fn architecture_rows(
     report: &Report,
     selected: &Scope,
     all: bool,
-    detail: bool,
+    file_detail: bool,
     selection: &DebtDiffSelection,
 ) -> Section {
     let mut section = Section::new("ARCHITECTURE");
-    let relationships = selected.kind() != ScopeKind::Repository;
     match report.mode() {
         ReportMode::Codebase => {
             let mut findings = selected.architecture_findings().to_vec();
+            // The cap keeps the worst findings rather than the first ones a
+            // scope happened to collect. The sort is stable, so findings of one
+            // rating keep the deterministic order analysis gave them.
+            findings.sort_by_key(|id| Reverse(report.architecture_findings()[id.index()].rating()));
             if !all {
                 findings.truncate(3);
             }
@@ -735,67 +745,12 @@ fn architecture_rows(
                         .with_stacked(witness),
                 );
             }
-            if detail {
-                section
-                    .rows
-                    .extend(edge_change_rows(report, selected, selection));
-            }
         }
     }
-    if relationships {
-        section.rows.extend(relationship_rows(report, selected));
-    }
-    if detail {
+    if file_detail {
         section.rows.extend(unmatched_import_rows(report, selected));
     }
     section
-}
-
-/// The added and removed dependency edges of a diff, which are context rather
-/// than debt movement.
-fn edge_change_rows(report: &Report, selected: &Scope, selection: &DebtDiffSelection) -> Vec<Row> {
-    selected
-        .architecture_comparisons()
-        .iter()
-        .filter(|id| !selection.architecture().contains(id))
-        .map(|id| &report.architecture_comparisons()[id.index()])
-        .filter(|comparison| {
-            matches!(
-                comparison.kind(),
-                ArchitectureComparisonKind::EdgeAdded | ArchitectureComparisonKind::EdgeRemoved
-            )
-        })
-        .map(|comparison| {
-            let change = if comparison.kind() == ArchitectureComparisonKind::EdgeAdded {
-                "added"
-            } else {
-                "removed"
-            };
-            let source = comparison
-                .files()
-                .first()
-                .and_then(|id| report.files().get(id.index()))
-                .map_or("?", FileRecord::path);
-            let target = comparison
-                .files()
-                .get(1)
-                .and_then(|id| report.files().get(id.index()))
-                .map_or("?", FileRecord::path);
-            let head = if comparison.relation() == Some(StaticRelationKind::ModuleOwnership) {
-                format!("{source} owns {target}")
-            } else {
-                format!("{source} → {target}")
-            };
-            // These rows are context: they never reach a `changed n` count, so
-            // they never wear a verdict word either, exactly like the
-            // relationship rows they sit beside.
-            let mut row = Row::new(None, head).with_fact(change);
-            for fact in evidence_facts(comparison.role(), comparison.trust()) {
-                row = row.with_fact(fact);
-            }
-            row
-        })
-        .collect()
 }
 
 /// The closed witness of one cycle, one step per line so it is never
@@ -870,36 +825,6 @@ fn package_instability(
     measurement: smackdebt_analysis::PackageGraphMeasurement,
 ) -> Option<Instability> {
     instability(measurement.fan_in(), measurement.fan_out())
-}
-
-/// The debt-bearing relationships a selected path keeps, including those whose
-/// other endpoint lies outside it.
-fn relationship_rows(report: &Report, selected: &Scope) -> Vec<Row> {
-    report
-        .dependency_edges()
-        .iter()
-        .filter(|edge| {
-            file_belongs_to_scope(report, edge.source(), selected)
-                || file_belongs_to_scope(report, edge.target(), selected)
-        })
-        .map(|edge| {
-            let source = report.files()[edge.source().index()].path();
-            let target = report.files()[edge.target().index()].path();
-            let mut row = match edge.relation() {
-                StaticRelationKind::Uses => Row::new(None, format!("{source} → {target}"))
-                    .with_fact(
-                        Counted::new(edge.references() as usize, "import", "imports").to_string(),
-                    ),
-                StaticRelationKind::ModuleOwnership => {
-                    Row::new(None, format!("{source} owns {target}"))
-                }
-            };
-            for fact in evidence_facts(Some(edge.role()), Some(edge.trust())) {
-                row = row.with_fact(fact);
-            }
-            row
-        })
-        .collect()
 }
 
 /// The per-file import problems the grouped warning summarises.
@@ -2203,18 +2128,16 @@ mod tests {
     }
 
     #[test]
-    fn an_edge_change_row_is_context_and_wears_no_verdict_word() {
+    fn a_diff_states_no_edge_change_row_even_with_all_detail() {
         let report = diff_report(Some(ArchitectureComparisonKind::CycleIntroduced));
         let terminal = render(&report, TerminalOptions::new(100, true, false));
-        let row = terminal
-            .lines()
-            .find(|line| line.contains("added"))
-            .unwrap_or_else(|| panic!("{terminal}"));
-        // The row does not count toward `changed n`, so it states no direction.
-        assert!(!row.contains("changed "), "{terminal}");
-        assert!(!row.contains("worse "), "{terminal}");
-        assert!(!row.contains("better "), "{terminal}");
-        assert!(row.starts_with("  ?"), "{terminal}");
+        // An added edge is a graph fact the machine report keeps; the diff
+        // states the cycle it caused and nothing else.
+        assert!(!terminal.contains("added"), "{terminal}");
+        assert!(
+            terminal.contains("  worse package dependency cycle introduced"),
+            "{terminal}"
+        );
     }
 
     #[test]
