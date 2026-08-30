@@ -1427,10 +1427,21 @@ fn every_problem_pattern_reaches_a_committed_terminal_and_machine_view() {
     ] {
         assert!(text.contains(fact), "{fact}: {text}");
     }
-    // A size finding states its subject and its measured value.
+    // A size finding states its subject and its measured value, and a card
+    // that heads on one names the file in the identity-then-kind form a
+    // finding head takes and states the value alone.
     assert!(
         text.lines()
             .any(|line| line.starts_with("        file · ") && line.ends_with(" lines")),
+        "{text}"
+    );
+    assert!(
+        text.contains("  watch god/long.js · file\n        41 lines\n"),
+        "{text}"
+    );
+    // A grouped sentence agrees with its count in its verb and its object.
+    assert!(
+        text.contains("  warning 2 source files use unsupported languages.\n"),
         "{text}"
     );
     // Every rated unit total reaches a reader with a noun that agrees.
@@ -3077,12 +3088,28 @@ fn problem_pattern_fixture() -> tempfile::TempDir {
         "export function plain(value) {\n  if (value) {\n    return 2;\n  }\n  return 0;\n}\n",
     )
     .unwrap();
+    // One file whose only debt is its length, so its card heads on its size
+    // finding rather than on a claimed source finding.
+    let mut long = (0..40)
+        .map(|line| format!("// a long file states its length and nothing else, line {line}\n"))
+        .collect::<String>();
+    long.push_str("export const length = 1;\n");
+    fs::write(project.path().join("god/long.js"), long).unwrap();
     let churn = |version: u32| {
         format!(
             "export function churn(value) {{\n  if (value > {version}) {{\n    if (value > 2) {{\n      if (value > 3) {{\n        return {version};\n      }}\n    }}\n  }}\n  return 0;\n}}\n"
         )
     };
     fs::write(project.path().join("hot/hot.js"), churn(1)).unwrap();
+    // Two files no grammar reads, so the grouped sentence that names them
+    // states a plural subject with a plural verb and a plural object.
+    for name in ["first", "second"] {
+        fs::write(
+            project.path().join(format!("hub/{name}.go")),
+            format!("package hub\n\nfunc {name}() int {{ return 1 }}\n"),
+        )
+        .unwrap();
+    }
     commit_as(
         project.path(),
         "Pattern Test",

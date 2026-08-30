@@ -25,6 +25,14 @@ states are identical at every terminal width. A row that does not fit the
 resolved width SHALL stack its facts on indented lines as it does today, so a
 narrow view MAY render more lines than it spends slots.
 
+A cycle witness SHALL cost one slot however many steps it stacks. A witness
+states one fact — the path that closes the cycle — and eliding it destroys
+that fact rather than shortening it, so the accounting counts the evidence
+item and never its steps. The budget is therefore a target a witness MAY
+overrun and never a hard line count, and the cards a scope shows and the
+evidence each of them states SHALL respect the rung regardless of how many
+lines a witness renders.
+
 This replaces the earlier rule that the default view shows the first three ranked
 findings or comparisons within the selected scope. That limit capped one section
 while the architecture and relationship rows beside it were uncapped, so the
@@ -93,6 +101,10 @@ to a file is itself a request for detail.
 #### Scenario: A file is selected
 - **WHEN** the selected scope is a file
 - **THEN** every card anchored on that file is shown with complete evidence
+
+#### Scenario: A budgeted view holds a long cycle
+- **WHEN** a rung allows three evidence lines and one shown `tangle` card carries a witness of twelve steps
+- **THEN** the witness renders every step, the card spends one slot on it, and the card count and the other cards' evidence still respect that rung
 
 ### Requirement: Codebase child order is severity-led
 Codebase child area rows SHALL sort by High count descending, Watch count
@@ -195,21 +207,35 @@ Each card SHALL keep its finding's exact evidence: shared commits, union
 commits, similarity, and the dependency state for a coupling pair, and counts
 without identity for concentration.
 
+A coupling pair a code dependency already explains is context rather than
+debt: it produces no finding, so no card claims it, so codebase terminal
+output SHALL NOT state it at any scope or detail level, `--all` included. The
+complete pair table with its shared commits, union commits, similarity, and
+explanation SHALL remain in the machine report, which is where a reader who
+wants context reads it. This narrows the earlier promise that a selected
+package or `--all` shows contextual history facts: that promise assumed a
+section a renderer filled, and codebase debt detail is now the ranked card
+table, which only findings enter.
+
 This replaces the earlier rule that default codebase output shows a `HISTORY`
 section of at most three findings ordered by shared commits descending,
 similarity descending, then stable package names and IDs. That section-local
 order competed with nothing else on the screen, so a Watch coupling pair was
 printed beside a High file with no statement of which mattered more. Diff
 terminal output SHALL keep `HISTORY` with its accepted limit and order this
-round.
+round, and with the contextual pairs it shows today.
 
 #### Scenario: Default codebase output has actionable history
 - **WHEN** an unexplained coupling finding exists
 - **THEN** one card states that pair once with its exact commit evidence and without a retained-pair or processing summary, ranked among the other problems
 
-#### Scenario: A user selects an evolution detail target
-- **WHEN** a package is selected or `--all` is supplied
+#### Scenario: A user selects an evolution detail target in a diff
+- **WHEN** a package is selected or `--all` is supplied in diff output
 - **THEN** relevant actionable and contextual history facts are shown without healthy rows, weak default pairs, or internal processing facts
+
+#### Scenario: A code dependency explains a coupling pair
+- **WHEN** a codebase package scope is selected or `--all` is supplied and a retained pair has a code dependency
+- **THEN** no terminal row states that pair and the machine report keeps its complete row
 
 ### Requirement: Architecture default shows witnesses rather than edge samples
 Codebase output SHALL present a rated cycle as one problem card carrying the

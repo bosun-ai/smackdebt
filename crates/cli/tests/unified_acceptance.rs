@@ -1093,6 +1093,18 @@ fn every_default_codebase_view_spends_at_most_the_screen_budget() {
     /// budget stated once more where the evidence is read.
     const SCREEN_BUDGET: usize = 24;
 
+    // A cycle witness is one fact stated one step per line, so its steps
+    // beyond the first are exempt from the accounting: the budget counts the
+    // evidence item and never its steps.
+    let slots = |text: &str| {
+        let rows = problem_body(text);
+        let steps = rows
+            .iter()
+            .filter(|line| line.trim_start().starts_with("→ "))
+            .count();
+        rows.len() - steps
+    };
+
     let languages = GeneratedRepository::new("main");
     copy_language_truth_files(&languages);
     // A directory scope over every supported language, which is the shape the
@@ -1100,11 +1112,32 @@ fn every_default_codebase_view_spends_at_most_the_screen_budget() {
     let directory = Invocation::new(["src"]).run(languages.path());
     directory.success();
     let text = String::from_utf8(directory.stdout).unwrap();
-    // At a width nothing wraps at, one rendered row is one spent slot, so the
-    // body length is the budget a reader sees.
-    let slots = |text: &str| problem_body(text).len();
     assert!(slots(&text) <= SCREEN_BUDGET, "{text}");
     assert!(!problem_heads(&text).is_empty(), "{text}");
+
+    // A cycle-bearing repository spends the budget the same way while its
+    // witnesses render in full, because eliding a witness destroys its
+    // meaning rather than shortening it.
+    let cycles = static_architecture_repository();
+    let cyclic = Invocation::new(["--history", "36500d"]).run(cycles.path());
+    cyclic.success();
+    let cyclic = String::from_utf8(cyclic.stdout).unwrap();
+    let rows = problem_body(&cyclic);
+    let heads = problem_heads(&cyclic);
+    assert!(!heads.is_empty(), "{cyclic}");
+    assert!(rows.len() > heads.len(), "{cyclic}");
+    assert!(slots(&cyclic) <= SCREEN_BUDGET, "{cyclic}");
+    for head in &heads {
+        assert!(head.contains("circular dependency"), "{cyclic}");
+    }
+    // Every witness closes its cycle and none is shortened.
+    let steps: Vec<&str> = rows
+        .iter()
+        .copied()
+        .filter(|line| line.trim_start().starts_with("→ "))
+        .collect();
+    assert!(steps.len() >= heads.len() * 2, "{cyclic}");
+    assert!(!cyclic.contains('\u{2026}'), "{cyclic}");
 
     // The view the discover line proposes fits the budget too, which is what
     // makes drilling in a step rather than a flood.

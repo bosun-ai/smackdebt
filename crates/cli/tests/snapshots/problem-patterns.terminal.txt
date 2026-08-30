@@ -25,7 +25,14 @@ PROBLEMS
         10 files import this
   watch one author · hot
         one contributor made 11 of 11 commits
+  watch god/long.js · file
+        41 lines
   watch plain · function · god/plain.js:1
         cyclomatic 2
+
+WARNINGS
+  warning 2 source files use unsupported languages.
+  hub/first.go: hub/first.go uses an unsupported language
+  hub/second.go: hub/second.go uses an unsupported language
 
   next: smackdebt god

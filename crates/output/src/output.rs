@@ -654,12 +654,18 @@ fn problem_row(report: &Report, card: &ProblemCard, evidence: usize) -> Row {
     // A `measured` card heads on its first fact, so that fact adds only what
     // the head has not already stated: each fact reaches a reader once.
     let headed = card.pattern() == ProblemPattern::Measured;
+    // The allowance is taken over evidence items, not over rendered lines: a
+    // cycle witness is one fact stated one step per line, and eliding steps
+    // would destroy the fact rather than shorten it. Its steps are therefore
+    // exempt from the slot accounting, so a card carrying a long witness may
+    // render past the budget while the cards a scope shows and the evidence
+    // each of them states still respect the rung.
     let stacked = card
         .evidence()
         .iter()
         .take(evidence)
         .enumerate()
-        .flat_map(|(index, fact)| evidence_lines(report, card, *fact, headed && index == 0))
+        .flat_map(|(index, fact)| evidence_lines(report, *fact, headed && index == 0))
         .collect();
     Row::new(word, problem_head(report, card)).with_stacked(stacked)
 }
@@ -686,28 +692,44 @@ fn problem_head(report: &Report, card: &ProblemCard) -> String {
     let anchor = anchor_label(report, card);
     match pattern_name(card.pattern()) {
         Some(name) => format!("{name} · {anchor}"),
-        None => match measured_identity(report, card) {
-            Some(identity) => format!("{identity} · {anchor}"),
-            None => anchor,
-        },
+        None => measured_head(report, card, &anchor),
     }
 }
 
-/// The identity a `measured` card heads on, which is its top claimed finding.
-fn measured_identity(report: &Report, card: &ProblemCard) -> Option<String> {
-    match card.evidence().first()? {
-        ProblemEvidence::Finding(id) => {
-            let finding = report.findings().get(id.index())?;
-            let path = report.files()[finding.file().index()].path();
-            Some(format!(
-                "{} · {}{}",
-                unit_identity(finding.identity(), path),
-                unit_kind_label(finding.identity().kind()),
-                evidence_suffix(Some(finding.role()), Some(finding.trust()))
-            ))
-        }
-        ProblemEvidence::Size(id) => Some(size_subject(report.size_findings().get(id.index())?)),
-        _ => None,
+/// The head of a `measured` card: the identity of its top claimed finding,
+/// then the anchor that identity does not already state.
+fn measured_head(report: &Report, card: &ProblemCard, anchor: &str) -> String {
+    match card.evidence().first() {
+        Some(ProblemEvidence::Finding(id)) => report.findings().get(id.index()).map_or_else(
+            || anchor.to_owned(),
+            |finding| format!("{} · {anchor}", finding_identity(report, finding)),
+        ),
+        Some(ProblemEvidence::Size(id)) => size_head(report, *id, anchor),
+        _ => anchor.to_owned(),
+    }
+}
+
+/// One finding's identity, its unit kind, and the role and trust that are
+/// worth stating, which is the head a finding row states.
+fn finding_identity(report: &Report, finding: &Finding) -> String {
+    let path = report.files()[finding.file().index()].path();
+    format!(
+        "{} · {}{}",
+        unit_identity(finding.identity(), path),
+        unit_kind_label(finding.identity().kind()),
+        evidence_suffix(Some(finding.role()), Some(finding.trust()))
+    )
+}
+
+/// A size finding's head, in the same identity-then-kind form a finding head
+/// takes.
+///
+/// A container is named beside the file it sits in; a file's own length is
+/// measured on the anchor itself, so its identity and its anchor are one.
+fn size_head(report: &Report, id: SizeFindingId, anchor: &str) -> String {
+    match report.size_findings()[id.index()].container() {
+        Some(container) => format!("{container} · container · {anchor}"),
+        None => format!("{anchor} · file"),
     }
 }
 
@@ -790,12 +812,7 @@ fn cycle_first_path<'a>(report: &'a Report, witness_edges: &[DependencyEdgeId]) 
 /// Every kind states one line, except a cycle witness, which is one fact
 /// stated one step per line so it is never shortened with an ellipsis, and a
 /// fact the card's head already states, which adds only what is left.
-fn evidence_lines(
-    report: &Report,
-    card: &ProblemCard,
-    fact: ProblemEvidence,
-    headed: bool,
-) -> Vec<String> {
+fn evidence_lines(report: &Report, fact: ProblemEvidence, headed: bool) -> Vec<String> {
     match fact {
         ProblemEvidence::Finding(id) => finding_evidence(report, id, headed),
         ProblemEvidence::Size(id) => size_evidence(report, id, headed),
@@ -805,9 +822,7 @@ fn evidence_lines(
         ProblemEvidence::Knowledge(id) => vec![knowledge_evidence(report, id)],
         // The rest are integers the report already measured, so they need no
         // finding table to be stated.
-        measured => counted_evidence(measured, anchor_is_hot(report, card))
-            .into_iter()
-            .collect(),
+        measured => counted_evidence(measured).into_iter().collect(),
     }
 }
 
@@ -815,11 +830,16 @@ fn evidence_lines(
 ///
 /// A fact that links a finding is stated from that finding instead and never
 /// reaches here.
-fn counted_evidence(fact: ProblemEvidence, hot: bool) -> Option<String> {
+fn counted_evidence(fact: ProblemEvidence) -> Option<String> {
     Some(match fact {
         ProblemEvidence::FanIn(value) => fan_in_evidence(value),
         ProblemEvidence::FanOut(value) => format!("imports {}", counted_files(value)),
-        ProblemEvidence::Hot(value) => heat_evidence(value, hot),
+        // Clustering carries a touch count only for a hotspot, so heat is the
+        // only activity a card states.
+        ProblemEvidence::Hot(value) => format!(
+            "hot ({})",
+            Counted::new(value as usize, "commit", "commits")
+        ),
         ProblemEvidence::RatedUnits(value) => {
             Counted::new(value as usize, "rated unit", "rated units").to_string()
         }
@@ -846,28 +866,6 @@ fn witness_evidence(report: &Report, id: ArchitectureFindingId) -> Vec<String> {
         .get(id.index())
         .map(|finding| cycle_witness_steps(report, finding.witness_edges()))
         .unwrap_or_default()
-}
-
-/// Whether the anchor a touch count belongs to is a hotspot.
-///
-/// A file set carries the touch count of its hottest member, which the
-/// hotspot table is what produced.
-fn anchor_is_hot(report: &Report, card: &ProblemCard) -> bool {
-    match card.anchor() {
-        ProblemAnchor::File(file) => hotspot_touches(report, *file).is_some(),
-        _ => true,
-    }
-}
-
-/// A hot anchor states its heat; activity that is not a hotspot states its
-/// commits alone.
-fn heat_evidence(touches: u32, hot: bool) -> String {
-    let commits = Counted::new(touches as usize, "commit", "commits");
-    if hot {
-        format!("hot ({commits})")
-    } else {
-        commits.to_string()
-    }
 }
 
 /// One claimed finding: where it is, what kind of unit it measures, and the
@@ -1741,39 +1739,49 @@ fn first_char_len(value: &str) -> usize {
     value.chars().next().map_or(1, char::len_utf8)
 }
 
+/// What one diagnostic kind says about its subject, in singular and then
+/// plural form.
+///
+/// A count moves the verb and the object together — one file uses *an
+/// unsupported language* and three files use *unsupported languages* — so the
+/// whole predicate is chosen at once rather than assembled from parts.
+const fn diagnostic_predicate(kind: DiagnosticKind) -> (&'static str, &'static str) {
+    match kind {
+        DiagnosticKind::NestedRepository => ("was not analyzed.", "were not analyzed."),
+        DiagnosticKind::UnsupportedLanguage => (
+            "uses an unsupported language.",
+            "use unsupported languages.",
+        ),
+        DiagnosticKind::UnreadableFile => ("could not be read.", "could not be read."),
+        DiagnosticKind::OversizedFile => ("is too large to inspect.", "are too large to inspect."),
+        DiagnosticKind::ParseFailure => {
+            ("could not be fully parsed.", "could not be fully parsed.")
+        }
+        DiagnosticKind::AmbiguousIdentity => (
+            "contains code that could not be matched.",
+            "contain code that could not be matched.",
+        ),
+        DiagnosticKind::UnsafeReference => (
+            "contains an unsafe reference.",
+            "contain unsafe references.",
+        ),
+        DiagnosticKind::Other => ("could not be analyzed.", "could not be analyzed."),
+    }
+}
+
 /// One sentence per diagnostic kind, each with its own subject.
 ///
-/// Every sentence agrees with its own count, because a grouped sentence now
-/// states its kind at every scope and one file is the common case.
+/// Every sentence agrees with its own count, because a grouped sentence states
+/// its kind at every scope and one file is the common case.
 fn diagnostic_summary(kind: DiagnosticKind, count: usize) -> String {
-    let subject = Counted::new(count, "source file", "source files");
-    let agrees = |singular: &'static str, plural: &'static str| {
-        if count == 1 { singular } else { plural }
+    // A pruned checkout is not a source file, so it names its own subject.
+    let subject = if kind == DiagnosticKind::NestedRepository {
+        Counted::new(count, "nested repository", "nested repositories")
+    } else {
+        Counted::new(count, "source file", "source files")
     };
-    match kind {
-        DiagnosticKind::NestedRepository => {
-            let subject = Counted::new(count, "nested repository", "nested repositories");
-            format!("{subject} {} not analyzed.", agrees("was", "were"))
-        }
-        DiagnosticKind::UnsupportedLanguage => format!(
-            "{subject} {} an unsupported language.",
-            agrees("uses", "use")
-        ),
-        DiagnosticKind::UnreadableFile => format!("{subject} could not be read."),
-        DiagnosticKind::OversizedFile => {
-            format!("{subject} {} too large to inspect.", agrees("is", "are"))
-        }
-        DiagnosticKind::ParseFailure => format!("{subject} could not be fully parsed."),
-        DiagnosticKind::AmbiguousIdentity => format!(
-            "{subject} {} code that could not be matched.",
-            agrees("contains", "contain")
-        ),
-        DiagnosticKind::UnsafeReference => format!(
-            "{subject} {} unsafe references.",
-            agrees("contains", "contain")
-        ),
-        DiagnosticKind::Other => format!("{subject} could not be analyzed."),
-    }
+    let (singular, plural) = diagnostic_predicate(kind);
+    format!("{subject} {}", if count == 1 { singular } else { plural })
 }
 
 fn file_belongs_to_scope(report: &Report, file: FileId, selected: &Scope) -> bool {
@@ -1793,14 +1801,6 @@ fn scope_within(report: &Report, scope: ScopeId, ancestor: ScopeId) -> bool {
         current = report.scopes().get(id.index()).and_then(Scope::parent);
     }
     false
-}
-
-fn hotspot_touches(report: &Report, file: FileId) -> Option<u32> {
-    report
-        .hotspots()
-        .binary_search_by_key(&file, |hotspot| hotspot.file())
-        .ok()
-        .map(|index| report.hotspots()[index].touches())
 }
 
 fn package_name(report: &Report, package_index: usize) -> Option<&str> {
@@ -2277,6 +2277,9 @@ mod tests {
                 HealthCounts::default(),
             );
         }
+        // A file measured only by its length, which heads its card on its
+        // size finding because it claims no source finding at all.
+        let long = file(15, lib, 2, "lib/long.js", HealthCounts::default());
         let mut finding = |index: usize, target: FileId, name: &str, line: u32, measurements| {
             let id = FindingId::from_index(index);
             builder.add_finding(Finding::new(
@@ -2299,6 +2302,9 @@ mod tests {
         builder.set_size_findings(vec![
             SizePolicy::default()
                 .rate_file(god, 520)
+                .expect("a long file is rated"),
+            SizePolicy::default()
+                .rate_file(long, 640)
                 .expect("a long file is rated"),
         ]);
         let mut edges = vec![
@@ -2733,50 +2739,217 @@ mod tests {
     #[test]
     fn singular_and_plural_evidence_wording_agree_with_their_counts() {
         let report = every_pattern_report();
-        let one = |value| {
-            evidence_lines(
-                &report,
-                &report.problems()[0],
-                ProblemEvidence::FanIn(value),
-                false,
-            )
-        };
-        assert_eq!(one(1), vec!["1 file imports this".to_owned()]);
-        assert_eq!(one(2), vec!["2 files import this".to_owned()]);
         for (fact, expected) in [
+            (ProblemEvidence::FanIn(1), "1 file imports this"),
+            (ProblemEvidence::FanIn(2), "2 files import this"),
             (ProblemEvidence::FanOut(1), "imports 1 file"),
             (ProblemEvidence::FanOut(3), "imports 3 files"),
             (ProblemEvidence::RatedUnits(1), "1 rated unit"),
             (ProblemEvidence::RatedUnits(4), "4 rated units"),
             (ProblemEvidence::Members(1), "1 file in the cycle"),
             (ProblemEvidence::Members(5), "5 files in the cycle"),
+            // Clustering carries a touch count only for a hotspot, so heat is
+            // the only activity wording a card states.
+            (ProblemEvidence::Hot(1), "hot (1 commit)"),
+            (ProblemEvidence::Hot(14), "hot (14 commits)"),
         ] {
             assert_eq!(
-                evidence_lines(&report, &report.problems()[0], fact, false),
+                evidence_lines(&report, fact, false),
                 vec![expected.to_owned()],
                 "{fact:?}"
             );
         }
-        // A hot anchor states its heat; the same count on an anchor that is
-        // not a hotspot states its commits alone.
-        let hot = report
+    }
+
+    #[test]
+    fn a_card_headed_on_a_size_finding_names_the_file_and_states_its_value() {
+        let report = every_pattern_report();
+        let detailed = render(&report, TerminalOptions::new(120, true, false));
+        // The head takes the identity-then-kind form a finding head takes,
+        // and a file's own length is measured on the anchor itself, so the
+        // path is written once.
+        assert!(
+            detailed.contains("  watch lib/long.js · file\n        640 lines\n"),
+            "{detailed}"
+        );
+        // The same finding on a card that does not head on it keeps its
+        // subject, because no head states it there.
+        assert!(
+            detailed.contains("        file · 520 lines\n"),
+            "{detailed}"
+        );
+        // A container names itself beside the file it sits in.
+        let container = SizePolicy::default()
+            .rate_container(FileId::from_index(0), "Editor", 900)
+            .expect("a long container is rated");
+        assert_eq!(size_subject(&container), "Editor · container");
+    }
+
+    #[test]
+    fn every_diagnostic_sentence_agrees_with_its_own_count() {
+        for (kind, singular, plural) in [
+            (
+                DiagnosticKind::NestedRepository,
+                "1 nested repository was not analyzed.",
+                "3 nested repositories were not analyzed.",
+            ),
+            (
+                DiagnosticKind::UnsupportedLanguage,
+                "1 source file uses an unsupported language.",
+                "3 source files use unsupported languages.",
+            ),
+            (
+                DiagnosticKind::UnreadableFile,
+                "1 source file could not be read.",
+                "3 source files could not be read.",
+            ),
+            (
+                DiagnosticKind::OversizedFile,
+                "1 source file is too large to inspect.",
+                "3 source files are too large to inspect.",
+            ),
+            (
+                DiagnosticKind::ParseFailure,
+                "1 source file could not be fully parsed.",
+                "3 source files could not be fully parsed.",
+            ),
+            (
+                DiagnosticKind::AmbiguousIdentity,
+                "1 source file contains code that could not be matched.",
+                "3 source files contain code that could not be matched.",
+            ),
+            (
+                DiagnosticKind::UnsafeReference,
+                "1 source file contains an unsafe reference.",
+                "3 source files contain unsafe references.",
+            ),
+            (
+                DiagnosticKind::Other,
+                "1 source file could not be analyzed.",
+                "3 source files could not be analyzed.",
+            ),
+        ] {
+            assert_eq!(diagnostic_summary(kind, 1), singular, "{kind:?}");
+            assert_eq!(diagnostic_summary(kind, 3), plural, "{kind:?}");
+        }
+    }
+
+    /// A report holding one long cycle beside five ordinary cards, so the
+    /// widest rung applies and one card's witness is longer than that rung.
+    fn report_with_a_long_cycle(members: usize) -> Report {
+        let mut builder = ReportBuilder::new(ReportMode::Codebase);
+        let root = ScopeId::from_index(0);
+        builder.add_scope(Scope::new(root, ScopeKind::Repository, ".", None));
+        builder.set_root(root);
+        let policy = HealthPolicy::default();
+        let measurements = Measurements::new(15, 1, 1);
+        // Five files carrying one ordinary finding each, plus the cycle.
+        for index in 0..5 {
+            let file = FileId::from_index(index);
+            builder.add_file(FileRecord::new(
+                file,
+                root,
+                format!("measured-{index}.rs"),
+                Coverage::new(1, 1, 0, 0, 10, 0),
+                HealthCounts::new(0, 1, 0),
+            ));
+            builder.add_finding(Finding::new(
+                FindingId::from_index(index),
+                file,
+                UnitIdentity::new(format!("unit-{index}"), UnitKind::Function),
+                SourceSpan::new(1, 2),
+                measurements,
+                policy.assess(measurements),
+            ));
+            builder.link_finding(root, FindingId::from_index(index));
+        }
+        let mut edges = Vec::new();
+        for index in 0..members {
+            builder.add_file(FileRecord::new(
+                FileId::from_index(5 + index),
+                root,
+                format!("cycle-{index:02}.rs"),
+                Coverage::new(1, 1, 0, 0, 1, 0),
+                HealthCounts::default(),
+            ));
+            edges.push(DependencyEdge::new(
+                DependencyEdgeId::from_index(index),
+                FileId::from_index(5 + index),
+                FileId::from_index(5 + (index + 1) % members),
+                1,
+                vec![SourceSpan::new(1, 1)],
+            ));
+        }
+        builder.set_architecture(ArchitectureReportFacts::new(
+            ArchitectureGraph::new(
+                DependencyCoverage::new(members as u32, 0, 0, 0, 0, 0, 0),
+                edges,
+                Vec::new(),
+                Vec::new(),
+                Vec::new(),
+                Vec::new(),
+            ),
+            vec![ArchitectureFinding::new(
+                ArchitectureFindingId::from_index(0),
+                ArchitectureFindingKind::FileCycle,
+                Vec::new(),
+                (0..members)
+                    .map(|index| FileId::from_index(5 + index))
+                    .collect(),
+                (0..members).map(DependencyEdgeId::from_index).collect(),
+            )],
+            Vec::new(),
+        ));
+        builder.link_architecture_finding(root, ArchitectureFindingId::from_index(0));
+        builder.finish()
+    }
+
+    /// A cycle witness is one fact stated one step per line, so eliding it
+    /// would destroy the fact rather than shorten it: the accounting counts
+    /// the evidence item and never its steps.
+    #[test]
+    fn a_witness_costs_one_slot_however_many_steps_it_stacks() {
+        let members = 12;
+        let report = report_with_a_long_cycle(members);
+        let terminal = render(&report, TerminalOptions::new(120, false, false));
+        let rows = section_rows(&terminal, "PROBLEMS");
+        // Six cards select the widest-depth rung, which allows three lines.
+        let heads = problem_heads(&terminal);
+        assert_eq!(heads.len(), 6, "{terminal}");
+        assert_eq!(ladder_rung(heads.len()), (6, 3));
+
+        // The witness renders every step and closes the cycle.
+        let witness: Vec<&String> = rows
+            .iter()
+            .filter(|line| {
+                line.trim_start()
+                    .trim_start_matches("→ ")
+                    .starts_with("cycle-")
+            })
+            .collect();
+        assert_eq!(witness.len(), members + 1, "{terminal}");
+        assert_eq!(
+            witness[0].trim(),
+            witness[members].trim().trim_start_matches("→ "),
+            "{terminal}"
+        );
+        assert!(!terminal.contains('…'), "{terminal}");
+
+        // Every card still respects the rung once the witness steps are set
+        // aside, which is exactly what the budget accounts for: six heads,
+        // the cycle's two facts, and one fact for each ordinary card.
+        let card = report
             .problems()
             .iter()
-            .find(|card| card.pattern() == ProblemPattern::HotMess)
-            .expect("the hot file has a card");
-        let cold = report
-            .problems()
-            .iter()
-            .find(|card| card.pattern() == ProblemPattern::Measured)
-            .expect("the measured file has a card");
-        assert_eq!(
-            evidence_lines(&report, hot, ProblemEvidence::Hot(1), false),
-            vec!["hot (1 commit)".to_owned()]
-        );
-        assert_eq!(
-            evidence_lines(&report, cold, ProblemEvidence::Hot(2), false),
-            vec!["2 commits".to_owned()]
-        );
+            .find(|card| card.pattern() == ProblemPattern::Tangle)
+            .expect("the cycle has a card");
+        assert_eq!(card.evidence().len(), 2, "{card:?}");
+        let extra = witness.len() - 1;
+        let slots = rows.len() - extra;
+        assert_eq!(slots, 6 + 2 + 5, "{terminal}");
+        assert!(slots <= SCREEN_BUDGET, "{terminal}");
+        // The rendered view may run past the budget; the accounting does not.
+        assert!(rows.len() > SCREEN_BUDGET, "{terminal}");
     }
 
     #[test]

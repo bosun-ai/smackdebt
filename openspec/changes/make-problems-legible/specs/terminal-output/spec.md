@@ -35,7 +35,9 @@ anchor. Pattern names SHALL be exactly `does too much` for `god_file`,
 `hot and complex` for `hot_mess`, `changes together` for `shotgun_pair`,
 `one author` for `bus_risk`, and `depends on less stable code` for
 `unstable_dependency`. A `measured` card's head SHALL be the identity of its top
-claimed finding, which is the head a finding row states today.
+claimed finding, which is the head a finding row states today. A card that
+claims no finding SHALL state no rating word: the word vocabulary rates debt,
+a card claiming nothing carries none, and `watch` would misstate it.
 
 An anchor SHALL be written by its kind, reusing the identity the accepted specs
 already give that kind:
@@ -57,16 +59,29 @@ already give that kind:
 
 Card evidence SHALL render one indented line per shown evidence item, in the
 order analysis stored it, with one exact wording per evidence kind:
-`<n> files import this`, `imports <n> files`, `hot (<n> commits)` for a hotspot
-and `<n> commits` for a file with activity that is not a hotspot,
+`<n> files import this`, `imports <n> files`, `hot (<n> commits)`,
 `<n> rated units`, `<n> files in the cycle`, a claimed finding's `path:line`
 with its measurements, a size finding's subject and measured value, a
 stable-dependency finding's integer degree operands and reference count, a
 coupling pair's shared commits, union commits, similarity operands, and
 dependency state, and a knowledge-concentration finding's counts without
-identity. Every wording SHALL use correct singular and plural form. A `tangle`
-card SHALL carry its architecture finding's existing cycle witness as stacked
-evidence, and that witness SHALL NOT be shortened with an ellipsis.
+identity. Clustering carries a touch count only for a hotspot, so heat is the
+only activity wording a card states; the activity of a file that is not a
+hotspot remains a machine-report fact. Every wording SHALL use correct singular
+and plural form, in the verb and in the object alike. A `tangle` card SHALL
+carry its architecture finding's existing cycle witness as stacked evidence,
+and that witness SHALL NOT be shortened with an ellipsis.
+
+When a card's head already names the finding an evidence item links — which
+only a `measured` card's first item does, because that head is that finding —
+the line SHALL state what the head has not: the finding's measurements, or a
+size finding's measured value alone. The head owns the identity, the unit
+kind, the source role, the parse trust, and the location, and each fact
+reaches a reader once. A `measured` card headed on a size finding SHALL
+therefore write that finding's identity in the same `<identity> · <kind>` form
+a finding-headed card writes, which for a file's own length is the file path
+followed by `file`, and for a container is the container name followed by
+`container` and then the anchor.
 
 Diff output SHALL keep `FINDINGS`, `ARCHITECTURE`, and `HISTORY` this round.
 `FINDINGS` SHALL show ranked comparison rows with `path:line` and their
@@ -91,6 +106,18 @@ as counts without identity.
 #### Scenario: A problem is in a hot file
 - **WHEN** a displayed card's file is a hotspot with 14 commits
 - **THEN** one evidence line states `hot (14 commits)`
+
+#### Scenario: A card heads on the finding its evidence links
+- **WHEN** a `measured` card's head names its top claimed finding and that finding is its first evidence item
+- **THEN** the evidence line states that finding's measurements alone, and its path, line, unit kind, role, and trust appear once, in the head
+
+#### Scenario: A file is measured only by its length
+- **WHEN** a file carries a size finding and no unclaimed source finding
+- **THEN** its `measured` card heads on `<path> · file` and its evidence line states the measured value alone
+
+#### Scenario: A card claims nothing
+- **WHEN** a `hub` card that claims no finding is shown
+- **THEN** its row states its pattern name and its anchor with no rating word
 
 #### Scenario: A diff moves debt in one family
 - **WHEN** a diff introduces a package cycle and moves no source comparison
