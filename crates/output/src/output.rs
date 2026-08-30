@@ -2165,9 +2165,9 @@ mod tests {
         HealthPolicy, HistoryCoverage, Hotspot, KnowledgeConcentrationFinding,
         KnowledgeConcentrationFindingId, Measurements, PackageEdge, PackageEdgeId,
         PackageGraphMeasurement, PackageId, PackageRecord, ParseStatus, Report, ReportBuilder,
-        ReportMode, Scope, ScopeId, SizePolicy, SourceRole, SourceSpan, SourceTrust,
-        StableDependencyEvidence, StableDependencyFinding, StableDependencyFindingId, UnitIdentity,
-        UnitKind,
+        ReportMode, Scope, ScopeId, SizePolicy, SourceCoverageOutcome, SourceRole, SourceSpan,
+        SourceTrust, StableDependencyEvidence, StableDependencyFinding, StableDependencyFindingId,
+        UnitIdentity, UnitKind,
     };
 
     /// Every private-use codepoint, which may never reach a machine consumer.
@@ -3254,6 +3254,112 @@ mod tests {
         let value: serde_json::Value = serde_json::from_slice(&json).unwrap();
         assert_eq!(value["schema_version"], 4);
         assert_eq!(value["mode"], "codebase");
+    }
+
+    /// Both qualifications a verdict can carry are analysis-owned bytes the
+    /// renderer only places, and the accepted placement puts the share
+    /// directly under the qualifier row when one exists. No generated fixture
+    /// is both mostly unsupported and drilled into, so the stacked order is
+    /// proven here over a report built with both.
+    #[test]
+    fn a_qualified_sub_scope_stacks_the_share_under_the_qualifier_row() {
+        let mut builder = ReportBuilder::new(ReportMode::Codebase);
+        let (root, package, outside) = (
+            ScopeId::from_index(0),
+            ScopeId::from_index(1),
+            ScopeId::from_index(2),
+        );
+        let mut root_scope = Scope::new(root, ScopeKind::Repository, ".", None);
+        root_scope.add_child(package);
+        root_scope.add_child(outside);
+        builder.add_scope(root_scope);
+        builder.add_scope(Scope::new(package, ScopeKind::Package, "app", Some(root)));
+        builder.add_scope(Scope::new(
+            outside,
+            ScopeKind::File,
+            "core/other.rs",
+            Some(root),
+        ));
+        builder.set_root(root);
+        builder.set_packages(vec![PackageRecord::current(
+            PackageId::from_index(0),
+            package,
+            "app",
+        )]);
+        // The package holds one of the repository's two High units, and two
+        // thirds of its bytes are in a language no grammar reads.
+        let mut file = |index: usize, scope: ScopeId, path: &str, coverage, counts| {
+            let id = FileId::from_index(index);
+            builder.add_file(
+                FileRecord::new(id, scope, path, coverage, counts)
+                    .with_package(PackageId::from_index(0)),
+            );
+            builder.link_file(scope, id);
+        };
+        file(
+            0,
+            package,
+            "app/work.rs",
+            Coverage::new(1, 1, 0, 0, 10, 0).with_bytes(100, 0),
+            HealthCounts::new(0, 0, 1),
+        );
+        file(
+            1,
+            package,
+            "app/tool.go",
+            Coverage::classified(1, SourceCoverageOutcome::Unsupported, 0, 0).with_bytes(200, 200),
+            HealthCounts::default(),
+        );
+        file(
+            2,
+            outside,
+            "core/other.rs",
+            Coverage::new(1, 1, 0, 0, 10, 0).with_bytes(100, 0),
+            HealthCounts::new(0, 0, 1),
+        );
+        let report = builder.finish();
+        let mut bytes = Vec::new();
+        write_terminal(
+            &mut bytes,
+            &report,
+            Some(package),
+            TerminalOptions::default(),
+        )
+        .unwrap();
+        let terminal = String::from_utf8(bytes).unwrap();
+        // Scope, tier sentence, qualifier, share, counts — in that order and
+        // with no line between them.
+        assert!(
+            terminal.starts_with(concat!(
+                "smackdebt · app\n",
+                "  Worn in the usual places.\n",
+                "  Not all source was checked. 66% of source bytes are Go.\n",
+                "  1 of the repository's 2 high live here.\n",
+                "1 high · 0 watch · 1 checked\n",
+            )),
+            "{terminal}"
+        );
+        // The renderer placed two analysis-owned facts and composed neither.
+        let verdict = report.scope_verdict(package);
+        let qualifier = verdict.qualifier().expect("a qualified sub-scope");
+        let share = verdict.share().expect("a framed sub-scope");
+        assert!(terminal.contains(&share.sentence()), "{terminal}");
+        assert!(terminal.contains(qualifier.sentence()), "{terminal}");
+        // The root carries the qualifier its own bytes earn and no share.
+        let mut root_bytes = Vec::new();
+        write_terminal(
+            &mut root_bytes,
+            &report,
+            Some(root),
+            TerminalOptions::default(),
+        )
+        .unwrap();
+        let root_terminal = String::from_utf8(root_bytes).unwrap();
+        assert!(!root_terminal.contains("live here."), "{root_terminal}");
+        assert!(
+            root_terminal.contains("Not all source was checked."),
+            "{root_terminal}"
+        );
     }
 
     #[test]

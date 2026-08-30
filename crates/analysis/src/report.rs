@@ -1936,6 +1936,42 @@ mod tests {
         );
     }
 
+    /// The accepted rule frames "a selected scope that is not the repository
+    /// root" without naming a mode, so a diff drilled into a sub-scope states
+    /// the same proportion its codebase view does.
+    #[test]
+    fn a_diff_sub_scope_frames_the_repository_the_same_way() {
+        let mut fixture = ReportFixture::new(ReportMode::Diff);
+        let (heavy, heavy_file) = fixture.add_file("src/heavy.rs", HealthCounts::new(0, 0, 2));
+        fixture.add_finding(heavy, heavy_file, "heavy", 25);
+        let (light, light_file) = fixture.add_file("src/light.rs", HealthCounts::new(9, 0, 1));
+        fixture.add_finding(light, light_file, "light", 25);
+        // A regression makes it a diff that moved debt rather than an empty one.
+        fixture.builder.add_comparison(comparison(
+            0,
+            heavy_file,
+            ComparisonKind::Regressed,
+            Some(Rating::Healthy),
+            Some(Rating::High),
+        ));
+        fixture
+            .builder
+            .link_comparison(heavy, ComparisonId::from_index(0));
+        let report = fixture.finish();
+        assert!(
+            report.verdict().unwrap().share().is_none(),
+            "the root frames nothing in either mode"
+        );
+        let verdict = report.scope_verdict(heavy);
+        assert_eq!(verdict.diff_tier(), Some(DiffTier::Worse));
+        let share = verdict.share().expect("a diff sub-scope frames the whole");
+        assert_eq!(share.high(), 2);
+        assert_eq!(share.repository_high(), 3);
+        assert_eq!(share.sentence(), "2 of the repository's 3 high live here.");
+        // The frame informs the reader and decides neither tier.
+        assert_eq!(verdict.tier(), CodebaseTier::Worn);
+    }
+
     #[test]
     fn a_diff_selection_holds_only_moved_debt_and_holds_it_once() {
         let mut fixture = ReportFixture::new(ReportMode::Diff);
