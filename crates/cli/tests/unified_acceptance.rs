@@ -2588,13 +2588,16 @@ fn strings<'a>(values: &'a Value, field: &str) -> HashSet<&'a str> {
 
 /// A dependency-target string must be legible on a single line: the
 /// language layer collapses any raw multi-line syntax before a target is
-/// retained, so no newline reaches the machine report.
+/// retained, so no newline, carriage return, or tab reaches the machine
+/// report.
 fn assert_single_line_target(target: &Value) {
     let target = target.as_str().unwrap();
-    assert!(
-        !target.contains('\n'),
-        "dependency target spans lines: {target:?}"
-    );
+    for forbidden in ['\n', '\r', '\t'] {
+        assert!(
+            !target.contains(forbidden),
+            "dependency target contains {forbidden:?}: {target:?}"
+        );
+    }
 }
 
 /// A relation's role is its file's role unless a test scope demoted it.

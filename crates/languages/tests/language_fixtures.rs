@@ -746,6 +746,74 @@ fn a_rust_macro_include_spanning_several_lines_records_a_single_line_target() {
     assert!(!dependency.target().contains('\n'));
 }
 
+/// Every non-`quoted()` extraction path is also a target-construction site,
+/// not only the `unresolved()` dynamic fallback — a splitter that only
+/// recognizes a literal space as a word boundary lets a newline or tab
+/// written between tokens survive into the target it builds.
+fn has_line_breaking_whitespace(target: &str) -> bool {
+    target
+        .chars()
+        .any(|character| matches!(character, '\n' | '\r' | '\t'))
+}
+
+#[test]
+fn a_multiline_unbraced_use_records_a_single_line_external_target() {
+    let analysis = Analyzer::default()
+        .analyze(
+            Path::new("src/lib.rs"),
+            b"use std::collections::\n\tHashMap;\nfn x() {}\n".to_vec(),
+        )
+        .unwrap();
+    assert_eq!(analysis.dependencies().len(), 1);
+    let dependency = &analysis.dependencies()[0];
+    assert_eq!(dependency.state(), &DependencySyntaxState::External);
+    assert!(!has_line_breaking_whitespace(dependency.target()));
+}
+
+#[test]
+fn a_multiline_unbraced_internal_use_records_a_single_line_target() {
+    let analysis = Analyzer::default()
+        .analyze(
+            Path::new("src/lib.rs"),
+            b"use crate::collections::\n\tHashMap;\nfn x() {}\n".to_vec(),
+        )
+        .unwrap();
+    assert_eq!(analysis.dependencies().len(), 1);
+    let dependency = &analysis.dependencies()[0];
+    assert!(matches!(
+        dependency.state(),
+        DependencySyntaxState::Candidates(_)
+    ));
+    assert!(!has_line_breaking_whitespace(dependency.target()));
+}
+
+#[test]
+fn a_backslash_continued_python_import_records_a_single_line_target() {
+    let analysis = Analyzer::default()
+        .analyze(Path::new("x.py"), b"import foo.\\\n    bar\n".to_vec())
+        .unwrap();
+    assert_eq!(analysis.dependencies().len(), 1);
+    let dependency = &analysis.dependencies()[0];
+    assert!(!has_line_breaking_whitespace(dependency.target()));
+}
+
+#[test]
+fn a_comment_interrupted_java_import_records_a_single_line_target() {
+    let analysis = Analyzer::default()
+        .analyze(
+            Path::new("X.java"),
+            b"import app.\n/* interrupting comment */\nLocal;\nclass X {}\n".to_vec(),
+        )
+        .unwrap();
+    assert_eq!(analysis.dependencies().len(), 1);
+    let dependency = &analysis.dependencies()[0];
+    assert!(matches!(
+        dependency.state(),
+        DependencySyntaxState::Candidates(_)
+    ));
+    assert!(!has_line_breaking_whitespace(dependency.target()));
+}
+
 #[test]
 fn root_package_malformed_and_unsupported_forms_do_not_guess() {
     let mut analyzer = Analyzer::default();

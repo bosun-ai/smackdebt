@@ -14,12 +14,7 @@ pub(super) fn quoted(
     let text = node.utf8_text(source).ok()?;
     let target = string_value(text);
     let Some(target) = target else {
-        return Some(unresolved(
-            node,
-            kind,
-            specifier_text(text),
-            "dependency target is dynamic",
-        ));
+        return Some(unresolved(node, kind, text, "dependency target is dynamic"));
     };
     if relative_only && !target.starts_with('.') {
         return Some(external(node, kind, target));
@@ -177,13 +172,7 @@ fn rust_reference(node: Node<'_>, source: &[u8]) -> Option<DependencySyntax> {
             .filter(|target| argument.is_some_and(|value| value.len() == target.len() + 2))
         else {
             return Some(
-                unresolved(
-                    node,
-                    kind,
-                    specifier_text(text),
-                    "dependency target is dynamic",
-                )
-                .with_internal_intent(),
+                unresolved(node, kind, text, "dependency target is dynamic").with_internal_intent(),
             );
         };
         if target.starts_with('/') {
@@ -601,16 +590,18 @@ fn path_candidates(target: &str, extensions: &[&str]) -> Vec<String> {
 }
 
 /// Reads a simple quoted specifier: a literal value between one pair of
-/// matching quote characters, with no interpolation and no embedded
-/// newline. A quoted value carrying either is not a static specifier, so
-/// callers fall back to `specifier_text` over the raw declaration text.
+/// matching quote characters, with no interpolation and no embedded line
+/// break. A quoted value carrying either is not a static specifier, so
+/// callers fall back to `specifier_text` over the raw declaration text —
+/// which, unlike this line-break rejection, also collapses an embedded tab
+/// rather than treating it as reason to give up on the value entirely.
 fn string_value(text: &str) -> Option<&str> {
     for quote in ['\'', '"', '`'] {
         if let Some(start) = text.find(quote) {
             let rest = &text[start + 1..];
             let end = rest.find(quote)?;
             let value = &rest[..end];
-            if !value.contains("${") && !value.contains('\n') {
+            if !value.contains("${") && !value.contains('\n') && !value.contains('\r') {
                 return Some(value);
             }
         }
@@ -632,6 +623,16 @@ fn specifier_text(text: &str) -> String {
         .join(" ")
 }
 
+// The three constructors below are where every `DependencySyntax` in this
+// crate is built, from every language and every extraction path — a
+// splitter or prefix-strip elsewhere in this file only ever produces a
+// `&str` that flows into one of them as `target`. Reducing `target` to a
+// single legible line here, once, is what guarantees the raw declaration
+// text a splitter failed to fully parse (an unbraced multi-line Rust `use`,
+// a backslash-continued Python import, a comment-interrupted Java import)
+// can never carry a newline, carriage return, or tab into a retained
+// dependency target — without auditing, and re-auditing, every splitter.
+
 fn candidates(
     node: Node<'_>,
     kind: DependencyKind,
@@ -640,14 +641,19 @@ fn candidates(
 ) -> DependencySyntax {
     DependencySyntax::new(
         kind,
-        target,
+        specifier_text(&target.into()),
         span(node),
         DependencySyntaxState::Candidates(values),
     )
 }
 
 fn external(node: Node<'_>, kind: DependencyKind, target: impl Into<String>) -> DependencySyntax {
-    DependencySyntax::new(kind, target, span(node), DependencySyntaxState::External)
+    DependencySyntax::new(
+        kind,
+        specifier_text(&target.into()),
+        span(node),
+        DependencySyntaxState::External,
+    )
 }
 
 fn unresolved(
@@ -658,7 +664,7 @@ fn unresolved(
 ) -> DependencySyntax {
     DependencySyntax::new(
         kind,
-        target,
+        specifier_text(&target.into()),
         span(node),
         DependencySyntaxState::Unresolved(reason.into()),
     )
@@ -679,5 +685,14 @@ mod tests {
     fn specifier_text_takes_the_first_line_and_collapses_whitespace() {
         let text = "  first \t line   here\n\tsecond line\n        third";
         assert_eq!(specifier_text(text), "first line here");
+    }
+
+    /// `str::lines` only splits on `\n` or `\r\n`, so a lone `\r` stays inside
+    /// the "first line" it returns — this proves the whitespace-run collapse
+    /// still removes it, which is why `string_value` only needs to reject a
+    /// `\n`/`\r\n` line break, not a bare `\r`, as not a static specifier.
+    #[test]
+    fn specifier_text_collapses_a_lone_carriage_return_within_the_first_line() {
+        assert_eq!(specifier_text("foo\rbar"), "foo bar");
     }
 }
