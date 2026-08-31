@@ -675,6 +675,11 @@ fn problem_row(report: &Report, card: &ProblemCard, evidence: usize) -> Row {
 ///
 /// A `measured` card has no pattern of its own: its head is the identity of
 /// the top finding it claimed, which is the head a finding row states.
+///
+/// The vocabulary is split at the seam the anchors already have — one file, or
+/// a set of files, a package, or a package pair — and neither half carries a
+/// wildcard, so a pattern added to the frozen list is a compile error in both
+/// rather than a card that quietly loses its name.
 const fn pattern_name(pattern: ProblemPattern) -> Option<&'static str> {
     match pattern {
         ProblemPattern::GodFile => Some("does too much"),
@@ -682,23 +687,31 @@ const fn pattern_name(pattern: ProblemPattern) -> Option<&'static str> {
         ProblemPattern::HotMess => Some("hot and complex"),
         ProblemPattern::LeakyInterface => Some("importers follow its changes"),
         ProblemPattern::Measured => None,
-        other => set_pattern_name(other),
+        ProblemPattern::Tangle
+        | ProblemPattern::ShotgunPair
+        | ProblemPattern::BusRisk
+        | ProblemPattern::UnstableDependency
+        | ProblemPattern::HiddenCoupling => set_pattern_name(pattern),
     }
 }
 
 /// The human name of a pattern whose subject is a set of files, a package, or
 /// a package pair, which is every pattern a single file does not anchor.
 const fn set_pattern_name(pattern: ProblemPattern) -> Option<&'static str> {
-    Some(match pattern {
-        ProblemPattern::Tangle => "circular dependency",
+    match pattern {
+        ProblemPattern::Tangle => Some("circular dependency"),
         // Two patterns name things that change together, one about packages
         // and one about files, so each says which subject it is about.
-        ProblemPattern::ShotgunPair => "packages change together",
-        ProblemPattern::BusRisk => "one author",
-        ProblemPattern::UnstableDependency => "depends on less stable code",
-        ProblemPattern::HiddenCoupling => "change together without a dependency",
-        _ => return None,
-    })
+        ProblemPattern::ShotgunPair => Some("packages change together"),
+        ProblemPattern::BusRisk => Some("one author"),
+        ProblemPattern::UnstableDependency => Some("depends on less stable code"),
+        ProblemPattern::HiddenCoupling => Some("change together without a dependency"),
+        ProblemPattern::GodFile
+        | ProblemPattern::Hub
+        | ProblemPattern::HotMess
+        | ProblemPattern::LeakyInterface
+        | ProblemPattern::Measured => None,
+    }
 }
 
 fn problem_head(report: &Report, card: &ProblemCard) -> String {
