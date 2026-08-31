@@ -167,6 +167,10 @@ pub enum smackdebt_analysis::Rating
 pub smackdebt_analysis::Rating::Healthy
 pub smackdebt_analysis::Rating::High
 pub smackdebt_analysis::Rating::Watch
+pub enum smackdebt_analysis::ReachAnswer
+pub smackdebt_analysis::ReachAnswer::Reaches
+pub smackdebt_analysis::ReachAnswer::Separate
+pub smackdebt_analysis::ReachAnswer::Undecided
 pub enum smackdebt_analysis::ReportMode
 pub smackdebt_analysis::ReportMode::Codebase
 pub smackdebt_analysis::ReportMode::Diff
@@ -786,6 +790,10 @@ impl smackdebt_analysis::PathId
 pub const fn smackdebt_analysis::PathId::from_index(usize) -> Self
 pub const fn smackdebt_analysis::PathId::get(self) -> u32
 pub const fn smackdebt_analysis::PathId::index(self) -> usize
+pub struct smackdebt_analysis::PathProbe
+impl smackdebt_analysis::PathProbe
+pub fn smackdebt_analysis::PathProbe::over(usize, &[(usize, usize)]) -> Self
+pub fn smackdebt_analysis::PathProbe::reaches(&mut self, usize, usize, usize) -> smackdebt_analysis::ReachAnswer
 pub struct smackdebt_analysis::ProblemCard
 impl smackdebt_analysis::ProblemCard
 pub const fn smackdebt_analysis::ProblemCard::anchor(&self) -> &smackdebt_analysis::ProblemAnchor

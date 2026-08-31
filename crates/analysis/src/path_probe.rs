@@ -8,10 +8,8 @@ use std::collections::VecDeque;
 /// rest on a search that ran out of room. `Separate` is the strongest answer
 /// this type carries, because it is the one that creates a finding, so every
 /// path that is not a completed search answers `Undecided` instead.
-// Read only by the hidden-coupling join, which lands in a later slice.
-#[allow(dead_code)]
 #[derive(Clone, Copy, Debug, Eq, Hash, Ord, PartialEq, PartialOrd)]
-pub(crate) enum ReachAnswer {
+pub enum ReachAnswer {
     Reaches,
     Separate,
     Undecided,
@@ -24,21 +22,17 @@ pub(crate) enum ReachAnswer {
 /// whole graph: rebuilding it per pair would make the cheap answer the
 /// expensive one. The visit marks and the queue are reused between probes for
 /// the same reason, so a probe allocates nothing.
-// The hidden-coupling join inside this crate is the only reader; it lands in a
-// later slice, so nothing calls this yet.
-#[allow(dead_code)]
-pub(crate) struct PathProbe {
+pub struct PathProbe {
     incoming: Vec<Vec<usize>>,
     visited: Vec<u64>,
     probes: u64,
     pending: VecDeque<usize>,
 }
 
-#[allow(dead_code)]
 impl PathProbe {
     /// Prepares probes over a graph whose edges read "source depends on
     /// target".
-    pub(crate) fn over(node_count: usize, edges: &[(usize, usize)]) -> Self {
+    pub fn over(node_count: usize, edges: &[(usize, usize)]) -> Self {
         Self {
             incoming: incoming_nodes(node_count, edges),
             visited: vec![0; node_count],
@@ -61,7 +55,7 @@ impl PathProbe {
     /// debug assertion; where assertions are off it answers `Undecided` rather
     /// than `Separate`, because `Separate` is the answer that creates a finding
     /// and a stale index must never manufacture one.
-    pub(crate) fn reaches(&mut self, from: usize, to: usize, budget: usize) -> ReachAnswer {
+    pub fn reaches(&mut self, from: usize, to: usize, budget: usize) -> ReachAnswer {
         let inside = from < self.incoming.len() && to < self.incoming.len();
         debug_assert!(inside, "a path probe reads node indexes of its own graph");
         if !inside {
