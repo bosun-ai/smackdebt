@@ -41,13 +41,19 @@ serializes.
 Codebase child area rows SHALL sort by High count descending, Watch count
 descending, then repository-relative name ascending, so the child holding the
 worst debt is read first and equal children keep a stable name order. Codebase
-finding rows SHALL use the finding rank owned by `hotspot-analysis` rather than
-any order of their own, and this specification SHALL NOT restate that rank's
-keys. This supersedes the earlier text, which enumerated a finding rank of
-rating, signals at that rating, total triggered signals, metrics, and recent
-activity; that copy omitted role class and hot state, contradicted the accepted
-rank once role and heat moved ahead of both signal counts, and described neither
-the child rows nor the finding rows as implemented.
+problem rows SHALL use the problem rank owned by `problem-clustering` rather
+than any order of their own, and this specification SHALL NOT restate that
+rank's keys.
+
+This replaces the earlier sentence that codebase finding rows use the finding
+rank owned by `hotspot-analysis`: codebase debt rows are problem cards now, and
+the accepted finding rank survives unchanged inside the problem rank as one of
+its keys and inside worst-offender selection. Diff comparison rows keep their
+own accepted order. The earlier text this supersedes also enumerated a finding
+rank of rating, signals at that rating, total triggered signals, metrics, and
+recent activity; that copy omitted role class and hot state, contradicted the
+accepted rank once role and heat moved ahead of both signal counts, and
+described neither the child rows nor the finding rows as implemented.
 
 #### Scenario: Two child areas hold different debt
 - **WHEN** one displayed child area has more High units than another
@@ -57,13 +63,13 @@ the child rows nor the finding rows as implemented.
 - **WHEN** two displayed child areas have equal High and Watch counts
 - **THEN** their repository-relative names produce stable order
 
-#### Scenario: Hot production debt meets colder debt in one scope
-- **WHEN** the selected scope holds findings that differ in role class or hot state
-- **THEN** the displayed finding order is exactly the finding rank `hotspot-analysis` accepts, so primary source precedes non-primary source at equal rating and hot state decides before either signal count
+#### Scenario: Problems of differing severity share a scope
+- **WHEN** the selected codebase scope holds cards that differ in rating, claimed High count, and hot state
+- **THEN** the displayed order is exactly the problem rank `problem-clustering` accepts, and no renderer reorders it
 
 #### Scenario: Every rank key ties
-- **WHEN** two findings tie on every key the finding rank compares before path
-- **THEN** path and span produce stable order
+- **WHEN** two cards tie on every key the problem rank compares before the anchor
+- **THEN** anchor path and anchor start line produce stable order
 
 ### Requirement: Structural single-child chains are passed visibly
 Terminal rendering SHALL pass through repository, package, or directory scopes
@@ -81,57 +87,132 @@ children. It SHALL show the passed repository-relative path as a breadcrumb.
 ### Requirement: Default terminal detail stays concise
 The default terminal view SHALL open with the verdict block, SHALL show `AREAS` only when
 several debt-bearing child areas exist, and SHALL show at most five such rows.
-It SHALL show the first three ranked findings or comparisons within the selected
-scope. Zero-value optional facts and empty optional sections SHALL be omitted,
-except that a verdict count SHALL always be printed with its word even when it
-is zero. When a diff moves no debt, the view SHALL be the verdict line only.
+Zero-value optional facts and empty optional sections SHALL be omitted, except
+that a verdict count SHALL always be printed with its word even when it is zero.
+When a diff moves no debt, the view SHALL be the verdict line only.
+
+Codebase debt detail SHALL fit about one screen at every scope, so zooming in
+changes which problems fill the budget and never how much is printed. The budget
+SHALL be 24 slots, where a problem card costs one slot plus one slot per shown
+evidence line. The budget SHALL be spent through the ladder of card-count and
+evidence-line pairs `(6, 3)`, `(8, 2)`, `(12, 1)`, `(24, 0)`, applying the first
+rung whose card count is at least the number of cards the displayed scope holds.
+Every rung costs exactly the budget, so a scope with few problems shows each in
+depth and a scope with many shows more of them with less evidence each. When the
+displayed scope holds more cards than the largest rung, the last rung SHALL apply
+and the cards ranked below the twenty-fourth SHALL NOT be shown; that cut is the
+budget, and `--top` is how a user lifts it. The budget constants and the ladder
+are proposed values under review and SHALL be implemented as named constants.
+
+The budget SHALL count slots rather than rendered lines, so the facts a view
+states are identical at every terminal width. A row that does not fit the
+resolved width SHALL stack its facts on indented lines as it does today, so a
+narrow view MAY render more lines than it spends slots.
+
+A cycle witness SHALL cost one slot however many steps it stacks. A witness
+states one fact — the path that closes the cycle — and eliding it destroys
+that fact rather than shortening it, so the accounting counts the evidence
+item and never its steps. The budget is therefore a target a witness MAY
+overrun and never a hard line count, and the cards a scope shows and the
+evidence each of them states SHALL respect the rung regardless of how many
+lines a witness renders.
+
+This replaces the earlier rule that the default view shows the first three ranked
+findings or comparisons within the selected scope. That limit capped one section
+while the architecture and relationship rows beside it were uncapped, so the
+view it produced was neither short nor ranked as a whole. Diff output SHALL keep
+the three-comparison limit and its section limits unchanged this round.
 
 `--top N` SHALL provide a middle level of detail between the default and
-`--all`: it SHALL raise or lower only the number of displayed ranked findings
-or comparisons to `N`, leaving the architecture and history section limits
-unchanged. `N` SHALL be a positive integer, and `--top` SHALL conflict with
-`--json` and with `--all`.
+`--all`. For codebase output it SHALL show at most `N` problem cards and SHALL
+select the ladder rung `N` selects by the same rule the default applies to the
+scope's card count, including the last-rung fallback when `N` exceeds the
+largest rung, so a larger `N` buys breadth by spending evidence depth exactly as
+the default does. For diff output it SHALL
+raise or lower only the number of displayed ranked comparisons to `N`, leaving
+the architecture and history section limits unchanged. `N` SHALL be a positive
+integer, and `--top` SHALL conflict with `--json` and with `--all`.
 
-`--all` SHALL show all useful debt without count limits and SHALL NOT show raw
-dependency edges, standard-library externals, churn dumps, cyclomatic-1 rows,
-weak coupling, or healthy rows; JSON remains the complete view of those facts.
+`--all` SHALL show every problem card, `detail` cards included, with complete
+evidence and without count limits, and SHALL NOT show raw dependency edges,
+standard-library externals, churn dumps, cyclomatic-1 rows, weak coupling, or
+healthy rows; JSON remains the complete view of those facts.
+
+A selected file scope SHALL show every card anchored on that file with complete
+evidence without applying the ladder, because a file holds few cards and drilling
+to a file is itself a request for detail.
 
 #### Scenario: Selected scope has more than five affected children
 - **WHEN** the default terminal report omits child rows
 - **THEN** it shows the five most relevant rows without omitted-row bookkeeping
 
+#### Scenario: A scope holds a handful of problems
+- **WHEN** the displayed codebase scope holds five cards
+- **THEN** the `(6, 3)` rung applies and each card shows at most three evidence lines
+
+#### Scenario: A scope holds many problems
+- **WHEN** the displayed codebase scope holds twenty cards
+- **THEN** the `(24, 0)` rung applies and twenty card heads are shown with no evidence lines
+
+#### Scenario: A scope holds more problems than the budget
+- **WHEN** the displayed codebase scope holds forty cards and neither `--top` nor `--all` is supplied
+- **THEN** the twenty-four highest ranked cards are shown and the rest are cut without bookkeeping rows
+
+#### Scenario: The same scope is rendered at two widths
+- **WHEN** one codebase view is rendered at 50 and at 120 columns
+- **THEN** both state the same cards and the same evidence, and only row stacking differs
+
 #### Scenario: User requests complete useful terminal detail
 - **WHEN** the user supplies `--all`
-- **THEN** terminal output shows all useful debt rows, findings, comparisons, and debt-bearing relationships without raw edges, standard-library externals, churn dumps, cyclomatic-1 rows, weak coupling, or healthy rows
+- **THEN** terminal output shows every card including `detail` ones with complete evidence, and no raw edges, standard-library externals, churn dumps, cyclomatic-1 rows, weak coupling, or healthy rows
 
 #### Scenario: Optional section has no finding
-- **WHEN** architecture or history has no actionable finding
-- **THEN** the terminal omits that section
+- **WHEN** the displayed scope holds no card the current detail level shows
+- **THEN** the terminal omits the problem section
 
 #### Scenario: A diff moves no debt
 - **WHEN** no comparison or finding counts as debt movement
 - **THEN** the view is the verdict line only, with no trailing history, warning, or context section
 
-#### Scenario: A middle finding limit is requested
-- **WHEN** the user supplies `--top 10` and twelve ranked findings exist
-- **THEN** ten findings are shown while architecture and history sections keep their default limits
+#### Scenario: A middle limit is requested
+- **WHEN** the user supplies `--top 10` and twelve cards exist in the displayed codebase scope
+- **THEN** ten cards are shown with the evidence allowance of the rung that ten selects
 
-#### Scenario: The limit exceeds the findings
-- **WHEN** the user supplies `--top 10` and four ranked findings exist
+#### Scenario: The limit exceeds the cards
+- **WHEN** the user supplies `--top 10` and four cards exist
 - **THEN** all four are shown and no filler or bookkeeping row appears
 
+#### Scenario: A file is selected
+- **WHEN** the selected scope is a file
+- **THEN** every card anchored on that file is shown with complete evidence
+
+#### Scenario: A budgeted view holds a long cycle
+- **WHEN** a rung allows three evidence lines and one shown `tangle` card carries a witness of twelve steps
+- **THEN** the witness renders every step, the card spends one slot on it, and the card count and the other cards' evidence still respect that rung
+
 ### Requirement: Codebase detail follows existing hotspot priority
-Every displayed finding SHALL show unit kind and SHALL show SourceRole whenever
-the role is not primary. Recovered advisory findings SHALL use the same ranking
-inside `--all` but SHALL remain absent from default detail.
+Every displayed problem card whose head or evidence names a finding SHALL show
+that finding's unit kind and SHALL show SourceRole whenever the role is not
+primary. Recovered advisory findings SHALL use the same ranking inside `--all`
+but SHALL remain absent from default detail. Clustering SHALL make that sentence
+hold rather than contradict it: a card claims a file's advisory and non-primary
+findings like any other, and the card carrying only such findings is the `detail`
+card `problem-clustering` defines, so the content it names is ranked and reachable
+under `--all` instead of being dropped when no card claims it. Every `detail`
+card SHALL be absent from default detail for that one reason, and this
+specification SHALL NOT restate the rule that decides visibility.
 
 #### Scenario: A benchmark function is High
-- **WHEN** it appears in default detail
+- **WHEN** its card appears in default detail
 - **THEN** its unit kind and benchmark role are visible
 
 #### Scenario: A recovered method is Watch
 - **WHEN** detailed output is requested
-- **THEN** its unit kind, role when non-primary, and advisory trust are visible
+- **THEN** its card is present, its unit kind, role when non-primary, and advisory trust are visible, and it holds the position the accepted finding rank gives it
+
+#### Scenario: A healthy file is imported everywhere
+- **WHEN** default detail is rendered
+- **THEN** its `detail` card is absent and `--all` shows it
 
 ### Requirement: Explore points to the next debt-bearing area
 The terminal discover line SHALL target the first displayed debt-bearing child after
@@ -205,9 +286,12 @@ tier sentence, and the counts behind it with every count labeled by its word,
 followed by the worst offender with its resolved path and reason when one
 exists. When the verdict carries an unsupported-coverage qualifier, the
 qualifier row SHALL render inside the verdict block directly under the tier
-sentence, using the analysis-owned qualifier bytes. It SHALL omit healthy
-counts, summary ratios, and decorative quality bars used as data. Coverage
-gaps SHALL use one grouped warning sentence only when a gap exists.
+sentence, using the analysis-owned qualifier bytes. When the verdict carries a
+repository-share fact, the share row SHALL render inside the verdict block
+directly under the qualifier row when one exists and directly under the tier
+sentence otherwise, using the analysis-owned share bytes. It SHALL omit healthy
+counts, summary ratios, and decorative quality bars used as data. Coverage gaps
+SHALL use one grouped warning sentence only when a gap exists.
 
 #### Scenario: Selection is fully analyzed
 - **WHEN** every selected source file is analyzed
@@ -224,6 +308,10 @@ gaps SHALL use one grouped warning sentence only when a gap exists.
 #### Scenario: The verdict is qualified
 - **WHEN** the unsupported byte share exceeds the qualifier threshold
 - **THEN** the qualifier row appears under the tier sentence inside the verdict block
+
+#### Scenario: A sub-scope view frames the repository
+- **WHEN** a package or directory scope is selected and the repository holds High debt
+- **THEN** the share row appears inside the verdict block stating the analysis-owned share bytes
 
 ### Requirement: Coverage notes describe source-analysis gaps
 Coverage notes SHALL report selected source files that could not be analyzed.
@@ -358,36 +446,65 @@ comparison the report already carries, and the renderer SHALL derive nothing.
 
 ### Requirement: Reports expose evolution as a separate concern
 The system SHALL retain history coverage, churn, coupling, and concentration in
-the report and JSON. Default terminal output SHALL show `HISTORY` only for
-actionable history findings and SHALL omit weak pairs and processing totals. It
-SHALL show at most three findings ordered by shared commits descending,
-similarity descending, then stable package names and IDs, each with shared
-commits, union commits, similarity, and the absent code dependency.
+the report and JSON. Codebase terminal output SHALL present actionable history
+findings as problem cards — one card per unexplained coupling finding and one
+per knowledge-concentration finding — ranked against every other problem rather
+than in a section of their own, and SHALL omit weak pairs and processing totals.
+Each card SHALL keep its finding's exact evidence: shared commits, union
+commits, similarity, and the dependency state for a coupling pair, and counts
+without identity for concentration.
+
+A coupling pair a code dependency already explains is context rather than
+debt: it produces no finding, so no card claims it, so codebase terminal
+output SHALL NOT state it at any scope or detail level, `--all` included. The
+complete pair table with its shared commits, union commits, similarity, and
+explanation SHALL remain in the machine report, which is where a reader who
+wants context reads it. This narrows the earlier promise that a selected
+package or `--all` shows contextual history facts: that promise assumed a
+section a renderer filled, and codebase debt detail is now the ranked card
+table, which only findings enter.
+
+This replaces the earlier rule that default codebase output shows a `HISTORY`
+section of at most three findings ordered by shared commits descending,
+similarity descending, then stable package names and IDs. That section-local
+order competed with nothing else on the screen, so a Watch coupling pair was
+printed beside a High file with no statement of which mattered more. Diff
+terminal output SHALL keep `HISTORY` with its accepted limit and order this
+round, and with the contextual pairs it shows today.
 
 #### Scenario: Default codebase output has actionable history
 - **WHEN** an unexplained coupling finding exists
-- **THEN** `HISTORY` shows that finding once with exact commit evidence and without a retained-pair or processing summary
+- **THEN** one card states that pair once with its exact commit evidence and without a retained-pair or processing summary, ranked among the other problems
 
-#### Scenario: A user selects an evolution detail target
-- **WHEN** a package is selected or `--all` is supplied
+#### Scenario: A user selects an evolution detail target in a diff
+- **WHEN** a package is selected or `--all` is supplied in diff output
 - **THEN** relevant actionable and contextual history facts are shown without healthy rows, weak default pairs, or internal processing facts
 
+#### Scenario: A code dependency explains a coupling pair
+- **WHEN** a codebase package scope is selected or `--all` is supplied and a retained pair has a code dependency
+- **THEN** no terminal row states that pair and the machine report keeps its complete row
+
 ### Requirement: Architecture default shows witnesses rather than edge samples
-Default `ARCHITECTURE` output SHALL appear only when an architecture finding
-exists and SHALL show rated cycle witnesses without arbitrary edge rows or edge
-totals. Each shown witness SHALL state its severity in the word vocabulary,
+Codebase output SHALL present a rated cycle as one problem card carrying the
+existing rated cycle witness as evidence, and SHALL show no edge rows and no
+edge totals. Each shown witness SHALL state its severity in the word vocabulary,
 `high` or `watch`, optionally decorated with its glyph when decoration is
 enabled. This supersedes the earlier rule that witnesses appear without severity
-words and with a status glyph. `--all` and path drill SHALL expose relevant
-relationship detail.
+words and with a status glyph. Diff output SHALL keep its `ARCHITECTURE` section
+with the same witness rule.
+
+This replaces the earlier sentence that `--all` and path drill expose relevant
+relationship detail. Neither `--all` nor a path view SHALL expose relationship
+rows at any scope; a relationship reaches a human only as aggregate card
+evidence, and the machine report retains the complete relation tables.
 
 #### Scenario: An acyclic graph has many edges
 - **WHEN** default output is rendered
-- **THEN** `ARCHITECTURE` and arbitrary edge totals are absent while detailed path output can still inspect relevant relationships
+- **THEN** no cycle card and no edge total appears, and no detail level lists the edges
 
 #### Scenario: A rated cycle exists
 - **WHEN** default output is rendered
-- **THEN** `ARCHITECTURE` shows the cycle witness once with its severity word, decorated only when decoration is enabled
+- **THEN** one card states the cycle once with its severity word and its witness, decorated only when decoration is enabled
 
 ### Requirement: Default terminal sections do not duplicate evidence
 A retained fact SHALL appear once in the nearest useful default terminal
@@ -428,3 +545,4 @@ consume the completed verdict rather than deriving one.
 #### Scenario: A scope verdict is requested for rendering
 - **WHEN** a renderer needs the verdict for the selected scope
 - **THEN** it reads completed facts and performs no analysis work
+
