@@ -125,42 +125,41 @@ fn a_mutual_import_produces_no_finding_of_either_kind() {
 /// leaked. The pair keeps its dependency, so it becomes no finding at all.
 #[test]
 fn a_wiring_file_is_never_named_as_the_interface_whose_importers_follow_it() {
-    let behavior = Graphs::imports(2, &[(1, 0)]);
-    assert_eq!(
-        found(&[pair(0, 1, 7, 12, 3)], &behavior),
-        [(ChangeLeakageKind::LeakyInterface, Some(0))],
-        "a file with a name of its own still leaks"
-    );
     assert_eq!(
         WIRING_FILENAMES,
         [
             "__init__.py",
             "index.cjs",
             "index.js",
-            "index.jsx",
             "index.mjs",
             "index.ts",
-            "index.tsx",
-            "index.vue",
             "lib.rs",
-            "mod.rs",
+            "mod.rs"
         ],
         "the excluded names are the re-export surfaces and nothing else"
     );
-    for name in WIRING_FILENAMES {
-        let wiring = Graphs::imports(2, &[(1, 0)]).named(0, &format!("core/parts/{name}"));
-        assert_eq!(found(&[pair(0, 1, 7, 12, 3)], &wiring), [], "{name}");
-    }
-    // A program entry point holds behavior like any other file, so its
-    // importers following it is a claim worth making. The wider entry-filename
-    // list the orphan rule uses would have silenced these.
-    for name in ["main.rs", "main.py", "build.rs", "setup.py", "__main__.py"] {
-        let program = Graphs::imports(2, &[(1, 0)]).named(0, &format!("core/parts/{name}"));
-        assert_eq!(
-            found(&[pair(0, 1, 7, 12, 3)], &program),
-            [(ChangeLeakageKind::LeakyInterface, Some(0))],
-            "{name}"
-        );
+    // Every other name here is one the wider entry-filename list would have
+    // silenced: a program entry point holds behavior like any other file, an
+    // `index.vue` is a directory's own component, and a JSX or TSX index is an
+    // application bootstrap. None is a barrel, and a component whose importers
+    // follow its changes is exactly what this rule exists to name.
+    let behaviour = [
+        "work.rs",
+        "main.rs",
+        "main.py",
+        "build.rs",
+        "setup.py",
+        "__main__.py",
+        "index.vue",
+        "index.jsx",
+        "index.tsx",
+    ];
+    let leaky: &[(ChangeLeakageKind, Option<usize>)] =
+        &[(ChangeLeakageKind::LeakyInterface, Some(0))];
+    let cases = WIRING_FILENAMES.iter().map(|name| (*name, &[][..]));
+    for (name, expected) in cases.chain(behaviour.iter().map(|name| (*name, leaky))) {
+        let graphs = Graphs::imports(2, &[(1, 0)]).named(0, &format!("core/parts/{name}"));
+        assert_eq!(found(&[pair(0, 1, 7, 12, 3)], &graphs), expected, "{name}");
     }
     // The follower's name decides nothing, because the claim is about the
     // interface: it is the file accused of leaking.

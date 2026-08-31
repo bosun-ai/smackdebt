@@ -384,9 +384,11 @@ both directions of travel — is what an absence is proved against, first by a
 package-level component label and then, only if that is inconclusive, by a
 budgeted walk from one end of the pair and, if that walk exhausts its budget,
 from the other. An inconclusive search produces nothing, because absence is
-proved rather than inferred. A conventional entry file is never named as the
-interface, since a file of declarations and re-exports has no abstraction to
-leak.
+proved rather than inferred. A wiring file — a crate or module root, a
+JavaScript or TypeScript barrel, a Python package initializer — is never named
+as the interface, since a file of declarations and re-exports has no abstraction
+to leak. That list is its own, deliberately narrower than the entry filenames
+the orphan rule reads: a program entry point holds behavior and stays eligible.
 
 Propagation facts come from the same architecture build. The package graph
 yields each package's reach-in count; every package large enough for the fact to

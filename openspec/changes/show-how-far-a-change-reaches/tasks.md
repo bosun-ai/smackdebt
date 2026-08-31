@@ -137,18 +137,25 @@ followed by `crates/cli/src/app.rs` (5 of 14); and on Fluyt
 a list of `mod` declarations and re-exports — `tools/mod.rs` is 68 lines of
 exactly that and `agents/mod.rs` is 3 — so the finding says an export was added
 and used, which is one edit, not an abstraction leaking. The rule reads its own
-`WIRING_FILENAMES` — `lib.rs`, `mod.rs`, the `index` barrel names, and
-`__init__.py` — rather than the wider `ENTRY_FILENAMES` the orphan rule
-publishes: that list also names program entry points such as `main.rs`,
-`build.rs`, and `setup.py`, which hold behavior like any other file and whose
-importers following them is a claim worth making. It applies to the interface
-side only (the claim is about the file accused of leaking) and leaves the pair
-with its dependency, so nothing falls through to the hidden rule. Effect: this
-workspace 4 findings → 0, Fluyt at 365 days 14 → 12 and 6 cards → 4, unchanged
-by the narrowing because every excluded finding named a crate root or a module
-root. Amended in `specs/change-leakage/spec.md` with two scenarios, proved by
+`WIRING_FILENAMES` — `lib.rs`, `mod.rs`, `index.js`, `index.cjs`, `index.mjs`,
+`index.ts`, and `__init__.py` — rather than the wider `ENTRY_FILENAMES` the
+orphan rule publishes, and it is narrower in two directions. That list names
+program entry points such as `main.rs`, `build.rs`, and `setup.py`, which hold
+behavior like any other file. It also names `index.vue`, `index.jsx`, and
+`index.tsx`, which are not barrels: an `index.vue` is a directory's component
+implementation and a JSX or TSX index is usually an application bootstrap, so
+excluding them would suppress exactly the component leakage this rule exists to
+name. Everything the list leaves out stays eligible.
+
+The rule applies to the interface side only (the claim is about the file accused
+of leaking) and leaves the pair with its dependency, so nothing falls through to
+the hidden rule. Effect: this workspace 4 findings → 0, Fluyt at 365 days 14 →
+12 and 6 cards → 4, and neither narrowing moved a number, because every excluded
+finding named a crate root or a module root. Amended in
+`specs/change-leakage/spec.md` with three scenarios, proved by
 `a_wiring_file_is_never_named_as_the_interface_whose_importers_follow_it`, which
-pins the whole list and pins five program entry points as still eligible, and
+pins the whole list, drives one case per name in it, and pins five program entry
+points and the three behavior-bearing `index` names as still eligible, and
 documented in the README.
 
 **Rule change 2 — a reach of zero is not a fact.** Fluyt printed `a change here

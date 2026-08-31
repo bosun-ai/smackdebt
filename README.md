@@ -709,13 +709,14 @@ declaration, in both directions — from one end of the pair and, if that walk
 runs out of budget, from the other. An inconclusive search reports nothing,
 because absence is proved rather than assumed.
 
-A wiring file — `lib.rs`, `mod.rs`, the `index` names a JavaScript or TypeScript
-barrel uses, and `__init__.py` — is never named as a leaking interface. Such a
+A wiring file — `lib.rs`, `mod.rs`, `index.js`, `index.cjs`, `index.mjs`,
+`index.ts`, and `__init__.py` — is never named as a leaking interface. Such a
 file is a list of declarations and re-exports rather than behavior, so it holds
 no abstraction to leak, and its importers change with it because adding an
-export and using it is one edit. A program entry point such as `main.rs` is not
-in that list: it holds behavior like any other file, so importers following it
-is still worth reporting.
+export and using it is one edit. Nothing else is excluded: a program entry point
+such as `main.rs`, and an `index.vue`, `index.jsx`, or `index.tsx` — a
+directory's own component or an application bootstrap rather than a barrel — all
+hold behavior, so importers following them is still worth reporting.
 
 These signals come from history, so they never enter the ratchet gate, which
 only counts signals that do not move with wall-clock time, and they never appear

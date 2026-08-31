@@ -40,26 +40,28 @@ leakage_index!(
 /// The filenames whose content is a module's wiring rather than its behavior.
 ///
 /// Each is the name a language gives to a re-export surface: a Rust crate root
-/// or module root, a JavaScript or TypeScript barrel, a Python package
+/// or module root, a plain JavaScript or TypeScript barrel, a Python package
 /// initializer. A file with one of these names is a list of declarations and
 /// re-exports, so it holds no abstraction that could leak.
 ///
 /// This is deliberately narrower than the accepted entry filename list the
-/// orphan rule publishes. That list also names program entry points —
-/// `main.rs`, `main.py`, `main.rb`, `build.rs`, `setup.py`, `__main__.py` —
-/// which hold behavior like any other file, and whose importers following their
-/// changes is a claim worth making.
+/// orphan rule publishes, in two directions. That list names program entry
+/// points — `main.rs`, `main.py`, `main.rb`, `build.rs`, `setup.py`,
+/// `__main__.py` — which hold behavior like any other file. It also names
+/// `index.vue`, `index.jsx`, and `index.tsx`, which are not barrels: an
+/// `index.vue` is a directory's component implementation and a JSX or TSX index
+/// is usually an application bootstrap. Excluding those would silence exactly
+/// the component leakage this rule exists to name, so all of them stay
+/// eligible and their importers following their changes remains a claim worth
+/// making.
 ///
 /// This is a proposed constant under review.
 pub const WIRING_FILENAMES: &[&str] = &[
     "__init__.py",
     "index.cjs",
     "index.js",
-    "index.jsx",
     "index.mjs",
     "index.ts",
-    "index.tsx",
-    "index.vue",
     "lib.rs",
     "mod.rs",
 ];

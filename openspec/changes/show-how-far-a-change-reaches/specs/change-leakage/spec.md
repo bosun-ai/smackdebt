@@ -177,18 +177,25 @@ when every one of these holds:
   hidden coupling claims no dependency of any kind exists and therefore reads
   the wider connection graph defined below. Neither admission rule SHALL be
   substituted for the other.
-- `a` is not a wiring file. The wiring filenames — `lib.rs`, `mod.rs`, the
-  `index` names a JavaScript or TypeScript barrel uses, and `__init__.py` —
-  name a module's re-export surface rather than its behavior: the file is a list
-  of declarations and re-exports, so it holds no abstraction that could leak,
-  and its importers change with it because adding an export and using it is one
+- `a` is not a wiring file. The wiring filenames — `lib.rs`, `mod.rs`,
+  `index.js`, `index.cjs`, `index.mjs`, `index.ts`, and `__init__.py` — name a
+  module's re-export surface rather than its behavior: the file is a list of
+  declarations and re-exports, so it holds no abstraction that could leak, and
+  its importers change with it because adding an export and using it is one
   edit. Calibration against two real repositories found this to be the rule's
   entire real-world output — every leaky finding named a crate root or a module
-  root — so a rule that keeps them names a shape a reader cannot act on. The
-  list SHALL be its own named constant rather than the accepted entry-filename
-  list, which also names program entry points such as `main.rs`, `build.rs`, and
-  `setup.py`; those hold behavior like any other file and SHALL stay eligible. A
-  pair excluded here keeps its dependency and therefore produces no finding of
+  root — so a rule that keeps them names a shape a reader cannot act on.
+
+  The list SHALL be its own named constant, narrower than the accepted
+  entry-filename list in two directions, and every name it leaves out SHALL stay
+  eligible. That list names program entry points such as `main.rs`, `build.rs`,
+  and `setup.py`, which hold behavior like any other file. It also names
+  `index.vue`, `index.jsx`, and `index.tsx`, which are not barrels: an
+  `index.vue` is a directory's component implementation and a JSX or TSX index is
+  usually an application bootstrap, so excluding them would suppress exactly the
+  component leakage this rule exists to name.
+
+  A pair excluded here keeps its dependency and therefore produces no finding of
   either kind. The follower's own name decides nothing, because the claim is
   about the interface.
 - `distance(a, b) ≥ LEAKAGE_MIN_DISTANCE = 2`.
@@ -240,6 +247,10 @@ review can move them in one place.
 #### Scenario: A program entry point's importers follow it
 - **WHEN** the interface a qualifying pair would name is `main.rs` or another program entry point
 - **THEN** the finding is created, because such a file holds behavior and the exclusion covers re-export surfaces only
+
+#### Scenario: A component named for its directory has importers that follow it
+- **WHEN** the interface a qualifying pair would name is `index.vue`, `index.jsx`, or `index.tsx`
+- **THEN** the finding is created, because such a file is a component or a bootstrap rather than a barrel
 
 ### Requirement: Hidden coupling proves absence, never infers it
 Absence SHALL be proved against one graph, defined here and used by both stages.
