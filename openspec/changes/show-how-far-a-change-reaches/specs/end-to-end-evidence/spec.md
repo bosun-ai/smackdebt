@@ -82,9 +82,10 @@ identical under one worker and automatic parallelism.
 Generated repositories SHALL provide hand-calculated facts for propagation reach
 and core size, including their absence cases: a layered multi-package repository
 whose root verdict states a reach sentence, a package large enough to state a
-file reach sentence, a single-package repository that states no reach at all, and
-a repository whose largest file cycle is too small a share of the codebase to be
-stated. Exact acceptance SHALL prove the sentence bytes in the terminal and the
+file reach sentence, a single-package repository below the file floor that
+states no reach at all, a single-package repository above it whose root states
+that package's file reach, and a repository whose largest file cycle is too
+small a share of the codebase to be stated. Exact acceptance SHALL prove the sentence bytes in the terminal and the
 same operands in the machine report from one invocation, and SHALL prove that
 the verdict tier, its counts, and the worst offender are identical whether or
 not each fact exists.
@@ -102,8 +103,12 @@ names — and that no floating-point number or boolean appears in any of them.
 - **THEN** the root states the package reach sentence and the package states the file reach sentence with their hand-calculated integers
 
 #### Scenario: A single-package repository is analyzed
-- **WHEN** the fixture declaring one package is analyzed
+- **WHEN** the fixture declaring one package below the file floor is analyzed
 - **THEN** no reach sentence appears in the terminal and no reach member appears in the machine report
+
+#### Scenario: A single-package repository is large enough to state its reach
+- **WHEN** the fixture declaring one package above the file floor is analyzed at its root
+- **THEN** the root states that package's file reach sentence with its hand-calculated integers and the machine report carries the same operands
 
 #### Scenario: A small core is analyzed
 - **WHEN** the fixture whose largest file cycle holds three of two hundred files is analyzed

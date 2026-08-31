@@ -1296,21 +1296,51 @@ impl Report {
         }
         let root = self.root?;
         if root == selected {
-            let reached = self
-                .package_graph
-                .iter()
-                .map(|measurement| measurement.reach_in())
-                .max()?;
-            return PropagationReach::packages(reached, self.packages.len() as u32);
+            return self.repository_reach();
         }
         let package = self
             .packages
             .iter()
             .find(|package| package.scope() == selected)?;
+        self.package_reach(package.id())
+    }
+
+    /// The reach the repository root states.
+    ///
+    /// A repository of several packages states how far a change travels between
+    /// them. A repository of one package is that package, and no consumer can
+    /// select its package scope, so the root states the file reach the package
+    /// scope would have stated rather than nothing.
+    fn repository_reach(&self) -> Option<PropagationReach> {
+        let reached = self
+            .package_graph
+            .iter()
+            .map(|measurement| measurement.reach_in())
+            .max()
+            .unwrap_or(0);
+        PropagationReach::packages(reached, self.packages.len() as u32)
+            .or_else(|| self.only_package_reach())
+    }
+
+    /// The file reach of the one package a repository holds, when it holds
+    /// exactly one and that package's value is material.
+    ///
+    /// More than one package and the root is not the package, so no package's
+    /// sentence may stand for it however few of them are material.
+    fn only_package_reach(&self) -> Option<PropagationReach> {
+        let [package] = self.packages.as_slice() else {
+            return None;
+        };
+        self.package_reach(package.id())
+    }
+
+    /// One package's own file reach, from the closure row it has when its
+    /// value is material.
+    fn package_reach(&self, package: PackageId) -> Option<PropagationReach> {
         let closure = self
             .package_closures
             .iter()
-            .find(|closure| closure.package() == package.id())?;
+            .find(|closure| closure.package() == package)?;
         PropagationReach::files(closure.reach(), closure.files())
     }
 

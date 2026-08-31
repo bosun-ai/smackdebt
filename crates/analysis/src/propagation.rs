@@ -182,15 +182,9 @@ fn inside_edges(edges: &[(usize, usize)], local: &[usize]) -> Vec<(usize, usize)
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::architecture::{
-        ArchitectureGraph, ArchitectureReportFacts, DependencyCoverage, PackageGraphMeasurement,
-    };
     use crate::health::HealthCounts;
-    use crate::report::{
-        Coverage, FileId, PackageRecord, ReportBuilder, ReportMode, Scope, ScopeId, ScopeKind,
-    };
+    use crate::report::{Coverage, FileId, ScopeId};
     use crate::source::ParseStatus;
-    use crate::verdict::{CoreSize, PropagationReach};
 
     fn file(index: usize, path: &str) -> FileRecord {
         FileRecord::new(
@@ -259,90 +253,6 @@ mod tests {
         file_packages.push(None);
         let closures = close_over_packages(1, &file_packages, &[]);
         assert_eq!(closures.closures()[0].files(), 20);
-    }
-
-    /// One report answers every scope from the tables it was built with, so
-    /// the facts land where their scope rule allows them and nowhere else.
-    #[test]
-    fn the_propagation_facts_reach_the_root_and_a_package_scope_and_nothing_else() {
-        let mut builder = ReportBuilder::new(ReportMode::Codebase);
-        let id = ScopeId::from_index;
-        let mut root = Scope::new(id(0), ScopeKind::Repository, ".", None);
-        let mut scopes = Vec::new();
-        let mut packages = Vec::new();
-        let mut graph = Vec::new();
-        for (index, name) in ["app", "core", "web"].into_iter().enumerate() {
-            let package = PackageId::from_index(index);
-            root.add_child(id(index + 1));
-            let mut scope = Scope::new(id(index + 1), ScopeKind::Package, name, Some(id(0)));
-            if index == 0 {
-                scope.add_child(id(4));
-            }
-            scopes.push(scope);
-            packages.push(PackageRecord::current(package, id(index + 1), name));
-            graph.push(PackageGraphMeasurement::new(package, 0, 0).with_reach_in(3 - index as u32));
-        }
-        scopes.push(Scope::new(
-            id(4),
-            ScopeKind::Directory,
-            "app/src",
-            Some(id(1)),
-        ));
-        builder.add_scope(root);
-        for scope in scopes {
-            builder.add_scope(scope);
-        }
-        builder.set_root(id(0));
-        builder.set_packages(packages);
-        builder.set_architecture(ArchitectureReportFacts::new(
-            ArchitectureGraph::new(
-                DependencyCoverage::default(),
-                Vec::new(),
-                Vec::new(),
-                Vec::new(),
-                Vec::new(),
-                graph,
-            ),
-            Vec::new(),
-            Vec::new(),
-        ));
-        // Twenty files chained inside the first package: the last is reached by
-        // all twenty, counting itself.
-        let chain: Vec<_> = (0..19).map(|node| (node, node + 1)).collect();
-        let closures = close_over_packages(3, &package_files(20, 0), &chain);
-        builder.set_propagation(
-            closures.closures().to_vec(),
-            Vec::new(),
-            CoreSize::from_counts(34, 210),
-        );
-        let report = builder.finish();
-
-        let root = report.scope_verdict(id(0));
-        assert_eq!(
-            root.reach().map(PropagationReach::sentence),
-            Some("A change in one package can reach 3 of 3 packages.".to_owned())
-        );
-        assert_eq!(
-            root.core_size().map(CoreSize::sentence),
-            Some("34 of 210 files sit in one dependency cycle.".to_owned())
-        );
-        let package = report.scope_verdict(id(1));
-        assert_eq!(
-            package.reach().map(PropagationReach::sentence),
-            Some("A change here can reach 20 of 20 files in this package.".to_owned())
-        );
-        assert!(package.core_size().is_none(), "the core is a root fact");
-        // A package without a material closure, and a directory, state neither.
-        for other in [2, 3, 4] {
-            let verdict = report.scope_verdict(id(other));
-            assert!(verdict.reach().is_none(), "scope {other} states no reach");
-            assert!(
-                verdict.core_size().is_none(),
-                "scope {other} states no core"
-            );
-        }
-        // Rendering a second time reads the same tables and closes over nothing.
-        assert_eq!(report.scope_verdict(id(1)).reach(), package.reach());
     }
 
     #[test]

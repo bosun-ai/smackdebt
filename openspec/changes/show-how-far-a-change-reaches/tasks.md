@@ -9,7 +9,7 @@
 ## 2. Core size and propagation reach
 
 - [x] 2.1 Retain the file pairs and the file strongly connected components the architecture build already computes, and carry them out of the build so the report can hold them.
-- [x] 2.2 Compute the package closure matrix and each package's reach-in count, and expose `reach_in` on the package-graph measurement.
+- [x] 2.2 Compute each package's reach-in count over the verdict package graph and expose `reach_in` on the package-graph measurement.
 - [x] 2.3 Compute the file closure for every package eagerly inside `build_architecture`, one row per package below the closure node limit with one transient bit set live at a time, skipping above the limit and disclosing the skip as a `propagation_skipped` diagnostic; add a work-counter test proving that rendering a package scope from the finished report performs no closure.
 - [x] 2.4 Compute exact reach for the bounded candidate set — cycle members and hub-degree files, ordered by fan-in descending then path, cut at the candidate limit — and store it as the candidate reach table.
 - [x] 2.5 Add the `PropagationReach` and `CoreSize` value objects beside the verdict share with smart constructors that return nothing below their materiality rules, chain them into the scope verdict, and prove with a pure test that neither moves the tier, its counts, or the worst offender.
@@ -41,7 +41,7 @@
 
 - [ ] 5.1 Add the change leakage module: the finding type with its two kinds, the pure `change_leakage(pairs, graph)` join at report finish, and the finding order of kind, distance descending, shared commits descending, then the two file identities.
 - [ ] 5.2 Implement the leaky-interface rule over edges that enter the file dependency cycle graph, importer side only, with the distance floor, the support floor, and the distance-scaled similarity bar, creating exactly one finding per interface-and-follower pair and none for a mutual dependency.
-- [ ] 5.3 Build the connection graph — every `uses` and `module_ownership` relation between primary trusted files — and the package connection matrix over it, kept distinct from the verdict-graph propagation matrix, with a pure test proving an owning pair is connected in one and absent from the other.
+- [ ] 5.3 Build the connection graph — every `uses` and `module_ownership` relation between primary trusted files — and the package closure matrix over it, which is the only package matrix this change builds and is deliberately not a verdict-graph closure, with a pure test proving an owning pair is connected in it and absent from the file dependency cycle graph.
 - [ ] 5.4 Implement the hidden-coupling rule with the two-stage absence proof over that one graph: the package connection stage, then two budgeted probes, with an undecided answer producing no finding.
 - [ ] 5.5 Append `LeakyInterface` and `HiddenCoupling` after `Measured` in the pattern enum, and prove that every pre-existing card keeps its pattern, claims, and rank position over the same report.
 - [ ] 5.6 Implement hybrid claiming: a leakage finding belongs to its interface file or to the lower-indexed file of its pair, a file-anchored card claims the leakage findings of its file, `measured` fires only on unclaimed source and size findings so a leakage finding alone never triggers it, and the two tail patterns card only what is left.

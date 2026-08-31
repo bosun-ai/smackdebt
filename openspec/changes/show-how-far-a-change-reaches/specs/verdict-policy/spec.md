@@ -22,6 +22,23 @@ hold, the fact SHALL be absent rather than stated as a zero, a one-of-one, or a
 hedge. The numbers SHALL be written as plain digits without grouping, as the
 accepted repository-share sentence writes them.
 
+A repository that holds exactly one package **is** that package, and no view can
+select that package's own scope, because the repository path every consumer
+writes as `.` selects the repository. Where such a repository's package-reach
+fact is immaterial — which it always is, one package being below the package
+floor — and that one package's file-reach fact is material, the repository root
+SHALL state the package-scope sentence rather than nothing. The sentence is the
+accepted one and no wording is invented for the case: the scope the reader
+selected is the package the number is about, so `A change here` names the same
+tree either way. Without this the most common shape there is, one library or one
+application in one repository, would be the only shape that can never state how
+far a change reaches.
+
+A repository holding more than one package SHALL NOT borrow a package's sentence
+for its root, however few of its packages are material, because there the root
+is not the package and `in this package` would name a scope the reader did not
+select.
+
 Both facts SHALL be stated only. They SHALL NOT change the selected tier, the
 counts behind it, the worst offender, or any rating, exactly as the
 unsupported-coverage qualifier and the repository-share fact never do. Producing
@@ -35,6 +52,18 @@ parser, or analysis work.
 #### Scenario: A package verdict carries reach
 - **WHEN** a package holding 98 files is selected and one of its files is depended on by 33 others
 - **THEN** the verdict carries `A change here can reach 34 of 98 files in this package.` and carries no core size fact
+
+#### Scenario: A single-package repository states its file reach at its root
+- **WHEN** the repository root of a repository declaring one package of 98 files is selected and one of its files is depended on by 33 others
+- **THEN** the verdict carries `A change here can reach 34 of 98 files in this package.`
+
+#### Scenario: A single-package repository is below the file floor
+- **WHEN** the repository declares one package holding fewer files than the file floor
+- **THEN** the verdict carries no reach fact
+
+#### Scenario: A multi-package repository never borrows a package sentence
+- **WHEN** a repository of several packages has no cross-package dependency and exactly one of its packages has a material file reach
+- **THEN** the root verdict carries no reach fact and that package's own scope still states its sentence
 
 #### Scenario: A directory scope is selected
 - **WHEN** a directory below a package is selected

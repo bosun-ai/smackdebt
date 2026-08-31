@@ -56,6 +56,18 @@ fn verdict_block(text: &str) -> Vec<&str> {
     text.lines().take_while(|line| !line.is_empty()).collect()
 }
 
+/// The verdict block without the facts a verdict states only, which is the
+/// scope, the tier sentence, the counts, and the worst offender.
+///
+/// The propagation facts are the lines the stated-only rule allows to differ
+/// between two trees; everything left here is what it forbids to differ.
+fn rated_verdict_lines(text: &str) -> Vec<&str> {
+    verdict_block(text)
+        .into_iter()
+        .filter(|line| !line.contains("can reach") && !line.contains("sit in one dependency cycle"))
+        .collect()
+}
+
 /// The repository path of one file in a report.
 fn file_path(report: &Value, file: u64) -> String {
     let file = &report["files"][file as usize];
@@ -603,19 +615,41 @@ fn a_layered_repository_states_its_package_reach_and_its_file_reach() {
 }
 
 /// A repository with one package has no cross-package reach to state, so the
-/// fact is absent rather than a one-of-one sentence.
+/// root states that package's own file reach instead — the repository is the
+/// package and no path selects its package scope — and states nothing at all
+/// where that package is below the file floor.
 #[test]
-fn a_single_package_repository_states_no_reach_at_all() {
-    let repository = rust_test_scope_repository();
-    let result = Invocation::new(["--json"]).run(repository.path());
+fn a_single_package_repository_states_its_own_file_reach_or_nothing() {
+    let small = rust_test_scope_repository();
+    let result = Invocation::new(["--json"]).run(small.path());
     result.success();
     let report = checked_json(&result.stdout);
     assert!(report["verdict"]["reach"].is_null());
     assert!(report["package_closures"].as_array().unwrap().is_empty());
-    let terminal = Invocation::new(["--all"]).run(repository.path());
+    let terminal = Invocation::new(["--all"]).run(small.path());
     terminal.success();
     let text = String::from_utf8(terminal.stdout).unwrap();
     assert!(!text.contains("can reach"), "{text}");
+
+    // Twenty files in one package, six of them in one cycle: every member of
+    // that cycle reaches the other five, so the package reaches six of twenty.
+    let wide = core_repository(20, 6);
+    let wide_result = Invocation::new(["--json"]).run(wide.path());
+    wide_result.success();
+    let wide_report = checked_json(&wide_result.stdout);
+    assert_eq!(
+        wide_report["verdict"]["reach"]["sentence"],
+        "A change here can reach 6 of 20 files in this package."
+    );
+    assert_eq!(wide_report["verdict"]["reach"]["reached"], 6);
+    assert_eq!(wide_report["verdict"]["reach"]["total"], 20);
+    let wide_terminal = Invocation::new([] as [&str; 0]).run(wide.path());
+    wide_terminal.success();
+    let wide_text = String::from_utf8(wide_terminal.stdout).unwrap();
+    assert!(
+        wide_text.contains("  A change here can reach 6 of 20 files in this package.\n"),
+        "{wide_text}"
+    );
 }
 
 /// The core is stated only when the largest file cycle clears both floors, and
@@ -668,20 +702,21 @@ fn a_core_is_stated_only_when_the_largest_cycle_clears_both_floors() {
         "the core sentence fits fifty columns whole: {narrow_text}"
     );
 
-    // The same twenty files without the cycle state no core, and the rest of
-    // the verdict block is byte-identical: the fact is stated only.
+    // The same twenty files without the cycle state no core and a reach of one
+    // rather than six, and every rated line of the block is byte-identical:
+    // both facts are stated only.
     let plain = core_repository(20, 0);
     let plain_terminal = Invocation::new([] as [&str; 0]).run(plain.path());
     plain_terminal.success();
     let plain_text = String::from_utf8(plain_terminal.stdout).unwrap();
-    let stated: Vec<_> = verdict_block(&text)
-        .into_iter()
-        .filter(|line| !line.contains("sit in one dependency cycle"))
-        .collect();
+    assert!(
+        !plain_text.contains("sit in one dependency cycle"),
+        "{plain_text}"
+    );
     assert_eq!(
-        stated,
-        verdict_block(&plain_text),
-        "the core moves no tier, count, or worst offender"
+        rated_verdict_lines(&text),
+        rated_verdict_lines(&plain_text),
+        "neither propagation fact moves a tier, a count, or the worst offender"
     );
 
     let small = core_repository(200, 3);
