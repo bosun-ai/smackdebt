@@ -301,7 +301,7 @@ pub const fn smackdebt_analysis::ChangeCoupling::union_commits(self) -> u32
 pub const fn smackdebt_analysis::ChangeCoupling::with_evidence(self, smackdebt_analysis::SourceRole, smackdebt_analysis::SourceTrust, smackdebt_analysis::SourceRole, smackdebt_analysis::SourceTrust) -> Self
 pub struct smackdebt_analysis::ChangeGraph<'a>
 impl<'a> smackdebt_analysis::ChangeGraph<'a>
-pub fn smackdebt_analysis::ChangeGraph<'a>::new(&[(usize, usize)], &'a smackdebt_analysis::ConnectionGraph, &'a [core::option::Option<smackdebt_analysis::PackageId>]) -> Self
+pub fn smackdebt_analysis::ChangeGraph<'a>::new(&[(usize, usize)], &'a smackdebt_analysis::ConnectionGraph, &'a [core::option::Option<smackdebt_analysis::PackageId>], &'a [smackdebt_analysis::FileRecord]) -> Self
 pub struct smackdebt_analysis::ChangeLeakageFinding
 impl smackdebt_analysis::ChangeLeakageFinding
 pub const fn smackdebt_analysis::ChangeLeakageFinding::coupling(self) -> smackdebt_analysis::FileChangeCouplingId

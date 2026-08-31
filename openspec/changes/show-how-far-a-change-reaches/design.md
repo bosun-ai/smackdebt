@@ -205,6 +205,20 @@ changes. A fixed endpoint is data-stable and explainable; the cost is that a
 pair whose *higher*-indexed file has a card still gets a standalone card, which
 is the shape a reader can predict from the rule.
 
+A hidden pair can sit under a `shotgun_pair` that names its two packages, and
+calibration asked whether the file card should then be suppressed. It should
+not. On a fixture whose packages hold one file each the two cards do repeat each
+other's operands, but on a real repository they never coincide: Fluyt states
+`bow ↔ stern` at 119 of 389 commits while its four file pairs state 5 to 8 of
+14 to 19 — different subjects, different numbers, and the file pair is the more
+specific and the more actionable. Suppressing it would delete the best output
+the detectors produce. The rule that keeps a reader from reading one thing twice
+is that each *finding* is claimed once, and it holds here: the package finding
+and the file finding are different findings about different subjects. If the
+repetition ever becomes a real complaint, the shape to reach for is folding a
+file pair whose operands equal its package pair's into that package card as
+evidence — one card, both levels — rather than dropping the more specific fact.
+
 ### The system numbers are stated, never rated
 
 Reach, core size, and amplification join the verdict head as analysis-owned

@@ -148,9 +148,13 @@ and integer arithmetic inside passes that already run.
   (cards and evidence); JSON snapshots churn in slices 2, 3, 4, and 5. The slice
   order is chosen so each churn lands on an otherwise quiet baseline and every
   regenerated snapshot is reviewed per case, never as a batch.
-- The ratchet baseline must not move this round. New analysis modules are sized
-  and structured to stay under the accepted file and container thresholds; if one
-  cannot be, the module is restructured rather than the baseline updated.
+- The ratchet baseline must not move this round, with one deliberate exception
+  taken at the end: new analysis modules are sized and structured to stay under
+  the accepted file and container thresholds, and every regression the gate
+  reported during the wave was restructured away rather than accepted. The
+  closing slice ratchets in the one improvement the wave earned —
+  `crates/output/src/json.rs · cyclomatic · watch 1 → 0`, from splitting the
+  evidence serialization — so the slack the baseline still allowed closes.
 - Live work counts are load-bearing: every new computation rides an existing
   pass — the history stream callback, the architecture build, and report finish —
   and no new algorithm pass is recorded, so the exact `algorithm_passes`
@@ -158,7 +162,13 @@ and integer arithmetic inside passes that already run.
 - A new public workload profile `evolution-wide` is added beside the existing
   profiles so the pair accumulator, the closures, and the path probes are
   measured on a workload that actually exercises them; `evolution-dense` becomes
-  the bulk-guard proof.
+  the bulk-guard proof. Its timing record is written by the next
+  `just release-baselines`, whose profile loop now includes it: every committed
+  baseline shares one workspace revision, so a lone new record would fail
+  `check-baselines.py`, and this change re-records no release evidence. Its
+  correctness half — the exact work counts, the pair table, the finding floors,
+  and the deliberate history shape — is checked on every run of the flow and is
+  green for all nine profiles.
 - `ARCHITECTURE.md` is updated under its existing accepted
   `architecture-documentation` requirements, which already require it to describe
   the analysis and presentation boundary; no delta is needed there. Its stale
@@ -168,3 +178,12 @@ and integer arithmetic inside passes that already run.
   `just release-baselines`, as they did for `earn-the-verdict` and
   `make-problems-legible`; `scripts/performance/check-baselines.py` validates
   committed records only, so `just performance-tests` stays green.
+- Three latent defects in the performance harness surfaced when the new profile
+  first ran the complete correctness-checked flow, and each is fixed with its
+  reason recorded: `EXPECTED_WORK` had been four inventory visits high for every
+  Git-bearing profile since discovery began honoring `.git/info/exclude`; the
+  evolutionary-finding check read a `similarity` member the report does not
+  publish, so any workload with an evolutionary finding crashed it; and
+  generated workloads now disable background Git maintenance, which had twice
+  raced the commits building the wide profile and left its object store with a
+  missing blob.

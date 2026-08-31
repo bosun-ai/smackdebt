@@ -2407,13 +2407,22 @@ fn readme_console_examples_use_the_simple_terminal_vocabulary() {
         "| `bus_risk` | `one author` |",
         "| `unstable_dependency` | `depends on less stable code` |",
         "| `measured` |",
-        "changed together in 27 of 83 commits · 33% · no direct dependency · linked via crates/output",
+        "changed together in 32 of 97 commits · 33% · no direct dependency · linked via crates/output",
         "29% · no code dependency",
-        "one contributor made 48 of 48 commits",
+        "one contributor made 56 of 59 commits",
+        // The four sentences a verdict may carry beyond its tier, each shown
+        // as captured output rather than described.
+        "A change in one package can reach 6 of 12 packages.",
+        "A change here can reach 17 of 36 files in this package.",
+        "9 of 86 files sit in one dependency cycle.",
+        "A typical change here touches 4 files.",
+        "a change here reaches 14 files",
+        "3 importers follow it",
         "instability 1/4 → 2/3",
-        "hot (6 commits)",
+        "hot (7 commits)",
         "2 files in the cycle",
-        "imports 10 files",
+        "imports 13 files",
+        "11 files import this",
         "GraphEditor.vue · closure",
         "next: smackdebt scripts",
         "4 of the repository's 20 high live here.",
@@ -3754,7 +3763,11 @@ fn assert_short_terminal_text(bytes: &[u8]) {
         "eligible mapping",
         "retained units",
         "retained package pairs",
-        " touches",
+        // The banned row was the churn line `<name> · <n> touches · +a -b`, so
+        // the ban names the separator that made it a row. The bare word is now
+        // the verb of a shipped verdict sentence — `A typical change here
+        // touches 4 files.` — and a shipped sentence cannot be banned.
+        " touches ·",
         " touch ",
         "primary/trusted",
         " · uses · ",

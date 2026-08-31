@@ -141,7 +141,8 @@ debt keeps the ranking it has today inside `--all` instead of disappearing.
 A file-anchored card SHALL state its evidence in exactly this order: the top
 claimed source finding when it claims one, then the integer facts that made its
 pattern fire, then the anchor's exact propagation reach when the pattern is
-`hub` and a reach value exists, then each claimed change-leakage finding in
+`hub` and a reach value greater than zero exists, then each claimed
+change-leakage finding in
 finding-table order, then each claimed size finding in table order, then the
 anchor's touch count when the file is hot, then its remaining claimed source
 findings in the accepted finding rank. A renderer under a budget shows a prefix
@@ -149,10 +150,18 @@ of that order, so the head names the problem, the next lines say why the pattern
 fired, and the enumeration of every remaining finding comes last where `--all`
 reaches it.
 
+A `hub` fires on either half of its degree, so a file that imports many others
+and is imported by none is a candidate whose reach is zero. `a change here
+reaches 0 files` states nothing, and an immaterial fact is absent rather than
+printed, so the candidate table keeps the row and the card states no reach line.
+
 A `god_file` that fired on the size conjunct SHALL therefore state its size
-finding among the facts that made it fire, directly after its rated unit total
-and its fan-out, rather than after the findings it enumerates: the size finding
-is the reason the card exists, not a trailing detail.
+finding among the facts that made it fire — after its rated unit total, its
+fan-out, and any change-leakage finding its file carries — rather than after the
+findings it enumerates: the size finding is the reason the card exists, not a
+trailing detail. Leakage precedes it because the one order above is the whole
+rule; the size finding's guarantee is that the enumerated findings never come
+between it and the facts that made the pattern fire.
 
 A `tangle` card SHALL state its architecture finding, then its member count,
 then its exact propagation reach when one exists, then the touch count of its
@@ -177,6 +186,10 @@ the tightest rung and the followers are the detail a wider rung buys. A
 #### Scenario: A hub spreads
 - **WHEN** a `hub` card's file is inside the reach candidate set
 - **THEN** its evidence states the importer count that made it fire and then its exact reach, before any claimed size finding
+
+#### Scenario: A hub only imports
+- **WHEN** a `hub` fired on its fan-out and nothing depends on its file
+- **THEN** its reach is zero, its card states no reach line, and the candidate table still holds the row
 
 #### Scenario: A card is rendered under a tight budget
 - **WHEN** a rung allows one evidence line

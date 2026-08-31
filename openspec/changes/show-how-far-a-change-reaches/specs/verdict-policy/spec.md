@@ -14,6 +14,16 @@ renderer SHALL compose, recompute, or reword one:
   `34 of 210 files sit in one dependency cycle.` with the core and graph file
   counts substituted. The fact SHALL retain both integers.
 
+Both file counts are the files the dependency graph is built over — the scope's
+primary, parsed files — because a fraction whose halves come from two
+populations answers nothing. A package's test, example, benchmark, fixture, and
+generated files are therefore outside both halves, so on a real package the
+denominator reads lower than the file count that package holds: measured gaps
+run from a tenth to a half of a package's files. The documentation SHALL state
+which files these sentences count, for the sentences and for the JSON members
+that carry the same integers, so a reader who counts their own package finds the
+rule rather than a contradiction.
+
 Each fact SHALL be present only where its scope and its materiality rule allow
 it: reach at the repository root and at a package scope, core size at the
 repository root only, and neither at a directory or file scope. Where the

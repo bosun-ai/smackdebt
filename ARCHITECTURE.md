@@ -352,15 +352,50 @@ those paths to the current inventory, follows unbroken rename chains from a
 current file to its earlier names, and converts contributor identity to a
 temporary integer before calling analysis.
 
-Analysis owns separate churn, change-coupling, contributor-concentration,
+Analysis owns separate churn, change-coupling, file-change-coupling,
+change-amplification, contributor-concentration,
 knowledge-concentration, and evolutionary-comparison modules. Package activity and contributor activity count
 once per commit. Change coupling counts each unordered package pair once per
 commit. Default findings require at least three shared commits and 20% Jaccard
-similarity; weaker observations remain available through JSON and `--all`. A
+similarity; weaker observations remain in JSON only, because no card names
+them. A
 recurrent pair without a static package edge in either direction creates a
 Watch finding. All ratios retain their numerator and denominator. Output only reads the completed
 aggregate tables; contributor names, addresses, raw fields, and temporary
 identifiers cannot enter a report value.
+
+File co-change rides the same stream. One directory tree, built once from the
+paths discovery owns, gives every file an integer depth and every pair an
+integer distance, and the accumulator stores only cross-directory pairs, only
+above its retention floors, and never from a commit that exceeded the bulk-file
+guard; the declined commits and the declined pair keys are disclosed in history
+coverage rather than dropped silently. The same pass files a sparse per-directory
+histogram of how many change-graph files each commit touched, deduplicated
+through the directory's ancestors, from which the nearest-rank median becomes
+one scope sentence.
+
+History streams before the dependency graph exists, so pair accumulation is
+graph-blind and the join runs once at report composition, where both the pairs
+and the graphs are in hand. The join reads two graphs and never substitutes one
+for the other: the file cycle graph, whose ownership exclusion keeps module
+wiring out, decides that an importer follows its interface; the connection graph
+— every `uses` and every `module_ownership` relation between two graph files, in
+both directions of travel — is what an absence is proved against, first by a
+package-level component label and then, only if that is inconclusive, by a
+budgeted walk from one end of the pair and, if that walk exhausts its budget,
+from the other. An inconclusive search produces nothing, because absence is
+proved rather than inferred. A conventional entry file is never named as the
+interface, since a file of declarations and re-exports has no abstraction to
+leak.
+
+Propagation facts come from the same architecture build. The package graph
+yields each package's reach-in count; every package below the closure node limit
+is closed over eagerly, one transient bit set at a time, so rendering a scope
+from a finished report performs no closure; the file components already computed
+for cycle findings give the core size; and a bounded candidate set of cycle
+members and hub-degree files carries one exact reverse reach each. Every one of
+these facts is stated only: none moves a tier, a count, or a worst offender, and
+none reaches the ratchet gate or a diff report.
 
 The selected history window is applied once, where streamed records become
 facts, so activity, churn, coupling, and concentration describe the same

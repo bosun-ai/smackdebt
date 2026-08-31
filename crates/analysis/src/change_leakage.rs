@@ -2,8 +2,8 @@ use std::cmp::Reverse;
 use std::collections::BTreeSet;
 
 use crate::{
-    ConnectionGraph, FileChangeCoupling, FileChangeCouplingId, FileId, PackageId, PathProbe,
-    Rating, ReachAnswer,
+    ConnectionGraph, FileChangeCoupling, FileChangeCouplingId, FileId, FileRecord, PackageId,
+    PathProbe, Rating, ReachAnswer, is_entry_filename,
 };
 
 macro_rules! leakage_index {
@@ -162,21 +162,43 @@ pub struct ChangeGraph<'a> {
     imports: BTreeSet<(usize, usize)>,
     connections: &'a ConnectionGraph,
     packages: &'a [Option<PackageId>],
+    files: &'a [FileRecord],
 }
 
 impl<'a> ChangeGraph<'a> {
-    /// Prepares one join over the cycle-graph edges, the connection graph, and
-    /// the package of every file the file dependency graph holds.
+    /// Prepares one join over the cycle-graph edges, the connection graph, the
+    /// package of every file the file dependency graph holds, and the files
+    /// themselves, which decide what a file can be accused of.
     pub fn new(
         cycle_edges: &[(usize, usize)],
         connections: &'a ConnectionGraph,
         packages: &'a [Option<PackageId>],
+        files: &'a [FileRecord],
     ) -> Self {
         Self {
             imports: cycle_edges.iter().copied().collect(),
             connections,
             packages,
+            files,
         }
+    }
+
+    /// Whether a file can be named as an interface whose importers follow it.
+    ///
+    /// A conventional entry file holds the module's wiring rather than its
+    /// behavior: `lib.rs`, `mod.rs`, `index.ts`, and `__init__.py` are lists of
+    /// declarations and re-exports. Its importers change with it because adding
+    /// an export and using it is one edit, not because an abstraction leaked —
+    /// the file has no abstraction of its own to leak. Calibration found this
+    /// to be the whole of the rule's real-world output: every leaky finding on
+    /// two real repositories named a crate root or a module root, so the rule
+    /// was naming a shape that cannot be fixed rather than a design that
+    /// should be. The pair keeps its dependency, so it never falls through to
+    /// the hidden rule either.
+    fn leaks(&self, interface: FileId) -> bool {
+        self.files
+            .get(interface.index())
+            .is_some_and(|file| !is_entry_filename(file.path()))
     }
 
     /// Whether one file depends on another through an edge that enters the
@@ -248,8 +270,13 @@ pub fn change_leakage(
             // A mutual dependency is a cycle, and the cycle finding already
             // names it.
             (true, true) => {}
-            (true, false) => findings.push(ChangeLeakageFinding::leaky(coupling, pair.right())),
-            (false, true) => findings.push(ChangeLeakageFinding::leaky(coupling, pair.left())),
+            (true, false) if graph.leaks(pair.right()) => {
+                findings.push(ChangeLeakageFinding::leaky(coupling, pair.right()));
+            }
+            (false, true) if graph.leaks(pair.left()) => {
+                findings.push(ChangeLeakageFinding::leaky(coupling, pair.left()));
+            }
+            (true, false) | (false, true) => {}
             (false, false) => {
                 if graph.proves_separate(*pair, &mut probe) {
                     findings.push(ChangeLeakageFinding::hidden(coupling));

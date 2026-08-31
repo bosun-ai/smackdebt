@@ -114,6 +114,14 @@ distance, and similarity thresholds the way the existing coupling thresholds are
 published, and SHALL state that a hidden pair is reported only when the absence
 of a path was proved, so an inconclusive search reports nothing.
 
+It SHALL state which files the two file counts count — the scope's primary,
+parsed files, the population every dependency fact in the report uses — so a
+reader whose package holds more files than the sentence names finds the rule
+rather than a contradiction. It SHALL state that a leaky interface is never a
+conventional entry file, because a file that is a list of declarations and
+re-exports has no abstraction to leak and its importers change with it by
+construction.
+
 It SHALL state that these signals are derived from history and therefore never
 enter the ratchet gate, and that they never appear in a diff report.
 
@@ -124,6 +132,10 @@ enter the ratchet gate, and that they never appear in a diff report.
 #### Scenario: A user sees a leakage card
 - **WHEN** the user looks up `importers follow its changes` or `change together without a dependency`
 - **THEN** the README explains the evidence each needs, publishes the thresholds, and explains why nothing is reported when a path search is inconclusive
+
+#### Scenario: A user counts the files in their own package
+- **WHEN** a package holds more files than the reach sentence names
+- **THEN** the README states that the sentence counts the package's primary, parsed files, the same population the dependency graph is built over
 
 #### Scenario: A user asks why the gate ignores these signals
 - **WHEN** the user reads the gate documentation beside the new signals

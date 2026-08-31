@@ -2368,7 +2368,7 @@ impl<'a> CodebaseReportBuilder<'a> {
         // graphs both exist: history streamed before the graph was built, so
         // pair accumulation was graph-blind and this is the first point at
         // which a pair can be asked what depends on what.
-        let change_leakage_findings = leakage_findings(&architecture, &evolution);
+        let change_leakage_findings = leakage_findings(&architecture, &evolution, &self.files);
         // The scope join runs once, here, where the one directory tree the
         // histograms were filed under is still in scope: a rendered scope then
         // reads a table position rather than a tree.
@@ -2460,6 +2460,7 @@ impl<'a> CodebaseReportBuilder<'a> {
 fn leakage_findings(
     architecture: &ArchitectureBuild,
     evolution: &smackdebt_analysis::EvolutionaryReportFacts,
+    files: &[FileRecord],
 ) -> Vec<ChangeLeakageFinding> {
     change_leakage(
         evolution.file_coupling(),
@@ -2467,6 +2468,7 @@ fn leakage_findings(
             &architecture.cycle_pairs,
             &architecture.connections,
             &architecture.graph_packages,
+            files,
         ),
     )
 }

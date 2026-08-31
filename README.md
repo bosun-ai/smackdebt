@@ -32,7 +32,9 @@ $ smackdebt
 
 smackdebt · repository root
   Worn in the usual places.
-20 high · 64 watch · 2,852 checked
+  A change in one package can reach 6 of 12 packages.
+  9 of 86 files sit in one dependency cycle.
+20 high · 63 watch · 3,304 checked
 worst: crates/project/src/project.rs — hot AND complex
 
 AREAS
@@ -55,10 +57,9 @@ PROBLEMS
   high hot and complex · scripts/performance/review-workloads.py
   high ArchitectureGraph::new · method · crates/analysis/src/architecture.rs:17
   high generic_source_roles · function · crates/discovery/src/inventory.rs:228
-  high ProblemEvidenceView::serialize · method · crates/output/src/json.rs:1412
   high compare_units · function · crates/analysis/src/comparison.rs:123
-  high generate · function · scripts/performance/workload.py:152
-  high main · function · scripts/performance/check-report.py:75
+  high generate · function · scripts/performance/workload.py:262
+  high main · function · scripts/performance/check-report.py:156
   high validate · function · scripts/performance/check-workload-reviews.py:71
   high cycle_witness · function · crates/analysis/src/cycle_witness.rs:3
   high violations · function · scripts/check-entry-modules.py:30
@@ -68,6 +69,7 @@ PROBLEMS
   watch vue.rs · closure · crates/languages/src/vue.rs:97
   watch language_slot · function · crates/languages/src/engine.rs:168
   watch CodebaseRequest::with_thresholds · method · crates/project/src/requests.rs:165
+  watch circular dependency · crates/analysis/src/change_coupling.rs
 
 WARNINGS
   warning 3 imports could not be followed
@@ -78,9 +80,11 @@ WARNINGS
 ```
 
 The report opens with a verdict block: the selected scope, the sentence for its
-tier, the counts behind that sentence with every count labeled by its word, and
-the single worst thing with its repository-relative path and the reason it is
-worst.
+tier, the sentences describing how far a change here travels, the counts behind
+that verdict with every count labeled by its word, and the single worst thing
+with its repository-relative path and the reason it is worst.
+[Read how far a change reaches](#read-how-far-a-change-reaches) explains those
+sentences and when each is absent.
 
 The codebase tiers are fixed. Their identifiers are the stable vocabulary for an
 integration; their sentences are what a person reads:
@@ -119,14 +123,16 @@ $ smackdebt crates/analysis
 smackdebt · crates/analysis
   Worn in the usual places.
   4 of the repository's 20 high live here.
-4 high · 17 watch · 1,049 checked
+  A change here can reach 17 of 36 files in this package.
+  A typical change here touches 4 files.
+4 high · 17 watch · 1,405 checked
 worst: crates/analysis/src/evolution.rs — hot AND complex
 
 PROBLEMS
   high hot and complex · crates/analysis/src/evolution.rs
-        crates/analysis/src/evolution.rs:56 · method · parameters 13
+        crates/analysis/src/evolution.rs:59 · method · parameters 13
   high everything depends on this · crates/analysis/src/report.rs
-        crates/analysis/src/report.rs:1448 · method · cognitive 18 · nesting 4
+        crates/analysis/src/report.rs:1631 · method · cognitive 18 · nesting 4
   high ArchitectureGraph::new · method · crates/analysis/src/architecture.rs:17
         parameters 6
   high compare_units · function · crates/analysis/src/comparison.rs:123
@@ -147,9 +153,9 @@ PROBLEMS
   watch GateSnapshot::from_report · method · crates/analysis/src/gate.rs:150
         cognitive 15
   watch packages change together · crates/analysis ↔ crates/cli
-        changed together in 27 of 83 commits · 33% · no direct dependency · linked via crates/output
+        changed together in 32 of 97 commits · 33% · no direct dependency · linked via crates/output
   watch one author · crates/analysis
-        one contributor made 48 of 48 commits
+        one contributor made 56 of 59 commits
   watch OrphanCandidate<'a>::new · method · crates/analysis/src/orphan.rs:44
         parameters 6
 
@@ -364,22 +370,36 @@ thresholds are:
 | Files imported that make a file broad without a size finding | 10 |
 | File imports in or out at which a file can be a hub | 8 |
 | Multiple of its package's median a hub also reaches, when that median is not zero | 4 |
+| Directories apart two files must sit before either co-change pattern names them | 2 |
+| Commits two files must share before either co-change pattern names them | 5 |
+| Share of their commits two files two directories apart must share | 40% |
+| Percentage that bar falls for each further directory between them | 5% |
+| Share no distance lowers that bar below | 20% |
 
 A `god_file` needs both halves: concentrated debt alone means a file has bugs,
 and breadth alone means a file is large. A `hub` compares a file against the
 median of its own package, so the same file is the same problem at every
-selected scope.
+selected scope. The two co-change patterns share their three thresholds and are
+explained in [Read how far a change reaches](#read-how-far-a-change-reaches).
 
 Every card is either a `default` card or a `detail` card. A card is `default`
-when it claims at least one finding that affects the verdict, or when it anchors
-a rated architecture, coupling, contributor-concentration, or stable-dependency
-finding. Every other card is `detail`: it appears under `--all`, at its own
-anchor when that anchor is the selected scope, and always in JSON. A widely
-imported file with no debt of its own, a file whose whole debt is advisory or
+when it claims at least one finding that affects the verdict, when it claims a
+change-leakage finding, or when it anchors a rated architecture, coupling,
+contributor-concentration, or stable-dependency finding. Every other card is
+`detail`: it appears under `--all`, at its own anchor when that anchor is the
+selected scope, and always in JSON. A widely imported file with no debt of its
+own and nothing following its changes, a file whose whole debt is advisory or
 non-primary, and a file whose only evidence is its size are all `detail` cards.
+That same widely imported file becomes a `default` card as soon as a leakage
+finding names it, because a file whose importers keep changing with it is a
+problem even when the file itself measures clean.
 Visibility decides where a card is shown and never what it is — it moves no
 rating, no count, and no verdict, and hiding a `detail` card never reorders the
 cards that remain.
+
+A file's leakage numbers appear as extra lines on the card that already names
+that file, and a card of their own exists only when nothing else names the file
+or the pair, so the report never states one subject twice.
 
 Cards are ranked against each other, so the first card is the problem to look at
 first. The order is the card's rating, then how many High findings it claims,
@@ -412,22 +432,24 @@ $ smackdebt --top 6 crates/analysis
 smackdebt · crates/analysis
   Worn in the usual places.
   4 of the repository's 20 high live here.
-4 high · 17 watch · 1,049 checked
+  A change here can reach 17 of 36 files in this package.
+  A typical change here touches 4 files.
+4 high · 17 watch · 1,405 checked
 worst: crates/analysis/src/evolution.rs — hot AND complex
 
 PROBLEMS
   high hot and complex · crates/analysis/src/evolution.rs
-        crates/analysis/src/evolution.rs:56 · method · parameters 13
-        124 rated units
-        file · 1,303 lines
+        crates/analysis/src/evolution.rs:59 · method · parameters 13
+        146 rated units
+        file · 1,666 lines
   high everything depends on this · crates/analysis/src/report.rs
-        crates/analysis/src/report.rs:1448 · method · cognitive 18 · nesting 4
-        imports 10 files
-        file · 2,596 lines
+        crates/analysis/src/report.rs:1631 · method · cognitive 18 · nesting 4
+        11 files import this
+        imports 13 files
   high ArchitectureGraph::new · method · crates/analysis/src/architecture.rs:17
         parameters 6
-        file · 812 lines
-        hot (6 commits)
+        file · 826 lines
+        hot (7 commits)
   high compare_units · function · crates/analysis/src/comparison.rs:123
         cognitive 56 · cyclomatic 25 · nesting 4
         crates/analysis/src/comparison.rs:42 · method · parameters 7
@@ -460,11 +482,12 @@ PROBLEMS
         → crates/analysis/src/evolution.rs
         → crates/analysis/src/change_coupling.rs
         2 files in the cycle
-        hot (9 commits)
+        a change here reaches 14 files
+        hot (13 commits)
   watch packages change together · crates/analysis ↔ crates/cli
-        changed together in 27 of 83 commits · 33% · no direct dependency · linked via crates/output
+        changed together in 32 of 97 commits · 33% · no direct dependency · linked via crates/output
   watch one author · crates/analysis
-        one contributor made 48 of 48 commits
+        one contributor made 56 of 59 commits
 ```
 
 The verdict counts rate units: `0 high · 0 watch · 22 checked` counts the
@@ -627,6 +650,75 @@ Static analysis does not provide compiler type resolution, runtime tracing, or
 executed build configuration. Macros, generated paths, runtime imports, and
 unsupported aliases can therefore remain unresolved.
 
+## Read how far a change reaches
+
+Beyond its tier, a codebase verdict may carry sentences about travel: how far a
+change spreads, how much of the codebase is tangled together, and how many files
+a change here usually touches.
+
+| Sentence | Where it appears | What the numbers count |
+| --- | --- | --- |
+| `A change in one package can reach 6 of 12 packages.` | repository root | the most packages that transitively depend on any one package, counting that package, out of every package |
+| `A change here can reach 17 of 36 files in this package.` | package scope | the most files inside the package that transitively depend on any one of its files, counting that file |
+| `9 of 86 files sit in one dependency cycle.` | repository root | the largest set of files that all depend on each other, out of the files the dependency graph is built over |
+| `A typical change here touches 4 files.` | repository, package, and directory scopes | the middle commit's file count, over the commits in the history window that touched this scope |
+
+Each is a stated fact. None changes the tier, the counts, the worst offender, or
+any rating: they describe the shape a reader is already looking at. Each is
+absent — never hedged, never zero — when the repository is too small, the
+history too thin, or the number too weak to mean anything: package reach needs
+at least 3 packages and a reach of at least 2, a package's file reach needs at
+least 20 files, a core needs at least 5 files and 2% of the graph, and the
+typical-change sentence needs complete history, at least 10 commits, and a
+middle commit touching at least 3 files. A repository whose commits are mostly
+one file each therefore states no typical-change sentence at its root while a
+package inside it, where changes really do arrive in fours, states one.
+
+Both file counts count the same population: the scope's primary, parsed files —
+the files the dependency graph is built over, which is what every other
+dependency number in the report counts too. A package's tests, examples,
+benchmarks, fixtures, and generated files are outside both halves of the
+fraction, so a package that holds 41 files may read `36`, and a package with a
+large test suite may read about half its file count. A fraction whose halves
+came from two populations would answer nothing, which is why the denominator is
+the graph rather than the directory listing.
+
+Two problem patterns come from the same family, joining what changed together
+with what depends on what:
+
+- `importers follow its changes` names a file whose importers keep changing with
+  it. The evidence reads `3 importers follow it` and then one line per importer:
+  `web/src/follower.js changed with it in 7 of 12 commits · 58% · 3 directories
+  away`. An interface whose callers must be edited whenever it moves is leaking
+  its internals into them.
+- `change together without a dependency` names two files that keep changing
+  together where nothing connects them: `changed together in 6 of 14 commits ·
+  43% · no dependency either way · 8 directories away`. This is the front end
+  and the API it calls over HTTP, or two implementations of one format — a
+  contract the code does not express.
+
+Both require the two files to sit in different directories, and a larger
+distance lowers the agreement each needs, because distance is what makes
+co-change surprising: two directories apart requires 40% of their commits
+together, three requires 35%, and six or more requires 20%. Both need at least
+five shared commits, so an anecdote is not a pattern.
+
+A pair is reported as hidden only when the absence of a dependency was proved.
+Smackdebt walks the connection graph — every import and every module
+declaration, in both directions — from one end of the pair and, if that walk
+runs out of budget, from the other. An inconclusive search reports nothing,
+because absence is proved rather than assumed.
+
+A conventional entry file — `lib.rs`, `mod.rs`, `index.ts`, `__init__.py`, and
+the rest of the entry names — is never named as a leaking interface. Such a file
+is a list of declarations and re-exports rather than behavior, so it holds no
+abstraction to leak, and its importers change with it because adding an export
+and using it is one edit.
+
+These signals come from history, so they never enter the ratchet gate, which
+only counts signals that do not move with wall-clock time, and they never appear
+in a diff report, which compares two trees rather than a window of commits.
+
 ## Read the history evidence
 
 History evidence comes from locally available non-merge Git history inside the
@@ -649,9 +741,11 @@ similarity. Weaker observations stay in JSON only. Recurrent coupling without a
 static dependency in either direction is Watch because it can reveal a missing
 or unclear package relationship.
 
-In a codebase report, actionable history is problem cards: one `changes
-together` card per unexplained coupling pair and one `one author` card per
-contributor concentration, each keeping its finding's exact evidence and each
+In a codebase report, actionable history is problem cards: one `packages change
+together` card per unexplained coupling pair, one `one author` card per
+contributor concentration, and the two file-level co-change patterns described
+in [Read how far a change reaches](#read-how-far-a-change-reaches), each keeping
+its finding's exact evidence and each
 ranked against every other problem rather than sitting in a section of its own.
 A `one author` card states counts only, such as `one contributor made 48 of 48
 commits`. A coupling pair that a code dependency already explains is context
@@ -684,9 +778,19 @@ verdicts leave out.
 
 Smackdebt follows detected renames back from files that still exist and assigns
 their history to the files' current packages. It does not reconstruct removed
-files or old package layouts. Binary changes count as commits without invented
+files or old package layouts. A file renamed twice is followed only while the
+chain of detected renames is unbroken, so history before a gap is not counted:
+co-change under-reports for such a file rather than guessing, and the gaps are
+counted in the machine report. Binary changes count as commits without invented
 line totals. Shallow, partial, empty, or unavailable history is stated in the
 report while source and static architecture results remain usable.
+
+How far apart two files sit is read from their repository-relative paths by
+splitting on `/`, and a pair inside one directory is never recorded. On a
+Windows checkout those paths are written with the platform separator, so every
+file appears to sit in the repository root, the file co-change table stays
+empty, and the two patterns built on it report nothing there. Package coupling,
+churn, activity, and contributor concentration are unaffected.
 
 Contributor names, addresses, and internal identities stop before the report.
 
@@ -814,6 +918,21 @@ High debt, the way the unsupported-coverage qualifier is:
 }
 ```
 
+`verdict.reach`, `verdict.core_size`, and `verdict.amplification` follow the
+same shape: the exact sentence the terminal prints and the integers behind it —
+`reached` and `total`, `core` and `files`, `median` and `commits`. Each member
+is absent exactly where its sentence is absent, so a consumer reads presence
+rather than a zero:
+
+```json
+"verdict": {
+  "tier": "worn", "sentence": "Worn in the usual places.",
+  "reach": { "sentence": "A change in one package can reach 6 of 12 packages.", "reached": 6, "total": 12 },
+  "core_size": { "sentence": "9 of 86 files sit in one dependency cycle.", "core": 9, "files": 86 },
+  "mode": "codebase"
+}
+```
+
 The `problems` table holds every card in problem-rank order, `detail` cards
 included, and a row's position is that card's identity. `pattern` is one of the
 frozen ids, `visibility` is the string `default` or `detail` rather than a
@@ -841,8 +960,9 @@ can join from a card to its rows or from a row back to its card.
 
 Behind the head, JSON contains the complete report, including everything the
 terminal leaves out: raw dependency edges, references outside the repository,
-churn totals, weak coupling, hotspots, size findings, orphan files, and healthy
-counts. Dependency edges appear in no human view at any scope or detail level,
+churn totals, weak coupling, weak file change coupling, hotspots, size findings,
+orphan files, file change coupling, package closures, candidate file reach, and
+healthy counts. Dependency edges appear in no human view at any scope or detail level,
 so the relation tables are the only place to read them; the terminal states a
 relationship as aggregate card evidence such as a fan-in count or a cycle
 witness. One package table owns stable package IDs, repository-relative paths,
@@ -859,6 +979,21 @@ relation row, because a file that imports a module normally and again inside a
 coupling operands, and contributor concentration without contributor identity.
 Hotspots, size findings, orphan files, stable-dependency findings, and
 knowledge-concentration findings each own a table and state their own `kind`.
+
+Four tables carry the change-reach facts. `file_change_coupling` holds every
+retained file pair with the lower file index first, its shared and union commit
+counts, and the directory distance between the two files.
+`change_leakage_findings` holds the pairs a rule named, each with its `kind`,
+the `coupling` row it was decided from, and, for `leaky_interface`, the
+`interface` file. `package_closures` holds one row per package whose file reach
+is material, with the `files` the package's dependency graph is built over and
+the largest `reach` inside it; a package below the file floor or above the
+closure limit has no row, so a consumer joins by package rather than by
+position. `file_reach` holds the exact reach of the bounded candidate set only.
+
+A retained pair that produced no finding reaches no human view at all, `--all`
+included: the weaker pairs are JSON-only by design, and `file_change_coupling`
+is where to inspect them.
 
 If a row the terminal used to print has disappeared, the version-4 table that
 retains it is where to look: `dependency_edges` and `package_edges` for import
@@ -917,8 +1052,10 @@ and Watch counts per path and signal, and the gate ratchets exactly ten
 time-invariant signals: `cognitive`, `cyclomatic`, `logical_lines`,
 `nesting`, `parameters`, `file_size`, `container_size`, `package_cycle`,
 `file_cycle`, and `stable_dependency`. History-derived signals such as change
-coupling and knowledge concentration stay out of the gate by rule: they move
-with wall-clock time, and a committed gate must not.
+coupling, knowledge concentration, and the two co-change patterns stay out of
+the gate by rule: they move with wall-clock time, and a committed gate must not.
+A report carrying leakage findings produces the same gate comparison as the same
+tree read without history at all.
 
 Any counter above its baseline is a regression: the gate names the row as
 `worse` with the moved counter, states the totals, and exits with status 3.

@@ -6,9 +6,9 @@
 //! rather than inside the module so the module stays one screen of rules.
 
 use smackdebt_analysis::{
-    ChangeGraph, ChangeLeakageKind, ConnectionGraph, FileChangeCoupling, FileId,
-    LEAKAGE_MIN_DISTANCE, LEAKAGE_SHARED_COMMITS, PATH_PROBE_NODES, PackageId, Rating,
-    change_leakage, required_permille,
+    ChangeGraph, ChangeLeakageKind, ConnectionGraph, Coverage, FileChangeCoupling, FileId,
+    FileRecord, HealthCounts, LEAKAGE_MIN_DISTANCE, LEAKAGE_SHARED_COMMITS, PATH_PROBE_NODES,
+    PackageId, Rating, ScopeId, change_leakage, required_permille,
 };
 
 /// One retained pair, named the way the accumulator stores it.
@@ -22,11 +22,24 @@ fn pair(left: usize, right: usize, shared: u32, union: u32, distance: u32) -> Fi
     )
 }
 
+/// One file, named so that nothing about its name changes a rule.
+fn file(index: usize, path: &str) -> FileRecord {
+    FileRecord::new(
+        FileId::from_index(index),
+        ScopeId::from_index(0),
+        path,
+        Coverage::default(),
+        HealthCounts::default(),
+    )
+    .with_package(PackageId::from_index(0))
+}
+
 /// The two graphs one join reads, owned so a test can borrow them.
 struct Graphs {
     cycle: Vec<(usize, usize)>,
     connections: ConnectionGraph,
     packages: Vec<Option<PackageId>>,
+    files: Vec<FileRecord>,
 }
 
 impl Graphs {
@@ -41,6 +54,9 @@ impl Graphs {
         connection: &[(usize, usize)],
     ) -> Self {
         let package_count = packages.iter().max().map_or(0, |package| package + 1);
+        let records = (0..files)
+            .map(|index| file(index, &format!("area{index}/unit{index}.js")))
+            .collect();
         let packages: Vec<Option<PackageId>> = packages
             .iter()
             .map(|package| Some(PackageId::from_index(*package)))
@@ -49,6 +65,7 @@ impl Graphs {
             cycle: cycle.to_vec(),
             connections: ConnectionGraph::new(files, package_count, connection, &packages),
             packages,
+            files: records,
         }
     }
 
@@ -58,8 +75,14 @@ impl Graphs {
         Self::new(files, &vec![0; files], edges, edges)
     }
 
+    /// Renames one file, which is how a test states what a name means.
+    fn named(mut self, index: usize, path: &str) -> Self {
+        self.files[index] = file(index, path);
+        self
+    }
+
     fn graph(&self) -> ChangeGraph<'_> {
-        ChangeGraph::new(&self.cycle, &self.connections, &self.packages)
+        ChangeGraph::new(&self.cycle, &self.connections, &self.packages, &self.files)
     }
 }
 
@@ -95,6 +118,35 @@ fn an_importer_that_follows_its_interface_is_named_from_the_import_direction() {
 fn a_mutual_import_produces_no_finding_of_either_kind() {
     let graphs = Graphs::imports(2, &[(0, 1), (1, 0)]);
     assert_eq!(found(&[pair(0, 1, 7, 12, 3)], &graphs), []);
+}
+
+/// A conventional entry file is a module's wiring rather than its behavior, so
+/// importers following it means an export was added, not that an abstraction
+/// leaked. The pair keeps its dependency, so it becomes no finding at all.
+#[test]
+fn an_entry_file_is_never_named_as_the_interface_whose_importers_follow_it() {
+    let behavior = Graphs::imports(2, &[(1, 0)]);
+    assert_eq!(
+        found(&[pair(0, 1, 7, 12, 3)], &behavior),
+        [(ChangeLeakageKind::LeakyInterface, Some(0))],
+        "a file with a name of its own still leaks"
+    );
+    for name in [
+        "core/src/lib.rs",
+        "core/parts/mod.rs",
+        "web/src/index.ts",
+        "app/pkg/__init__.py",
+    ] {
+        let wiring = Graphs::imports(2, &[(1, 0)]).named(0, name);
+        assert_eq!(found(&[pair(0, 1, 7, 12, 3)], &wiring), [], "{name}");
+    }
+    // The follower's name decides nothing, because the claim is about the
+    // interface: it is the file accused of leaking.
+    let follower = Graphs::imports(2, &[(1, 0)]).named(1, "web/src/index.ts");
+    assert_eq!(
+        found(&[pair(0, 1, 7, 12, 3)], &follower),
+        [(ChangeLeakageKind::LeakyInterface, Some(0))]
+    );
 }
 
 /// Distance is a floor on both rules: one directory apart says nothing, two

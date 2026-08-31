@@ -25,8 +25,8 @@
 - [x] 3.4 Serialize the `file_change_coupling` table with the lower file index first, integer shared and union commits, and the directory distance, extending the checked schema in the same commit.
 - [x] 3.5 Add boundary tests: a pair one commit below the retention floor, a pair one permille below it, a same-directory pair storing nothing, a test file and its subject producing no pair, and a pair whose union excludes a bulk commit.
 - [x] 3.6 Add the `bulk_commit_repository()` fixture and prove end to end that a thirty-file commit yields one bulk commit, no pair, and unchanged churn, touches, package coupling, and concentration. The guard's amplification half is proven in 4.5, which has no fact to read until amplification exists.
-- [ ] 3.7 Add the `evolution-wide` workload profile — roughly two thousand files, fifty packages, forty commits with real cross-directory pairs, several provably unlinked pairs, and one bulk commit — wiring `PROFILES`, `GRAPH_PROFILES`, the `release-baselines.sh` profile loop from eight to nine, `EXPECTED_WORK`, `test_workload.py`, and a recorded baseline under `benchmarks/baselines/`.
-- [ ] 3.8 Extend `scripts/performance/check-report.py` with the file-pair mirror block: bounds, lower index first, shared at most union, distance at least one, and no finding below the detector floors.
+- [x] 3.7 Add the `evolution-wide` workload profile — roughly two thousand files, fifty packages, forty commits with real cross-directory pairs, several provably unlinked pairs, and one bulk commit — wiring `PROFILES`, `GRAPH_PROFILES`, the `release-baselines.sh` profile loop from eight to nine, `EXPECTED_WORK`, `test_workload.py`, and a recorded baseline under `benchmarks/baselines/`. The timing record is the one half deferred: every committed baseline shares one workspace revision, so a lone new record would fail `check-baselines.py`, and this change deliberately re-records no release evidence. The profile is in the release loop and its record lands with the next `just release-baselines`, which the delta now states.
+- [x] 3.8 Extend `scripts/performance/check-report.py` with the file-pair mirror block: bounds, lower index first, shared at most union, distance at least one, and no finding below the detector floors.
 - [x] 3.9 Assert exact equality of inventory walks, reads, Git processes, parser visits, and algorithm passes with the pre-change values on every affected flow, and regenerate the JSON snapshots per case.
 
 ## 4. Change amplification
@@ -57,8 +57,182 @@
 
 ## 6. Calibration, documentation, and close-out
 
-- [ ] 6.1 Calibrate against real repositories: run the release binary over this workspace at the repository root, `crates/analysis`, and `crates/output`, and over the private Fluyt repository at its root and one busy directory, each at a 90-day and a 365-day window; record every resulting card set in this file before any constant is frozen.
-- [ ] 6.2 Freeze or adjust the constants from the recorded runs — the pair guards, the leakage floors and the similarity bar, the amplification clamp and floors, the reach and core materiality rules — updating the specs where a proposed value moved, and record zero findings on a quiet repository as a legitimate outcome rather than a reason to lower a floor.
-- [ ] 6.3 Update the README: the two new patterns with their words and thresholds, the `packages change together` rename, the three verdict sentences and when each is absent, the new JSON tables and verdict members, the weak-pairs-are-JSON-only rule, and the statement that these signals never gate and never appear in a diff.
-- [ ] 6.4 Update `ARCHITECTURE.md` for the change graph, the join at report finish, the closures and their bounds, and correct its stale claim that weak coupling is available through `--all`.
-- [ ] 6.5 Note the stale performance `report_digest` values per precedent, confirm the committed ratchet baseline is unchanged with `just gate`, pass `openspec validate --all --strict` and the complete check, tick every task, and archive this change.
+- [x] 6.1 Calibrate against real repositories: run the release binary over this workspace at the repository root, `crates/analysis`, and `crates/output`, and over the private Fluyt repository at its root and one busy directory, each at a 90-day and a 365-day window; record every resulting card set in this file before any constant is frozen.
+- [x] 6.2 Freeze or adjust the constants from the recorded runs — the pair guards, the leakage floors and the similarity bar, the amplification clamp and floors, the reach and core materiality rules — updating the specs where a proposed value moved, and record zero findings on a quiet repository as a legitimate outcome rather than a reason to lower a floor.
+- [x] 6.3 Update the README: the two new patterns with their words and thresholds, the `packages change together` rename, the three verdict sentences and when each is absent, the new JSON tables and verdict members, the weak-pairs-are-JSON-only rule, and the statement that these signals never gate and never appear in a diff.
+- [x] 6.4 Update `ARCHITECTURE.md` for the change graph, the join at report finish, the closures and their bounds, and correct its stale claim that weak coupling is available through `--all`.
+- [x] 6.5 Note the stale performance `report_digest` values per precedent, confirm the committed ratchet baseline moves by exactly the one deliberate row with `just gate`, pass `openspec validate --all --strict` and the complete check, and tick every task. The change is **not** archived: the wave is reviewed as a whole first.
+
+### 6.1 Calibration record
+
+Release binary, `target/release/smackdebt`, at the constants below. Every run
+was repeated before and after the two rule changes 6.2 records; the counts here
+are the shipped behavior.
+
+**This workspace** (170 commits in the 90-day window, 118 of them eligible;
+history complete at both windows, so 90d and 365d read the same commits and
+produce identical tables):
+
+| Scope | Window | Head sentences beyond the tier | Retained pairs | Findings | Leakage cards |
+| --- | --- | --- | ---: | ---: | ---: |
+| repository root | 90d | `A change in one package can reach 6 of 12 packages.` · `9 of 86 files sit in one dependency cycle.` | 60 | 0 | 0 |
+| repository root | 365d | the same two | 60 | 0 | 0 |
+| `crates/analysis` | 90d | `4 of the repository's 20 high live here.` · `A change here can reach 17 of 36 files in this package.` · `A typical change here touches 4 files.` | 60 | 0 | 0 |
+| `crates/analysis` | 365d | the same three | 60 | 0 | 0 |
+| `crates/output` | 90d | `1 of the repository's 20 high live here.` · `A typical change here touches 5 files.` | 60 | 0 | 0 |
+| `crates/output` | 365d | the same two | 60 | 0 | 0 |
+
+**Fluyt** (private; 189 commits in 90 days, 1,087 in 365):
+
+| Scope | Window | Head sentences beyond the tier | Retained pairs | Findings | Leakage cards |
+| --- | --- | --- | ---: | ---: | ---: |
+| repository root | 90d | `A change in one package can reach 6 of 16 packages.` · `A typical change here touches 4 files.` | 8 | 0 | 0 |
+| repository root | 365d | `A change in one package can reach 6 of 16 packages.` · `A typical change here touches 3 files.` | 361 | 12 hidden | 4, `--all` only |
+| `bow/src/components` | 90d | `21 of the repository's 138 high live here.` · `A typical change here touches 8 files.` | 8 | 0 | 0 |
+| `bow/src/components` | 365d | `21 of the repository's 138 high live here.` · `A typical change here touches 7 files.` | 361 | 12 hidden | 0 at this scope |
+
+Fluyt's twelve findings at 365 days are the strongest evidence the detectors
+produced: eight of them pair a Vue/TypeScript front end file with the Ruby API
+endpoint it calls over HTTP, five to eight directories apart, with no dependency
+either way — `bow/src/api/identity.ts ↔ stern/app/api/identity/v1/auth.rb
+changed together in 5 of 19 commits · 26% · no dependency either way · 8
+directories away`. Four of them reach standalone cards, all `default` and all
+ranked below the one-screen budget of a 493-card repository, so they appear
+under `--all`.
+
+**Strict launch.** Zero new default-view items on either repository at every
+calibrated scope: the target was one to two. The fixture
+`change_leakage_repository()` still proves one new default card, so the path
+from finding to default view is exercised where it can be pinned.
+
+### 6.2 Constant decisions
+
+Every constant keeps its proposed value. Two rules changed, both because the
+calibration runs showed a true statement that no reader can act on.
+
+| Constant | Value | Decision |
+| --- | ---: | --- |
+| `BULK_COMMIT_FILES` | 25 | Frozen. Fluyt declines 15 of 189 commits at 90 days and 46 of 1,087 at 365; this workspace declines 2 of 170. Both are the sweeping commits the guard exists for, and both repositories still produce every finding they have. |
+| `RETAINED_FILE_PAIR_SHARED_COMMITS` | 3 | Frozen. It keeps the table at 60 rows here and 361 on Fluyt — inspectable in JSON, far below any storage concern. |
+| `RETAINED_FILE_PAIR_SIMILARITY_PERMILLE` | 100 | Frozen; no repository came near the limit from either side. |
+| `RETAINED_FILE_PAIR_LIMIT` | 1,000,000 | Frozen. `declined_pairs` is 0 on both repositories at both windows and on the wide workload. |
+| `LEAKAGE_MIN_DISTANCE` | 2 | Frozen. Every finding on both repositories sits at distance 2 or more by a wide margin (Fluyt's cluster is at 5 to 8). |
+| `LEAKAGE_SHARED_COMMITS` | 5 | Frozen. Lowering it is what a quiet repository tempts you to do; this workspace at 90 days is a legitimate zero and the plan says so. Fluyt's own 90-day zero is 189 commits with only 8 retained pairs, none reaching five shared commits — thin history, not a bad floor. |
+| similarity bar (400 / 50 / 200 permille) | as proposed | Frozen. Fluyt's findings run from 23% at distance 8 to 67% at distance 2, and the low end clears the bar only because distance lowered it: at a flat 40% bar seven of the twelve would vanish, including every front-end-to-API pair. |
+| `PATH_PROBE_NODES` | 4,096 | Frozen. No pair on either repository was left undecided: every stage-two answer came from a component that fits. |
+| `AMPLIFICATION_MIN_COMMITS` / `MIN_MEDIAN` / `MAX_FILES` | 10 / 3 / 1,000 | Frozen. The median floor is what keeps this workspace's root silent: 45 of its 106 windowed commits touch exactly one change-graph file and the repository-wide median is 2, while `crates/analysis` reads 4 and `crates/output` 5. A scope where changes really do arrive in fours says so and a repository of one-file commits does not, which is the rule working. |
+| `PACKAGE_REACH_FILES` | 20 | Frozen. It leaves this workspace one closure row out of twelve packages and Fluyt seven out of sixteen — the packages large enough for the number to mean anything. |
+| `ROOT_REACH_PACKAGES` / `ROOT_REACH_REACHED` | 3 / 2 | Frozen; both repositories state the root sentence and neither is near the floor. |
+| `CORE_SIZE_FILES` / `CORE_SIZE_PERCENT` | 5 / 2 | Frozen. This workspace states `9 of 86` (10%); Fluyt states nothing, because its largest file cycle is below the floor. One repository saying it and the other not is the materiality rule working, not a threshold to lower. |
+| `CLOSURE_NODE_LIMIT` | 4,096 | Frozen. Fluyt's largest package holds 521 graph files, an eighth of the limit, and no `propagation_skipped` diagnostic appeared on either repository. |
+| `REACH_CANDIDATE_LIMIT` | 64 | Frozen. This workspace fills 23 of it and Fluyt 58, so the cut has never yet decided anything, and the bound still holds. |
+
+**Rule change 1 — a conventional entry file is never a leaking interface.**
+Before this rule, every `leaky_interface` finding on both repositories named a
+wiring module: `crates/analysis/src/lib.rs` followed by `project.rs` (20 of 57),
+`output.rs` (19 of 58), and `json.rs` (15 of 40); `crates/project/src/lib.rs`
+followed by `crates/cli/src/app.rs` (5 of 14); and on Fluyt
+`quak/quak-core/src/tools/mod.rs` followed by its registry (11 of 16) and
+`quak/quak-core/src/agents/mod.rs` (6 of 6). Six of six. Each of those files is
+a list of `mod` declarations and re-exports — `tools/mod.rs` is 68 lines of
+exactly that and `agents/mod.rs` is 3 — so the finding says an export was added
+and used, which is one edit, not an abstraction leaking. The rule reuses the
+accepted `ENTRY_FILENAMES` list the orphan rule already publishes, applies to
+the interface side only (the claim is about the file accused of leaking), and
+leaves the pair with its dependency, so nothing falls through to the hidden
+rule. Effect: this workspace 4 findings → 0, Fluyt at 365 days 14 → 12 and 6
+cards → 4. Amended in `specs/change-leakage/spec.md` with a scenario, proved by
+`an_entry_file_is_never_named_as_the_interface_whose_importers_follow_it`, and
+documented in the README.
+
+**Rule change 2 — a reach of zero is not a fact.** Fluyt printed `a change here
+reaches 0 files` nine times at its root under `--all` and four times at
+`bow/src/components`, on `hub` cards that fired on fan-out alone: a file that
+imports twenty-two others and is imported by none is a reach candidate whose
+reach is zero. The line states nothing, and this product leaves an immaterial
+fact absent rather than printing it. The candidate table keeps the row; the card
+states no line. Amended in `specs/problem-clustering/spec.md` with a scenario
+and proved inside
+`a_hub_states_its_exact_reach_after_the_degree_that_made_it_fire`.
+
+**Considered and not implemented — suppressing a hidden card under its package
+pair.** On the `history-strength-order` fixture the hidden card `b/main.js ↔
+c/main.js` repeats the operands of the `packages change together · b ↔ c` card
+one level up, because each of those packages holds exactly one file. On real
+repositories the two never coincide: Fluyt carries `bow ↔ stern` at 119 of 389
+commits and four file pairs at 5 to 8 of 14 to 19 — different subjects,
+different numbers, and the file pair is the more specific and more actionable of
+the two. Suppressing the file card would delete the best output the detectors
+produced on the only repository that produces any. The clustering contract is
+that each *finding* is claimed once, and it holds. Recorded in `design.md` with
+the alternative — folding a pair whose operands match its package pair into that
+card as evidence — left as a future option rather than a rule invented at
+calibration time.
+
+**Recorded, not changed — the graph-files denominator.** `A change here can
+reach 17 of 36 files in this package.` counts the files the dependency graph is
+built over, not the files the package holds: `crates/analysis` holds 41 (36 in
+the graph), and on Fluyt `bow` holds 664 against 425, `stern` 707 against 521,
+and `quak/quak-manifests` 50 against 26 — a gap running from a tenth to a half.
+The population is deliberate and shared by both halves of the fraction, which is
+what makes the fraction mean anything, and it is the population every other
+dependency number in the report already counts. The sentence's own words
+nonetheless claim more than that, so the population is now stated in
+`specs/verdict-policy/spec.md` and in the README rather than left implicit. The
+alternative — naming the population inside the sentence — would put a new
+adjective into a frozen head sentence at the last slice, and the wording is a
+locked user decision, so it is raised for review rather than taken here.
+
+**Observed, not changed — fan-in and reach are counted over different graphs.**
+On `crates/analysis/src/lib.rs` the same card reads `32 files import this` and
+`a change here reaches 22 files`, which looks like a contradiction. Fan-in
+counts the verdict graph; reach walks the file cycle graph, which excludes the
+ten same-crate imports that accompany a `mod` declaration as wiring. Both
+numbers are right for their own question and the smaller one follows the larger
+on the card. Moving reach onto the verdict graph would change core size,
+closures, and the candidate set that slices 1 and 2 pinned, so it is recorded
+here for review rather than done at calibration time. On this workspace the card
+is no longer produced at all, because the file is an entry file.
+
+### 6.x Performance and close-out record
+
+- **Diff-mode cost of computed-but-unstated work at `evolution-wide`.** The base
+  commit `6dcdfd1` and this branch, both release builds, over the wide workload
+  with forty files changed in the worktree: allocations 352,945 → 384,328
+  (+31,383, +8.9%) and transient bytes 21,420,106 → 24,290,217 (+2,870,111,
+  +13.4%). A diff report states none of it — no pair, no histogram, no closure,
+  no reach, no core size — and `build_architecture` runs twice, which is why the
+  diff pays nearly twice what the same workload's codebase run pays for facts it
+  does state (247,331 vs 231,292 allocations, +6.9%). In wall time the
+  difference is under the noise floor: two rounds of seven and fifteen samples
+  put the branch between 20 ms faster and 9 ms slower on a ~320 ms diff run.
+- **`evolution-dense` is a two-bulk-commit workload**, not a one-bulk-commit
+  workload: both of its commits touch a hundred files. The delta scenario said
+  one; it now says what the profile does, and the check asserts it.
+- **`EXPECTED_WORK` was stale for every Git-bearing profile.** `evolution-dense`
+  expected 308 inventory visits and produces 304, `small-diff` 112 against 108,
+  and `large-dependency-diff` 1208 against 1204 — each four low, because
+  discovery began honoring `.git/info/exclude` when it moved onto the ignore
+  crate and every Git-bearing workload writes one naming four bookkeeping files.
+  `check-report.py` runs only inside the baseline flow, so nothing had caught it.
+  Corrected with the reason recorded beside the table, and every profile now
+  passes the complete correctness-checked flow.
+- **The evolutionary-finding check read a member that does not exist.** It
+  compared `row["similarity"]` against 0.2, and the report publishes integer
+  operands only, so any workload that produced an evolutionary finding crashed
+  the checker. `evolution-wide` is the first that does. Rewritten as the integer
+  comparison the report's own rule states.
+- **Generated workloads now disable background Git maintenance.** A maintenance
+  run racing the forty commits that build `evolution-wide` left the object store
+  with a missing blob twice in a row, which `git fsck` confirmed; the workload
+  became nondeterministic through no fault of the analysis.
+- **Committed `report_digest` values are stale**, as they were for
+  `earn-the-verdict` and `make-problems-legible`: this change moves report bytes
+  and re-records no release evidence.
+  `scripts/performance/check-baselines.py` validates committed records only, so
+  `just performance-tests` stays green.
+- **The ratchet baseline moves by exactly one deliberate row.** `just gate`
+  reported `0 regressions · 1 improvement` — `crates/output/src/json.rs ·
+  cyclomatic · watch 1 → 0`, earned by the evidence-serialization split in slice
+  5 — and that improvement is ratcheted in with `gate --update` so the slack
+  closes. No other row moved.

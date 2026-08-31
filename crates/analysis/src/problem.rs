@@ -511,12 +511,20 @@ impl<'a> ProblemInput<'a> {
         self
     }
 
-    /// The exact reach of a file inside the bounded candidate set.
+    /// The exact reach of a file inside the bounded candidate set, when that
+    /// reach is worth a line.
+    ///
+    /// A candidate qualifies on either half of its degree, so a file that
+    /// imports many others and is imported by none is a candidate whose reach
+    /// is zero. `a change here reaches 0 files` states nothing, and this
+    /// product leaves an immaterial fact absent rather than printing it, so
+    /// the row exists in the table and the evidence line does not.
     fn exact_reach(&self, file: FileId) -> Option<u32> {
         self.file_reach
             .binary_search_by_key(&file, |reach| reach.file())
             .ok()
             .map(|position| self.file_reach[position].reach())
+            .filter(|&reach| reach > 0)
     }
 
     /// The retained pair one change-leakage finding was decided from.
@@ -1684,6 +1692,11 @@ mod tests {
         let mut bare = imported_file(8);
         bare.reach(1, 41);
         assert_eq!(bare.cluster()[0].evidence(), [ProblemEvidence::FanIn(8)]);
+        // A candidate nothing depends on reaches nothing, and "0 files" states
+        // nothing: the table keeps the row and the card states no line.
+        let mut nothing = imported_file(8);
+        nothing.reach(0, 0);
+        assert_eq!(nothing.cluster()[0].evidence(), [ProblemEvidence::FanIn(8)]);
     }
 
     #[test]

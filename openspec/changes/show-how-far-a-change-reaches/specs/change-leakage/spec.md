@@ -177,6 +177,17 @@ when every one of these holds:
   hidden coupling claims no dependency of any kind exists and therefore reads
   the wider connection graph defined below. Neither admission rule SHALL be
   substituted for the other.
+- `a` is not a conventional entry file. The accepted entry filenames — `lib.rs`,
+  `mod.rs`, `index.ts`, `__init__.py`, and the rest of the list the orphan rule
+  already publishes — name a module's wiring rather than its behavior: the file
+  is a list of declarations and re-exports, so it holds no abstraction that
+  could leak, and its importers change with it because adding an export and
+  using it is one edit. Calibration against two real repositories found this to
+  be the rule's entire real-world output — every leaky finding named a crate
+  root or a module root — so a rule that keeps them names a shape a reader
+  cannot act on. A pair excluded here keeps its dependency and therefore
+  produces no finding of either kind. The follower's own name decides nothing,
+  because the claim is about the interface.
 - `distance(a, b) ≥ LEAKAGE_MIN_DISTANCE = 2`.
 - `shared_commits ≥ LEAKAGE_SHARED_COMMITS = 5`.
 - `shared × 1000 ≥ union × required_permille(distance)`, where
@@ -218,6 +229,10 @@ review can move them in one place.
 #### Scenario: A Rust module owns its child
 - **WHEN** a Rust file declares a child module and the two change together often
 - **THEN** the ownership pair is outside the cycle graph and no finding is created
+
+#### Scenario: A crate root's importers follow it
+- **WHEN** the interface a qualifying pair would name is `lib.rs`, `mod.rs`, `index.ts`, or another conventional entry file
+- **THEN** no finding of either kind is created, because the file is the module's wiring and has no abstraction to leak
 
 ### Requirement: Hidden coupling proves absence, never infers it
 Absence SHALL be proved against one graph, defined here and used by both stages.
