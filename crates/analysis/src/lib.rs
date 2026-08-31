@@ -18,6 +18,7 @@ mod hotspot;
 mod instability;
 mod median;
 mod orphan;
+mod path_probe;
 mod problem;
 mod reachability;
 mod report;
@@ -68,7 +69,7 @@ pub use problem::{
     ProblemPattern, ProblemPolicy, ProblemRank, ProblemVisibility, cluster_problems,
     duplicate_claim,
 };
-pub use reachability::{ReachAnswer, bounded_reaches, largest_component_size, reach_in_counts};
+pub use reachability::{largest_component_size, reach_in_counts};
 pub use size::{SizeFinding, SizeFindingId, SizePolicy, SizeSubject};
 pub use stable_dependencies::{MINIMUM_STABLE_DEPENDENCY_REFERENCES, stable_dependency_findings};
 pub use strongly_connected_components::strongly_connected_components;

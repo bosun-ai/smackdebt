@@ -50,7 +50,14 @@ impl DirectoryTree {
     pub const ROOT: DirectoryId = DirectoryId::from_index(0);
 
     /// Builds the tree over repository-relative file paths, in one visit per
-    /// path component, with the file order the paths arrive in as file identity.
+    /// path component.
+    ///
+    /// **A file's identity is its position in this sequence.** The caller must
+    /// pass every file, in `FileId` order, unfiltered: the tree cannot tell a
+    /// skipped file from a shifted one, so a `.filter()` at the call site would
+    /// silently misalign every directory lookup and every distance that follows
+    /// from it, with no wrong-looking value to notice. Filtering belongs on the
+    /// pairs a signal accumulates, never on the input to this tree.
     ///
     /// A path's last component is its file name, and an empty or `.` component
     /// names the directory it sits in, so the repository scope path `.` and a

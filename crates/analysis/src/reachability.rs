@@ -1,25 +1,18 @@
 use crate::strongly_connected_components;
 use std::collections::VecDeque;
 
-/// What a bounded path probe settled about one ordered pair of nodes.
-///
-/// `Undecided` is a first-class answer rather than a failure: a probe that
-/// spent its whole budget without settling the question proves nothing, and a
-/// finding that claims two files have no dependency between them must never
-/// rest on a search that ran out of room.
-#[derive(Clone, Copy, Debug, Eq, Hash, Ord, PartialEq, PartialOrd)]
-pub enum ReachAnswer {
-    Reaches,
-    Separate,
-    Undecided,
-}
-
-/// How many nodes transitively depend on each node, counting itself.
+/// How many nodes transitively depend on each node, **counting itself**.
 ///
 /// An edge `(source, target)` reads "source depends on target", so a change to
 /// a node travels to the nodes that depend on it and the count answers how far
 /// that change can reach. Cyclic nodes all carry the same count, because every
 /// member of a cycle reaches every other member.
+///
+/// The self-inclusive convention is deliberate and matches the scoped reach
+/// sentences, where a package reachable from eight others reads "9 of 14".
+/// Card evidence states the other convention — "41 files transitively depend
+/// on it" excludes the file itself — so a consumer writing evidence subtracts
+/// one from this count rather than this function stating two things.
 ///
 /// The closure runs over the condensation of the graph in topological order,
 /// with one fixed-width bit set per live component, so its transient memory is
@@ -44,75 +37,6 @@ pub fn largest_component_size(components: &[Vec<usize>]) -> u32 {
         .map(|component| component.len() as u32)
         .max()
         .unwrap_or(0)
-}
-
-/// Whether a path leads from `from` to `to`, within a node budget.
-///
-/// The walk starts at `to` and follows incoming edges breadth first, so it
-/// explores only what can reach the target. It visits at most `budget` nodes
-/// and answers `Separate` only after exhausting the whole set that reaches
-/// `to`, so absence is proved rather than inferred: a walk that runs out of
-/// budget answers `Undecided` instead. Neighbours are visited in node order, so
-/// a tight budget settles the same question the same way on every run.
-pub fn bounded_reaches(
-    node_count: usize,
-    edges: &[(usize, usize)],
-    from: usize,
-    to: usize,
-    budget: usize,
-) -> ReachAnswer {
-    if from >= node_count || to >= node_count {
-        return ReachAnswer::Separate;
-    }
-    if from == to {
-        return ReachAnswer::Reaches;
-    }
-    walk_back(&incoming_nodes(node_count, edges), from, to, budget)
-}
-
-/// The nodes with an edge into each node, in node order.
-fn incoming_nodes(node_count: usize, edges: &[(usize, usize)]) -> Vec<Vec<usize>> {
-    let mut incoming: Vec<Vec<usize>> = vec![Vec::new(); node_count];
-    let inside = edges
-        .iter()
-        .filter(|&&(source, target)| source < node_count && target < node_count);
-    for &(source, target) in inside {
-        incoming[target].push(source);
-    }
-    for sources in incoming.iter_mut() {
-        sources.sort_unstable();
-        sources.dedup();
-    }
-    incoming
-}
-
-/// Walks back from `to` until it meets `from`, exhausts what reaches `to`, or
-/// spends its node budget.
-fn walk_back(incoming: &[Vec<usize>], from: usize, to: usize, budget: usize) -> ReachAnswer {
-    if budget == 0 {
-        return ReachAnswer::Undecided;
-    }
-    let mut visited = vec![false; incoming.len()];
-    visited[to] = true;
-    let mut seen = 1;
-    let mut pending = VecDeque::from([to]);
-    while let Some(node) = pending.pop_front() {
-        for &source in &incoming[node] {
-            if visited[source] {
-                continue;
-            }
-            if seen == budget {
-                return ReachAnswer::Undecided;
-            }
-            visited[source] = true;
-            seen += 1;
-            if source == from {
-                return ReachAnswer::Reaches;
-            }
-            pending.push_back(source);
-        }
-    }
-    ReachAnswer::Separate
 }
 
 /// The acyclic graph of a graph's strongly connected components.
@@ -332,47 +256,5 @@ mod tests {
         let components = strongly_connected_components(5, &[(0, 1), (1, 0), (2, 3), (3, 2)]);
         assert_eq!(largest_component_size(&components), 2);
         assert_eq!(largest_component_size(&[]), 0);
-    }
-
-    #[test]
-    fn nodes_with_no_path_between_them_are_separate() {
-        assert_eq!(
-            bounded_reaches(4, &[(0, 1), (2, 3)], 0, 3, 4_096),
-            ReachAnswer::Separate
-        );
-    }
-
-    #[test]
-    fn a_three_hop_path_reaches() {
-        let edges = [(0, 1), (1, 2), (2, 3)];
-        assert_eq!(
-            bounded_reaches(4, &edges, 0, 3, 4_096),
-            ReachAnswer::Reaches
-        );
-        // The walk follows the edge direction, so the far end reaches nothing.
-        assert_eq!(
-            bounded_reaches(4, &edges, 3, 0, 4_096),
-            ReachAnswer::Separate
-        );
-        assert_eq!(bounded_reaches(4, &edges, 2, 2, 0), ReachAnswer::Reaches);
-    }
-
-    #[test]
-    fn a_budget_one_node_short_of_the_answer_is_undecided() {
-        let edges = [(0, 1), (1, 2), (2, 3)];
-        // Reaching 3 from 0 walks four nodes, so a budget of four settles it
-        // and a budget of three runs out with the question open.
-        assert_eq!(bounded_reaches(4, &edges, 0, 3, 4), ReachAnswer::Reaches);
-        assert_eq!(bounded_reaches(4, &edges, 0, 3, 3), ReachAnswer::Undecided);
-        // Separate is only ever answered by exhausting the reachable set, so
-        // the same one-node-short budget leaves absence unproved.
-        assert_eq!(
-            bounded_reaches(4, &[(0, 1), (2, 3)], 2, 1, 2),
-            ReachAnswer::Separate
-        );
-        assert_eq!(
-            bounded_reaches(4, &[(0, 1), (2, 3)], 2, 1, 1),
-            ReachAnswer::Undecided
-        );
     }
 }

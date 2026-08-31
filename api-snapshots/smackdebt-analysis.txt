@@ -167,10 +167,6 @@ pub enum smackdebt_analysis::Rating
 pub smackdebt_analysis::Rating::Healthy
 pub smackdebt_analysis::Rating::High
 pub smackdebt_analysis::Rating::Watch
-pub enum smackdebt_analysis::ReachAnswer
-pub smackdebt_analysis::ReachAnswer::Reaches
-pub smackdebt_analysis::ReachAnswer::Separate
-pub smackdebt_analysis::ReachAnswer::Undecided
 pub enum smackdebt_analysis::ReportMode
 pub smackdebt_analysis::ReportMode::Codebase
 pub smackdebt_analysis::ReportMode::Diff
@@ -1071,7 +1067,6 @@ pub const smackdebt_analysis::WORN_PERMILLE: u32
 pub const smackdebt_analysis::WORST_OFFENDER_LIMIT: usize
 pub fn smackdebt_analysis::aggregate_comparisons(&mut [smackdebt_analysis::Scope], &[smackdebt_analysis::Comparison], smackdebt_analysis::ScopeId)
 pub fn smackdebt_analysis::aggregate_scopes(&mut [smackdebt_analysis::Scope], &[smackdebt_analysis::FileRecord], smackdebt_analysis::ScopeId)
-pub fn smackdebt_analysis::bounded_reaches(usize, &[(usize, usize)], usize, usize, usize) -> smackdebt_analysis::ReachAnswer
 pub fn smackdebt_analysis::change_coupling(&[smackdebt_analysis::HistoryCommitFact], &smackdebt_analysis::PackageContainment) -> alloc::vec::Vec<smackdebt_analysis::ChangeCoupling>
 pub fn smackdebt_analysis::churn(usize, usize, &[smackdebt_analysis::HistoryCommitFact]) -> (alloc::vec::Vec<smackdebt_analysis::FileHistory>, alloc::vec::Vec<smackdebt_analysis::PackageHistory>)
 pub fn smackdebt_analysis::cluster_problems(smackdebt_analysis::ProblemInput<'_>) -> alloc::vec::Vec<smackdebt_analysis::ProblemCard>
