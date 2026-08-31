@@ -40,6 +40,7 @@
     "size_findings",
     "orphan_files",
     "file_change_coupling",
+    "change_leakage_findings",
     "package_closures",
     "file_reach",
     "problems"
@@ -239,6 +240,12 @@
       "type": "array",
       "items": {
         "$ref": "#/$defs/file_change_coupling"
+      }
+    },
+    "change_leakage_findings": {
+      "type": "array",
+      "items": {
+        "$ref": "#/$defs/change_leakage_finding"
       }
     },
     "package_closures": {
@@ -2091,6 +2098,46 @@
       },
       "additionalProperties": false
     },
+    "change_leakage_finding": {
+      "oneOf": [
+        {
+          "type": "object",
+          "required": [
+            "kind",
+            "coupling",
+            "interface"
+          ],
+          "properties": {
+            "kind": {
+              "const": "leaky_interface"
+            },
+            "coupling": {
+              "$ref": "#/$defs/index"
+            },
+            "interface": {
+              "$ref": "#/$defs/index"
+            }
+          },
+          "additionalProperties": false
+        },
+        {
+          "type": "object",
+          "required": [
+            "kind",
+            "coupling"
+          ],
+          "properties": {
+            "kind": {
+              "const": "hidden_coupling"
+            },
+            "coupling": {
+              "$ref": "#/$defs/index"
+            }
+          },
+          "additionalProperties": false
+        }
+      ]
+    },
     "package_closure": {
       "type": "object",
       "required": [
@@ -2334,7 +2381,9 @@
             "shotgun_pair",
             "bus_risk",
             "unstable_dependency",
-            "measured"
+            "measured",
+            "leaky_interface",
+            "hidden_coupling"
           ]
         },
         "rating": {
@@ -2476,7 +2525,8 @@
                 "hot",
                 "rated_units",
                 "members",
-                "reach_in"
+                "reach_in",
+                "followers"
               ]
             },
             "value": {
@@ -2511,7 +2561,8 @@
         "architecture_findings",
         "stable_dependency_findings",
         "evolutionary_findings",
-        "knowledge_concentration_findings"
+        "knowledge_concentration_findings",
+        "change_leakage_findings"
       ]
     }
   }

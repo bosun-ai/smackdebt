@@ -161,10 +161,19 @@ makes a stage-one *separate* answer decisive — a verdict-graph matrix is a
 subset, so its "separate" could be overturned by an ownership edge the wider
 graph admits, and every stage-one hit would have to fall through to the probes
 anyway. The cost is one extra closure over the package graph, which has tens of
-nodes where the file graph has thousands. Stage two is two budgeted reverse
-breadth-first searches over the connection graph, each bounded at
-`PATH_PROBE_NODES`; a probe that exhausts its budget answers *undecided*, and an
-undecided probe produces no finding.
+nodes where the file graph has thousands. Because that projection is symmetric,
+its condensation has no edge between components and the matrix is one component
+label per package rather than a bit set per package: two packages reach each
+other exactly when their labels agree.
+
+Stage two is one budgeted breadth-first walk over the connection graph, bounded
+at `PATH_PROBE_NODES`; a walk that exhausts its budget answers *undecided*, and
+an undecided walk produces no finding. One walk answers for both directions
+because the graph holds both directions of travel, so exhausting everything that
+reaches one end without meeting the other proves absence both ways. A walk per
+direction was specified first and would buy no proof: the second walk explores
+the other end's side of the same relation, and its only effect is to withhold a
+finding whenever that side alone exceeds the budget.
 
 The alternative — treat "no path found within budget" as "no path" — would make
 the strongest claim in the product on the weakest evidence, and it would make

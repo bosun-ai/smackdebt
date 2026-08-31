@@ -11,21 +11,22 @@ use std::sync::{Arc, Mutex, mpsc};
 use rayon::prelude::*;
 use smackdebt_analysis::{
     ArchitectureComparison, ArchitectureComparisonId, ArchitectureFinding, ArchitectureFindingId,
-    ArchitectureFindingKind, ArchitectureGraph, ArchitectureReportFacts, Comparison, ComparisonId,
-    ContributorId, CoreSize, Coverage, DependencyCoverage, DependencyEdge, DependencyEdgeId,
-    DependencySyntax, DependencySyntaxState, Diagnostic, DiagnosticId, DiagnosticKind,
-    DirectoryTree, EvolutionAccumulator, ExternalDependency, FileActivity, FileAnalysis, FileDebt,
-    FileId, FileReach, FileRecord, Finding, FindingId, HealthAssessment, HealthCounts,
-    HealthPolicy, HistoryAvailability, HistoryChangeFact, HistoryCommitFact, HistoryCoverage,
-    HistoryWindow, HotspotPolicy, Language, ModuleDeclaration, OrphanCandidate, OrphanFile,
-    PackageClosure, PackageContainment, PackageEdge, PackageEdgeId, PackageGraphMeasurement,
-    PackageId, PackageRecord, ParseStatus, Rating, Report, ReportBuilder as AnalysisReportBuilder,
-    ReportMode, ResolutionDiagnostic, ResolutionIssueKind, Scope, ScopeId, ScopeKind, SizeFinding,
-    SizePolicy, SourceCoverageOutcome, SourceRole, SourceTrust, StableDependencyFinding,
+    ArchitectureFindingKind, ArchitectureGraph, ArchitectureReportFacts, ChangeGraph,
+    ChangeLeakageFinding, Comparison, ComparisonId, ConnectionGraph, ContributorId, CoreSize,
+    Coverage, DependencyCoverage, DependencyEdge, DependencyEdgeId, DependencySyntax,
+    DependencySyntaxState, Diagnostic, DiagnosticId, DiagnosticKind, DirectoryTree,
+    EvolutionAccumulator, ExternalDependency, FileActivity, FileAnalysis, FileDebt, FileId,
+    FileReach, FileRecord, Finding, FindingId, HealthAssessment, HealthCounts, HealthPolicy,
+    HistoryAvailability, HistoryChangeFact, HistoryCommitFact, HistoryCoverage, HistoryWindow,
+    HotspotPolicy, Language, ModuleDeclaration, OrphanCandidate, OrphanFile, PackageClosure,
+    PackageContainment, PackageEdge, PackageEdgeId, PackageGraphMeasurement, PackageId,
+    PackageRecord, ParseStatus, Rating, Report, ReportBuilder as AnalysisReportBuilder, ReportMode,
+    ResolutionDiagnostic, ResolutionIssueKind, Scope, ScopeId, ScopeKind, SizeFinding, SizePolicy,
+    SourceCoverageOutcome, SourceRole, SourceTrust, StableDependencyFinding, change_leakage,
     close_over_packages, compare_architecture, compare_units, cycle_witness, dependency_degree,
-    enters_file_graph, file_reaches, graph_file_count, largest_component_size, orphan_files,
-    reach_in_counts, stable_dependency_findings, strongly_connected_components,
-    test_declared_files,
+    enters_connection_graph, enters_file_graph, file_reaches, graph_file_count,
+    largest_component_size, orphan_files, reach_in_counts, stable_dependency_findings,
+    strongly_connected_components, test_declared_files,
 };
 use smackdebt_discovery::{DiscoveredFile, Inventory, generic_source_roles, glob_matches};
 use smackdebt_git::{Change, ContributorIdentity, GitRepository};
@@ -2363,6 +2364,11 @@ impl<'a> CodebaseReportBuilder<'a> {
             &explanation_pairs,
             None,
         );
+        // The dependency join runs once, here, where the retained pairs and the
+        // graphs both exist: history streamed before the graph was built, so
+        // pair accumulation was graph-blind and this is the first point at
+        // which a pair can be asked what depends on what.
+        let change_leakage_findings = leakage_findings(&architecture, &evolution);
         // The scope join runs once, here, where the one directory tree the
         // histograms were filed under is still in scope: a rendered scope then
         // reads a table position rather than a tree.
@@ -2414,6 +2420,7 @@ impl<'a> CodebaseReportBuilder<'a> {
         builder.set_stable_dependency_findings(architecture.stable_dependencies);
         builder.set_size_findings(self.size_findings);
         builder.set_evolution(evolution);
+        builder.set_change_leakage_findings(change_leakage_findings);
         builder.set_explanation_pairs(explanation_pairs);
         for finding in evolutionary_findings {
             let pair = finding.coupling();
@@ -2447,6 +2454,23 @@ impl<'a> CodebaseReportBuilder<'a> {
     }
 }
 
+/// Joins the retained file pairs with the graphs the architecture build
+/// carried out, which is the whole of what the change-leakage capability adds
+/// to composition: no table is walked twice and no graph is rebuilt.
+fn leakage_findings(
+    architecture: &ArchitectureBuild,
+    evolution: &smackdebt_analysis::EvolutionaryReportFacts,
+) -> Vec<ChangeLeakageFinding> {
+    change_leakage(
+        evolution.file_coupling(),
+        &ChangeGraph::new(
+            &architecture.cycle_pairs,
+            &architecture.connections,
+            &architecture.graph_packages,
+        ),
+    )
+}
+
 struct ArchitectureBuild {
     coverage: DependencyCoverage,
     orphans: Vec<OrphanFile>,
@@ -2471,6 +2495,14 @@ struct ArchitectureBuild {
     file_reach: Vec<FileReach>,
     /// The largest file dependency cycle, when it is material.
     core_size: Option<CoreSize>,
+    /// The imports that enter the file dependency cycle graph, which the
+    /// leaky-interface rule reads.
+    cycle_pairs: Vec<(usize, usize)>,
+    /// The wider graph the hidden-coupling rule proves absence against, with
+    /// its package closure derived once.
+    connections: ConnectionGraph,
+    /// The package of every file that enters the file dependency graph.
+    graph_packages: Vec<Option<PackageId>>,
 }
 
 #[derive(Clone)]
@@ -3247,6 +3279,22 @@ fn build_architecture(
         manifest_names,
         &index,
     );
+    // Absence is proved against a wider graph than the cycle graph: every
+    // `uses` and every `module_ownership` relation between two graph files, in
+    // both directions of travel. It is built here, beside the cycle graph it
+    // must never be confused with, and carried to the change-leakage join.
+    let connection_relations: Vec<_> = file_edges
+        .iter()
+        .filter(|edge| enters_connection_graph(edge, files))
+        .map(|edge| (edge.source().index(), edge.target().index()))
+        .collect();
+    let graph_packages = graph_packages(files);
+    let connections = ConnectionGraph::new(
+        files.len(),
+        package_count,
+        &connection_relations,
+        &graph_packages,
+    );
     // The components the cycle findings are made of are also the core and the
     // reach candidates, so they are retained rather than recomputed.
     let file_components = strongly_connected_components(files.len(), &file_pairs);
@@ -3254,7 +3302,7 @@ fn build_architecture(
         largest_component_size(&file_components),
         graph_file_count(files),
     );
-    let closures = close_over_packages(package_count, &graph_packages(files), &file_pairs);
+    let closures = close_over_packages(package_count, &graph_packages, &file_pairs);
     let file_reach = file_reaches(files, &file_components, &file_pairs);
     for component in file_components
         .iter()
@@ -3311,6 +3359,9 @@ fn build_architecture(
         skipped_closures: closures.skipped().to_vec(),
         file_reach,
         core_size,
+        cycle_pairs: file_pairs,
+        connections,
+        graph_packages,
     }
 }
 

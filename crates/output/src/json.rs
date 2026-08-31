@@ -15,9 +15,9 @@ use crate::output::{
     scope_kind,
 };
 use smackdebt_analysis::{
-    ClaimedFinding, FileChangeCoupling, FileReach, Hotspot, KnowledgeConcentrationFinding,
-    OrphanFile, PackageClosure, ProblemAnchor, ProblemCard, ProblemEvidence, SizeFinding,
-    SizeSubject, StableDependencyFinding, Verdict, WorstOffender,
+    ChangeLeakageFinding, ClaimedFinding, FileChangeCoupling, FileReach, Hotspot,
+    KnowledgeConcentrationFinding, OrphanFile, PackageClosure, ProblemAnchor, ProblemCard,
+    ProblemEvidence, SizeFinding, SizeSubject, StableDependencyFinding, Verdict, WorstOffender,
 };
 
 /// Streams JSON schema version 4 without cloning report strings or arrays.
@@ -133,6 +133,10 @@ impl Serialize for ReportView<'_> {
         map.serialize_entry(
             "file_change_coupling",
             &FileChangeCouplingRecords(report.file_change_coupling()),
+        )?;
+        map.serialize_entry(
+            "change_leakage_findings",
+            &ChangeLeakageFindings(report.change_leakage_findings()),
         )?;
         map.serialize_entry(
             "package_closures",
@@ -688,6 +692,35 @@ impl Serialize for FileChangeCouplingView {
         map.serialize_entry("shared_commits", &self.0.shared_commits())?;
         map.serialize_entry("union_commits", &self.0.union_commits())?;
         map.serialize_entry("distance", &self.0.distance())?;
+        map.end()
+    }
+}
+/// What the change-leakage join decided about those pairs, in the order the
+/// rules define.
+///
+/// A row links the pair it was decided from rather than restating its
+/// operands, and carries no reference count, relation kind, resolution
+/// outcome, or edge identity: the finding is a statement about design, and the
+/// relation tables remain the place a consumer reads relations.
+struct ChangeLeakageFindings<'a>(&'a [ChangeLeakageFinding]);
+impl Serialize for ChangeLeakageFindings<'_> {
+    fn serialize<S: Serializer>(&self, serializer: S) -> Result<S::Ok, S::Error> {
+        let mut sequence = serializer.serialize_seq(Some(self.0.len()))?;
+        for finding in self.0 {
+            sequence.serialize_element(&ChangeLeakageFindingView(*finding))?;
+        }
+        sequence.end()
+    }
+}
+struct ChangeLeakageFindingView(ChangeLeakageFinding);
+impl Serialize for ChangeLeakageFindingView {
+    fn serialize<S: Serializer>(&self, serializer: S) -> Result<S::Ok, S::Error> {
+        let mut map = serializer.serialize_map(Some(3))?;
+        map.serialize_entry("kind", self.0.kind().id())?;
+        map.serialize_entry("coupling", &self.0.coupling().get())?;
+        if let Some(interface) = self.0.interface() {
+            map.serialize_entry("interface", &interface.get())?;
+        }
         map.end()
     }
 }
@@ -1550,63 +1583,55 @@ impl Serialize for ProblemEvidenceList<'_> {
 ///
 /// A fact that links a finding names the table it indexes, so a consumer
 /// resolves it with one lookup; a fact the report already measured carries its
-/// integer instead.
+/// integer instead. Two functions partition the vocabulary between those two
+/// shapes, so a kind neither of them classifies writes no member at all and
+/// schema validation fails rather than a wrong kind being invented.
 struct ProblemEvidenceView(ProblemEvidence);
 impl Serialize for ProblemEvidenceView {
     fn serialize<S: Serializer>(&self, serializer: S) -> Result<S::Ok, S::Error> {
         let mut map = serializer.serialize_map(Some(2))?;
-        match self.0 {
-            ProblemEvidence::Finding(id) => {
-                map.serialize_entry("kind", "findings")?;
-                map.serialize_entry("index", &id.get())?;
+        match (linked_finding(self.0), measured_fact(self.0)) {
+            (Some((table, index)), _) => {
+                map.serialize_entry("kind", table)?;
+                map.serialize_entry("index", &index)?;
             }
-            ProblemEvidence::Size(id) => {
-                map.serialize_entry("kind", "size_findings")?;
-                map.serialize_entry("index", &id.get())?;
-            }
-            ProblemEvidence::Architecture(id) => {
-                map.serialize_entry("kind", "architecture_findings")?;
-                map.serialize_entry("index", &id.get())?;
-            }
-            ProblemEvidence::StableDependency(id) => {
-                map.serialize_entry("kind", "stable_dependency_findings")?;
-                map.serialize_entry("index", &id.get())?;
-            }
-            ProblemEvidence::Coupling(id) => {
-                map.serialize_entry("kind", "evolutionary_findings")?;
-                map.serialize_entry("index", &id.get())?;
-            }
-            ProblemEvidence::Knowledge(id) => {
-                map.serialize_entry("kind", "knowledge_concentration_findings")?;
-                map.serialize_entry("index", &id.get())?;
-            }
-            ProblemEvidence::FanIn(value) => {
-                map.serialize_entry("kind", "fan_in")?;
+            (None, Some((kind, value))) => {
+                map.serialize_entry("kind", kind)?;
                 map.serialize_entry("value", &value)?;
             }
-            ProblemEvidence::FanOut(value) => {
-                map.serialize_entry("kind", "fan_out")?;
-                map.serialize_entry("value", &value)?;
-            }
-            ProblemEvidence::Hot(value) => {
-                map.serialize_entry("kind", "hot")?;
-                map.serialize_entry("value", &value)?;
-            }
-            ProblemEvidence::RatedUnits(value) => {
-                map.serialize_entry("kind", "rated_units")?;
-                map.serialize_entry("value", &value)?;
-            }
-            ProblemEvidence::Members(value) => {
-                map.serialize_entry("kind", "members")?;
-                map.serialize_entry("value", &value)?;
-            }
-            ProblemEvidence::ReachIn(value) => {
-                map.serialize_entry("kind", "reach_in")?;
-                map.serialize_entry("value", &value)?;
-            }
+            (None, None) => {}
         }
         map.end()
     }
+}
+
+/// The table one evidence link indexes and the position it names, which is the
+/// same table a claim of that finding names.
+const fn linked_finding(fact: ProblemEvidence) -> Option<(&'static str, u32)> {
+    Some(match fact {
+        ProblemEvidence::Finding(id) => ("findings", id.get()),
+        ProblemEvidence::Size(id) => ("size_findings", id.get()),
+        ProblemEvidence::Architecture(id) => ("architecture_findings", id.get()),
+        ProblemEvidence::StableDependency(id) => ("stable_dependency_findings", id.get()),
+        ProblemEvidence::Coupling(id) => ("evolutionary_findings", id.get()),
+        ProblemEvidence::Knowledge(id) => ("knowledge_concentration_findings", id.get()),
+        ProblemEvidence::ChangeLeakage(id) => ("change_leakage_findings", id.get()),
+        _ => return None,
+    })
+}
+
+/// The kind one measured fact names and the integer it carries.
+const fn measured_fact(fact: ProblemEvidence) -> Option<(&'static str, u32)> {
+    Some(match fact {
+        ProblemEvidence::FanIn(value) => ("fan_in", value),
+        ProblemEvidence::FanOut(value) => ("fan_out", value),
+        ProblemEvidence::Hot(value) => ("hot", value),
+        ProblemEvidence::RatedUnits(value) => ("rated_units", value),
+        ProblemEvidence::Members(value) => ("members", value),
+        ProblemEvidence::ReachIn(value) => ("reach_in", value),
+        ProblemEvidence::Followers(value) => ("followers", value),
+        _ => return None,
+    })
 }
 
 /// The findings one card claimed, each naming the table it indexes and its
@@ -1632,6 +1657,7 @@ impl Serialize for ClaimedFindingView {
             ClaimedFinding::StableDependency(id) => ("stable_dependency_findings", id.get()),
             ClaimedFinding::Coupling(id) => ("evolutionary_findings", id.get()),
             ClaimedFinding::Knowledge(id) => ("knowledge_concentration_findings", id.get()),
+            ClaimedFinding::ChangeLeakage(id) => ("change_leakage_findings", id.get()),
         };
         let mut map = serializer.serialize_map(Some(2))?;
         map.serialize_entry("table", table)?;

@@ -1,0 +1,268 @@
+use std::cmp::Reverse;
+use std::collections::BTreeSet;
+
+use crate::{
+    ConnectionGraph, FileChangeCoupling, FileChangeCouplingId, FileId, PackageId, PathProbe,
+    Rating, ReachAnswer,
+};
+
+macro_rules! leakage_index {
+    ($(#[$documentation:meta])* $name:ident) => {
+        $(#[$documentation])*
+        #[derive(Clone, Copy, Debug, Eq, Hash, Ord, PartialEq, PartialOrd)]
+        pub struct $name(u32);
+
+        impl $name {
+            /// Creates an index from a table position.
+            pub const fn from_index(index: usize) -> Self {
+                Self(index as u32)
+            }
+
+            /// Returns the table position represented by this index.
+            pub const fn index(self) -> usize {
+                self.0 as usize
+            }
+
+            /// Returns the compact integer representation.
+            pub const fn get(self) -> u32 {
+                self.0
+            }
+        }
+    };
+}
+
+leakage_index!(
+    /// The identity of one change-leakage finding, which is its position in
+    /// the report's change-leakage finding table.
+    ChangeLeakageFindingId
+);
+
+/// The directories two files sit apart before either rule may name them.
+///
+/// This is a proposed constant under review.
+pub const LEAKAGE_MIN_DISTANCE: u32 = 2;
+
+/// The commits a pair must share before either rule may name it.
+///
+/// This is a proposed constant under review.
+pub const LEAKAGE_SHARED_COMMITS: u32 = 5;
+
+/// The share of its union, in permille, a pair at the minimum distance must
+/// reach.
+///
+/// This is a proposed constant under review.
+pub const LEAKAGE_SIMILARITY_PERMILLE: u32 = 400;
+
+/// The permille the similarity bar falls for each directory beyond the
+/// minimum distance.
+///
+/// This is a proposed constant under review.
+pub const LEAKAGE_SIMILARITY_STEP_PERMILLE: u32 = 50;
+
+/// The share of its union, in permille, no distance lowers the bar below.
+///
+/// This is a proposed constant under review.
+pub const LEAKAGE_SIMILARITY_FLOOR_PERMILLE: u32 = 200;
+
+/// The nodes one path probe may visit before it answers undecided.
+///
+/// This is a proposed constant under review.
+pub const PATH_PROBE_NODES: usize = 4_096;
+
+/// The share of its union a pair that many directories apart must reach.
+///
+/// Distance buys severity by lowering the similarity bar: two files far apart
+/// that change together at all is a stronger statement than two neighbours
+/// that change together often.
+pub const fn required_permille(distance: u32) -> u32 {
+    let steps = distance.saturating_sub(LEAKAGE_MIN_DISTANCE);
+    let bar = LEAKAGE_SIMILARITY_PERMILLE
+        .saturating_sub(steps.saturating_mul(LEAKAGE_SIMILARITY_STEP_PERMILLE));
+    if bar < LEAKAGE_SIMILARITY_FLOOR_PERMILLE {
+        LEAKAGE_SIMILARITY_FLOOR_PERMILLE
+    } else {
+        bar
+    }
+}
+
+/// What one change-leakage finding says about the pair it was decided from.
+#[derive(Clone, Copy, Debug, Eq, Hash, Ord, PartialEq, PartialOrd)]
+pub enum ChangeLeakageKind {
+    /// The importers of one file follow its changes.
+    LeakyInterface,
+    /// Two files change together with no dependency either way.
+    HiddenCoupling,
+}
+
+impl ChangeLeakageKind {
+    /// The frozen machine id, which no renderer may rename or compose.
+    pub const fn id(self) -> &'static str {
+        match self {
+            Self::LeakyInterface => "leaky_interface",
+            Self::HiddenCoupling => "hidden_coupling",
+        }
+    }
+}
+
+/// One statement about a retained pair, which the join decided and no
+/// measurement produced.
+#[derive(Clone, Copy, Debug, Eq, Hash, Ord, PartialEq, PartialOrd)]
+pub struct ChangeLeakageFinding {
+    kind: ChangeLeakageKind,
+    coupling: FileChangeCouplingId,
+    interface: Option<FileId>,
+}
+
+impl ChangeLeakageFinding {
+    /// A finding naming the file whose importers follow it.
+    pub const fn leaky(coupling: FileChangeCouplingId, interface: FileId) -> Self {
+        Self {
+            kind: ChangeLeakageKind::LeakyInterface,
+            coupling,
+            interface: Some(interface),
+        }
+    }
+
+    /// A finding naming a pair no dependency explains.
+    pub const fn hidden(coupling: FileChangeCouplingId) -> Self {
+        Self {
+            kind: ChangeLeakageKind::HiddenCoupling,
+            coupling,
+            interface: None,
+        }
+    }
+
+    pub const fn kind(self) -> ChangeLeakageKind {
+        self.kind
+    }
+
+    /// The retained pair this finding was decided from.
+    pub const fn coupling(self) -> FileChangeCouplingId {
+        self.coupling
+    }
+
+    /// The file whose importers follow it, which only a leaky interface has.
+    pub const fn interface(self) -> Option<FileId> {
+        self.interface
+    }
+
+    /// Every leakage finding is rated Watch, so the card it reaches carries a
+    /// word a reader already knows.
+    pub const fn rating(self) -> Rating {
+        Rating::Watch
+    }
+}
+
+/// The graphs one join reads: the file dependency cycle graph the leaky rule
+/// admits, and the connection graph absence is proved against.
+///
+/// Both are borrowed and neither is derived here, so the join stays a pure
+/// function of tables the report already holds.
+pub struct ChangeGraph<'a> {
+    imports: BTreeSet<(usize, usize)>,
+    connections: &'a ConnectionGraph,
+    packages: &'a [Option<PackageId>],
+}
+
+impl<'a> ChangeGraph<'a> {
+    /// Prepares one join over the cycle-graph edges, the connection graph, and
+    /// the package of every file the file dependency graph holds.
+    pub fn new(
+        cycle_edges: &[(usize, usize)],
+        connections: &'a ConnectionGraph,
+        packages: &'a [Option<PackageId>],
+    ) -> Self {
+        Self {
+            imports: cycle_edges.iter().copied().collect(),
+            connections,
+            packages,
+        }
+    }
+
+    /// Whether one file depends on another through an edge that enters the
+    /// file dependency cycle graph.
+    fn imports(&self, source: FileId, target: FileId) -> bool {
+        self.imports.contains(&(source.index(), target.index()))
+    }
+
+    fn package(&self, file: FileId) -> Option<PackageId> {
+        self.packages.get(file.index()).copied().flatten()
+    }
+
+    /// Whether no path connects the two files in either direction over the
+    /// connection graph, proved in two stages.
+    ///
+    /// The package connection matrix answers first and answers only
+    /// *separate*. Otherwise one budgeted walk settles it: the connection
+    /// graph holds both directions of travel, so a walk that exhausts
+    /// everything reaching the second file without meeting the first has
+    /// proved absence in both directions, and a second walk could only repeat
+    /// the answer under a different budget. A walk that spends its whole
+    /// budget answers undecided, which proves nothing and creates nothing.
+    fn proves_separate(&self, pair: FileChangeCoupling, probe: &mut Option<PathProbe>) -> bool {
+        if self
+            .connections
+            .separates(self.package(pair.left()), self.package(pair.right()))
+        {
+            return true;
+        }
+        let probe = probe.get_or_insert_with(|| self.connections.probe());
+        probe.reaches(pair.left().index(), pair.right().index(), PATH_PROBE_NODES)
+            == ReachAnswer::Separate
+    }
+}
+
+/// Joins the retained pairs with the dependency graph into leakage findings.
+///
+/// This creates no measurement and rates no unit: it decides which
+/// already-measured pairs are worth naming. Both rules read the same distance,
+/// support, and distance-scaled similarity gates, and differ only in the graph
+/// they read and in what they claim about it.
+pub fn change_leakage(
+    pairs: &[FileChangeCoupling],
+    graph: &ChangeGraph<'_>,
+) -> Vec<ChangeLeakageFinding> {
+    let mut findings = Vec::new();
+    let mut probe = None;
+    for (position, pair) in pairs.iter().enumerate() {
+        if !qualifies(*pair) {
+            continue;
+        }
+        let coupling = FileChangeCouplingId::from_index(position);
+        match (
+            graph.imports(pair.left(), pair.right()),
+            graph.imports(pair.right(), pair.left()),
+        ) {
+            // A mutual dependency is a cycle, and the cycle finding already
+            // names it.
+            (true, true) => {}
+            (true, false) => findings.push(ChangeLeakageFinding::leaky(coupling, pair.right())),
+            (false, true) => findings.push(ChangeLeakageFinding::leaky(coupling, pair.left())),
+            (false, false) => {
+                if graph.proves_separate(*pair, &mut probe) {
+                    findings.push(ChangeLeakageFinding::hidden(coupling));
+                }
+            }
+        }
+    }
+    findings.sort_by_key(|finding| {
+        let pair = pairs[finding.coupling().index()];
+        (
+            finding.kind(),
+            Reverse(pair.distance()),
+            Reverse(pair.shared_commits()),
+            pair.left(),
+            pair.right(),
+        )
+    });
+    findings
+}
+
+/// Whether a pair clears the distance, support, and distance-scaled
+/// similarity gates both rules share.
+fn qualifies(pair: FileChangeCoupling) -> bool {
+    pair.distance() >= LEAKAGE_MIN_DISTANCE
+        && pair.shared_commits() >= LEAKAGE_SHARED_COMMITS
+        && u64::from(pair.shared_commits()) * 1_000
+            >= u64::from(pair.union_commits()) * u64::from(required_permille(pair.distance()))
+}

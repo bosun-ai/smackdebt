@@ -3,15 +3,17 @@ smackdebt · repository root
 0 high · 0 watch · 0 checked
 
 PROBLEMS
-  watch changes together · a ↔ b
+  watch packages change together · a ↔ b
         changed together in 4 of 10 commits · 40% · no code dependency
-  watch changes together · b ↔ c
+  watch packages change together · b ↔ c
         changed together in 7 of 14 commits · 50% · no code dependency
-  watch changes together · c ↔ d
+  watch packages change together · c ↔ d
         changed together in 5 of 14 commits · 36% · no code dependency
-  watch changes together · d ↔ e
+  watch packages change together · d ↔ e
         changed together in 4 of 8 commits · 50% · no code dependency
   watch one author · b
         one contributor made 10 of 10 commits
   watch one author · c
         one contributor made 11 of 11 commits
+  watch change together without a dependency · b/main.js ↔ c/main.js
+        changed together in 7 of 14 commits · 50% · no dependency either way · 2 directories away

@@ -22,6 +22,7 @@ macro_rules! evolution_index {
 
 evolution_index!(ContributorId);
 evolution_index!(EvolutionaryFindingId);
+evolution_index!(FileChangeCouplingId);
 evolution_index!(EvolutionaryComparisonId);
 evolution_index!(KnowledgeConcentrationFindingId);
 

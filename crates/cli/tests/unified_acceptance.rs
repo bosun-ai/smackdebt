@@ -15,11 +15,12 @@ use support::edges::assert_no_dependency_edge_rows;
 use support::hermetic::hermetic_env;
 use support::{
     GeneratedRepository, Invocation, amplification_repository, bulk_commit_repository,
-    copy_language_truth_files, core_repository, deepened_signal_repository, evolution_repository,
-    module_wiring_repository, propagation_repository, ref_diff_repository,
-    rust_test_scope_repository, shallow_clone, signal_table_repository, source_role_repository,
-    stable_dependency_repository, static_architecture_repository, test_scoped_workspace_repository,
-    wide_directory_repository, workspace_manifest_repository, worktree_change_repository,
+    change_leakage_repository, copy_language_truth_files, core_repository,
+    deepened_signal_repository, evolution_repository, module_wiring_repository,
+    propagation_repository, ref_diff_repository, rust_test_scope_repository, shallow_clone,
+    signal_table_repository, source_role_repository, stable_dependency_repository,
+    static_architecture_repository, test_scoped_workspace_repository, wide_directory_repository,
+    workspace_manifest_repository, worktree_change_repository,
 };
 
 #[derive(Debug, Deserialize)]
@@ -992,6 +993,193 @@ fn a_scope_states_how_many_files_a_typical_change_there_touches() {
         rated_verdict_lines(&windowed),
         "amplification moves no tier, no count, and no worst offender"
     );
+}
+
+/// Both leakage kinds, their hand-calculated operands, and every case that
+/// must produce nothing, from one invocation.
+///
+/// The importer three directories away shares 7 of the interface's 12 commits;
+/// the unlinked pair shares 6 of 9 across two packages neither of which can
+/// reach the other. Four cases produce nothing: the test that changes with the
+/// file it exercises, the two files of one directory, the Rust parent and the
+/// module its child declares, and the pair three commits short of the support
+/// floor. The last of those is retained, which is what makes it evidence that
+/// a retained pair is not a finding.
+#[test]
+fn the_leakage_fixture_states_both_kinds_and_every_absence() {
+    let repository = change_leakage_repository();
+    let history = ["--json", "--history", "36500d"];
+    let result = Invocation::new(history).run(repository.path());
+    result.success();
+    let automatic = Invocation::new(history)
+        .automatic_workers()
+        .run(repository.path());
+    assert_eq!(result, automatic, "serial and parallel runs must agree");
+    let report = checked_json(&result.stdout);
+
+    let pairs: Vec<_> = report["file_change_coupling"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .map(|pair| {
+            (
+                file_path(&report, pair["left"].as_u64().unwrap()),
+                file_path(&report, pair["right"].as_u64().unwrap()),
+                pair["shared_commits"].as_u64().unwrap(),
+                pair["union_commits"].as_u64().unwrap(),
+                pair["distance"].as_u64().unwrap(),
+            )
+        })
+        .collect();
+    let expected: Vec<_> = [
+        ("app/interface.js", "web/src/follower.js", 7, 12, 3),
+        ("data/src/model.js", "data/store/lib/keys.js", 6, 9, 3),
+        ("edge/lib/b.js", "edge/src/a.js", 3, 3, 2),
+        ("wiring/src/a/b/mod.rs", "wiring/src/lib.rs", 6, 6, 2),
+    ]
+    .into_iter()
+    .map(|(left, right, shared, union, distance)| {
+        (left.to_owned(), right.to_owned(), shared, union, distance)
+    })
+    .collect();
+    assert_eq!(
+        pairs, expected,
+        "no pair names the test file and none names two files of one directory"
+    );
+
+    let findings: Vec<_> = report["change_leakage_findings"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .map(|finding| {
+            (
+                finding["kind"].as_str().unwrap().to_owned(),
+                finding["coupling"].as_u64().unwrap(),
+                finding["interface"]
+                    .as_u64()
+                    .map(|file| file_path(&report, file)),
+            )
+        })
+        .collect();
+    assert_eq!(
+        findings,
+        [
+            (
+                "leaky_interface".to_owned(),
+                0,
+                Some("app/interface.js".to_owned())
+            ),
+            ("hidden_coupling".to_owned(), 1, None),
+        ],
+        "the wiring pair is connected by a module declaration and the edge pair is below the support floor"
+    );
+
+    // The hybrid claim: the interface already carries a card, so its leakage
+    // finding is one more line on that card rather than a second card about
+    // the same file.
+    let cards: Vec<_> = report["problems"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .map(|card| {
+            (
+                card["pattern"].as_str().unwrap().to_owned(),
+                card["visibility"].as_str().unwrap().to_owned(),
+                serde_json::to_string(&card["claimed"]).unwrap(),
+            )
+        })
+        .collect();
+    assert_eq!(
+        cards,
+        [
+            (
+                "hot_mess".to_owned(),
+                "default".to_owned(),
+                "[{\"index\":0,\"table\":\"findings\"},{\"index\":0,\"table\":\"change_leakage_findings\"}]".to_owned()
+            ),
+            (
+                "hidden_coupling".to_owned(),
+                "default".to_owned(),
+                "[{\"index\":1,\"table\":\"change_leakage_findings\"}]".to_owned()
+            ),
+        ]
+    );
+
+    let terminal = Invocation::new(["--history", "36500d"]).run(repository.path());
+    terminal.success();
+    let text = String::from_utf8(terminal.stdout).unwrap();
+    assert_eq!(
+        problem_body(&text),
+        [
+            "  high hot and complex · app/interface.js",
+            "        app/interface.js:1 · function · cognitive 6",
+            "        1 rated unit",
+            "        web/src/follower.js changed with it in 7 of 12 commits · 58% · 3 directories away",
+            "  watch change together without a dependency · data/src/model.js ↔ data/store/lib/keys.js",
+            "        changed together in 6 of 9 commits · 67% · no dependency either way · 3 directories away",
+        ]
+    );
+    for absent in [
+        "interface.test.js",
+        "web/src/one.js",
+        "wiring/src/lib.rs",
+        "edge/",
+    ] {
+        assert!(!text.contains(absent), "{absent}: {text}");
+    }
+}
+
+/// The strict launch: the fixture's default view gains one card, every scope
+/// still fits one screen, and the pair below every floor reaches the machine
+/// report and no human view.
+#[test]
+fn the_leakage_fixture_gains_one_default_card_and_states_no_weak_pair() {
+    /// The slots a codebase view spends on problems, stated once more where
+    /// the evidence is read.
+    const SCREEN_BUDGET: usize = 24;
+
+    let repository = change_leakage_repository();
+    let rendered = |arguments: Vec<&str>| {
+        let run = Invocation::new(arguments.clone()).run(repository.path());
+        run.success();
+        String::from_utf8(run.stdout).unwrap()
+    };
+    // The fixture's commits carry fixed dates, so a one-day window renders the
+    // same tree without history at all.
+    for scope in [".", "app", "data", "data/src", "web/src"] {
+        let with = rendered(vec![scope, "--history", "36500d"]);
+        let without = rendered(vec![scope, "--history", "1d"]);
+        let gained = problem_heads(&with).len() - problem_heads(&without).len();
+        let expected = usize::from(scope == "." || scope.starts_with("data"));
+        assert_eq!(gained, expected, "{scope}: {with}{without}");
+        assert!(
+            problem_body(&with).len() <= SCREEN_BUDGET,
+            "{scope}: {with}"
+        );
+    }
+
+    // A retained pair that met no detector's thresholds reaches the machine
+    // report and no view at any scope or detail level.
+    for arguments in [
+        vec!["--history", "36500d"],
+        vec!["--all", "--history", "36500d"],
+        vec!["--top", "5", "--history", "36500d"],
+        vec!["edge", "--history", "36500d"],
+        vec!["edge", "--all", "--history", "36500d"],
+        vec!["edge/src/a.js", "--history", "36500d"],
+        vec!["edge/src/a.js", "--all", "--history", "36500d"],
+    ] {
+        let text = rendered(arguments.clone());
+        let body = problem_body(&text).join("\n");
+        // The pair's identity is its two paths, and neither reaches a card,
+        // an evidence line, or a scope of its own.
+        for absent in ["edge/lib/b.js", "edge/src/a.js"] {
+            assert!(!body.contains(absent), "{arguments:?}: {text}");
+        }
+        if arguments[0] == "edge" {
+            assert!(body.is_empty(), "{arguments:?}: {text}");
+        }
+    }
 }
 
 #[test]
@@ -2213,7 +2401,9 @@ fn readme_console_examples_use_the_simple_terminal_vocabulary() {
         "| `hub` | `everything depends on this` |",
         "| `tangle` | `circular dependency` |",
         "| `hot_mess` | `hot and complex` |",
-        "| `shotgun_pair` | `changes together` |",
+        "| `shotgun_pair` | `packages change together` |",
+        "| `leaky_interface` | `importers follow its changes` |",
+        "| `hidden_coupling` | `change together without a dependency` |",
         "| `bus_risk` | `one author` |",
         "| `unstable_dependency` | `depends on less stable code` |",
         "| `measured` |",
@@ -2239,9 +2429,13 @@ fn readme_console_examples_use_the_simple_terminal_vocabulary() {
     ] {
         assert!(readme.contains(required), "README is missing {required}");
     }
+    // `change together without a dependency` was banned while it belonged to a
+    // deleted coupling section, to prove the section had not crept back. It is
+    // now the human name of the frozen pattern id `hidden_coupling`, so the
+    // documentation must carry it and the assertion moved to the required list
+    // above: a shipped feature cannot be documented under a ban.
     for removed in [
         "QUALITY",
-        "change together without a dependency",
         "touches count distinct commits",
         "external uses · primary/trusted",
         "unresolved uses · primary/trusted",
@@ -2627,7 +2821,10 @@ fn declared_manifest_names_make_the_workspace_graph_and_coupling_true() {
     // in the machine report alone.
     let coupling_lines: Vec<_> = text.lines().filter(|line| line.contains(" ↔ ")).collect();
     assert_eq!(coupling_lines.len(), 1, "{coupling_lines:?}");
-    assert_eq!(coupling_lines[0], "  watch changes together · rb ↔ ui");
+    assert_eq!(
+        coupling_lines[0],
+        "  watch packages change together · rb ↔ ui"
+    );
     assert!(unique.len() > 1, "{unique:?}");
     assert!(
         text.contains(" · no code dependency\n"),
@@ -3338,17 +3535,18 @@ fn assert_index_integrity(report: &Value) {
 
 /// The tables a problem card may claim from, named the way the report names
 /// them, so a claim resolves with one lookup.
-const CLAIMABLE_TABLES: [&str; 6] = [
+const CLAIMABLE_TABLES: [&str; 7] = [
     "findings",
     "size_findings",
     "architecture_findings",
     "stable_dependency_findings",
     "evolutionary_findings",
     "knowledge_concentration_findings",
+    "change_leakage_findings",
 ];
 
 /// The frozen pattern ids, which are the only names a card may carry.
-const PROBLEM_PATTERNS: [&str; 8] = [
+const PROBLEM_PATTERNS: [&str; 10] = [
     "god_file",
     "hub",
     "tangle",
@@ -3357,6 +3555,8 @@ const PROBLEM_PATTERNS: [&str; 8] = [
     "bus_risk",
     "unstable_dependency",
     "measured",
+    "leaky_interface",
+    "hidden_coupling",
 ];
 
 /// Validates the problem table: every anchor and evidence index resolves into
@@ -3459,7 +3659,8 @@ fn assert_problem_evidence(report: &Value, evidence: &Value) {
                     "hot",
                     "rated_units",
                     "members",
-                    "reach_in"
+                    "reach_in",
+                    "followers"
                 ]
                 .contains(&kind),
                 "unknown evidence kind {kind}"

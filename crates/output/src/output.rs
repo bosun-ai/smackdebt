@@ -8,8 +8,8 @@ use std::path::{Path, PathBuf};
 
 use anstyle::{Ansi256Color, AnsiColor, Style};
 use smackdebt_analysis::{
-    ArchitectureComparisonKind, ArchitectureFindingId, CodebaseTier, Comparison,
-    ComparisonDirection, ComparisonKind, CouplingLink, DebtDiffSelection, DebtFamily,
+    ArchitectureComparisonKind, ArchitectureFindingId, ChangeLeakageFindingId, CodebaseTier,
+    Comparison, ComparisonDirection, ComparisonKind, CouplingLink, DebtDiffSelection, DebtFamily,
     DependencyEdgeId, Diagnostic, DiagnosticKind, DiffTier, EvolutionaryFindingId, FileId,
     FileRecord, Finding, FindingId, Instability, KnowledgeConcentrationFindingId, Language,
     Measurements, PackageId, ProblemAnchor, ProblemCard, ProblemEvidence, ProblemPattern,
@@ -679,13 +679,26 @@ const fn pattern_name(pattern: ProblemPattern) -> Option<&'static str> {
     match pattern {
         ProblemPattern::GodFile => Some("does too much"),
         ProblemPattern::Hub => Some("everything depends on this"),
-        ProblemPattern::Tangle => Some("circular dependency"),
         ProblemPattern::HotMess => Some("hot and complex"),
-        ProblemPattern::ShotgunPair => Some("changes together"),
-        ProblemPattern::BusRisk => Some("one author"),
-        ProblemPattern::UnstableDependency => Some("depends on less stable code"),
+        ProblemPattern::LeakyInterface => Some("importers follow its changes"),
         ProblemPattern::Measured => None,
+        other => set_pattern_name(other),
     }
+}
+
+/// The human name of a pattern whose subject is a set of files, a package, or
+/// a package pair, which is every pattern a single file does not anchor.
+const fn set_pattern_name(pattern: ProblemPattern) -> Option<&'static str> {
+    Some(match pattern {
+        ProblemPattern::Tangle => "circular dependency",
+        // Two patterns name things that change together, one about packages
+        // and one about files, so each says which subject it is about.
+        ProblemPattern::ShotgunPair => "packages change together",
+        ProblemPattern::BusRisk => "one author",
+        ProblemPattern::UnstableDependency => "depends on less stable code",
+        ProblemPattern::HiddenCoupling => "change together without a dependency",
+        _ => return None,
+    })
 }
 
 fn problem_head(report: &Report, card: &ProblemCard) -> String {
@@ -762,6 +775,12 @@ fn anchor_label(report: &Report, card: &ProblemCard) -> String {
                 None => path.to_owned(),
             }
         }
+        // A co-change finding names the two files it is about, in the same
+        // symmetric wording the coupling family already uses, because the
+        // relationship is symmetric.
+        ProblemAnchor::Files(files) if card.pattern() == ProblemPattern::HiddenCoupling => {
+            pair_anchor(report, files)
+        }
         ProblemAnchor::Files(files) => cycle_anchor(report, card, files),
         ProblemAnchor::Package(package) => package_name(report, package.index())
             .unwrap_or("?")
@@ -777,6 +796,19 @@ fn anchor_label(report: &Report, card: &ProblemCard) -> String {
             }
         }
     }
+}
+
+/// The two file paths a co-change finding names, which is the subject of the
+/// finding rather than a dependency row: no reference count, relation kind,
+/// resolution outcome, or ownership wording accompanies them.
+fn pair_anchor(report: &Report, files: &[FileId]) -> String {
+    let path = |position: usize| {
+        files
+            .get(position)
+            .and_then(|file| report.files().get(file.index()))
+            .map_or("?", FileRecord::path)
+    };
+    format!("{} ↔ {}", path(0), path(1))
 }
 
 /// A cycle's first witness path, which is the identity the worst-offender rule
@@ -849,6 +881,7 @@ fn evidence_lines(report: &Report, fact: ProblemEvidence, headed: bool) -> Vec<S
         ProblemEvidence::StableDependency(id) => vec![stable_dependency_evidence(report, id)],
         ProblemEvidence::Coupling(id) => vec![coupling_evidence(report, id)],
         ProblemEvidence::Knowledge(id) => vec![knowledge_evidence(report, id)],
+        ProblemEvidence::ChangeLeakage(id) => vec![leakage_evidence(report, id)],
         // The rest are integers the report already measured, so they need no
         // finding table to be stated.
         measured => counted_evidence(measured).into_iter().collect(),
@@ -875,6 +908,13 @@ fn counted_evidence(fact: ProblemEvidence) -> Option<String> {
         ProblemEvidence::Members(value) => format!("{} in the cycle", counted_files(value)),
         ProblemEvidence::ReachIn(value) => {
             format!("a change here reaches {}", counted_files(value))
+        }
+        ProblemEvidence::Followers(value) => {
+            let verb = if value == 1 { "follows" } else { "follow" };
+            format!(
+                "{} {verb} it",
+                Counted::new(value as usize, "importer", "importers")
+            )
         }
         _ => return None,
     })
@@ -967,6 +1007,63 @@ fn stable_dependency_evidence(report: &Report, id: StableDependencyFindingId) ->
     }
     facts.push(Counted::new(evidence.references() as usize, "import", "imports").to_string());
     facts.join(" · ")
+}
+
+/// One change-leakage finding: which files changed together, how often, how
+/// alike, and how far apart.
+///
+/// A leaky interface names the follower, because the card's file is the
+/// interface and the follower is what the line adds. A hidden pair names
+/// neither file — the head already does — and states the proof instead.
+fn leakage_evidence(report: &Report, id: ChangeLeakageFindingId) -> String {
+    let Some(finding) = report.change_leakage_findings().get(id.index()) else {
+        return String::new();
+    };
+    let Some(pair) = report
+        .file_change_coupling()
+        .get(finding.coupling().index())
+        .copied()
+    else {
+        return String::new();
+    };
+    let commits = format!(
+        "in {} of {} commits",
+        pair.shared_commits(),
+        pair.union_commits()
+    );
+    let mut facts = match finding.interface() {
+        Some(interface) => {
+            let follower = if interface == pair.left() {
+                pair.right()
+            } else {
+                pair.left()
+            };
+            let path = report.files()[follower.index()].path();
+            vec![format!("{path} changed with it {commits}")]
+        }
+        None => vec![format!("changed together {commits}")],
+    };
+    facts.push(format!(
+        "{}%",
+        rounded_percent(pair.shared_commits(), pair.union_commits())
+    ));
+    if finding.interface().is_none() {
+        facts.push("no dependency either way".to_owned());
+    }
+    facts.push(format!(
+        "{} away",
+        Counted::new(pair.distance() as usize, "directory", "directories")
+    ));
+    facts.join(" · ")
+}
+
+/// A shared-to-union share as a whole percent, rounded to the nearest, from
+/// the two integers the same line states.
+const fn rounded_percent(shared: u32, union: u32) -> u32 {
+    if union == 0 {
+        return 0;
+    }
+    ((shared as u64 * 200 + union as u64) / (union as u64 * 2)) as u32
 }
 
 fn coupling_evidence(report: &Report, id: EvolutionaryFindingId) -> String {
@@ -2213,15 +2310,15 @@ mod tests {
     use smackdebt_analysis::{
         ArchitectureComparison, ArchitectureComparisonId, ArchitectureFinding,
         ArchitectureFindingId, ArchitectureFindingKind, ArchitectureGraph, ArchitectureReportFacts,
-        ChangeCoupling, ComparisonId, ContributorConcentration, Coverage, DependencyCoverage,
-        DependencyEdge, DependencyEdgeId, EvolutionaryFinding, EvolutionaryFindingId,
-        EvolutionaryReportFacts, FileActivity, FileId, FileRecord, FindingId, HealthCounts,
-        HealthPolicy, HistoryCoverage, Hotspot, KnowledgeConcentrationFinding,
-        KnowledgeConcentrationFindingId, Measurements, PackageEdge, PackageEdgeId,
-        PackageGraphMeasurement, PackageId, PackageRecord, ParseStatus, Report, ReportBuilder,
-        ReportMode, Scope, ScopeId, SizePolicy, SourceCoverageOutcome, SourceRole, SourceSpan,
-        SourceTrust, StableDependencyEvidence, StableDependencyFinding, StableDependencyFindingId,
-        UnitIdentity, UnitKind,
+        ChangeCoupling, ChangeLeakageFinding, ComparisonId, ContributorConcentration, Coverage,
+        DependencyCoverage, DependencyEdge, DependencyEdgeId, EvolutionaryFinding,
+        EvolutionaryFindingId, EvolutionaryReportFacts, FileActivity, FileChangeCoupling,
+        FileChangeCouplingId, FileId, FileRecord, FindingId, HealthCounts, HealthPolicy,
+        HistoryCoverage, Hotspot, KnowledgeConcentrationFinding, KnowledgeConcentrationFindingId,
+        Measurements, PackageEdge, PackageEdgeId, PackageGraphMeasurement, PackageId,
+        PackageRecord, ParseStatus, Report, ReportBuilder, ReportMode, Scope, ScopeId, SizePolicy,
+        SourceCoverageOutcome, SourceRole, SourceSpan, SourceTrust, StableDependencyEvidence,
+        StableDependencyFinding, StableDependencyFindingId, UnitIdentity, UnitKind,
     };
 
     /// Every private-use codepoint, which may never reach a machine consumer.
@@ -2753,7 +2850,7 @@ mod tests {
             "  high does too much · app/god.js",
             "  high hot and complex · app/hot.js",
             "  watch circular dependency · app/left.js",
-            "  watch changes together · app ↔ core",
+            "  watch packages change together · app ↔ core",
             "  watch one author · lib",
             "  watch depends on less stable code · app → core",
             // A `measured` card heads on its top claimed finding and anchors
@@ -2897,6 +2994,99 @@ mod tests {
             assert_eq!(diagnostic_summary(kind, 1), singular, "{kind:?}");
             assert_eq!(diagnostic_summary(kind, 3), plural, "{kind:?}");
         }
+    }
+
+    /// The two standalone leakage cards, in the words each pattern owns.
+    ///
+    /// The interface carries no debt of its own, which is the file a leaky
+    /// interface tends to be, so both cards exist only because a leakage
+    /// finding named their subject.
+    #[test]
+    fn the_two_leakage_cards_state_their_pattern_their_subject_and_their_operands() {
+        let mut builder = ReportBuilder::new(ReportMode::Codebase);
+        let root = ScopeId::from_index(0);
+        builder.add_scope(Scope::new(root, ScopeKind::Repository, ".", None));
+        builder.set_root(root);
+        for (index, path) in ["core/api.ts", "a/one.ts", "b/two.ts", "c/three.ts"]
+            .into_iter()
+            .enumerate()
+        {
+            builder.add_file(FileRecord::new(
+                FileId::from_index(index),
+                root,
+                path,
+                Coverage::new(1, 1, 0, 0, 10, 0),
+                HealthCounts::default(),
+            ));
+        }
+        let pairs = [
+            (0, 1, 7, 12, 3),
+            (0, 2, 6, 10, 4),
+            (0, 3, 5, 9, 2),
+            (1, 2, 6, 9, 4),
+        ]
+        .map(|(left, right, shared, union, distance)| {
+            FileChangeCoupling::new(
+                FileId::from_index(left),
+                FileId::from_index(right),
+                shared,
+                union,
+                distance,
+            )
+        });
+        builder.set_evolution(
+            EvolutionaryReportFacts::new(
+                HistoryCoverage::unavailable("test"),
+                Vec::new(),
+                Vec::new(),
+                Vec::new(),
+                Vec::new(),
+                Vec::new(),
+                Vec::new(),
+            )
+            .with_file_coupling(pairs.to_vec()),
+        );
+        let interface = FileId::from_index(0);
+        // The table is in the order the join defines: distance descending,
+        // then shared commits descending, so the card states the farthest
+        // follower first.
+        builder.set_change_leakage_findings(vec![
+            ChangeLeakageFinding::leaky(FileChangeCouplingId::from_index(1), interface),
+            ChangeLeakageFinding::leaky(FileChangeCouplingId::from_index(0), interface),
+            ChangeLeakageFinding::leaky(FileChangeCouplingId::from_index(2), interface),
+            ChangeLeakageFinding::hidden(FileChangeCouplingId::from_index(3)),
+        ]);
+        let report = builder.finish();
+        // The count is stated before the followers, so it survives the rung
+        // that allows three evidence lines while a follower is what a wider
+        // rung buys.
+        let terminal = render(&report, TerminalOptions::new(120, false, false));
+        assert_eq!(
+            section_rows(&terminal, "PROBLEMS"),
+            [
+                "  watch importers follow its changes · core/api.ts",
+                "        3 importers follow it",
+                "        b/two.ts changed with it in 6 of 10 commits · 60% · 4 directories away",
+                "        a/one.ts changed with it in 7 of 12 commits · 58% · 3 directories away",
+                "  watch change together without a dependency · a/one.ts ↔ b/two.ts",
+                "        changed together in 6 of 9 commits · 67% · no dependency either way · 4 directories away",
+            ],
+            "{terminal}"
+        );
+        let detailed = render(&report, TerminalOptions::new(120, true, false));
+        assert_eq!(
+            section_rows(&detailed, "PROBLEMS"),
+            [
+                "  watch importers follow its changes · core/api.ts",
+                "        3 importers follow it",
+                "        b/two.ts changed with it in 6 of 10 commits · 60% · 4 directories away",
+                "        a/one.ts changed with it in 7 of 12 commits · 58% · 3 directories away",
+                "        c/three.ts changed with it in 5 of 9 commits · 56% · 2 directories away",
+                "  watch change together without a dependency · a/one.ts ↔ b/two.ts",
+                "        changed together in 6 of 9 commits · 67% · no dependency either way · 4 directories away",
+            ],
+            "{detailed}"
+        );
     }
 
     /// A report holding one long cycle beside five ordinary cards, so the
@@ -3870,13 +4060,13 @@ mod tests {
         assert_eq!(problem_heads(&default).len(), 4, "{default}");
         assert!(
             default.contains(
-                "  watch changes together · b ↔ c\n        changed together in 8 of 10 commits · 80% · no code dependency\n"
+                "  watch packages change together · b ↔ c\n        changed together in 8 of 10 commits · 80% · no code dependency\n"
             ),
             "{default}"
         );
         assert!(
             default.contains(
-                "  watch changes together · d ↔ e\n        changed together in 3 of 5 commits · 60% · no code dependency\n"
+                "  watch packages change together · d ↔ e\n        changed together in 3 of 5 commits · 60% · no code dependency\n"
             ),
             "{default}"
         );
@@ -3952,13 +4142,13 @@ mod tests {
         let terminal = render(&report, TerminalOptions::default());
         assert!(
             terminal.contains(
-                "  watch changes together · a ↔ b\n        changed together in 3 of 4 commits · 75% · no code dependency\n"
+                "  watch packages change together · a ↔ b\n        changed together in 3 of 4 commits · 75% · no code dependency\n"
             ),
             "{terminal}"
         );
         assert!(
             terminal.contains(
-                "  watch changes together · b ↔ c\n        changed together in 3 of 4 commits · 75% · code dependency exists\n"
+                "  watch packages change together · b ↔ c\n        changed together in 3 of 4 commits · 75% · code dependency exists\n"
             ),
             "{terminal}"
         );
@@ -4045,13 +4235,13 @@ mod tests {
         let terminal = render(&report, TerminalOptions::default());
         assert!(
             terminal.contains(
-                "  watch changes together · a ↔ b\n        changed together in 3 of 4 commits · 75% · code dependency exists\n"
+                "  watch packages change together · a ↔ b\n        changed together in 3 of 4 commits · 75% · code dependency exists\n"
             ),
             "{terminal}"
         );
         assert!(
             terminal.contains(
-                "  watch changes together · a ↔ c\n        changed together in 3 of 4 commits · 75% · no direct dependency · linked via b\n"
+                "  watch packages change together · a ↔ c\n        changed together in 3 of 4 commits · 75% · no direct dependency · linked via b\n"
             ),
             "{terminal}"
         );

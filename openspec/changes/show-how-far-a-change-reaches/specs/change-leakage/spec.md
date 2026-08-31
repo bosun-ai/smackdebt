@@ -250,11 +250,21 @@ direction over the connection graph. Absence SHALL be proved in two stages:
    propagation closures already use, and SHALL be distinct from the
    propagation-reach matrix, which answers a different question over a narrower
    graph.
-2. Otherwise, analysis SHALL run one budgeted reverse breadth-first search per
-   direction over the connection graph, each visiting at most
-   `PATH_PROBE_NODES = 4_096` nodes. A probe SHALL answer *reaches*, *separate*,
-   or *undecided*, and SHALL answer undecided exactly when it exhausted its
-   budget without settling the question.
+2. Otherwise, analysis SHALL run one budgeted breadth-first walk over the
+   connection graph, visiting at most `PATH_PROBE_NODES = 4_096` nodes. The
+   walk SHALL answer *reaches*, *separate*, or *undecided*, and SHALL answer
+   undecided exactly when it exhausted its budget without settling the
+   question.
+
+   One walk answers for both directions, because the connection graph holds
+   both directions of travel: a walk that exhausts everything reaching the
+   second file without meeting the first has proved that no path joins the two
+   in either direction. A second walk from the other end would explore the
+   other file's side of the same symmetric relation and could only repeat that
+   answer — except where one side exceeds the node budget and the other does
+   not, and there it would withhold a finding the first walk had already
+   proved. Requiring a walk per direction would therefore buy no proof and
+   would make the answer depend on which side of a pair happens to be large.
 
 An undecided probe SHALL produce no finding. A `hidden_coupling` finding claims
 that no dependency explains the co-change, and a claim that strong SHALL NOT
@@ -278,15 +288,15 @@ a named integer constant.
 
 #### Scenario: Two packages are joined only by module ownership
 - **WHEN** the only relation between two packages is a module-ownership relation and a qualifying pair spans them
-- **THEN** the package connection matrix reports the two packages connected, the pair falls through to the probes, and no finding is created on the strength of the package stage
+- **THEN** the package connection matrix reports the two packages connected, the pair falls through to the file-level walk, and no finding is created on the strength of the package stage
 
-#### Scenario: A probe exhausts its budget
-- **WHEN** a probe visits its whole node budget without finding a path or exhausting the reachable set
+#### Scenario: A walk exhausts its budget
+- **WHEN** a walk visits its whole node budget without finding a path or exhausting the reachable set
 - **THEN** the answer is undecided and no finding is created
 
 #### Scenario: One package holds the whole repository
 - **WHEN** a repository declares a single package so the package stage can never separate a pair
-- **THEN** every qualifying pair is decided by the file-level probes alone and an undecided probe still creates no finding
+- **THEN** every qualifying pair is decided by the file-level walk alone and an undecided walk still creates no finding
 
 ### Requirement: Change amplification is a median of files per commit
 Analysis SHALL accumulate, during the one history stream, a sparse per-directory

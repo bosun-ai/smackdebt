@@ -4,8 +4,10 @@ mod architecture;
 mod architecture_comparison;
 mod change_amplification;
 mod change_coupling;
+mod change_leakage;
 mod churn;
 mod comparison;
+mod connection_graph;
 mod contributor_concentration;
 mod cycle_witness;
 mod dependency_degree;
@@ -49,7 +51,14 @@ pub use change_amplification::{
 pub use change_coupling::{
     PackageContainment, change_coupling, qualifies_for_finding, unexplained_coupling,
 };
+pub use change_leakage::{
+    ChangeGraph, ChangeLeakageFinding, ChangeLeakageFindingId, ChangeLeakageKind,
+    LEAKAGE_MIN_DISTANCE, LEAKAGE_SHARED_COMMITS, LEAKAGE_SIMILARITY_FLOOR_PERMILLE,
+    LEAKAGE_SIMILARITY_PERMILLE, LEAKAGE_SIMILARITY_STEP_PERMILLE, PATH_PROBE_NODES,
+    change_leakage, required_permille,
+};
 pub use churn::churn;
+pub use connection_graph::{ConnectionGraph, enters_connection_graph};
 pub use contributor_concentration::{
     MINIMUM_CONCENTRATION_COMMITS, MINIMUM_CONCENTRATION_PERCENT, contributor_concentration,
     knowledge_concentration,
@@ -61,8 +70,8 @@ pub use evolution::{
     ChangeCoupling, ContributorConcentration, ContributorId, CouplingEvidence, CouplingLink,
     EvolutionAccumulator, EvolutionaryComparison, EvolutionaryComparisonId,
     EvolutionaryComparisonKind, EvolutionaryFinding, EvolutionaryFindingId,
-    EvolutionaryFindingKind, EvolutionaryReportFacts, FileChangeCoupling, FileHistory,
-    HistoryAvailability, HistoryChangeFact, HistoryCommitFact, HistoryCoverage,
+    EvolutionaryFindingKind, EvolutionaryReportFacts, FileChangeCoupling, FileChangeCouplingId,
+    FileHistory, HistoryAvailability, HistoryChangeFact, HistoryCommitFact, HistoryCoverage,
     KnowledgeConcentrationFinding, KnowledgeConcentrationFindingId, PackageHistory,
 };
 pub use evolutionary_comparison::compare_evolution;

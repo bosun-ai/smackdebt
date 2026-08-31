@@ -1,3 +1,4 @@
+use crate::change_leakage::ChangeLeakageFinding;
 use crate::comparison::{Comparison, ComparisonDirection};
 use crate::file_reach::FileReach;
 use crate::health::{HealthAssessment, HealthCounts, Measurements, Rating};
@@ -792,6 +793,10 @@ pub struct Report {
     /// file order. A retained pair is the population a change-leakage detector
     /// reads: it is not a finding and reaches no human view.
     file_change_coupling: Vec<FileChangeCoupling>,
+    /// What the join decided about those pairs, in the order the change-leakage
+    /// rules define. A finding is a statement about design, which a retained
+    /// pair is not.
+    change_leakage_findings: Vec<ChangeLeakageFinding>,
     contributor_concentration: Vec<ContributorConcentration>,
     evolutionary_findings: Vec<EvolutionaryFinding>,
     evolutionary_comparisons: Vec<EvolutionaryComparison>,
@@ -912,6 +917,14 @@ impl ReportBuilder {
         self.report.package_closures = closures;
         self.report.file_reach = file_reach;
         self.report.core_size = core_size;
+    }
+
+    /// Sets what the change-leakage join decided about the retained pairs.
+    ///
+    /// The join runs once, over finished tables, and is not an algorithm pass:
+    /// it measures nothing and rates nothing.
+    pub fn set_change_leakage_findings(&mut self, findings: Vec<ChangeLeakageFinding>) {
+        self.report.change_leakage_findings = findings;
     }
 
     /// Sets what a typical change to each scope touches, by scope position.
@@ -1126,6 +1139,7 @@ impl Report {
             package_history: Vec::new(),
             change_coupling: Vec::new(),
             file_change_coupling: Vec::new(),
+            change_leakage_findings: Vec::new(),
             explanation_pairs: BTreeSet::new(),
             coupling_links: BTreeMap::new(),
             contributor_concentration: Vec::new(),
@@ -1234,6 +1248,10 @@ impl Report {
     /// problem card.
     pub fn file_change_coupling(&self) -> &[FileChangeCoupling] {
         &self.file_change_coupling
+    }
+    /// What the change-leakage join decided, in finding-table order.
+    pub fn change_leakage_findings(&self) -> &[ChangeLeakageFinding] {
+        &self.change_leakage_findings
     }
     pub fn contributor_concentration(&self) -> &[ContributorConcentration] {
         &self.contributor_concentration
@@ -1653,6 +1671,7 @@ impl Report {
             )
             .with_hotspots(&self.hotspots)
             .with_file_reach(&self.file_reach)
+            .with_change_leakage(&self.change_leakage_findings, &self.file_change_coupling)
     }
 
     /// Completes scope summaries from the report's owned tables.

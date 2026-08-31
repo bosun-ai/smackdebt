@@ -1125,6 +1125,182 @@ pub(crate) fn amplification_repository() -> GeneratedRepository {
     repository
 }
 
+/// A repository whose history states one leakage finding of each kind and
+/// every case that must state nothing.
+///
+/// Seven commits rewrite `app/interface.js` beside the `web/src/follower.js`
+/// that imports it, and five more rewrite the interface beside its test, so the
+/// pair shares 7 of 12 commits three directories apart and the interface leaks.
+/// Six commits rewrite `data/src/model.js` beside `data/store/lib/keys.js`, and
+/// three rewrite the model alone, so that pair shares 6 of 9 commits three
+/// directories apart with nothing in either package that reaches the other.
+///
+/// The nesting of `data/store` inside `data` is deliberate. Two packages that
+/// keep changing together with no dependency are a `shotgun_pair` as well, and
+/// a nested pair is never a coupling row, so the file finding is the only card
+/// the history adds and the strict-launch count states exactly that.
+///
+/// Three cases must produce nothing. `web/src/one.js` and `web/src/two.js`
+/// change together five times inside one directory, which is what a directory
+/// is for. `app/tests/unit/interface.test.js` imports the interface and changes
+/// with it five times, which is good practice rather than leakage. The Rust
+/// files of `wiring` are joined only by module declarations — `src/lib.rs`
+/// declares `a`, which declares `b` — so the pair two directories apart that
+/// shares all six of its commits is connected and never named. One further
+/// pair, `edge/src/a.js` with `edge/lib/b.js`, is retained at three shared
+/// commits and reaches no detector floor, so it exists in the machine report
+/// and in no human view.
+///
+/// Authorship alternates so no package concentrates on one contributor, and no
+/// package reaches the concentration commit floor with a single author.
+pub(crate) fn change_leakage_repository() -> GeneratedRepository {
+    let repository = GeneratedRepository::new("main");
+    repository.write(
+        ".smackdebt.toml",
+        b"[thresholds.cognitive]\nwatch = 2\nhigh = 5\n",
+    );
+    for package in ["app", "web", "data", "data/store", "edge"] {
+        let name = package.replace('/', "-");
+        repository.write(
+            &format!("{package}/package.json"),
+            format!("{{\"name\":\"{name}\",\"private\":true}}\n").as_bytes(),
+        );
+    }
+    repository.write(
+        "wiring/Cargo.toml",
+        b"[package]\nname = \"wiring\"\nversion = \"0.1.0\"\nedition = \"2024\"\n",
+    );
+    let mut day = 0;
+    for (message, files, count) in LEAKAGE_COMMITS {
+        leakage_commits(&repository, &mut day, message, files, count);
+    }
+    repository
+}
+
+/// The interface whose importers follow it, complex enough for one High
+/// finding under the fixture's own thresholds so the file already carries a
+/// card before any history is read.
+const LEAKY_INTERFACE: &str = "export function thing(value) {\n  if (value) {\n    if (value > 1) {\n      if (value > {}) {\n        return 3;\n      }\n    }\n  }\n  return 0;\n}\n";
+
+/// One commit group: a message, the files it rewrites together as a path
+/// beside the source template whose `{}` becomes the version, and how many
+/// times it rewrites them.
+type LeakageCommits = (&'static str, &'static [(&'static str, &'static str)], usize);
+
+/// Every commit group of [`change_leakage_repository`].
+const LEAKAGE_COMMITS: [LeakageCommits; 7] = [
+    (
+        "the interface and the importer that follows it",
+        &[
+            ("app/interface.js", LEAKY_INTERFACE),
+            (
+                "web/src/follower.js",
+                "import { thing } from '../../app/interface.js';\n\nexport const follower = thing({});\n",
+            ),
+        ],
+        7,
+    ),
+    (
+        "the interface and the test that exercises it",
+        &[
+            ("app/interface.js", LEAKY_INTERFACE),
+            (
+                "app/tests/unit/interface.test.js",
+                "import { thing } from '../../interface.js';\n\nexport const checked = thing({});\n",
+            ),
+        ],
+        5,
+    ),
+    (
+        "two files no dependency connects",
+        &[
+            ("data/src/model.js", "export const model = {};\n"),
+            ("data/store/lib/keys.js", "export const keys = {};\n"),
+        ],
+        6,
+    ),
+    (
+        "the model alone",
+        &[("data/src/model.js", "export const model = 1{};\n")],
+        3,
+    ),
+    (
+        "two files of one directory",
+        &[
+            ("web/src/one.js", "export const one = {};\n"),
+            ("web/src/two.js", "export const two = {};\n"),
+        ],
+        5,
+    ),
+    (
+        "a pair below every detector floor",
+        &[
+            ("edge/src/a.js", "export const a = {};\n"),
+            ("edge/lib/b.js", "export const b = {};\n"),
+        ],
+        3,
+    ),
+    (
+        "a parent and the module its child declares",
+        &[
+            (
+                "wiring/src/lib.rs",
+                "mod a;\n\npub const VERSION: u32 = {};\n",
+            ),
+            ("wiring/src/a/mod.rs", "mod b;\n\npub use self::b::value;\n"),
+            (
+                "wiring/src/a/b/mod.rs",
+                "pub fn value() -> u32 {\n    {}\n}\n",
+            ),
+        ],
+        6,
+    ),
+];
+
+/// Rewrites one group's files together, `count` times, alternating authors.
+///
+/// A file whose source never changes is written every time and committed once,
+/// because Git records the change rather than the write: that is how the module
+/// declaration between the wiring files exists without changing with them.
+fn leakage_commits(
+    repository: &GeneratedRepository,
+    day: &mut usize,
+    message: &str,
+    files: &[(&str, &str)],
+    count: usize,
+) {
+    for version in 1..=count {
+        let sources: Vec<String> = files
+            .iter()
+            .map(|(_, template)| template.replace("{}", &version.to_string()))
+            .collect();
+        let edits: Vec<_> = files
+            .iter()
+            .zip(&sources)
+            .map(|((path, _), source)| WorktreeEdit::Write(path, source.as_bytes()))
+            .collect();
+        repository.apply(&edits);
+        let (name, address) = if (*day).is_multiple_of(2) {
+            ("Ada Fixture", "ada@example.invalid")
+        } else {
+            ("Bo Fixture", "bo@example.invalid")
+        };
+        repository.commit(commit(message, name, address, &leakage_date(*day)));
+        *day += 1;
+    }
+}
+
+/// One fixed date per commit, so the fixture states the same history whenever
+/// it runs.
+fn leakage_date(index: usize) -> String {
+    let day = index + 1;
+    if day <= 31 {
+        format!("2026-01-{day:02}T12:00:00Z")
+    } else {
+        format!("2026-02-{:02}T12:00:00Z", day - 31)
+    }
+}
+
 pub(crate) fn worktree_change_repository() -> GeneratedRepository {
     let repository = GeneratedRepository::new("main");
     for package in ["a", "b", "c", "d", "e", "f", "gone", "h", "i"] {

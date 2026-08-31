@@ -146,7 +146,7 @@ PROBLEMS
         → crates/analysis/src/comparison.rs
   watch GateSnapshot::from_report · method · crates/analysis/src/gate.rs:150
         cognitive 15
-  watch changes together · crates/analysis ↔ crates/cli
+  watch packages change together · crates/analysis ↔ crates/cli
         changed together in 27 of 83 commits · 33% · no direct dependency · linked via crates/output
   watch one author · crates/analysis
         one contributor made 48 of 48 commits
@@ -321,8 +321,14 @@ a coupling pair reads `<left> ↔ <right>` and a stable-dependency pair reads
 for the root package. The evidence follows on indented lines: a claimed
 finding's `path:line` with its measurements, a size finding's subject and
 measured value, `<n> files import this`, `imports <n> files`, `<n> rated units`,
-`<n> files in the cycle`, `hot (<n> commits)`, a coupling pair's commit operands
-and dependency state, and a contributor concentration's counts.
+`<n> files in the cycle`, `hot (<n> commits)`, `a change here reaches <n>
+files`, `<n> importers follow it`, a coupling pair's commit operands and
+dependency state, and a contributor concentration's counts. A co-change finding
+names the two files it is about: a `hidden_coupling` card heads
+`<left> ↔ <right>` and states `changed together in 6 of 9 commits · 67% · no
+dependency either way · 4 directories away`, and a leaking interface's card
+states `<follower> changed with it in 7 of 12 commits · 58% · 3 directories
+away` for each importer that follows it.
 
 The pattern ids are the stable vocabulary for an integration; the words beside
 them are what a person reads:
@@ -333,10 +339,12 @@ them are what a person reads:
 | `hub` | `everything depends on this` | a file whose imports in or out reach eight and, when its package's median is not zero, reach four times that median |
 | `tangle` | `circular dependency` | one rated dependency cycle: High across packages, Watch inside one package |
 | `hot_mess` | `hot and complex` | a file that carries High debt and is a hotspot in the selected window, five touches by default |
-| `shotgun_pair` | `changes together` | two packages that keep changing together with no code dependency explaining it |
+| `shotgun_pair` | `packages change together` | two packages that keep changing together with no code dependency explaining it |
 | `bus_risk` | `one author` | a package whose commits concentrate on a single contributor |
 | `unstable_dependency` | `depends on less stable code` | a package depending on a less stable package through at least two references |
 | `measured` | the finding's own head | anything rated that no other pattern claimed |
+| `leaky_interface` | `importers follow its changes` | a file whose importers keep changing with it across at least two directories |
+| `hidden_coupling` | `change together without a dependency` | two files that keep changing together across at least two directories with no dependency either way |
 
 `measured` is the fallback, so nothing the report rated disappears for want of a
 pattern that recognizes it: its head is exactly the head a finding row used to
@@ -453,7 +461,7 @@ PROBLEMS
         → crates/analysis/src/change_coupling.rs
         2 files in the cycle
         hot (9 commits)
-  watch changes together · crates/analysis ↔ crates/cli
+  watch packages change together · crates/analysis ↔ crates/cli
         changed together in 27 of 83 commits · 33% · no direct dependency · linked via crates/output
   watch one author · crates/analysis
         one contributor made 48 of 48 commits
@@ -688,7 +696,7 @@ These short examples run against generated public repositories in the release
 evidence. Each comment declares the exact exit status, empty stderr, and the
 stable stdout fragments that must appear in the stated order.
 
-<!-- smackdebt-example fixture=evolution status=0 stderr=empty stdout=smackdebt_·_repository_root|checked|PROBLEMS|changes_together_·_a_↔_b -->
+<!-- smackdebt-example fixture=evolution status=0 stderr=empty stdout=smackdebt_·_repository_root|checked|PROBLEMS|packages_change_together_·_a_↔_b -->
 ```console
 smackdebt --color never --jobs 1 --history 36500d
 ```

@@ -2,9 +2,10 @@ use crate::architecture::{
     ArchitectureFinding, ArchitectureFindingId, DependencyEdge, StableDependencyFinding,
     StableDependencyFindingId,
 };
+use crate::change_leakage::{ChangeLeakageFinding, ChangeLeakageFindingId, ChangeLeakageKind};
 use crate::dependency_degree::dependency_degree;
 use crate::evolution::{
-    EvolutionaryFinding, EvolutionaryFindingId, KnowledgeConcentrationFinding,
+    EvolutionaryFinding, EvolutionaryFindingId, FileChangeCoupling, KnowledgeConcentrationFinding,
     KnowledgeConcentrationFindingId,
 };
 use crate::file_reach::FileReach;
@@ -51,10 +52,15 @@ problem_index!(
 
 /// The frozen machine vocabulary of problem patterns.
 ///
-/// These eight ids are the stable contract for machine consumers the way tier
+/// These ten ids are the stable contract for machine consumers the way tier
 /// ids and worst-offender reason ids are. Declaration order is the claiming
 /// order, so a card built by an earlier pattern owns the findings a later
 /// pattern would otherwise claim.
+///
+/// The two leakage patterns are appended after `Measured` rather than inserted
+/// among the others, because appending at the tail leaves every existing claim,
+/// card, and rank position byte-identical: they card only what nothing else
+/// named.
 #[derive(Clone, Copy, Debug, Eq, Hash, Ord, PartialEq, PartialOrd)]
 pub enum ProblemPattern {
     Tangle,
@@ -65,36 +71,39 @@ pub enum ProblemPattern {
     BusRisk,
     UnstableDependency,
     Measured,
+    LeakyInterface,
+    HiddenCoupling,
 }
+
+/// The frozen machine vocabulary, in the claiming order [`ProblemPattern`]
+/// declares, so the contract is one list rather than a mapping a reader has to
+/// check against the enum.
+const PATTERN_IDS: [&str; 10] = [
+    "tangle",
+    "god_file",
+    "hub",
+    "hot_mess",
+    "shotgun_pair",
+    "bus_risk",
+    "unstable_dependency",
+    "measured",
+    "leaky_interface",
+    "hidden_coupling",
+];
 
 impl ProblemPattern {
     /// The frozen machine id, which no renderer may rename or compose.
     pub const fn id(self) -> &'static str {
-        match self {
-            Self::Tangle => "tangle",
-            Self::GodFile => "god_file",
-            Self::Hub => "hub",
-            Self::HotMess => "hot_mess",
-            Self::ShotgunPair => "shotgun_pair",
-            Self::BusRisk => "bus_risk",
-            Self::UnstableDependency => "unstable_dependency",
-            Self::Measured => "measured",
-        }
+        PATTERN_IDS[self.class() as usize]
     }
 
     /// The position of this pattern in the frozen claiming order, which is
     /// also its rank class.
+    ///
+    /// Declaration order is claiming order, so the variant's own position
+    /// answers and no second list can fall out of step with the first.
     pub const fn class(self) -> u8 {
-        match self {
-            Self::Tangle => 0,
-            Self::GodFile => 1,
-            Self::Hub => 2,
-            Self::HotMess => 3,
-            Self::ShotgunPair => 4,
-            Self::BusRisk => 5,
-            Self::UnstableDependency => 6,
-            Self::Measured => 7,
-        }
+        self as u8
     }
 }
 
@@ -121,6 +130,8 @@ pub enum ProblemEvidence {
     StableDependency(StableDependencyFindingId),
     Coupling(EvolutionaryFindingId),
     Knowledge(KnowledgeConcentrationFindingId),
+    /// One change-leakage finding of the card's file or pair.
+    ChangeLeakage(ChangeLeakageFindingId),
     /// Files that depend on the anchor file, over verdict-graph edges.
     FanIn(u32),
     /// Files the anchor file depends on, over verdict-graph edges.
@@ -134,6 +145,10 @@ pub enum ProblemEvidence {
     /// Files that transitively depend on the anchor, excluding the anchor
     /// itself, for a file inside the bounded reach candidate set.
     ReachIn(u32),
+    /// Importers of a `leaky_interface` card's file that follow its changes,
+    /// stored as its own fact so a consumer reads the count without counting
+    /// the card's claimed findings.
+    Followers(u32),
 }
 
 /// The identity of one finding a card claimed.
@@ -148,6 +163,7 @@ pub enum ClaimedFinding {
     StableDependency(StableDependencyFindingId),
     Coupling(EvolutionaryFindingId),
     Knowledge(KnowledgeConcentrationFindingId),
+    ChangeLeakage(ChangeLeakageFindingId),
 }
 
 /// Where a card is shown.
@@ -385,6 +401,8 @@ pub struct ProblemInput<'a> {
     knowledge_concentration_findings: &'a [KnowledgeConcentrationFinding],
     hotspots: &'a [Hotspot],
     file_reach: &'a [FileReach],
+    change_leakage_findings: &'a [ChangeLeakageFinding],
+    file_change_coupling: &'a [FileChangeCoupling],
     policy: ProblemPolicy,
 }
 
@@ -402,6 +420,8 @@ impl<'a> ProblemInput<'a> {
             knowledge_concentration_findings: &[],
             hotspots: &[],
             file_reach: &[],
+            change_leakage_findings: &[],
+            file_change_coupling: &[],
             policy: ProblemPolicy::new(
                 CONCENTRATED_HIGH_FINDINGS,
                 BROAD_DEBT_UNITS,
@@ -472,6 +492,19 @@ impl<'a> ProblemInput<'a> {
         self
     }
 
+    /// Adds the change-leakage findings beside the retained pairs they were
+    /// decided from, which a card reads to name the two files of a pair.
+    #[must_use]
+    pub const fn with_change_leakage(
+        mut self,
+        findings: &'a [ChangeLeakageFinding],
+        pairs: &'a [FileChangeCoupling],
+    ) -> Self {
+        self.change_leakage_findings = findings;
+        self.file_change_coupling = pairs;
+        self
+    }
+
     #[must_use]
     pub const fn with_policy(mut self, policy: ProblemPolicy) -> Self {
         self.policy = policy;
@@ -484,6 +517,27 @@ impl<'a> ProblemInput<'a> {
             .binary_search_by_key(&file, |reach| reach.file())
             .ok()
             .map(|position| self.file_reach[position].reach())
+    }
+
+    /// The retained pair one change-leakage finding was decided from.
+    fn coupling(&self, finding: &ChangeLeakageFinding) -> Option<FileChangeCoupling> {
+        self.file_change_coupling
+            .get(finding.coupling().index())
+            .copied()
+    }
+
+    /// The file a change-leakage finding belongs to for claiming: the interface
+    /// whose importers follow it, or the lower-indexed file of a hidden pair.
+    ///
+    /// The lower-indexed file is a fixed, data-stable choice. Letting either
+    /// endpoint claim the finding would make the pair's evidence land under
+    /// whichever file happened to carry debt, so the same report would state
+    /// the same pair in two different places depending on unrelated facts.
+    fn leakage_owner(&self, finding: &ChangeLeakageFinding) -> Option<FileId> {
+        match finding.interface() {
+            Some(interface) => Some(interface),
+            None => self.coupling(finding).map(FileChangeCoupling::left),
+        }
     }
 
     /// The touch count of a hot file.
@@ -525,6 +579,11 @@ pub fn cluster_problems(input: ProblemInput<'_>) -> Vec<ProblemCard> {
     bus_risks(&input, &mut cards);
     unstable_dependencies(&input, &mut cards);
     files.measured(&mut cards);
+    // The two leakage patterns run last and card only what is left, so a
+    // leakage number reaches a reader as one more line on the card that
+    // already names its subject wherever such a card exists.
+    files.leaky_interfaces(&mut cards);
+    files.hidden_couplings(&mut cards);
     rank(&input, cards)
 }
 
@@ -541,6 +600,10 @@ struct FileFacts {
     findings: Vec<Vec<FindingId>>,
     /// The size findings of each file, in table order.
     sizes: Vec<Vec<SizeFindingId>>,
+    /// The change-leakage findings that belong to each file, in finding-table
+    /// order, which is what makes a leakage number one more line on the card
+    /// that already names its file.
+    leakage: Vec<Vec<ChangeLeakageFindingId>>,
     /// High findings that affect the verdict, which is what the `god_file` and
     /// `hot_mess` rules count.
     high: Vec<u32>,
@@ -586,11 +649,20 @@ impl FileFacts {
                 slot.push(SizeFindingId::from_index(position));
             }
         }
+        let mut leakage = vec![Vec::new(); input.files.len()];
+        for (position, finding) in input.change_leakage_findings.iter().enumerate() {
+            if let Some(file) = input.leakage_owner(finding)
+                && let Some(slot) = leakage.get_mut(file.index())
+            {
+                slot.push(ChangeLeakageFindingId::from_index(position));
+            }
+        }
         Self {
             degrees,
             medians,
             findings,
             sizes,
+            leakage,
             high,
             verdict_affecting,
         }
@@ -820,6 +892,72 @@ impl<'a, 'b> FilePass<'a, 'b> {
         }
     }
 
+    /// One card per interface file that still holds a `leaky_interface`
+    /// finding no other pattern claimed.
+    ///
+    /// The card states how many importers follow the file before it states
+    /// them, so the count survives the tightest rung and the followers are the
+    /// detail a wider rung buys.
+    fn leaky_interfaces(&mut self, cards: &mut Vec<ProblemCard>) {
+        for index in 0..self.input.files.len() {
+            if self.claimed[index] {
+                continue;
+            }
+            let followers = self.followers(index);
+            if followers == 0 {
+                continue;
+            }
+            let rating = self.claimed_rating(index);
+            let card = self.card(
+                index,
+                ProblemPattern::LeakyInterface,
+                rating,
+                vec![ProblemEvidence::Followers(followers)],
+            );
+            cards.push(card);
+        }
+    }
+
+    /// One card per `hidden_coupling` finding whose lower-indexed file carries
+    /// no file-anchored card, anchored on the two files the finding is about.
+    fn hidden_couplings(&self, cards: &mut Vec<ProblemCard>) {
+        for (position, finding) in self.input.change_leakage_findings.iter().enumerate() {
+            let Some(pair) = self.input.coupling(finding) else {
+                continue;
+            };
+            if finding.kind() != ChangeLeakageKind::HiddenCoupling
+                || self
+                    .claimed
+                    .get(pair.left().index())
+                    .copied()
+                    .unwrap_or(false)
+            {
+                continue;
+            }
+            let id = ChangeLeakageFindingId::from_index(position);
+            cards.push(ProblemCard {
+                pattern: ProblemPattern::HiddenCoupling,
+                rating: finding.rating(),
+                anchor: ProblemAnchor::Files(vec![pair.left(), pair.right()]),
+                evidence: vec![ProblemEvidence::ChangeLeakage(id)],
+                claimed_findings: vec![ClaimedFinding::ChangeLeakage(id)],
+                visibility: ProblemVisibility::Default,
+            });
+        }
+    }
+
+    /// How many importers follow one file, which is how many of its leakage
+    /// findings name it as an interface.
+    fn followers(&self, index: usize) -> u32 {
+        self.facts.leakage[index]
+            .iter()
+            .filter(|id| {
+                self.input.change_leakage_findings[id.index()].kind()
+                    == ChangeLeakageKind::LeakyInterface
+            })
+            .count() as u32
+    }
+
     /// The highest rating among the findings a file card would claim, and
     /// `healthy` when it would claim none.
     fn claimed_rating(&self, index: usize) -> Rating {
@@ -829,7 +967,16 @@ impl<'a, 'b> FilePass<'a, 'b> {
         let sizes = self.facts.sizes[index]
             .iter()
             .map(|id| self.input.size_findings[id.index()].rating());
-        findings.chain(sizes).max().unwrap_or(Rating::Healthy)
+        // A leakage finding is rated by the capability that owns it, so a file
+        // whose only debt is a leakage finding carries that finding's word.
+        let leakage = self.facts.leakage[index]
+            .iter()
+            .map(|id| self.input.change_leakage_findings[id.index()].rating());
+        findings
+            .chain(sizes)
+            .chain(leakage)
+            .max()
+            .unwrap_or(Rating::Healthy)
     }
 
     /// Builds one file-anchored card, claiming every retained finding and
@@ -837,11 +984,12 @@ impl<'a, 'b> FilePass<'a, 'b> {
     /// verdict.
     ///
     /// Evidence is stated head first: the file's top finding, the facts that
-    /// made the pattern fire, its size findings, its heat, and only then its
-    /// remaining findings — so a budgeted renderer states the problem and its
-    /// reason before it enumerates, and `--all` still reaches every claim. A
-    /// card claiming no source finding heads on its first other fact, which is
-    /// its size finding for a file measured only by its length.
+    /// made the pattern fire, the leakage findings it claims, its size
+    /// findings, its heat, and only then its remaining findings — so a budgeted
+    /// renderer states the problem and its reason before it enumerates, and
+    /// `--all` still reaches every claim. A card claiming no source finding
+    /// heads on its first other fact, which is its size finding for a file
+    /// measured only by its length.
     fn card(
         &mut self,
         index: usize,
@@ -852,13 +1000,16 @@ impl<'a, 'b> FilePass<'a, 'b> {
         self.claimed[index] = true;
         let findings = &self.facts.findings[index];
         let sizes = &self.facts.sizes[index];
-        let mut evidence =
-            Vec::with_capacity(findings.len() + sizes.len() + pattern_facts.len() + 1);
+        let leakage = &self.facts.leakage[index];
+        let mut evidence = Vec::with_capacity(
+            findings.len() + sizes.len() + leakage.len() + pattern_facts.len() + 1,
+        );
         let mut rest = findings.iter();
         if let Some(&top) = rest.next() {
             evidence.push(ProblemEvidence::Finding(top));
         }
         evidence.extend(pattern_facts);
+        evidence.extend(leakage.iter().map(|&id| ProblemEvidence::ChangeLeakage(id)));
         evidence.extend(sizes.iter().map(|&id| ProblemEvidence::Size(id)));
         if let Some(touches) = self.input.hot_touches(FileId::from_index(index)) {
             evidence.push(ProblemEvidence::Hot(touches));
@@ -868,13 +1019,19 @@ impl<'a, 'b> FilePass<'a, 'b> {
             .iter()
             .map(|&id| ClaimedFinding::Source(id))
             .chain(sizes.iter().map(|&id| ClaimedFinding::Size(id)))
+            .chain(leakage.iter().map(|&id| ClaimedFinding::ChangeLeakage(id)))
             .collect::<Vec<_>>();
+        // Claiming a change-leakage finding is enough to be shown by default:
+        // such a finding is a rated statement that survived every guard, floor,
+        // and proof its capability demands, and the file it names tends to be
+        // one with no debt of its own.
+        let shown = self.facts.verdict_affecting[index] || !leakage.is_empty();
         ProblemCard {
             pattern,
             rating,
             anchor: ProblemAnchor::File(FileId::from_index(index)),
             evidence,
-            visibility: if self.facts.verdict_affecting[index] {
+            visibility: if shown {
                 ProblemVisibility::Default
             } else {
                 ProblemVisibility::Detail
@@ -968,6 +1125,7 @@ fn claim_rating(input: &ProblemInput<'_>, claim: ClaimedFinding) -> Rating {
         ClaimedFinding::Knowledge(id) => {
             input.knowledge_concentration_findings[id.index()].rating()
         }
+        ClaimedFinding::ChangeLeakage(id) => input.change_leakage_findings[id.index()].rating(),
     }
 }
 
@@ -1970,6 +2128,8 @@ mod tests {
             ProblemPattern::BusRisk,
             ProblemPattern::UnstableDependency,
             ProblemPattern::Measured,
+            ProblemPattern::LeakyInterface,
+            ProblemPattern::HiddenCoupling,
         ];
         assert_eq!(
             patterns.map(ProblemPattern::id),
@@ -1982,11 +2142,15 @@ mod tests {
                 "bus_risk",
                 "unstable_dependency",
                 "measured",
+                "leaky_interface",
+                "hidden_coupling",
             ]
         );
+        // The two leakage patterns are appended at the tail, so every existing
+        // class is the class it was.
         assert_eq!(
             patterns.map(ProblemPattern::class),
-            [0, 1, 2, 3, 4, 5, 6, 7]
+            [0, 1, 2, 3, 4, 5, 6, 7, 8, 9]
         );
     }
 

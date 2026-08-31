@@ -1377,7 +1377,7 @@ fn evolutionary_analysis_is_exact_private_and_deterministic() {
     assert_eq!(
         terminal_text
             .matches(
-                "  watch changes together · a ↔ b\n        changed together in 3 of 6 commits · 50% · no code dependency\n"
+                "  watch packages change together · a ↔ b\n        changed together in 3 of 6 commits · 50% · no code dependency\n"
             )
             .count(),
         1
@@ -1461,7 +1461,7 @@ fn an_indirect_dependency_path_is_named_without_suppressing_the_finding() {
     // intermediate on the path.
     assert!(
         terminal.contains(
-            "  watch changes together · a ↔ c\n        changed together in 4 of 4 commits · 100% · no direct dependency · linked via b\n"
+            "  watch packages change together · a ↔ c\n        changed together in 4 of 4 commits · 100% · no direct dependency · linked via b\n"
         ),
         "{terminal}"
     );
@@ -1910,7 +1910,9 @@ fn fixture_and_generated_history_stays_descriptive_without_findings() {
         ["--all", "--color", "never", "--history", "36500d"],
     ))
     .unwrap();
-    assert!(!detailed.contains("changes together"), "{detailed}");
+    // The substring covers both co-change patterns, so neither the package
+    // wording nor the file wording can return with a fixture-explained pair.
+    assert!(!detailed.contains("change together"), "{detailed}");
     assert!(!detailed.contains("a ↔ b"), "{detailed}");
     assert!(!detailed.contains("a ↔ c"), "{detailed}");
 }
@@ -2022,7 +2024,7 @@ fn generated_history_cannot_change_eligible_history_or_concentration() {
     assert!(!detailed.contains("shared commits"));
     assert!(
         detailed.contains(
-            "  watch changes together · a ↔ b\n        changed together in 3 of 3 commits · 100% · no code dependency\n"
+            "  watch packages change together · a ↔ b\n        changed together in 3 of 3 commits · 100% · no code dependency\n"
         ),
         "{detailed}"
     );
