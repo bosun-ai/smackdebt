@@ -714,8 +714,9 @@ mod tests {
             "the guard bounds the pair table alone; without the sweep the sample \
              is one commit short of material"
         );
-        assert!(
-            finish(HistoryAvailability::Incomplete).is_empty(),
+        assert_eq!(
+            finish(HistoryAvailability::Incomplete),
+            crate::DirectoryAmplification::default(),
             "a stream that saw part of the history has no typical change to state"
         );
     }

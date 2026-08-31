@@ -26,6 +26,7 @@ mod problem;
 mod propagation;
 mod reachability;
 mod report;
+mod scope_amplification;
 mod size;
 mod source;
 mod stable_dependencies;
@@ -44,7 +45,6 @@ pub use architecture::{
 pub use architecture_comparison::{PackageCycle, compare_architecture};
 pub use change_amplification::{
     AMPLIFICATION_MAX_FILES, AMPLIFICATION_MIN_COMMITS, AMPLIFICATION_MIN_MEDIAN,
-    DirectoryAmplification, scope_amplification,
 };
 pub use change_coupling::{
     PackageContainment, change_coupling, qualifies_for_finding, unexplained_coupling,
@@ -89,6 +89,7 @@ pub use propagation::{
     enters_file_graph, graph_file_count,
 };
 pub use reachability::{largest_component_size, reach_in_counts};
+pub use scope_amplification::{DirectoryAmplification, scope_amplification};
 pub use size::{SizeFinding, SizeFindingId, SizePolicy, SizeSubject};
 pub use stable_dependencies::{MINIMUM_STABLE_DEPENDENCY_REFERENCES, stable_dependency_findings};
 pub use strongly_connected_components::strongly_connected_components;

@@ -455,10 +455,6 @@ pub const fn smackdebt_analysis::DiffCounts::new(u32, u32, u32) -> Self
 pub const fn smackdebt_analysis::DiffCounts::total(self) -> u32
 pub const fn smackdebt_analysis::DiffCounts::worse(self) -> u32
 pub struct smackdebt_analysis::DirectoryAmplification(_)
-impl smackdebt_analysis::DirectoryAmplification
-pub fn smackdebt_analysis::DirectoryAmplification::get(&self, smackdebt_analysis::DirectoryId) -> core::option::Option<smackdebt_analysis::ChangeAmplification>
-pub fn smackdebt_analysis::DirectoryAmplification::is_empty(&self) -> bool
-pub fn smackdebt_analysis::DirectoryAmplification::len(&self) -> usize
 pub struct smackdebt_analysis::DirectoryId(_)
 impl smackdebt_analysis::DirectoryId
 pub const fn smackdebt_analysis::DirectoryId::from_index(usize) -> Self
