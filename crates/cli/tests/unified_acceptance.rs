@@ -971,8 +971,20 @@ fn a_scope_states_how_many_files_a_typical_change_there_touches() {
     let file = rendered(vec!["core/src/unit0.js", "--history", "36500d"]);
     assert!(!file.contains("A typical change here"), "{file}");
 
-    // The same tree without a complete history states no typical change and
-    // every rated line of the block is byte-identical: the fact is stated only.
+    // The same tree read through the default window states no typical change:
+    // the fixture's commits carry fixed dates the ninety-day window excludes, so
+    // the stream stays complete and its sample is empty rather than shallow.
+    // Every rated line of the block is byte-identical between the two runs,
+    // which is what stated-only means.
+    let default_run = Invocation::new(["--json"]).run(repository.path());
+    default_run.success();
+    let default_report = checked_json(&default_run.stdout);
+    assert_eq!(
+        default_report["history_coverage"]["availability"],
+        "complete"
+    );
+    assert_eq!(default_report["history_coverage"]["commits"], 0);
+    assert_eq!(stated(&["--json"]), None);
     let windowed = rendered(vec![]);
     assert!(!windowed.contains("A typical change here"), "{windowed}");
     assert_eq!(
