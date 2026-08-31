@@ -8,6 +8,7 @@ mod comparison;
 mod contributor_concentration;
 mod cycle_witness;
 mod dependency_degree;
+mod directory_tree;
 mod evolution;
 mod evolutionary_comparison;
 mod gate;
@@ -15,8 +16,10 @@ mod health;
 mod history_window;
 mod hotspot;
 mod instability;
+mod median;
 mod orphan;
 mod problem;
+mod reachability;
 mod report;
 mod size;
 mod source;
@@ -44,6 +47,7 @@ pub use contributor_concentration::{
 };
 pub use cycle_witness::cycle_witness;
 pub use dependency_degree::dependency_degree;
+pub use directory_tree::{DirectoryId, DirectoryTree};
 pub use evolution::{
     ChangeCoupling, ContributorConcentration, ContributorId, CouplingEvidence, CouplingLink,
     EvolutionAccumulator, EvolutionaryComparison, EvolutionaryComparisonId,
@@ -64,6 +68,7 @@ pub use problem::{
     ProblemPattern, ProblemPolicy, ProblemRank, ProblemVisibility, cluster_problems,
     duplicate_claim,
 };
+pub use reachability::{ReachAnswer, bounded_reaches, largest_component_size, reach_in_counts};
 pub use size::{SizeFinding, SizeFindingId, SizePolicy, SizeSubject};
 pub use stable_dependencies::{MINIMUM_STABLE_DEPENDENCY_REFERENCES, stable_dependency_findings};
 pub use strongly_connected_components::strongly_connected_components;

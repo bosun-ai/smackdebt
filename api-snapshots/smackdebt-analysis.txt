@@ -167,6 +167,10 @@ pub enum smackdebt_analysis::Rating
 pub smackdebt_analysis::Rating::Healthy
 pub smackdebt_analysis::Rating::High
 pub smackdebt_analysis::Rating::Watch
+pub enum smackdebt_analysis::ReachAnswer
+pub smackdebt_analysis::ReachAnswer::Reaches
+pub smackdebt_analysis::ReachAnswer::Separate
+pub smackdebt_analysis::ReachAnswer::Undecided
 pub enum smackdebt_analysis::ReportMode
 pub smackdebt_analysis::ReportMode::Codebase
 pub smackdebt_analysis::ReportMode::Diff
@@ -436,6 +440,22 @@ pub const fn smackdebt_analysis::DiffCounts::changed(self) -> u32
 pub const fn smackdebt_analysis::DiffCounts::new(u32, u32, u32) -> Self
 pub const fn smackdebt_analysis::DiffCounts::total(self) -> u32
 pub const fn smackdebt_analysis::DiffCounts::worse(self) -> u32
+pub struct smackdebt_analysis::DirectoryId(_)
+impl smackdebt_analysis::DirectoryId
+pub const fn smackdebt_analysis::DirectoryId::from_index(usize) -> Self
+pub const fn smackdebt_analysis::DirectoryId::get(self) -> u32
+pub const fn smackdebt_analysis::DirectoryId::index(self) -> usize
+pub struct smackdebt_analysis::DirectoryTree
+impl smackdebt_analysis::DirectoryTree
+pub const smackdebt_analysis::DirectoryTree::ROOT: smackdebt_analysis::DirectoryId
+pub fn smackdebt_analysis::DirectoryTree::ancestors(&self, smackdebt_analysis::DirectoryId) -> impl core::iter::traits::iterator::Iterator<Item = smackdebt_analysis::DirectoryId> + '_
+pub fn smackdebt_analysis::DirectoryTree::depth(&self, smackdebt_analysis::DirectoryId) -> u32
+pub fn smackdebt_analysis::DirectoryTree::directory_count(&self) -> usize
+pub fn smackdebt_analysis::DirectoryTree::directory_of(&self, smackdebt_analysis::FileId) -> core::option::Option<smackdebt_analysis::DirectoryId>
+pub fn smackdebt_analysis::DirectoryTree::directory_of_path(&self, &str) -> core::option::Option<smackdebt_analysis::DirectoryId>
+pub fn smackdebt_analysis::DirectoryTree::distance(&self, smackdebt_analysis::DirectoryId, smackdebt_analysis::DirectoryId) -> u32
+pub fn smackdebt_analysis::DirectoryTree::from_file_paths<P: core::convert::AsRef<str>>(impl core::iter::traits::collect::IntoIterator<Item = P>) -> Self
+pub fn smackdebt_analysis::DirectoryTree::parent(&self, smackdebt_analysis::DirectoryId) -> core::option::Option<smackdebt_analysis::DirectoryId>
 pub struct smackdebt_analysis::EvolutionAccumulator
 impl smackdebt_analysis::EvolutionAccumulator
 pub fn smackdebt_analysis::EvolutionAccumulator::accept(&mut self, smackdebt_analysis::HistoryCommitFact)
@@ -1051,6 +1071,7 @@ pub const smackdebt_analysis::WORN_PERMILLE: u32
 pub const smackdebt_analysis::WORST_OFFENDER_LIMIT: usize
 pub fn smackdebt_analysis::aggregate_comparisons(&mut [smackdebt_analysis::Scope], &[smackdebt_analysis::Comparison], smackdebt_analysis::ScopeId)
 pub fn smackdebt_analysis::aggregate_scopes(&mut [smackdebt_analysis::Scope], &[smackdebt_analysis::FileRecord], smackdebt_analysis::ScopeId)
+pub fn smackdebt_analysis::bounded_reaches(usize, &[(usize, usize)], usize, usize, usize) -> smackdebt_analysis::ReachAnswer
 pub fn smackdebt_analysis::change_coupling(&[smackdebt_analysis::HistoryCommitFact], &smackdebt_analysis::PackageContainment) -> alloc::vec::Vec<smackdebt_analysis::ChangeCoupling>
 pub fn smackdebt_analysis::churn(usize, usize, &[smackdebt_analysis::HistoryCommitFact]) -> (alloc::vec::Vec<smackdebt_analysis::FileHistory>, alloc::vec::Vec<smackdebt_analysis::PackageHistory>)
 pub fn smackdebt_analysis::cluster_problems(smackdebt_analysis::ProblemInput<'_>) -> alloc::vec::Vec<smackdebt_analysis::ProblemCard>
@@ -1065,8 +1086,10 @@ pub const fn smackdebt_analysis::instability(u32, u32) -> core::option::Option<s
 pub fn smackdebt_analysis::is_entry_filename(&str) -> bool
 pub fn smackdebt_analysis::is_symbolic_candidate(&str) -> bool
 pub fn smackdebt_analysis::knowledge_concentration(&[smackdebt_analysis::ContributorConcentration]) -> alloc::vec::Vec<smackdebt_analysis::KnowledgeConcentrationFinding>
+pub fn smackdebt_analysis::largest_component_size(&[alloc::vec::Vec<usize>]) -> u32
 pub fn smackdebt_analysis::orphan_files(&[smackdebt_analysis::OrphanCandidate<'_>]) -> alloc::vec::Vec<smackdebt_analysis::OrphanFile>
 pub fn smackdebt_analysis::qualifies_for_finding(smackdebt_analysis::ChangeCoupling) -> bool
+pub fn smackdebt_analysis::reach_in_counts(usize, &[(usize, usize)]) -> alloc::vec::Vec<u32>
 pub fn smackdebt_analysis::stable_dependency_findings(&[smackdebt_analysis::PackageEdge], &[smackdebt_analysis::PackageGraphMeasurement]) -> alloc::vec::Vec<smackdebt_analysis::StableDependencyFinding>
 pub fn smackdebt_analysis::strongly_connected_components(usize, &[(usize, usize)]) -> alloc::vec::Vec<alloc::vec::Vec<usize>>
 pub fn smackdebt_analysis::test_declared_files(&alloc::collections::btree::set::BTreeSet<smackdebt_analysis::ModuleDeclaration>) -> alloc::collections::btree::set::BTreeSet<usize>

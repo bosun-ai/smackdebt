@@ -9,6 +9,7 @@ use crate::evolution::{
 };
 use crate::health::Rating;
 use crate::hotspot::Hotspot;
+use crate::median::nearest_rank_median;
 use crate::report::{
     FileActivity, FileId, FileRecord, Finding, FindingId, FindingRank, PackageId, PackageRecord,
 };
@@ -625,15 +626,6 @@ fn package_medians(
             )
         })
         .collect()
-}
-
-/// The nearest-rank median of a sorted integer sample, which stays an integer
-/// because it selects a member rather than averaging two.
-fn nearest_rank_median(sorted: &[u32]) -> u32 {
-    match sorted.len() {
-        0 => 0,
-        length => sorted[(length - 1) / 2],
-    }
 }
 
 /// One card per architecture finding.

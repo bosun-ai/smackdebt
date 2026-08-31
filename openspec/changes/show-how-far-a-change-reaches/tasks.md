@@ -1,10 +1,10 @@
 ## 1. Pure primitives
 
-- [ ] 1.1 Add the directory tree in analysis: directory identity, parent and depth vectors, the file-to-directory lookup, interned component names, the ancestor walk, and the integer distance `depth(a) + depth(b) - 2 * depth(lca)`, built once from the paths discovery already owns in time proportional to total path components.
-- [ ] 1.2 Add the reachability module: strongly connected component condensation with a reverse-topological bit-set closure, a largest-component size, a caller-bounded reach-in count, and a budgeted bidirectional path probe answering reaches, separate, or undecided.
-- [ ] 1.3 Move the nearest-rank median out of the problem module into a shared home and point both existing callers at it, changing no value.
-- [ ] 1.4 Add pure tests: distances of 0, 1, 2, and across two subtrees; diamond, cycle, and two-hundred-thousand-node chain reach; a probe that answers separate, one that answers reaches, and one that answers undecided exactly one node short of its budget; stack safety on the chain.
-- [ ] 1.5 Regenerate the analysis API snapshot for the new surface and review it.
+- [x] 1.1 Add the directory tree in analysis: directory identity, parent and depth vectors, the file-to-directory lookup, interned component names, the ancestor walk, and the integer distance `depth(a) + depth(b) - 2 * depth(lca)`, built once from the paths discovery already owns in time proportional to total path components.
+- [x] 1.2 Add the reachability module: strongly connected component condensation with a reverse-topological bit-set closure, a largest-component size, a caller-bounded reach-in count, and a budgeted bidirectional path probe answering reaches, separate, or undecided.
+- [x] 1.3 Move the nearest-rank median out of the problem module into a shared home and point both existing callers at it, changing no value.
+- [x] 1.4 Add pure tests: distances of 0, 1, 2, and across two subtrees; diamond, cycle, and two-hundred-thousand-node chain reach; a probe that answers separate, one that answers reaches, and one that answers undecided exactly one node short of its budget; stack safety on the chain.
+- [x] 1.5 Regenerate the analysis API snapshot for the new surface and review it.
 
 ## 2. Core size and propagation reach
 
