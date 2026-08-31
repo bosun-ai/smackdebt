@@ -1135,10 +1135,17 @@ pub(crate) fn amplification_repository() -> GeneratedRepository {
 /// three rewrite the model alone, so that pair shares 6 of 9 commits three
 /// directories apart with nothing in either package that reaches the other.
 ///
+/// A second unlinked pair with the same counts states the other half of the
+/// claiming rule. `data/src/rules.js` is complex enough for a finding of its
+/// own, so it already carries a card before any history is read and its hidden
+/// finding is one more line on that card rather than a card of its own. Its
+/// partner `data/store/lib/cache.js` therefore reaches a reader only through
+/// that line, which is what makes the line name it.
+///
 /// The nesting of `data/store` inside `data` is deliberate. Two packages that
 /// keep changing together with no dependency are a `shotgun_pair` as well, and
-/// a nested pair is never a coupling row, so the file finding is the only card
-/// the history adds and the strict-launch count states exactly that.
+/// a nested pair is never a coupling row, so the file findings add exactly one
+/// card to each affected scope and the strict-launch count states that.
 ///
 /// Three cases must produce nothing. `web/src/one.js` and `web/src/two.js`
 /// change together five times inside one directory, which is what a directory
@@ -1182,13 +1189,23 @@ pub(crate) fn change_leakage_repository() -> GeneratedRepository {
 /// card before any history is read.
 const LEAKY_INTERFACE: &str = "export function thing(value) {\n  if (value) {\n    if (value > 1) {\n      if (value > {}) {\n        return 3;\n      }\n    }\n  }\n  return 0;\n}\n";
 
+/// The file of a hidden pair that already carries a card, complex enough for
+/// one Watch finding under the fixture's own thresholds and no more, so the
+/// card exists before history is read and the hidden finding joins it.
+const CLAIMING_FILE: &str = "export function rule(value) {\n  if (value) {\n    if (value > {}) {\n      return 1;\n    }\n  }\n  return 0;\n}\n";
+
+/// The same file at a version the paired commits never wrote, so the commits
+/// that rewrite it alone are changes rather than no-ops, exactly as the model's
+/// own solo template is.
+const CLAIMING_FILE_ALONE: &str = "export function rule(value) {\n  if (value) {\n    if (value > 1{}) {\n      return 1;\n    }\n  }\n  return 0;\n}\n";
+
 /// One commit group: a message, the files it rewrites together as a path
 /// beside the source template whose `{}` becomes the version, and how many
 /// times it rewrites them.
 type LeakageCommits = (&'static str, &'static [(&'static str, &'static str)], usize);
 
 /// Every commit group of [`change_leakage_repository`].
-const LEAKAGE_COMMITS: [LeakageCommits; 7] = [
+const LEAKAGE_COMMITS: [LeakageCommits; 9] = [
     (
         "the interface and the importer that follows it",
         &[
@@ -1222,6 +1239,19 @@ const LEAKAGE_COMMITS: [LeakageCommits; 7] = [
     (
         "the model alone",
         &[("data/src/model.js", "export const model = 1{};\n")],
+        3,
+    ),
+    (
+        "a file that already carries a card and the file it changes with",
+        &[
+            ("data/src/rules.js", CLAIMING_FILE),
+            ("data/store/lib/cache.js", "export const cache = {};\n"),
+        ],
+        6,
+    ),
+    (
+        "the rules alone",
+        &[("data/src/rules.js", CLAIMING_FILE_ALONE)],
         3,
     ),
     (

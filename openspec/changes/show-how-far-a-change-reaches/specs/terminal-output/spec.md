@@ -81,14 +81,26 @@ order analysis stored it, with one exact wording per evidence kind:
 `<follower> changed with it in <shared> of <union> commits · <p>% · <d>
 directories away`,
 `changed together in <shared> of <union> commits · <p>% · no dependency either
-way · <d> directories away`, a claimed finding's `path:line`
+way · <d> directories away`,
+`changed with <partner> in <shared> of <union> commits · <p>% · no dependency
+either way · <d> directories away`, a claimed finding's `path:line`
 with its measurements, a size finding's subject and measured value, a
 stable-dependency finding's integer degree operands and reference count, a
 coupling pair's shared commits, union commits, similarity operands, and
 dependency state, and a knowledge-concentration finding's counts without
 identity. The percentage of a co-change line SHALL be the shared-to-union share
 rounded to the nearest whole percent, as the accepted coupling row already
-states it. Clustering carries a touch count only for a hotspot, so heat is the
+states it.
+
+A co-change evidence line SHALL name the end of its pair the card's head does
+not, so the two files a finding is about reach a reader exactly once between
+them. A `leaky_interface` line therefore names the follower, because the head is
+the interface. A `hidden_coupling` line names neither file on a standalone card,
+whose head is both paths, and SHALL name the partner — the file at the other end
+of the pair — when the finding was claimed by the card of a file that already
+carried debt, whose head is one path. Without that the partner is unrecoverable
+from the terminal: the reader learns that a file changes with something and
+never learns with what, which is most of the finding. Clustering carries a touch count only for a hotspot, so heat is the
 only activity wording a card states; the activity of a file that is not a
 hotspot remains a machine-report fact. Every wording SHALL use correct singular
 and plural form, in the verb and in the object alike. A `tangle` card SHALL
@@ -138,6 +150,10 @@ as counts without identity.
 - **WHEN** a standalone `hidden_coupling` card is shown
 - **THEN** its row reads `watch change together without a dependency · <left> ↔ <right>` and its evidence states the shared commits, the rounded percentage, `no dependency either way`, and the directory distance
 
+#### Scenario: A hidden pair is claimed by a file that already carries a card
+- **WHEN** a hidden finding's lower-indexed file already carries a card of its own, so no standalone card is written
+- **THEN** that card's evidence line reads `changed with <partner> in <shared> of <union> commits · <p>% · no dependency either way · <d> directories away`, naming the file at the other end of the pair, which the card's head does not name
+
 #### Scenario: A hub states its reach
 - **WHEN** a `hub` card's file carries an exact reach of 41
 - **THEN** one evidence line reads `a change here reaches 41 files`
@@ -184,7 +200,9 @@ or a cycle witness. Complete relation tables SHALL remain in the machine report.
 
 One carve-out SHALL exist and no other: a co-change finding names the two files
 it is about, so a `hidden_coupling` card MAY head on `<left> ↔ <right>` and a
-leakage evidence line MAY name a follower file. A finding's subject is the
+leakage evidence line MAY name the file at the other end of its pair, which is a
+follower for a leaky interface and a partner for a claimed hidden pair. A
+finding's subject is the
 identity of the thing measured, not a graph row — the same principle that
 already lets a cycle witness print file paths and lets an `unstable_dependency`
 card head on a package pair. The carve-out SHALL be limited to the two file

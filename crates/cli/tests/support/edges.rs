@@ -9,8 +9,10 @@
 //! # The one carve-out
 //!
 //! A co-change finding names the two files it is *about*: a `hidden_coupling`
-//! card heads `<left> ↔ <right>`, and a leaking interface's evidence names the
-//! follower that changed with it. A finding's subject is the identity of the
+//! card heads `<left> ↔ <right>`, and a leakage evidence line names the end of
+//! its pair the head left out — the follower that changed with a leaking
+//! interface, or the partner of a hidden pair whose finding was claimed by a
+//! card that heads on one file. A finding's subject is the identity of the
 //! thing measured, not a graph row — the same principle that already lets a
 //! cycle witness print file paths and lets an `unstable_dependency` card head
 //! on a package pair. The carve-out is limited to the two file identities, so

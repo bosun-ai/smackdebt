@@ -999,12 +999,16 @@ fn a_scope_states_how_many_files_a_typical_change_there_touches() {
 /// must produce nothing, from one invocation.
 ///
 /// The importer three directories away shares 7 of the interface's 12 commits;
-/// the unlinked pair shares 6 of 9 across two packages neither of which can
-/// reach the other. Four cases produce nothing: the test that changes with the
-/// file it exercises, the two files of one directory, the Rust parent and the
-/// module its child declares, and the pair three commits short of the support
-/// floor. The last of those is retained, which is what makes it evidence that
-/// a retained pair is not a finding.
+/// the two unlinked pairs share 6 of 9 each across two packages neither of
+/// which can reach the other. Those two state the claiming rule from both
+/// sides: the model's pair raises a card of its own because its lower-indexed
+/// file carries nothing, and the rules file's pair is one more line on the card
+/// that file already had — the line that has to name the partner, because
+/// nothing else on that card does. Four cases produce nothing: the test that
+/// changes with the file it exercises, the two files of one directory, the Rust
+/// parent and the module its child declares, and the pair three commits short
+/// of the support floor. The last of those is retained, which is what makes it
+/// evidence that a retained pair is not a finding.
 #[test]
 fn the_leakage_fixture_states_both_kinds_and_every_absence() {
     let repository = change_leakage_repository();
@@ -1034,6 +1038,7 @@ fn the_leakage_fixture_states_both_kinds_and_every_absence() {
     let expected: Vec<_> = [
         ("app/interface.js", "web/src/follower.js", 7, 12, 3),
         ("data/src/model.js", "data/store/lib/keys.js", 6, 9, 3),
+        ("data/src/rules.js", "data/store/lib/cache.js", 6, 9, 3),
         ("edge/lib/b.js", "edge/src/a.js", 3, 3, 2),
         ("wiring/src/a/b/mod.rs", "wiring/src/lib.rs", 6, 6, 2),
     ]
@@ -1070,13 +1075,16 @@ fn the_leakage_fixture_states_both_kinds_and_every_absence() {
                 Some("app/interface.js".to_owned())
             ),
             ("hidden_coupling".to_owned(), 1, None),
+            ("hidden_coupling".to_owned(), 2, None),
         ],
         "the wiring pair is connected by a module declaration and the edge pair is below the support floor"
     );
 
-    // The hybrid claim: the interface already carries a card, so its leakage
-    // finding is one more line on that card rather than a second card about
-    // the same file.
+    // The hybrid claim, in both of its shapes: the interface and the rules file
+    // already carry cards, so their leakage findings are one more line on those
+    // cards rather than second cards about the same files, while the model's
+    // pair — whose lower-indexed file carries nothing — raises a card of its
+    // own.
     let cards: Vec<_> = report["problems"]
         .as_array()
         .unwrap()
@@ -1098,6 +1106,11 @@ fn the_leakage_fixture_states_both_kinds_and_every_absence() {
                 "[{\"index\":0,\"table\":\"findings\"},{\"index\":0,\"table\":\"change_leakage_findings\"}]".to_owned()
             ),
             (
+                "measured".to_owned(),
+                "default".to_owned(),
+                "[{\"index\":1,\"table\":\"findings\"},{\"index\":2,\"table\":\"change_leakage_findings\"}]".to_owned()
+            ),
+            (
                 "hidden_coupling".to_owned(),
                 "default".to_owned(),
                 "[{\"index\":1,\"table\":\"change_leakage_findings\"}]".to_owned()
@@ -1115,6 +1128,14 @@ fn the_leakage_fixture_states_both_kinds_and_every_absence() {
             "        app/interface.js:1 · function · cognitive 6",
             "        1 rated unit",
             "        web/src/follower.js changed with it in 7 of 12 commits · 58% · 3 directories away",
+            // The claimed hidden finding names the partner, because this card's
+            // head names one file and nothing else on the card would.
+            "  watch rule · function · data/src/rules.js:1",
+            "        cognitive 3",
+            "        changed with data/store/lib/cache.js in 6 of 9 commits · 67% · no dependency either way · 3 directories away",
+            "        hot (9 commits)",
+            // The standalone card's head names both files, so its line states
+            // the proof instead.
             "  watch change together without a dependency · data/src/model.js ↔ data/store/lib/keys.js",
             "        changed together in 6 of 9 commits · 67% · no dependency either way · 3 directories away",
         ]

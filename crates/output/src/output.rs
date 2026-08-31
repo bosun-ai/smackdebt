@@ -10,12 +10,12 @@ use anstyle::{Ansi256Color, AnsiColor, Style};
 use smackdebt_analysis::{
     ArchitectureComparisonKind, ArchitectureFindingId, ChangeLeakageFindingId, CodebaseTier,
     Comparison, ComparisonDirection, ComparisonKind, CouplingLink, DebtDiffSelection, DebtFamily,
-    DependencyEdgeId, Diagnostic, DiagnosticKind, DiffTier, EvolutionaryFindingId, FileId,
-    FileRecord, Finding, FindingId, Instability, KnowledgeConcentrationFindingId, Language,
-    Measurements, PackageId, ProblemAnchor, ProblemCard, ProblemEvidence, ProblemPattern,
-    ProblemVisibility, Rating, Report, ReportMode, ResolutionIssueKind, Scope, ScopeId, ScopeKind,
-    Signal, SizeFinding, SizeFindingId, SourceRole, SourceTrust, StableDependencyFindingId,
-    UnitKind, Verdict, instability, qualifies_for_finding,
+    DependencyEdgeId, Diagnostic, DiagnosticKind, DiffTier, EvolutionaryFindingId,
+    FileChangeCoupling, FileId, FileRecord, Finding, FindingId, Instability,
+    KnowledgeConcentrationFindingId, Language, Measurements, PackageId, ProblemAnchor, ProblemCard,
+    ProblemEvidence, ProblemPattern, ProblemVisibility, Rating, Report, ReportMode,
+    ResolutionIssueKind, Scope, ScopeId, ScopeKind, Signal, SizeFinding, SizeFindingId, SourceRole,
+    SourceTrust, StableDependencyFindingId, UnitKind, Verdict, instability, qualifies_for_finding,
 };
 use unicode_width::{UnicodeWidthChar, UnicodeWidthStr};
 
@@ -660,14 +660,29 @@ fn problem_row(report: &Report, card: &ProblemCard, evidence: usize) -> Row {
     // exempt from the slot accounting, so a card carrying a long witness may
     // render past the budget while the cards a scope shows and the evidence
     // each of them states still respect the rung.
+    let anchored = anchored_file(card);
     let stacked = card
         .evidence()
         .iter()
         .take(evidence)
         .enumerate()
-        .flat_map(|(index, fact)| evidence_lines(report, *fact, headed && index == 0))
+        .flat_map(|(index, fact)| evidence_lines(report, *fact, headed && index == 0, anchored))
         .collect();
     Row::new(word, problem_head(report, card)).with_stacked(stacked)
+}
+
+/// The one file a card's head names, which only a file anchor gives it.
+///
+/// A pair of files, a package, or a package pair names no single file, so an
+/// evidence line that would otherwise leave one end of a pair unnamed knows
+/// from this whether the head already carries it.
+const fn anchored_file(card: &ProblemCard) -> Option<FileId> {
+    match card.anchor() {
+        ProblemAnchor::File(file) => Some(*file),
+        ProblemAnchor::Files(_) | ProblemAnchor::Package(_) | ProblemAnchor::PackagePair(..) => {
+            None
+        }
+    }
 }
 
 /// The human name of one pattern, which is presentation and never the frozen
@@ -886,7 +901,16 @@ fn stated_verdict_facts(verdict: &Verdict) -> Vec<String> {
 /// Every kind states one line, except a cycle witness, which is one fact
 /// stated one step per line so it is never shortened with an ellipsis, and a
 /// fact the card's head already states, which adds only what is left.
-fn evidence_lines(report: &Report, fact: ProblemEvidence, headed: bool) -> Vec<String> {
+///
+/// `anchored` is the one file the head names when the card has a file anchor,
+/// which a co-change line reads so that it states the end of its pair the head
+/// left out.
+fn evidence_lines(
+    report: &Report,
+    fact: ProblemEvidence,
+    headed: bool,
+    anchored: Option<FileId>,
+) -> Vec<String> {
     match fact {
         ProblemEvidence::Finding(id) => finding_evidence(report, id, headed),
         ProblemEvidence::Size(id) => size_evidence(report, id, headed),
@@ -894,7 +918,7 @@ fn evidence_lines(report: &Report, fact: ProblemEvidence, headed: bool) -> Vec<S
         ProblemEvidence::StableDependency(id) => vec![stable_dependency_evidence(report, id)],
         ProblemEvidence::Coupling(id) => vec![coupling_evidence(report, id)],
         ProblemEvidence::Knowledge(id) => vec![knowledge_evidence(report, id)],
-        ProblemEvidence::ChangeLeakage(id) => vec![leakage_evidence(report, id)],
+        ProblemEvidence::ChangeLeakage(id) => vec![leakage_evidence(report, id, anchored)],
         // The rest are integers the report already measured, so they need no
         // finding table to be stated.
         measured => counted_evidence(measured).into_iter().collect(),
@@ -1025,10 +1049,18 @@ fn stable_dependency_evidence(report: &Report, id: StableDependencyFindingId) ->
 /// One change-leakage finding: which files changed together, how often, how
 /// alike, and how far apart.
 ///
-/// A leaky interface names the follower, because the card's file is the
-/// interface and the follower is what the line adds. A hidden pair names
-/// neither file — the head already does — and states the proof instead.
-fn leakage_evidence(report: &Report, id: ChangeLeakageFindingId) -> String {
+/// The line names the end of the pair the card's head does not, so the two
+/// files a finding is about reach a reader exactly once between them. A leaky
+/// interface names the follower, because the card's file is the interface. A
+/// hidden pair names nothing on its own standalone card, whose head is both
+/// paths, and names the partner when the finding was claimed by the card of a
+/// file that already carried debt, whose head is one path — without it that
+/// partner would be unrecoverable from the terminal.
+fn leakage_evidence(
+    report: &Report,
+    id: ChangeLeakageFindingId,
+    anchored: Option<FileId>,
+) -> String {
     let Some(finding) = report.change_leakage_findings().get(id.index()) else {
         return String::new();
     };
@@ -1044,17 +1076,26 @@ fn leakage_evidence(report: &Report, id: ChangeLeakageFindingId) -> String {
         pair.shared_commits(),
         pair.union_commits()
     );
-    let mut facts = match finding.interface() {
-        Some(interface) => {
-            let follower = if interface == pair.left() {
-                pair.right()
-            } else {
-                pair.left()
-            };
-            let path = report.files()[follower.index()].path();
-            vec![format!("{path} changed with it {commits}")]
+    let path = |file: FileId| {
+        report
+            .files()
+            .get(file.index())
+            .map_or("?", FileRecord::path)
+    };
+    let mut facts = match (finding.interface(), anchored) {
+        (Some(interface), _) => {
+            vec![format!(
+                "{} changed with it {commits}",
+                path(other_end(pair, interface))
+            )]
         }
-        None => vec![format!("changed together {commits}")],
+        (None, Some(file)) => {
+            vec![format!(
+                "changed with {} {commits}",
+                path(other_end(pair, file))
+            )]
+        }
+        (None, None) => vec![format!("changed together {commits}")],
     };
     facts.push(format!(
         "{}%",
@@ -1068,6 +1109,16 @@ fn leakage_evidence(report: &Report, id: ChangeLeakageFindingId) -> String {
         Counted::new(pair.distance() as usize, "directory", "directories")
     ));
     facts.join(" · ")
+}
+
+/// The file at the other end of a pair from the one already named, which is
+/// the file a co-change evidence line adds.
+const fn other_end(pair: FileChangeCoupling, named: FileId) -> FileId {
+    if named.index() == pair.left().index() {
+        pair.right()
+    } else {
+        pair.left()
+    }
 }
 
 /// A shared-to-union share as a whole percent, rounded to the nearest, from
@@ -2929,7 +2980,7 @@ mod tests {
             ),
         ] {
             assert_eq!(
-                evidence_lines(&report, fact, false),
+                evidence_lines(&report, fact, false, None),
                 vec![expected.to_owned()],
                 "{fact:?}"
             );
@@ -3099,6 +3150,75 @@ mod tests {
                 "        changed together in 6 of 9 commits · 67% · no dependency either way · 4 directories away",
             ],
             "{detailed}"
+        );
+    }
+
+    /// The hidden pair whose lower-indexed file already carries a card of its
+    /// own, which is the shape the hybrid claim produces.
+    ///
+    /// The finding is one more line on that card rather than a card of its
+    /// own, so the head names one file and only the line can name the other.
+    /// Stating `changed together` there would leave the partner unrecoverable:
+    /// a reader would learn that the file changes with something and never
+    /// learn with what.
+    #[test]
+    fn a_hidden_pair_claimed_by_a_file_card_names_the_partner_it_changed_with() {
+        let mut builder = ReportBuilder::new(ReportMode::Codebase);
+        let root = ScopeId::from_index(0);
+        builder.add_scope(Scope::new(root, ScopeKind::Repository, ".", None));
+        builder.set_root(root);
+        for (index, path) in ["a/one.ts", "b/two.ts"].into_iter().enumerate() {
+            builder.add_file(FileRecord::new(
+                FileId::from_index(index),
+                root,
+                path,
+                Coverage::new(1, 1, 0, 0, 10, 0),
+                HealthCounts::new(0, 1, 0),
+            ));
+        }
+        // The lower-indexed file carries debt of its own, so the leakage
+        // finding is claimed by that card instead of raising a standalone one.
+        let measurements = Measurements::new(15, 1, 1);
+        builder.add_finding(Finding::new(
+            FindingId::from_index(0),
+            FileId::from_index(0),
+            UnitIdentity::new("one", UnitKind::Function),
+            SourceSpan::new(1, 2),
+            measurements,
+            HealthPolicy::default().assess(measurements),
+        ));
+        builder.link_finding(root, FindingId::from_index(0));
+        builder.set_evolution(
+            EvolutionaryReportFacts::new(
+                HistoryCoverage::unavailable("test"),
+                Vec::new(),
+                Vec::new(),
+                Vec::new(),
+                Vec::new(),
+                Vec::new(),
+                Vec::new(),
+            )
+            .with_file_coupling(vec![FileChangeCoupling::new(
+                FileId::from_index(0),
+                FileId::from_index(1),
+                6,
+                9,
+                4,
+            )]),
+        );
+        builder.set_change_leakage_findings(vec![ChangeLeakageFinding::hidden(
+            FileChangeCouplingId::from_index(0),
+        )]);
+        let report = builder.finish();
+        let terminal = render(&report, TerminalOptions::new(120, false, false));
+        assert_eq!(
+            section_rows(&terminal, "PROBLEMS"),
+            [
+                "  watch one · function · a/one.ts:1",
+                "        cognitive 15",
+                "        changed with b/two.ts in 6 of 9 commits · 67% · no dependency either way · 4 directories away",
+            ],
+            "{terminal}"
         );
     }
 

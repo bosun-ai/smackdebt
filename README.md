@@ -330,11 +330,15 @@ measured value, `<n> files import this`, `imports <n> files`, `<n> rated units`,
 `<n> files in the cycle`, `hot (<n> commits)`, `a change here reaches <n>
 files`, `<n> importers follow it`, a coupling pair's commit operands and
 dependency state, and a contributor concentration's counts. A co-change finding
-names the two files it is about: a `hidden_coupling` card heads
-`<left> ↔ <right>` and states `changed together in 6 of 9 commits · 67% · no
-dependency either way · 4 directories away`, and a leaking interface's card
-states `<follower> changed with it in 7 of 12 commits · 58% · 3 directories
-away` for each importer that follows it.
+names the two files it is about, and its evidence line names the one the card's
+head does not. A `hidden_coupling` card heads `<left> ↔ <right>` and states
+`changed together in 6 of 9 commits · 67% · no dependency either way · 4
+directories away`, naming neither again. When such a finding lands on the card of
+a file that already carried debt, that card's head names one file, so the line
+names the other: `changed with data/store/lib/cache.js in 6 of 9 commits · 67% ·
+no dependency either way · 3 directories away`. A leaking interface's card is the
+same shape from the other side, stating `<follower> changed with it in 7 of 12
+commits · 58% · 3 directories away` for each importer that follows it.
 
 The pattern ids are the stable vocabulary for an integration; the words beside
 them are what a person reads:
