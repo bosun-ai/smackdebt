@@ -20,7 +20,8 @@ use crate::{
 use crate::{
     ChangeCoupling, ContributorConcentration, CouplingLink, EvolutionaryComparison,
     EvolutionaryComparisonId, EvolutionaryFinding, EvolutionaryFindingId, EvolutionaryReportFacts,
-    FileHistory, HistoryCoverage, KnowledgeConcentrationFinding, PackageHistory,
+    FileChangeCoupling, FileHistory, HistoryCoverage, KnowledgeConcentrationFinding,
+    PackageHistory,
 };
 #[cfg(test)]
 use crate::{HealthPolicy, LocalUnitId, Signal, Thresholds, compare_units};
@@ -787,6 +788,10 @@ pub struct Report {
     file_history: Vec<FileHistory>,
     package_history: Vec<PackageHistory>,
     change_coupling: Vec<ChangeCoupling>,
+    /// The file pairs that change together often enough to be worth keeping, in
+    /// file order. A retained pair is the population a change-leakage detector
+    /// reads: it is not a finding and reaches no human view.
+    file_change_coupling: Vec<FileChangeCoupling>,
     contributor_concentration: Vec<ContributorConcentration>,
     evolutionary_findings: Vec<EvolutionaryFinding>,
     evolutionary_comparisons: Vec<EvolutionaryComparison>,
@@ -940,6 +945,7 @@ impl ReportBuilder {
         self.report.file_history = facts.file_history;
         self.report.package_history = facts.package_history;
         self.report.change_coupling = facts.coupling;
+        self.report.file_change_coupling = facts.file_coupling;
         self.report.contributor_concentration = facts.concentration;
         self.report.evolutionary_findings = facts.findings;
         self.report.evolutionary_comparisons = facts.comparisons;
@@ -1106,6 +1112,7 @@ impl Report {
             file_history: Vec::new(),
             package_history: Vec::new(),
             change_coupling: Vec::new(),
+            file_change_coupling: Vec::new(),
             explanation_pairs: BTreeSet::new(),
             coupling_links: BTreeMap::new(),
             contributor_concentration: Vec::new(),
@@ -1205,6 +1212,14 @@ impl Report {
 
     pub fn change_coupling(&self) -> &[ChangeCoupling] {
         &self.change_coupling
+    }
+    /// The retained file pairs that change together, in file order.
+    ///
+    /// A retained pair is a population, not a statement: it reaches the machine
+    /// report and never a default view, an `--all` view, a file scope, or a
+    /// problem card.
+    pub fn file_change_coupling(&self) -> &[FileChangeCoupling] {
+        &self.file_change_coupling
     }
     pub fn contributor_concentration(&self) -> &[ContributorConcentration] {
         &self.contributor_concentration

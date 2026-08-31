@@ -1,6 +1,7 @@
 //! Repository use cases. This crate is the only place that composes discovery,
 //! parsers, Git, health policy, and parallel execution.
 
+use std::borrow::Cow;
 use std::collections::{BTreeMap, BTreeSet, HashMap};
 use std::fs;
 use std::path::{Path, PathBuf};
@@ -13,17 +14,18 @@ use smackdebt_analysis::{
     ArchitectureFindingKind, ArchitectureGraph, ArchitectureReportFacts, Comparison, ComparisonId,
     ContributorId, CoreSize, Coverage, DependencyCoverage, DependencyEdge, DependencyEdgeId,
     DependencySyntax, DependencySyntaxState, Diagnostic, DiagnosticId, DiagnosticKind,
-    EvolutionAccumulator, ExternalDependency, FileActivity, FileAnalysis, FileDebt, FileId,
-    FileReach, FileRecord, Finding, FindingId, HealthAssessment, HealthCounts, HealthPolicy,
-    HistoryAvailability, HistoryChangeFact, HistoryCommitFact, HistoryCoverage, HistoryWindow,
-    HotspotPolicy, Language, ModuleDeclaration, OrphanCandidate, OrphanFile, PackageClosure,
-    PackageContainment, PackageEdge, PackageEdgeId, PackageGraphMeasurement, PackageId,
-    PackageRecord, ParseStatus, Rating, Report, ReportBuilder as AnalysisReportBuilder, ReportMode,
-    ResolutionDiagnostic, ResolutionIssueKind, Scope, ScopeId, ScopeKind, SizeFinding, SizePolicy,
-    SourceCoverageOutcome, SourceRole, SourceTrust, StableDependencyFinding, close_over_packages,
-    compare_architecture, compare_units, cycle_witness, dependency_degree, enters_file_graph,
-    file_reaches, graph_file_count, largest_component_size, orphan_files, reach_in_counts,
-    stable_dependency_findings, strongly_connected_components, test_declared_files,
+    DirectoryTree, EvolutionAccumulator, ExternalDependency, FileActivity, FileAnalysis, FileDebt,
+    FileId, FileReach, FileRecord, Finding, FindingId, HealthAssessment, HealthCounts,
+    HealthPolicy, HistoryAvailability, HistoryChangeFact, HistoryCommitFact, HistoryCoverage,
+    HistoryWindow, HotspotPolicy, Language, ModuleDeclaration, OrphanCandidate, OrphanFile,
+    PackageClosure, PackageContainment, PackageEdge, PackageEdgeId, PackageGraphMeasurement,
+    PackageId, PackageRecord, ParseStatus, Rating, Report, ReportBuilder as AnalysisReportBuilder,
+    ReportMode, ResolutionDiagnostic, ResolutionIssueKind, Scope, ScopeId, ScopeKind, SizeFinding,
+    SizePolicy, SourceCoverageOutcome, SourceRole, SourceTrust, StableDependencyFinding,
+    close_over_packages, compare_architecture, compare_units, cycle_witness, dependency_degree,
+    enters_file_graph, file_reaches, graph_file_count, largest_component_size, orphan_files,
+    reach_in_counts, stable_dependency_findings, strongly_connected_components,
+    test_declared_files,
 };
 use smackdebt_discovery::{DiscoveredFile, Inventory, generic_source_roles, glob_matches};
 use smackdebt_git::{Change, ContributorIdentity, GitRepository};
@@ -1526,6 +1528,31 @@ enum HistoryAlias {
     Unusable,
 }
 
+/// The repository-relative path of every file history can name, each placed at
+/// its own [`FileId`].
+///
+/// [`DirectoryTree`] reads a file's identity from the position it holds in the
+/// sequence the tree is built from, so the paths are placed by index rather
+/// than pushed in iteration order: the diff flow assembles its history files
+/// from a filtered list, and pushing them in order would shift every directory
+/// lookup and every distance that follows from it with no wrong-looking value
+/// to notice. A position no history file claims holds the empty path, which the
+/// tree files under the repository root and no signal ever asks about.
+fn history_directory_paths(
+    files: &[(PathBuf, FileId, PackageId, SourceRole, SourceTrust)],
+) -> Vec<Cow<'_, str>> {
+    let count = files
+        .iter()
+        .map(|(_, file, _, _, _)| file.index() + 1)
+        .max()
+        .unwrap_or_default();
+    let mut paths = vec![Cow::Borrowed(""); count];
+    for (path, file, _, _, _) in files {
+        paths[file.index()] = path.to_string_lossy();
+    }
+    paths
+}
+
 fn load_evolution(
     inventory_root: &Path,
     history_days: u32,
@@ -1558,6 +1585,7 @@ fn load_evolution(
         .iter()
         .map(|(path, file, _, _, _)| (*file, path.clone()))
         .collect();
+    let directories = DirectoryTree::from_file_paths(history_directory_paths(files));
     let mut contributors = HashMap::<ContributorIdentity, ContributorId>::new();
     let mut accumulator = EvolutionAccumulator::default();
     for (_, file, package, role, trust) in files {
@@ -1642,7 +1670,7 @@ fn load_evolution(
             );
         }
         if !changes.is_empty() {
-            accumulator.accept(HistoryCommitFact::new(contributor, changes));
+            accumulator.accept(HistoryCommitFact::new(contributor, changes), &directories);
         }
         eligible_commits += u32::from(contains_eligible_source);
         Ok(())

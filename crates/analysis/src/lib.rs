@@ -11,6 +11,7 @@ mod dependency_degree;
 mod directory_tree;
 mod evolution;
 mod evolutionary_comparison;
+mod file_change_coupling;
 mod file_reach;
 mod gate;
 mod health;
@@ -55,11 +56,15 @@ pub use evolution::{
     ChangeCoupling, ContributorConcentration, ContributorId, CouplingEvidence, CouplingLink,
     EvolutionAccumulator, EvolutionaryComparison, EvolutionaryComparisonId,
     EvolutionaryComparisonKind, EvolutionaryFinding, EvolutionaryFindingId,
-    EvolutionaryFindingKind, EvolutionaryReportFacts, FileHistory, HistoryAvailability,
-    HistoryChangeFact, HistoryCommitFact, HistoryCoverage, KnowledgeConcentrationFinding,
-    KnowledgeConcentrationFindingId, PackageHistory,
+    EvolutionaryFindingKind, EvolutionaryReportFacts, FileChangeCoupling, FileHistory,
+    HistoryAvailability, HistoryChangeFact, HistoryCommitFact, HistoryCoverage,
+    KnowledgeConcentrationFinding, KnowledgeConcentrationFindingId, PackageHistory,
 };
 pub use evolutionary_comparison::compare_evolution;
+pub use file_change_coupling::{
+    BULK_COMMIT_FILES, RETAINED_FILE_PAIR_LIMIT, RETAINED_FILE_PAIR_SHARED_COMMITS,
+    RETAINED_FILE_PAIR_SIMILARITY_PERMILLE,
+};
 pub use file_reach::{FileReach, REACH_CANDIDATE_LIMIT, file_reaches};
 pub use gate::{GateComparison, GateDelta, GateRow, GateSignal, GateSnapshot};
 pub use history_window::HistoryWindow;

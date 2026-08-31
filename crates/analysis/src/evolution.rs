@@ -49,6 +49,8 @@ pub struct HistoryCoverage {
     reason: Option<String>,
     window_days: Option<u32>,
     window_excluded_commits: u32,
+    bulk_commits: u32,
+    declined_pairs: u32,
 }
 
 impl HistoryCoverage {
@@ -93,6 +95,8 @@ impl HistoryCoverage {
             reason,
             window_days: None,
             window_excluded_commits: 0,
+            bulk_commits: 0,
+            declined_pairs: 0,
         }
     }
     /// Records the selected window and the boundary rejects the defensive
@@ -106,6 +110,24 @@ impl HistoryCoverage {
         );
         self.window_days = days;
         self.window_excluded_commits = excluded_commits;
+        self
+    }
+    /// Records what pair accumulation approximated: the commits the bulk-commit
+    /// guard held back from it and the pairs its storage limit declined.
+    ///
+    /// Both counters describe pair accumulation alone. A bulk-excluded commit
+    /// stays a fully counted commit everywhere else, so it still contributes
+    /// churn, touches, package coupling, concentration, and one amplification
+    /// observation. They are machine-report facts: no terminal view states
+    /// either, at any scope or detail level, because they are processing totals
+    /// of the kind human output already omits.
+    pub fn with_change_graph(mut self, bulk_commits: u32, declined_pairs: u32) -> Self {
+        assert!(
+            bulk_commits <= self.commits,
+            "bulk commits cannot exceed streamed commits"
+        );
+        self.bulk_commits = bulk_commits;
+        self.declined_pairs = declined_pairs;
         self
     }
     pub fn unavailable(reason: impl Into<String>) -> Self {
@@ -181,6 +203,15 @@ impl HistoryCoverage {
     pub const fn window_excluded_commits(&self) -> u32 {
         self.window_excluded_commits
     }
+    /// Streamed commits the bulk-commit guard excluded from file pair
+    /// accumulation, which every other history signal still counts.
+    pub const fn bulk_commits(&self) -> u32 {
+        self.bulk_commits
+    }
+    /// File pairs the storage limit declined to create.
+    pub const fn declined_pairs(&self) -> u32 {
+        self.declined_pairs
+    }
 }
 
 impl Default for HistoryCoverage {
@@ -235,6 +266,23 @@ impl HistoryChangeFact {
     pub const fn affects_findings(self) -> bool {
         self.role.affects_verdict() && matches!(self.trust, SourceTrust::Trusted)
     }
+    /// Whether this change may enter the change graph, which is the population
+    /// file change coupling and change amplification are accumulated over.
+    ///
+    /// The name mirrors [`crate::DependencyEdge::enters_verdict_graph`], and so
+    /// does the reason for a second, narrower predicate beside
+    /// [`Self::affects_findings`]. That one admits test, example, and benchmark
+    /// roles, which is right for churn, for package change coupling, and for
+    /// concentration: they describe how the whole repository moves. It is wrong
+    /// here. A test file and the file it exercises change in the same commit by
+    /// construction, so admitting the test role would manufacture the strongest
+    /// possible co-change pair for every well-tested file and name good
+    /// practice as leakage. Fixture, generated, recovered, and failed source
+    /// contributes no pair for the same reason and stays complete in the
+    /// machine report as history context.
+    pub const fn enters_change_graph(self) -> bool {
+        matches!(self.role, SourceRole::Primary) && matches!(self.trust, SourceTrust::Trusted)
+    }
     pub const fn added_lines(self) -> Option<u32> {
         self.added_lines
     }
@@ -269,6 +317,7 @@ pub struct EvolutionAccumulator {
     churn: crate::churn::ChurnAccumulator,
     coupling: crate::change_coupling::ChangeCouplingAccumulator,
     concentration: crate::contributor_concentration::ContributorConcentrationAccumulator,
+    file_coupling: crate::file_change_coupling::FileChangeCouplingAccumulator,
 }
 
 impl EvolutionAccumulator {
@@ -281,10 +330,18 @@ impl EvolutionAccumulator {
     ) {
         self.churn.register_source(file, package, role, trust);
     }
-    pub fn accept(&mut self, commit: HistoryCommitFact) {
+    /// Fans one commit out to every signal the one history stream feeds.
+    ///
+    /// The directory tree is borrowed rather than owned because the report
+    /// builds it once, over every file in file order, and composition keeps it:
+    /// file pair accumulation reads distances from it here, and the scope join
+    /// reads directories from the same tree later. The same tree must be passed
+    /// for every commit of one report.
+    pub fn accept(&mut self, commit: HistoryCommitFact, directories: &crate::DirectoryTree) {
         self.churn.accept(&commit);
         self.coupling.accept(&commit);
         self.concentration.accept(&commit);
+        self.file_coupling.accept(&commit, directories);
     }
     pub fn finish(
         self,
@@ -295,6 +352,11 @@ impl EvolutionAccumulator {
         explanation_pairs: &BTreeSet<(PackageId, PackageId)>,
         before_explanation_pairs: Option<&BTreeSet<(PackageId, PackageId)>>,
     ) -> EvolutionaryReportFacts {
+        let coverage = coverage.with_change_graph(
+            self.file_coupling.bulk_commits(),
+            self.file_coupling.declined_pairs(),
+        );
+        let file_coupling = self.file_coupling.finish();
         let (file_history, package_history) = self.churn.finish(file_count, package_count);
         let (coupling, eligible_coupling) = self.coupling.finish(containment);
         let concentration = self.concentration.finish();
@@ -328,13 +390,23 @@ impl EvolutionAccumulator {
             comparisons,
         )
         .with_concentration_findings(concentration_findings)
+        .with_file_coupling(file_coupling)
     }
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::{HistoryChangeFact, change_coupling, contributor_concentration};
+    use crate::{DirectoryTree, HistoryChangeFact, change_coupling, contributor_concentration};
+
+    /// A tree giving each of the first `count` files its own directory, so a
+    /// pair of them is always cross-directory.
+    fn directories(count: usize) -> DirectoryTree {
+        let paths: Vec<String> = (0..count)
+            .map(|file| format!("dir{file}/main.js"))
+            .collect();
+        DirectoryTree::from_file_paths(&paths)
+    }
 
     fn commit(
         contributor: usize,
@@ -444,6 +516,118 @@ mod tests {
         .with_window(Some(90), 1);
         assert_eq!(coverage.window_days(), Some(90));
         assert_eq!(coverage.window_excluded_commits(), 1);
+    }
+
+    /// The change graph is narrower than the population evolutionary findings
+    /// read, and the whole of the difference is the role and trust matrix.
+    #[test]
+    fn only_primary_trusted_source_enters_the_change_graph() {
+        let change = HistoryChangeFact::new(
+            FileId::from_index(0),
+            PackageId::from_index(0),
+            Some(1),
+            Some(0),
+        );
+        assert!(change.enters_change_graph());
+        assert!(change.affects_findings());
+        for (role, trust) in [
+            (SourceRole::Test, SourceTrust::Trusted),
+            (SourceRole::Example, SourceTrust::Trusted),
+            (SourceRole::Benchmark, SourceTrust::Trusted),
+            (SourceRole::Fixture, SourceTrust::Trusted),
+            (SourceRole::Generated, SourceTrust::Trusted),
+            (SourceRole::Primary, SourceTrust::Advisory),
+            (SourceRole::Primary, SourceTrust::Failed),
+        ] {
+            let contextual = change.with_source_evidence(role, trust);
+            assert!(
+                !contextual.enters_change_graph(),
+                "{role:?} {trust:?} contributes no pair and no amplification"
+            );
+        }
+        // The three roles churn and package coupling still count are exactly
+        // the ones the two predicates disagree about.
+        for role in [SourceRole::Test, SourceRole::Example, SourceRole::Benchmark] {
+            let evidence = change.with_source_evidence(role, SourceTrust::Trusted);
+            assert!(evidence.affects_findings());
+            assert!(!evidence.enters_change_graph());
+        }
+    }
+
+    /// The bulk-commit guard belongs to pair accumulation alone: the commit it
+    /// holds back still moves churn, touches, and package coupling, and only
+    /// the pair table and the population its unions describe skip it.
+    #[test]
+    fn a_bulk_commit_is_counted_everywhere_but_in_the_pair_table() {
+        let files = crate::BULK_COMMIT_FILES + 1;
+        let directories = directories(files);
+        let mut accumulator = EvolutionAccumulator::default();
+        for contributor in 0..3 {
+            accumulator.accept(
+                commit(
+                    contributor,
+                    &[(0, 0, Some(1), Some(0)), (1, 1, Some(1), Some(0))],
+                ),
+                &directories,
+            );
+        }
+        let sweep: Vec<_> = (0..files)
+            .map(|file| (file, file % 2, Some(1), Some(0)))
+            .collect();
+        accumulator.accept(commit(3, &sweep), &directories);
+
+        let changes = (6 + files) as u32;
+        let report = accumulator.finish(
+            HistoryCoverage::new(
+                HistoryAvailability::Complete,
+                None,
+                4,
+                4,
+                changes,
+                0,
+                None,
+                None,
+                changes,
+                0,
+                0,
+                0,
+                None,
+            ),
+            files,
+            2,
+            &crate::PackageContainment::default(),
+            &BTreeSet::new(),
+            None,
+        );
+
+        assert_eq!(
+            (
+                report.coverage.bulk_commits(),
+                report.coverage.declined_pairs()
+            ),
+            (1, 0)
+        );
+        assert_eq!(report.file_history[0].touches(), 4);
+        assert_eq!(report.file_history[files - 1].touches(), 1);
+        assert_eq!(report.package_history[0].touches(), 4);
+        assert_eq!(
+            (
+                report.coupling[0].shared_commits(),
+                report.coupling[0].union_commits()
+            ),
+            (4, 4)
+        );
+        assert_eq!(
+            report.file_coupling(),
+            [FileChangeCoupling::new(
+                FileId::from_index(0),
+                FileId::from_index(1),
+                3,
+                3,
+                2
+            )],
+            "the sweep is outside both the shared count and the union it is compared with"
+        );
     }
 
     #[test]
@@ -588,18 +772,21 @@ mod tests {
 
         let mut accumulator = EvolutionAccumulator::default();
         for contributor in 0..3 {
-            accumulator.accept(HistoryCommitFact::new(
-                ContributorId::from_index(contributor),
-                vec![
-                    contextual,
-                    HistoryChangeFact::new(
-                        FileId::from_index(1),
-                        PackageId::from_index(1),
-                        Some(1),
-                        Some(0),
-                    ),
-                ],
-            ));
+            accumulator.accept(
+                HistoryCommitFact::new(
+                    ContributorId::from_index(contributor),
+                    vec![
+                        contextual,
+                        HistoryChangeFact::new(
+                            FileId::from_index(1),
+                            PackageId::from_index(1),
+                            Some(1),
+                            Some(0),
+                        ),
+                    ],
+                ),
+                &directories(2),
+            );
         }
         let report = accumulator.finish(
             HistoryCoverage::new(
@@ -632,10 +819,13 @@ mod tests {
     fn incomplete_history_cannot_create_findings_or_diff_verdicts() {
         let mut accumulator = EvolutionAccumulator::default();
         for contributor in 0..3 {
-            accumulator.accept(commit(
-                contributor,
-                &[(0, 0, Some(1), Some(0)), (1, 1, Some(1), Some(0))],
-            ));
+            accumulator.accept(
+                commit(
+                    contributor,
+                    &[(0, 0, Some(1), Some(0)), (1, 1, Some(1), Some(0))],
+                ),
+                &directories(2),
+            );
         }
         let report = accumulator.finish(
             HistoryCoverage::new(
@@ -668,25 +858,28 @@ mod tests {
     fn complete_history_without_eligible_mapping_cannot_create_findings() {
         let mut accumulator = EvolutionAccumulator::default();
         for contributor in 0..3 {
-            accumulator.accept(HistoryCommitFact::new(
-                ContributorId::from_index(contributor),
-                vec![
-                    HistoryChangeFact::new(
-                        FileId::from_index(0),
-                        PackageId::from_index(0),
-                        Some(1),
-                        Some(0),
-                    )
-                    .with_source_evidence(SourceRole::Generated, SourceTrust::Trusted),
-                    HistoryChangeFact::new(
-                        FileId::from_index(1),
-                        PackageId::from_index(1),
-                        Some(1),
-                        Some(0),
-                    )
-                    .with_source_evidence(SourceRole::Generated, SourceTrust::Trusted),
-                ],
-            ));
+            accumulator.accept(
+                HistoryCommitFact::new(
+                    ContributorId::from_index(contributor),
+                    vec![
+                        HistoryChangeFact::new(
+                            FileId::from_index(0),
+                            PackageId::from_index(0),
+                            Some(1),
+                            Some(0),
+                        )
+                        .with_source_evidence(SourceRole::Generated, SourceTrust::Trusted),
+                        HistoryChangeFact::new(
+                            FileId::from_index(1),
+                            PackageId::from_index(1),
+                            Some(1),
+                            Some(0),
+                        )
+                        .with_source_evidence(SourceRole::Generated, SourceTrust::Trusted),
+                    ],
+                ),
+                &directories(2),
+            );
         }
         let report = accumulator.finish(
             HistoryCoverage::new(
@@ -720,24 +913,30 @@ mod tests {
     fn contextual_history_changes_descriptive_operands_not_finding_operands() {
         let mut accumulator = EvolutionAccumulator::default();
         for contributor in 0..3 {
-            accumulator.accept(commit(
-                contributor,
-                &[(0, 0, Some(1), Some(0)), (1, 1, Some(1), Some(0))],
-            ));
+            accumulator.accept(
+                commit(
+                    contributor,
+                    &[(0, 0, Some(1), Some(0)), (1, 1, Some(1), Some(0))],
+                ),
+                &directories(3),
+            );
         }
         for contributor in 3..5 {
-            accumulator.accept(HistoryCommitFact::new(
-                ContributorId::from_index(contributor),
-                vec![
-                    HistoryChangeFact::new(
-                        FileId::from_index(2),
-                        PackageId::from_index(0),
-                        Some(1),
-                        Some(0),
-                    )
-                    .with_source_evidence(SourceRole::Generated, SourceTrust::Trusted),
-                ],
-            ));
+            accumulator.accept(
+                HistoryCommitFact::new(
+                    ContributorId::from_index(contributor),
+                    vec![
+                        HistoryChangeFact::new(
+                            FileId::from_index(2),
+                            PackageId::from_index(0),
+                            Some(1),
+                            Some(0),
+                        )
+                        .with_source_evidence(SourceRole::Generated, SourceTrust::Trusted),
+                    ],
+                ),
+                &directories(3),
+            );
         }
         let report = accumulator.finish(
             HistoryCoverage::new(
@@ -1054,6 +1253,65 @@ impl CouplingEvidence {
     }
 }
 
+/// Two files that change in the same commits, named lower identity first.
+///
+/// Every operand is an integer. The distance is the directory distance of the
+/// pair, which is at least 1 because a pair inside one directory is never
+/// stored. Similarity is derived by a reader, exactly as it is for package
+/// change coupling, so no ratio is stored or serialized.
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub struct FileChangeCoupling {
+    left: FileId,
+    right: FileId,
+    shared_commits: u32,
+    union_commits: u32,
+    distance: u32,
+}
+
+impl FileChangeCoupling {
+    /// Creates one retained pair, which names the lower file identity first.
+    pub fn new(
+        left: FileId,
+        right: FileId,
+        shared_commits: u32,
+        union_commits: u32,
+        distance: u32,
+    ) -> Self {
+        assert!(
+            left < right,
+            "a file pair names the lower file identity first"
+        );
+        assert!(
+            shared_commits <= union_commits,
+            "shared commits are part of the union"
+        );
+        assert!(distance >= 1, "a stored pair crosses a directory boundary");
+        Self {
+            left,
+            right,
+            shared_commits,
+            union_commits,
+            distance,
+        }
+    }
+    pub const fn left(self) -> FileId {
+        self.left
+    }
+    pub const fn right(self) -> FileId {
+        self.right
+    }
+    pub const fn shared_commits(self) -> u32 {
+        self.shared_commits
+    }
+    pub const fn union_commits(self) -> u32 {
+        self.union_commits
+    }
+    /// The integer directory distance between the two files.
+    pub const fn distance(self) -> u32 {
+        self.distance
+    }
+}
+
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub struct ContributorConcentration {
     package: PackageId,
@@ -1229,6 +1487,7 @@ pub struct EvolutionaryReportFacts {
     pub(crate) findings: Vec<EvolutionaryFinding>,
     pub(crate) comparisons: Vec<EvolutionaryComparison>,
     pub(crate) concentration_findings: Vec<KnowledgeConcentrationFinding>,
+    pub(crate) file_coupling: Vec<FileChangeCoupling>,
 }
 
 impl EvolutionaryReportFacts {
@@ -1251,6 +1510,7 @@ impl EvolutionaryReportFacts {
             findings,
             comparisons,
             concentration_findings: Vec::new(),
+            file_coupling: Vec::new(),
         }
     }
     /// Adds the knowledge-concentration findings, kept in their own table.
@@ -1260,6 +1520,17 @@ impl EvolutionaryReportFacts {
     ) -> Self {
         self.concentration_findings = findings;
         self
+    }
+    /// Adds the retained file change coupling pairs, kept in their own table.
+    ///
+    /// A retained pair is the population a change-leakage detector reads. It is
+    /// not a finding and reaches no human view.
+    pub fn with_file_coupling(mut self, pairs: Vec<FileChangeCoupling>) -> Self {
+        self.file_coupling = pairs;
+        self
+    }
+    pub fn file_coupling(&self) -> &[FileChangeCoupling] {
+        &self.file_coupling
     }
     pub fn concentration_findings(&self) -> &[KnowledgeConcentrationFinding] {
         &self.concentration_findings

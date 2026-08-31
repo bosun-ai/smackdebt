@@ -982,6 +982,75 @@ pub(crate) fn evolution_repository() -> GeneratedRepository {
     repository
 }
 
+/// The files the sweeping commit of [`bulk_commit_repository`] adds, chosen so
+/// that commit changes thirty change-graph files once the two files it rewrites
+/// are counted — five more than the bulk-commit guard admits.
+const BULK_FIXTURE_ADDED_FILES: usize = 28;
+
+/// A repository whose history holds one sweeping commit beside five ordinary
+/// ones.
+///
+/// `left/src/a.js` and `right/src/b.js` change together in five two-file
+/// commits, which retains one pair four directories apart. The sixth commit
+/// rewrites both of them and adds twenty-eight files, so thirty files enter the
+/// change graph at once: the guard holds that commit back from pair
+/// accumulation, and the pair's shared and union counts both stay at five,
+/// while churn, touches, and package change coupling still count it in full.
+pub(crate) fn bulk_commit_repository() -> GeneratedRepository {
+    let repository = GeneratedRepository::new("main");
+    for package in ["left", "right"] {
+        repository.write(
+            &format!("{package}/package.json"),
+            format!("{{\"name\":\"{package}\",\"private\":true}}\n").as_bytes(),
+        );
+    }
+    for version in 1..=5 {
+        repository.apply(&[
+            WorktreeEdit::Write(
+                "left/src/a.js",
+                format!("export const a = {version};\n").as_bytes(),
+            ),
+            WorktreeEdit::Write(
+                "right/src/b.js",
+                format!("export const b = {version};\n").as_bytes(),
+            ),
+        ]);
+        repository.commit(commit(
+            "two files change together",
+            "Bulk Fixture",
+            "bulk@example.invalid",
+            &format!("2026-02-0{version}T12:00:00Z"),
+        ));
+    }
+    let paths: Vec<String> = (0..BULK_FIXTURE_ADDED_FILES)
+        .map(|index| {
+            let package = if index % 2 == 0 { "left" } else { "right" };
+            format!("{package}/src/bulk/unit{index:02}.js")
+        })
+        .collect();
+    let sources: Vec<String> = (0..BULK_FIXTURE_ADDED_FILES)
+        .map(|index| format!("export const unit{index:02} = 1;\n"))
+        .collect();
+    let mut sweep = vec![
+        WorktreeEdit::Write("left/src/a.js", b"export const a = 6;\n"),
+        WorktreeEdit::Write("right/src/b.js", b"export const b = 6;\n"),
+    ];
+    sweep.extend(
+        paths
+            .iter()
+            .zip(&sources)
+            .map(|(path, source)| WorktreeEdit::Write(path, source.as_bytes())),
+    );
+    repository.apply(&sweep);
+    repository.commit(commit(
+        "one sweeping change",
+        "Bulk Fixture",
+        "bulk@example.invalid",
+        "2026-02-06T12:00:00Z",
+    ));
+    repository
+}
+
 pub(crate) fn worktree_change_repository() -> GeneratedRepository {
     let repository = GeneratedRepository::new("main");
     for package in ["a", "b", "c", "d", "e", "f", "gone", "h", "i"] {

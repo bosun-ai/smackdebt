@@ -14,8 +14,8 @@ use support::coverage_failure_repository;
 use support::edges::assert_no_dependency_edge_rows;
 use support::hermetic::hermetic_env;
 use support::{
-    GeneratedRepository, Invocation, copy_language_truth_files, core_repository,
-    deepened_signal_repository, evolution_repository, module_wiring_repository,
+    GeneratedRepository, Invocation, bulk_commit_repository, copy_language_truth_files,
+    core_repository, deepened_signal_repository, evolution_repository, module_wiring_repository,
     propagation_repository, ref_diff_repository, rust_test_scope_repository, shallow_clone,
     signal_table_repository, source_role_repository, stable_dependency_repository,
     static_architecture_repository, test_scoped_workspace_repository, wide_directory_repository,
@@ -742,6 +742,102 @@ fn a_core_is_stated_only_when_the_largest_cycle_clears_both_floors() {
         !small_text.contains("sit in one dependency cycle"),
         "{small_text}"
     );
+}
+
+/// The bulk-commit guard belongs to file pair accumulation alone, and the two
+/// counters that disclose it are machine-report facts no human view states.
+///
+/// Five ordinary commits change one cross-directory pair. The sixth rewrites
+/// both of its files and adds twenty-eight more, so thirty files enter the
+/// change graph at once: the pair keeps five shared of five union while churn,
+/// touches, and package change coupling all count six commits.
+#[test]
+fn a_sweeping_commit_is_counted_everywhere_but_in_the_file_pair_table() {
+    let repository = bulk_commit_repository();
+    let result = Invocation::new(["--json", "--history", "36500d"]).run(repository.path());
+    result.success();
+    let automatic = Invocation::new(["--json", "--history", "36500d"])
+        .automatic_workers()
+        .run(repository.path());
+    assert_eq!(result, automatic, "serial and parallel runs must agree");
+    let report = checked_json(&result.stdout);
+
+    assert_eq!(report["history_coverage"]["commits"], 6);
+    assert_eq!(report["history_coverage"]["bulk_commits"], 1);
+    assert_eq!(report["history_coverage"]["declined_pairs"], 0);
+
+    let pairs: Vec<_> = report["file_change_coupling"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .map(|pair| {
+            (
+                file_path(&report, pair["left"].as_u64().unwrap()),
+                file_path(&report, pair["right"].as_u64().unwrap()),
+                pair["shared_commits"].as_u64().unwrap(),
+                pair["union_commits"].as_u64().unwrap(),
+                pair["distance"].as_u64().unwrap(),
+            )
+        })
+        .collect();
+    assert_eq!(
+        pairs,
+        [(
+            "left/src/a.js".to_owned(),
+            "right/src/b.js".to_owned(),
+            5,
+            5,
+            4
+        )],
+        "the sweeping commit is outside both the shared count and its union"
+    );
+
+    let touches = |path: &str| {
+        report["file_history"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .find(|row| file_path(&report, row["file"].as_u64().unwrap()) == path)
+            .map(|row| row["touches"].as_u64().unwrap())
+    };
+    assert_eq!(touches("left/src/a.js"), Some(6));
+    assert_eq!(touches("right/src/b.js"), Some(6));
+    assert_eq!(touches("left/src/bulk/unit00.js"), Some(1));
+    let coupling: Vec<_> = report["change_coupling"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .map(|pair| {
+            (
+                package_path(&report, pair["left"].as_u64().unwrap()),
+                package_path(&report, pair["right"].as_u64().unwrap()),
+                pair["shared_commits"].as_u64().unwrap(),
+                pair["union_commits"].as_u64().unwrap(),
+            )
+        })
+        .collect();
+    assert_eq!(
+        coupling,
+        [("left".to_owned(), "right".to_owned(), 6, 6)],
+        "the guard never reaches package change coupling"
+    );
+
+    // No human view states either counter, at any scope or detail level.
+    for arguments in [
+        vec![],
+        vec!["--all"],
+        vec!["--top", "5"],
+        vec!["left"],
+        vec!["left/src"],
+        vec!["left/src/a.js", "--all"],
+    ] {
+        let rendered = Invocation::new(arguments.clone()).run(repository.path());
+        rendered.success();
+        let text = String::from_utf8(rendered.stdout).unwrap();
+        for absent in ["bulk commit", "declined", "change together"] {
+            assert!(!text.contains(absent), "{arguments:?}: {text}");
+        }
+    }
 }
 
 #[test]
@@ -2940,6 +3036,28 @@ fn assert_index_integrity(report: &Value) {
     }
     for row in report["contributor_concentration"].as_array().unwrap() {
         assert!((row["package"].as_u64().unwrap() as usize) < packages);
+    }
+    // A retained file pair names the lower file identity first, crosses a
+    // directory boundary, and compares two counts drawn from one population.
+    let mut previous = None;
+    for pair in report["file_change_coupling"].as_array().unwrap() {
+        let left = pair["left"].as_u64().unwrap();
+        let right = pair["right"].as_u64().unwrap();
+        assert!((left as usize) < files, "pair left index is invalid");
+        assert!((right as usize) < files, "pair right index is invalid");
+        assert!(left < right, "a pair names the lower file identity first");
+        let key = Some((left, right));
+        assert!(previous < key, "pairs are ordered by file identity");
+        previous = key;
+        let shared = pair["shared_commits"].as_u64().unwrap();
+        assert!(shared >= 3, "a retained pair clears the support floor");
+        assert!(shared <= pair["union_commits"].as_u64().unwrap());
+        assert!(shared * 10 >= pair["union_commits"].as_u64().unwrap());
+        assert!(
+            pair["distance"].as_u64().unwrap() >= 1,
+            "a same-directory pair is never stored"
+        );
+        assert!(pair.get("similarity").is_none(), "no ratio is serialized");
     }
     for coupling in report["change_coupling"].as_array().unwrap() {
         let left = coupling["left"].as_u64().unwrap();

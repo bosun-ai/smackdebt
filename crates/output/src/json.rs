@@ -15,9 +15,9 @@ use crate::output::{
     scope_kind,
 };
 use smackdebt_analysis::{
-    ClaimedFinding, FileReach, Hotspot, KnowledgeConcentrationFinding, OrphanFile, PackageClosure,
-    ProblemAnchor, ProblemCard, ProblemEvidence, SizeFinding, SizeSubject, StableDependencyFinding,
-    Verdict, WorstOffender,
+    ClaimedFinding, FileChangeCoupling, FileReach, Hotspot, KnowledgeConcentrationFinding,
+    OrphanFile, PackageClosure, ProblemAnchor, ProblemCard, ProblemEvidence, SizeFinding,
+    SizeSubject, StableDependencyFinding, Verdict, WorstOffender,
 };
 
 /// Streams JSON schema version 4 without cloning report strings or arrays.
@@ -130,6 +130,10 @@ impl Serialize for ReportView<'_> {
         map.serialize_entry("hotspots", &Hotspots(report.hotspots()))?;
         map.serialize_entry("size_findings", &SizeFindings(report.size_findings()))?;
         map.serialize_entry("orphan_files", &OrphanFiles(report.orphan_files()))?;
+        map.serialize_entry(
+            "file_change_coupling",
+            &FileChangeCouplingRecords(report.file_change_coupling()),
+        )?;
         map.serialize_entry(
             "package_closures",
             &PackageClosures(report.package_closures()),
@@ -576,6 +580,8 @@ impl Serialize for HistoryCoverageView<'_> {
         map.serialize_entry("reason", &value.reason())?;
         map.serialize_entry("window_days", &value.window_days())?;
         map.serialize_entry("window_excluded_commits", &value.window_excluded_commits())?;
+        map.serialize_entry("bulk_commits", &value.bulk_commits())?;
+        map.serialize_entry("declined_pairs", &value.declined_pairs())?;
         map.end()
     }
 }
@@ -654,6 +660,34 @@ impl Serialize for ChangeCouplingView {
         map.serialize_entry("right_trust", source_trust_name(evidence.right_trust()))?;
         map.serialize_entry("shared_commits", &self.0.shared_commits())?;
         map.serialize_entry("union_commits", &self.0.union_commits())?;
+        map.end()
+    }
+}
+/// The file pairs that change together often enough to be retained.
+///
+/// A retained pair is a population a detector reads rather than a statement
+/// about design, so it appears here and in no human view. Similarity is not
+/// serialized, exactly as it is not for package change coupling: a reader
+/// derives it from the two integer operands.
+struct FileChangeCouplingRecords<'a>(&'a [FileChangeCoupling]);
+impl Serialize for FileChangeCouplingRecords<'_> {
+    fn serialize<S: Serializer>(&self, serializer: S) -> Result<S::Ok, S::Error> {
+        let mut sequence = serializer.serialize_seq(Some(self.0.len()))?;
+        for pair in self.0 {
+            sequence.serialize_element(&FileChangeCouplingView(*pair))?;
+        }
+        sequence.end()
+    }
+}
+struct FileChangeCouplingView(FileChangeCoupling);
+impl Serialize for FileChangeCouplingView {
+    fn serialize<S: Serializer>(&self, serializer: S) -> Result<S::Ok, S::Error> {
+        let mut map = serializer.serialize_map(Some(5))?;
+        map.serialize_entry("left", &self.0.left().get())?;
+        map.serialize_entry("right", &self.0.right().get())?;
+        map.serialize_entry("shared_commits", &self.0.shared_commits())?;
+        map.serialize_entry("union_commits", &self.0.union_commits())?;
+        map.serialize_entry("distance", &self.0.distance())?;
         map.end()
     }
 }

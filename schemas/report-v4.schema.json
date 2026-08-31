@@ -39,6 +39,7 @@
     "hotspots",
     "size_findings",
     "orphan_files",
+    "file_change_coupling",
     "package_closures",
     "file_reach",
     "problems"
@@ -233,6 +234,12 @@
         "$ref": "#/$defs/index"
       },
       "uniqueItems": true
+    },
+    "file_change_coupling": {
+      "type": "array",
+      "items": {
+        "$ref": "#/$defs/file_change_coupling"
+      }
     },
     "package_closures": {
       "type": "array",
@@ -1436,7 +1443,9 @@
         "rename_gaps",
         "reason",
         "window_days",
-        "window_excluded_commits"
+        "window_excluded_commits",
+        "bulk_commits",
+        "declined_pairs"
       ],
       "properties": {
         "availability": {
@@ -1510,6 +1519,14 @@
           "minimum": 0
         },
         "window_excluded_commits": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "bulk_commits": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "declined_pairs": {
           "type": "integer",
           "minimum": 0
         }
@@ -2016,6 +2033,37 @@
           "items": {
             "$ref": "#/$defs/worst_offender"
           }
+        }
+      },
+      "additionalProperties": false
+    },
+    "file_change_coupling": {
+      "type": "object",
+      "required": [
+        "left",
+        "right",
+        "shared_commits",
+        "union_commits",
+        "distance"
+      ],
+      "properties": {
+        "left": {
+          "$ref": "#/$defs/index"
+        },
+        "right": {
+          "$ref": "#/$defs/index"
+        },
+        "shared_commits": {
+          "type": "integer",
+          "minimum": 3
+        },
+        "union_commits": {
+          "type": "integer",
+          "minimum": 3
+        },
+        "distance": {
+          "type": "integer",
+          "minimum": 1
         }
       },
       "additionalProperties": false

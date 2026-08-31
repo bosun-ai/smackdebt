@@ -72,6 +72,21 @@ def audit_private_values(value: object, location: str = "report") -> None:
         require(not Path(value).is_absolute(), f"absolute path at {location}")
 
 
+def check_file_pairs(pairs: list, file_count: int) -> None:
+    """Mirror the retained file pair contract: bounds, order, and floors."""
+    previous = None
+    for row in pairs:
+        require(row["left"] < file_count and row["right"] < file_count, "file pair index is invalid")
+        require(row["left"] < row["right"], "file pair identity is not stable")
+        pair = (row["left"], row["right"])
+        require(previous is None or previous < pair, "file pairs are not in file order")
+        previous = pair
+        require(row["shared_commits"] <= row["union_commits"], "file pair operands are invalid")
+        require(row["shared_commits"] >= 3, "a pair below the support floor was retained")
+        require(row["shared_commits"] * 10 >= row["union_commits"], "a pair below the similarity floor was retained")
+        require(row["distance"] >= 1, "a same-directory file pair was retained")
+
+
 def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--profile", required=True)
@@ -124,6 +139,7 @@ def main() -> int:
         "file_history",
         "package_history",
         "change_coupling",
+        "file_change_coupling",
     ):
         require(isinstance(report.get(table), list), f"missing table {table}")
     require(len(report["files"]) == sum(workload["language_files"].values()), "file count changed")
@@ -220,6 +236,7 @@ def main() -> int:
         require(row["left"] < package_count and row["right"] < package_count, "coupling package index is invalid")
         require(row["left"] < row["right"], "coupling package identity is not stable")
         require(row["shared_commits"] <= row["union_commits"], "coupling commit operands are invalid")
+    check_file_pairs(report["file_change_coupling"], file_count)
     for row in report["evolutionary_findings"]:
         require(row["left"] < package_count and row["right"] < package_count, "evolution finding package index is invalid")
         require(row["left"] < row["right"], "evolution finding package identity is not stable")

@@ -19,15 +19,15 @@
 
 ## 3. The file co-change accumulator
 
-- [ ] 3.1 Add `HistoryChangeFact::enters_change_graph()` as primary role and trusted parse, named to mirror the dependency-edge verdict predicate, with a pure test proving a test-role change is excluded.
-- [ ] 3.2 Add the file change coupling accumulator as a member of the evolution accumulator: per-commit distinct change-graph files, the bulk-commit guard, cross-directory pairs only, its own per-file commit count, and union derived from that count.
-- [ ] 3.3 Apply the retention floors and the pair storage limit, counting bulk commits and declined pairs, and add the history coverage builder that discloses both without touching the existing constructor.
-- [ ] 3.4 Serialize the `file_change_coupling` table with the lower file index first, integer shared and union commits, and the directory distance, extending the checked schema in the same commit.
-- [ ] 3.5 Add boundary tests: a pair one commit below the retention floor, a pair one permille below it, a same-directory pair storing nothing, a test file and its subject producing no pair, and a pair whose union excludes a bulk commit.
-- [ ] 3.6 Add the `bulk_commit_repository()` fixture and prove end to end that a thirty-file commit yields one bulk commit, no pair, and unchanged churn, touches, package coupling, concentration, and amplification inputs.
+- [x] 3.1 Add `HistoryChangeFact::enters_change_graph()` as primary role and trusted parse, named to mirror the dependency-edge verdict predicate, with a pure test proving a test-role change is excluded.
+- [x] 3.2 Add the file change coupling accumulator as a member of the evolution accumulator: per-commit distinct change-graph files, the bulk-commit guard, cross-directory pairs only, its own per-file commit count, and union derived from that count.
+- [x] 3.3 Apply the retention floors and the pair storage limit, counting bulk commits and declined pairs, and add the history coverage builder that discloses both without touching the existing constructor.
+- [x] 3.4 Serialize the `file_change_coupling` table with the lower file index first, integer shared and union commits, and the directory distance, extending the checked schema in the same commit.
+- [x] 3.5 Add boundary tests: a pair one commit below the retention floor, a pair one permille below it, a same-directory pair storing nothing, a test file and its subject producing no pair, and a pair whose union excludes a bulk commit.
+- [x] 3.6 Add the `bulk_commit_repository()` fixture and prove end to end that a thirty-file commit yields one bulk commit, no pair, and unchanged churn, touches, package coupling, concentration, and amplification inputs.
 - [ ] 3.7 Add the `evolution-wide` workload profile — roughly two thousand files, fifty packages, forty commits with real cross-directory pairs, several provably unlinked pairs, and one bulk commit — wiring `PROFILES`, `GRAPH_PROFILES`, the `release-baselines.sh` profile loop from eight to nine, `EXPECTED_WORK`, `test_workload.py`, and a recorded baseline under `benchmarks/baselines/`.
 - [ ] 3.8 Extend `scripts/performance/check-report.py` with the file-pair mirror block: bounds, lower index first, shared at most union, distance at least one, and no finding below the detector floors.
-- [ ] 3.9 Assert exact equality of inventory walks, reads, Git processes, parser visits, and algorithm passes with the pre-change values on every affected flow, and regenerate the JSON snapshots per case.
+- [x] 3.9 Assert exact equality of inventory walks, reads, Git processes, parser visits, and algorithm passes with the pre-change values on every affected flow, and regenerate the JSON snapshots per case.
 
 ## 4. Change amplification
 
