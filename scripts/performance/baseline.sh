@@ -19,7 +19,7 @@ if [ -n "$accept_report_change" ] && [ "$accept_report_change" != "--accept-repo
 fi
 case "$profile" in
     one-file|hundred-file|graph-sparse|graph-dense|many-package) command="scripts/performance/smackdebt-codebase.sh" ;;
-    evolution-dense) command="scripts/performance/smackdebt-evolution.sh" ;;
+    evolution-dense|evolution-wide) command="scripts/performance/smackdebt-evolution.sh" ;;
     small-diff|large-dependency-diff) command="scripts/performance/smackdebt-diff.sh" ;;
     *) echo "unknown profile: $profile" >&2; exit 2 ;;
 esac

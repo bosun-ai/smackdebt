@@ -249,6 +249,28 @@ class WorkloadHarnessTests(unittest.TestCase):
             self.assertEqual(len(list(root.glob("package-*/package.json"))), 20)
             self.assertFalse(subprocess.run(["git", "status", "--porcelain"], cwd=root, check=True, capture_output=True, text=True).stdout)
 
+    def test_wide_evolution_profile_has_a_ring_an_isolated_tail_and_deliberate_commits(self):
+        # Sixteen packages is the smallest tree that keeps the isolated tail
+        # whole, so the shape the full profile measures is the shape tested.
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory) / "workload"
+            self.run_tool("generate", "--output", str(root), "--profile", "evolution-wide", "--files", "640")
+            manifest = json.loads((root / "manifest.json").read_text())
+            self.assertEqual(manifest["language_files"], {"javascript": 640})
+            self.assertEqual(len(list(root.glob("package-*/package.json"))), 16)
+            commits = subprocess.run(["git", "rev-list", "--count", "HEAD"], cwd=root, check=True, capture_output=True, text=True)
+            self.assertEqual(commits.stdout.strip(), "40")
+            self.assertFalse(subprocess.run(["git", "status", "--porcelain"], cwd=root, check=True, capture_output=True, text=True).stdout)
+            self.assertFalse(subprocess.run(["git", "fsck"], cwd=root, check=True, capture_output=True, text=True).stderr)
+            ring = (root / "package-0000/unit-000000.js").read_text()
+            self.assertIn("import unit_1 from '../package-0001/unit-000040';", ring)
+            spine = (root / "package-0000/unit-000001.js").read_text()
+            self.assertIn("import unit_0 from './unit-000000';", spine)
+            # The tail is what makes the absence of a path provable at all.
+            for package in range(8, 16):
+                first = root / f"package-{package:04}" / f"unit-{package * 40:06d}.js"
+                self.assertNotIn("import", first.read_text())
+
     def test_runner_checks_before_each_measured_command(self):
         with tempfile.TemporaryDirectory() as directory:
             root = Path(directory) / "workload"

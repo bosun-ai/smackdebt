@@ -62,24 +62,45 @@ proven, so a two-hundred-thousand node chain completes rather than overflowing.
 A public workload profile `evolution-wide` SHALL exist beside the existing
 profiles, covering roughly two thousand files across fifty packages with roughly
 forty commits that produce real cross-directory pairs, several provably
-unlinked pairs, and one bulk commit, so every new bound is exercised by a
-measured workload rather than only by unit tests. The existing dense-evolution
-profile SHALL serve as the bulk-guard proof, where one commit touching a hundred
-files produces one bulk commit and no pair. The workload identity, its recorded
-counts, and its budgets SHALL follow the accepted workload evidence rules.
+unlinked pairs, and one sweeping commit beside the initial import, so every new
+bound is exercised by a measured workload rather than only by unit tests. Its
+packages SHALL form a dependency ring with an isolated tail, so a pair drawn
+from the tail has no connection path at all and the package stage of the
+absence proof is what settles it.
+
+The existing dense-evolution profile SHALL serve as the bulk-guard proof: both
+of its commits touch a hundred files, so both are declined and no pair survives.
+
+The workload identity, its recorded counts, and its budgets SHALL follow the
+accepted workload evidence rules. Because every committed baseline record shares
+one workspace revision, `evolution-wide` SHALL be wired into the release
+baseline loop and its record SHALL be written by the next release baseline run
+rather than by this change, which deliberately re-records no release evidence.
+
+A generated workload SHALL disable background Git maintenance in the repository
+it creates, because a maintenance run racing the commits that build a workload
+has been observed to leave its object store unreadable, which makes a
+deterministic workload nondeterministic.
 
 The machine-report performance check SHALL validate the file pair table the way
 it validates the existing tables: bounds on counts, the lower file index first,
 shared commits never exceeding union commits, a directory distance of at least
-one, and no finding below the detector floors.
+one, and no finding below the detector floors. It SHALL also hold each history
+workload to the shape its generator wrote — its bulk commit count, its retained
+pair count, and how many findings of each kind it produces — so a rule that
+stops firing is a failure rather than a quieter report.
 
-#### Scenario: One commit touches a hundred files
+#### Scenario: Every commit touches a hundred files
 - **WHEN** the dense-evolution workload is measured
-- **THEN** the bulk commit count is one, no pair is accumulated from that commit, and every other history value is unchanged
+- **THEN** both of its hundred-file commits are counted as bulk, no pair is accumulated from either, and every other history value is unchanged
 
 #### Scenario: A wide repository is measured
 - **WHEN** the `evolution-wide` workload runs through the complete correctness-checked flow
-- **THEN** its wall time, peak memory, allocations, reads, and Git process counts are recorded against its own workload identity
+- **THEN** its wall time, peak memory, allocations, reads, and Git process counts are recorded against its own workload identity by the release baseline run its profile loop now includes
+
+#### Scenario: A wide repository's deliberate history is read
+- **WHEN** the `evolution-wide` workload is measured
+- **THEN** its retained pairs, its one leaky interface, and its four pairs no connection path joins are exactly what the check expects, and no pair key was declined
 
 #### Scenario: Fifty packages are closed over
 - **WHEN** the `evolution-wide` workload closes over every one of its packages

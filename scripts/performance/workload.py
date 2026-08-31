@@ -25,10 +25,31 @@ PROFILES = {
     "graph-dense": 500,
     "many-package": 1_000,
     "evolution-dense": 100,
+    "evolution-wide": 2_000,
     "large-dependency-diff": 1_000,
 }
-GRAPH_PROFILES = {"graph-sparse", "graph-dense", "many-package", "evolution-dense", "large-dependency-diff"}
+GRAPH_PROFILES = {
+    "graph-sparse",
+    "graph-dense",
+    "many-package",
+    "evolution-dense",
+    "evolution-wide",
+    "large-dependency-diff",
+}
 DIFF_PROFILES = {"small-diff", "large-dependency-diff"}
+PACKAGE_SIZES = {"many-package": 1, "evolution-dense": 1, "evolution-wide": 40}
+# The wide evolution profile keeps its last packages out of the dependency ring,
+# so a pair drawn from two of them has no connection path at all and the package
+# stage of the absence proof settles it without a walk.
+WIDE_ISOLATED_PACKAGES = 8
+WIDE_HIDDEN_PAIRS = 4
+WIDE_HIDDEN_COMMITS = 5
+WIDE_LEAKY_COMMITS = 6
+WIDE_NOISE_GROUPS = 4
+WIDE_NOISE_COMMITS = 3
+WIDE_NOISE_FILES = 3
+WIDE_BULK_PACKAGES = 30
+WIDE_EPOCH = 946684800
 LANGUAGES = ("rust", "python", "javascript", "typescript", "tsx", "java", "c", "cpp", "ruby", "vue")
 EXTENSIONS = {
     "rust": ".rs", "python": ".py", "javascript": ".js", "typescript": ".ts",
@@ -73,8 +94,41 @@ def _profile_count(profile: str, files: int | None) -> int:
     return count
 
 
+def _package_size(profile: str) -> int:
+    """The files one package of a graph profile holds."""
+    return PACKAGE_SIZES.get(profile, 10)
+
+
+def _wide_bytes(index: int, count: int) -> bytes:
+    """Return one wide-evolution unit: a ring between packages, a spine inside
+    each of them, and nothing at all in the isolated tail."""
+    package_size = _package_size("evolution-wide")
+    packages = (count + package_size - 1) // package_size
+    connected = max(1, packages - WIDE_ISOLATED_PACKAGES)
+    package = index // package_size
+    first = package * package_size
+    rows = []
+    if package < connected and index == first:
+        target = (package + 1) % connected
+        rows.append(
+            f"import unit_{target} from '../package-{target:04}/unit-{target * package_size:06}';"
+        )
+    elif package < connected:
+        rows.append(f"import unit_{package} from './unit-{first:06}';")
+    rows.extend(
+        [
+            f"export default function unit_{index}(value) {{",
+            f"  return value + {index % 17};",
+            "}",
+        ]
+    )
+    return ("\n".join(rows) + "\n").encode()
+
+
 def _graph_bytes(profile: str, index: int, count: int, changed: bool = False) -> bytes:
-    package_size = 1 if profile in {"many-package", "evolution-dense"} else 10
+    if profile == "evolution-wide":
+        return _wide_bytes(index, count)
+    package_size = _package_size(profile)
     package = index // package_size
     package_count = (count + package_size - 1) // package_size
     targets = [(package + 1) % package_count]
@@ -133,6 +187,11 @@ def _git_commit(root: Path) -> None:
     subprocess.run(["git", "init", "-q"], cwd=root, check=True)
     subprocess.run(["git", "config", "user.email", "benchmark@example.invalid"], cwd=root, check=True)
     subprocess.run(["git", "config", "user.name", "Smackdebt Benchmark"], cwd=root, check=True)
+    # A generated repository is written and read in one breath, so background
+    # repacking has nothing to gain and a maintenance run racing a commit has
+    # been observed to leave the object store unreadable mid-generation.
+    subprocess.run(["git", "config", "gc.auto", "0"], cwd=root, check=True)
+    subprocess.run(["git", "config", "maintenance.auto", "false"], cwd=root, check=True)
     env = os.environ.copy()
     env.update({"GIT_AUTHOR_DATE": "2000-01-01T00:00:00Z", "GIT_COMMITTER_DATE": "2000-01-01T00:00:00Z"})
     subprocess.run(["git", "add", "-A"], cwd=root, check=True, env=env)
@@ -147,6 +206,57 @@ def _git_commit_evolution(root: Path) -> None:
     env.update({"GIT_AUTHOR_DATE": "2000-01-02T00:00:00Z", "GIT_COMMITTER_DATE": "2000-01-02T00:00:00Z"})
     subprocess.run(["git", "add", "-A"], cwd=root, check=True, env=env)
     subprocess.run(["git", "commit", "-qm", "generated evolution"], cwd=root, check=True, env=env)
+
+
+def _wide_touch(root: Path, paths: list[Path], day: int) -> None:
+    """Record one commit that touches exactly the named files."""
+    for path in paths:
+        path.write_bytes(path.read_bytes() + f"// history touch {day}\n".encode())
+    stamp = f"@{WIDE_EPOCH + day * 86400} +0000"
+    env = os.environ.copy()
+    env.update({"GIT_AUTHOR_DATE": stamp, "GIT_COMMITTER_DATE": stamp})
+    subprocess.run(["git", "add", "-A"], cwd=root, check=True, env=env)
+    subprocess.run(["git", "commit", "-qm", f"generated touch {day}"], cwd=root, check=True, env=env)
+
+
+def _wide_events(root: Path) -> list[list[Path]]:
+    """The file set of every deliberate commit, in commit order.
+
+    The leaky pair is an importer and the interface it follows; each hidden
+    pair is drawn from two packages the ring never joined; each noise group
+    stays one commit below the support floor so a retained pair that is not a
+    finding is measured too; the sweeping commit is what the bulk guard has to
+    decline.
+    """
+    firsts, seconds = [], []
+    for package in sorted(root.glob("package-*")):
+        units = sorted(package.glob("unit-*.js"))
+        firsts.append(units[0])
+        seconds.append(units[min(1, len(units) - 1)])
+    isolated = firsts[-WIDE_ISOLATED_PACKAGES:]
+    connected = firsts[: max(1, len(firsts) - WIDE_ISOLATED_PACKAGES)]
+    events = [[connected[0], connected[1 % len(connected)]]] * WIDE_LEAKY_COMMITS
+    for pair in range(WIDE_HIDDEN_PAIRS):
+        left = isolated[(pair * 2) % len(isolated)]
+        right = isolated[(pair * 2 + 1) % len(isolated)]
+        events.extend([[left, right]] * WIDE_HIDDEN_COMMITS)
+    for group in range(WIDE_NOISE_GROUPS):
+        members = [
+            connected[(2 + group * WIDE_NOISE_FILES + offset) % len(connected)]
+            for offset in range(WIDE_NOISE_FILES)
+        ]
+        events.extend([members] * WIDE_NOISE_COMMITS)
+    events.append(seconds[-WIDE_BULK_PACKAGES:])
+    return events
+
+
+def _git_commit_wide(root: Path) -> None:
+    _git_commit(root)
+    for day, paths in enumerate(_wide_events(root), start=1):
+        _wide_touch(root, sorted(set(paths)), day)
+
+
+HISTORY_BUILDERS = {"evolution-dense": _git_commit_evolution, "evolution-wide": _git_commit_wide}
 
 
 def generate(root: Path, profile: str, seed: int, files: int | None, lines: int) -> dict:
@@ -164,7 +274,7 @@ def generate(root: Path, profile: str, seed: int, files: int | None, lines: int)
         elif path.is_dir() and path != root and ".git" not in path.parts:
             shutil.rmtree(path)
     if profile in GRAPH_PROFILES:
-        package_size = 1 if profile in {"many-package", "evolution-dense"} else 10
+        package_size = _package_size(profile)
         for index in range(count):
             package = index // package_size
             folder = root / f"package-{package:04}"
@@ -181,8 +291,8 @@ def generate(root: Path, profile: str, seed: int, files: int | None, lines: int)
             folder = root / "src" / f"group-{index // 1000:03d}"
             folder.mkdir(parents=True, exist_ok=True)
             (folder / f"generated-{index:06d}{EXTENSIONS[language]}").write_bytes(_stable_bytes(profile, seed, language, index, lines))
-    if profile == "evolution-dense":
-        _git_commit_evolution(root)
+    if profile in HISTORY_BUILDERS:
+        HISTORY_BUILDERS[profile](root)
         (root / ".git" / "info" / "exclude").write_text("manifest.json\nmetadata.json\ncheck.json\nruns.jsonl\n")
     elif profile in DIFF_PROFILES:
         _git_commit(root)

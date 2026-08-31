@@ -16,7 +16,16 @@ The source measurements are in `one-file.json`, `hundred-file.json`, and
 `graph-dense.json`, `many-package.json`, and `large-dependency-diff.json`.
 They were recorded from an optimized build after output correctness checks.
 Evolutionary analysis adds `evolution-dense.json`, with two commits touching
-100 packages and every observed unordered package pair retained once.
+100 packages and every observed unordered package pair retained once. Both of
+its commits exceed the bulk-commit guard, so it is also the proof that a
+sweeping commit contributes no file pair.
+
+The `evolution-wide` profile — 2,000 files in 50 packages, 40 commits, a
+dependency ring with an isolated tail, one leaky interface, four pairs no
+connection path joins, and one sweeping commit — is in the release profile loop
+and has no record here yet. Every committed record shares one workspace
+revision, so its record is written by the next `just release-baselines` rather
+than on its own. Its correctness half runs on every measured invocation.
 The 100-file comparison measured five serial runs at
 40–50 ms and five four-worker runs at 30–40 ms, so the first parallel cutover
 is 100 files.

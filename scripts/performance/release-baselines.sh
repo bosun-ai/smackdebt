@@ -38,7 +38,7 @@ with open(sys.argv[1], "w", encoding="utf-8") as stream:
     json.dump(state, stream)
 PY
 
-for profile in one-file hundred-file small-diff graph-sparse graph-dense many-package evolution-dense large-dependency-diff; do
+for profile in one-file hundred-file small-diff graph-sparse graph-dense many-package evolution-dense evolution-wide large-dependency-diff; do
     scripts/performance/baseline.sh "$profile" "$state" $accept_report_change
 done
 revision=$(python3 -c 'import json,sys; print(json.load(open(sys.argv[1]))["workspace_revision"])' "$state")
