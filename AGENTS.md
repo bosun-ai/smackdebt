@@ -9,6 +9,8 @@ Read `README.md`, `ARCHITECTURE.md`, and the active change under
 `openspec/changes/` before implementation. OpenSpec is the source of truth for
 accepted behavior and implementation order.
 
+Output must be concise, useful, beautiful, and actionable. Avoid noise.
+
 @/Users/timonv/.codex/RTK.md
 
 ## Workflow
