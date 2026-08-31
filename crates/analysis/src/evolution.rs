@@ -318,6 +318,7 @@ pub struct EvolutionAccumulator {
     coupling: crate::change_coupling::ChangeCouplingAccumulator,
     concentration: crate::contributor_concentration::ContributorConcentrationAccumulator,
     file_coupling: crate::file_change_coupling::FileChangeCouplingAccumulator,
+    amplification: crate::change_amplification::ChangeAmplificationAccumulator,
 }
 
 impl EvolutionAccumulator {
@@ -334,14 +335,15 @@ impl EvolutionAccumulator {
     ///
     /// The directory tree is borrowed rather than owned because the report
     /// builds it once, over every file in file order, and composition keeps it:
-    /// file pair accumulation reads distances from it here, and the scope join
-    /// reads directories from the same tree later. The same tree must be passed
-    /// for every commit of one report.
+    /// file pair accumulation and change amplification read directories from it
+    /// here, and the scope join reads the same tree later. The same tree must be
+    /// passed for every commit of one report.
     pub fn accept(&mut self, commit: HistoryCommitFact, directories: &crate::DirectoryTree) {
         self.churn.accept(&commit);
         self.coupling.accept(&commit);
         self.concentration.accept(&commit);
         self.file_coupling.accept(&commit, directories);
+        self.amplification.accept(&commit, directories);
     }
     pub fn finish(
         self,
@@ -351,12 +353,21 @@ impl EvolutionAccumulator {
         containment: &crate::PackageContainment,
         explanation_pairs: &BTreeSet<(PackageId, PackageId)>,
         before_explanation_pairs: Option<&BTreeSet<(PackageId, PackageId)>>,
-    ) -> EvolutionaryReportFacts {
+    ) -> (EvolutionaryReportFacts, crate::DirectoryAmplification) {
         let coverage = coverage.with_change_graph(
             self.file_coupling.bulk_commits(),
             self.file_coupling.declined_pairs(),
         );
         let file_coupling = self.file_coupling.finish();
+        // A shallow or unavailable stream holds a sample of the commits it
+        // happened to reach, which is not the sample the median is about, so
+        // an incomplete stream states no amplification anywhere rather than a
+        // median of what it saw.
+        let amplification = if coverage.availability() == HistoryAvailability::Complete {
+            self.amplification.finish()
+        } else {
+            crate::DirectoryAmplification::default()
+        };
         let (file_history, package_history) = self.churn.finish(file_count, package_count);
         let (coupling, eligible_coupling) = self.coupling.finish(containment);
         let concentration = self.concentration.finish();
@@ -380,7 +391,7 @@ impl EvolutionAccumulator {
         } else {
             Vec::new()
         };
-        EvolutionaryReportFacts::new(
+        let facts = EvolutionaryReportFacts::new(
             coverage,
             file_history,
             package_history,
@@ -390,7 +401,11 @@ impl EvolutionAccumulator {
             comparisons,
         )
         .with_concentration_findings(concentration_findings)
-        .with_file_coupling(file_coupling)
+        .with_file_coupling(file_coupling);
+        // The amplification travels beside the facts rather than inside them:
+        // it is keyed by directory, and only the composition that owns the
+        // directory tree can turn it into the answer a scope states.
+        (facts, amplification)
     }
 }
 
@@ -577,7 +592,7 @@ mod tests {
         accumulator.accept(commit(3, &sweep), &directories);
 
         let changes = (6 + files) as u32;
-        let report = accumulator.finish(
+        let (report, _) = accumulator.finish(
             HistoryCoverage::new(
                 HistoryAvailability::Complete,
                 None,
@@ -627,6 +642,81 @@ mod tests {
                 2
             )],
             "the sweep is outside both the shared count and the union it is compared with"
+        );
+    }
+
+    /// Change amplification rides the same stream as the pairs and is bounded
+    /// by neither the pair guard nor the pair floors: the sweeping commit the
+    /// guard holds back is the tenth observation that makes the fact material
+    /// at all. An incomplete stream states nothing anywhere.
+    #[test]
+    fn amplification_counts_the_commit_the_pair_guard_holds_back() {
+        let files = crate::BULK_COMMIT_FILES + 1;
+        let directories = directories(files);
+        let sweep: Vec<_> = (0..files)
+            .map(|file| (file, file % 2, Some(1), Some(0)))
+            .collect();
+        let accumulated = || {
+            let mut accumulator = EvolutionAccumulator::default();
+            for contributor in 0..9 {
+                accumulator.accept(
+                    commit(
+                        contributor,
+                        &[
+                            (0, 0, Some(1), Some(0)),
+                            (1, 1, Some(1), Some(0)),
+                            (2, 0, Some(1), Some(0)),
+                        ],
+                    ),
+                    &directories,
+                );
+            }
+            accumulator.accept(commit(9, &sweep), &directories);
+            accumulator
+        };
+        let coverage = |availability| {
+            HistoryCoverage::new(
+                availability,
+                None,
+                10,
+                10,
+                10,
+                0,
+                None,
+                None,
+                10,
+                0,
+                0,
+                0,
+                None,
+            )
+        };
+        let finish = |availability| {
+            accumulated()
+                .finish(
+                    coverage(availability),
+                    files,
+                    2,
+                    &crate::PackageContainment::default(),
+                    &BTreeSet::new(),
+                    None,
+                )
+                .1
+        };
+
+        let complete = finish(HistoryAvailability::Complete);
+        let root = complete
+            .get(crate::DirectoryTree::ROOT)
+            .expect("nine ordinary commits and one sweep are ten observations");
+        assert_eq!(
+            (root.median(), root.commits()),
+            (3, 10),
+            "the guard bounds the pair table alone; without the sweep the sample \
+             is one commit short of material"
+        );
+        assert!(
+            finish(HistoryAvailability::Incomplete).is_empty(),
+            "a stream that saw part of the history has no typical change to state"
         );
     }
 
@@ -788,7 +878,7 @@ mod tests {
                 &directories(2),
             );
         }
-        let report = accumulator.finish(
+        let (report, _) = accumulator.finish(
             HistoryCoverage::new(
                 HistoryAvailability::Complete,
                 None,
@@ -827,7 +917,7 @@ mod tests {
                 &directories(2),
             );
         }
-        let report = accumulator.finish(
+        let (report, _) = accumulator.finish(
             HistoryCoverage::new(
                 HistoryAvailability::Incomplete,
                 None,
@@ -881,7 +971,7 @@ mod tests {
                 &directories(2),
             );
         }
-        let report = accumulator.finish(
+        let (report, _) = accumulator.finish(
             HistoryCoverage::new(
                 HistoryAvailability::Complete,
                 None,
@@ -938,7 +1028,7 @@ mod tests {
                 &directories(3),
             );
         }
-        let report = accumulator.finish(
+        let (report, _) = accumulator.finish(
             HistoryCoverage::new(
                 HistoryAvailability::Complete,
                 None,

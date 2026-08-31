@@ -273,6 +273,12 @@ pub fn smackdebt_analysis::ArchitectureGraph::new(smackdebt_analysis::Dependency
 pub struct smackdebt_analysis::ArchitectureReportFacts
 impl smackdebt_analysis::ArchitectureReportFacts
 pub fn smackdebt_analysis::ArchitectureReportFacts::new(smackdebt_analysis::ArchitectureGraph, alloc::vec::Vec<smackdebt_analysis::ArchitectureFinding>, alloc::vec::Vec<smackdebt_analysis::ArchitectureComparison>) -> Self
+pub struct smackdebt_analysis::ChangeAmplification
+impl smackdebt_analysis::ChangeAmplification
+pub const fn smackdebt_analysis::ChangeAmplification::commits(self) -> u32
+pub const fn smackdebt_analysis::ChangeAmplification::from_counts(u32, u32) -> core::option::Option<Self>
+pub const fn smackdebt_analysis::ChangeAmplification::median(self) -> u32
+pub fn smackdebt_analysis::ChangeAmplification::sentence(self) -> alloc::string::String
 pub struct smackdebt_analysis::ChangeCoupling
 impl smackdebt_analysis::ChangeCoupling
 pub const fn smackdebt_analysis::ChangeCoupling::evidence(self) -> core::option::Option<smackdebt_analysis::CouplingEvidence>
@@ -448,6 +454,11 @@ pub const fn smackdebt_analysis::DiffCounts::changed(self) -> u32
 pub const fn smackdebt_analysis::DiffCounts::new(u32, u32, u32) -> Self
 pub const fn smackdebt_analysis::DiffCounts::total(self) -> u32
 pub const fn smackdebt_analysis::DiffCounts::worse(self) -> u32
+pub struct smackdebt_analysis::DirectoryAmplification(_)
+impl smackdebt_analysis::DirectoryAmplification
+pub fn smackdebt_analysis::DirectoryAmplification::get(&self, smackdebt_analysis::DirectoryId) -> core::option::Option<smackdebt_analysis::ChangeAmplification>
+pub fn smackdebt_analysis::DirectoryAmplification::is_empty(&self) -> bool
+pub fn smackdebt_analysis::DirectoryAmplification::len(&self) -> usize
 pub struct smackdebt_analysis::DirectoryId(_)
 impl smackdebt_analysis::DirectoryId
 pub const fn smackdebt_analysis::DirectoryId::from_index(usize) -> Self
@@ -467,7 +478,7 @@ pub fn smackdebt_analysis::DirectoryTree::parent(&self, smackdebt_analysis::Dire
 pub struct smackdebt_analysis::EvolutionAccumulator
 impl smackdebt_analysis::EvolutionAccumulator
 pub fn smackdebt_analysis::EvolutionAccumulator::accept(&mut self, smackdebt_analysis::HistoryCommitFact, &smackdebt_analysis::DirectoryTree)
-pub fn smackdebt_analysis::EvolutionAccumulator::finish(self, smackdebt_analysis::HistoryCoverage, usize, usize, &smackdebt_analysis::PackageContainment, &alloc::collections::btree::set::BTreeSet<(smackdebt_analysis::PackageId, smackdebt_analysis::PackageId)>, core::option::Option<&alloc::collections::btree::set::BTreeSet<(smackdebt_analysis::PackageId, smackdebt_analysis::PackageId)>>) -> smackdebt_analysis::EvolutionaryReportFacts
+pub fn smackdebt_analysis::EvolutionAccumulator::finish(self, smackdebt_analysis::HistoryCoverage, usize, usize, &smackdebt_analysis::PackageContainment, &alloc::collections::btree::set::BTreeSet<(smackdebt_analysis::PackageId, smackdebt_analysis::PackageId)>, core::option::Option<&alloc::collections::btree::set::BTreeSet<(smackdebt_analysis::PackageId, smackdebt_analysis::PackageId)>>) -> (smackdebt_analysis::EvolutionaryReportFacts, smackdebt_analysis::DirectoryAmplification)
 pub fn smackdebt_analysis::EvolutionAccumulator::register_source(&mut self, smackdebt_analysis::FileId, smackdebt_analysis::PackageId, smackdebt_analysis::SourceRole, smackdebt_analysis::SourceTrust)
 pub struct smackdebt_analysis::EvolutionaryComparison
 impl smackdebt_analysis::EvolutionaryComparison
@@ -945,6 +956,7 @@ pub fn smackdebt_analysis::ReportBuilder::set_orphan_files(&mut self, alloc::vec
 pub fn smackdebt_analysis::ReportBuilder::set_packages(&mut self, alloc::vec::Vec<smackdebt_analysis::PackageRecord>)
 pub fn smackdebt_analysis::ReportBuilder::set_propagation(&mut self, alloc::vec::Vec<smackdebt_analysis::PackageClosure>, alloc::vec::Vec<smackdebt_analysis::FileReach>, core::option::Option<smackdebt_analysis::CoreSize>)
 pub fn smackdebt_analysis::ReportBuilder::set_root(&mut self, smackdebt_analysis::ScopeId)
+pub fn smackdebt_analysis::ReportBuilder::set_scope_amplification(&mut self, alloc::vec::Vec<core::option::Option<smackdebt_analysis::ChangeAmplification>>)
 pub fn smackdebt_analysis::ReportBuilder::set_size_findings(&mut self, alloc::vec::Vec<smackdebt_analysis::SizeFinding>)
 pub fn smackdebt_analysis::ReportBuilder::set_stable_dependency_findings(&mut self, alloc::vec::Vec<smackdebt_analysis::StableDependencyFinding>)
 pub fn smackdebt_analysis::ReportBuilder::with_capacity(smackdebt_analysis::ReportMode, usize, usize, usize, usize, usize) -> Self
@@ -1070,6 +1082,7 @@ pub fn smackdebt_analysis::UnitIdentity::name(&self) -> &str
 pub fn smackdebt_analysis::UnitIdentity::new(impl core::convert::Into<alloc::string::String>, smackdebt_analysis::UnitKind) -> Self
 pub struct smackdebt_analysis::Verdict
 impl smackdebt_analysis::Verdict
+pub const fn smackdebt_analysis::Verdict::amplification(&self) -> core::option::Option<smackdebt_analysis::ChangeAmplification>
 pub fn smackdebt_analysis::Verdict::codebase(smackdebt_analysis::VerdictCounts, alloc::vec::Vec<smackdebt_analysis::WorstOffender>) -> Self
 pub const fn smackdebt_analysis::Verdict::core_size(&self) -> core::option::Option<smackdebt_analysis::CoreSize>
 pub const fn smackdebt_analysis::Verdict::counts(&self) -> smackdebt_analysis::VerdictCounts
@@ -1082,6 +1095,7 @@ pub const fn smackdebt_analysis::Verdict::selection(&self) -> &smackdebt_analysi
 pub const fn smackdebt_analysis::Verdict::sentence(&self) -> &'static str
 pub const fn smackdebt_analysis::Verdict::share(&self) -> core::option::Option<smackdebt_analysis::VerdictShare>
 pub const fn smackdebt_analysis::Verdict::tier(&self) -> smackdebt_analysis::CodebaseTier
+pub const fn smackdebt_analysis::Verdict::with_amplification(self, core::option::Option<smackdebt_analysis::ChangeAmplification>) -> Self
 pub const fn smackdebt_analysis::Verdict::with_core_size(self, core::option::Option<smackdebt_analysis::CoreSize>) -> Self
 pub fn smackdebt_analysis::Verdict::with_qualifier(self, core::option::Option<smackdebt_analysis::CoverageQualifier>) -> Self
 pub const fn smackdebt_analysis::Verdict::with_reach(self, core::option::Option<smackdebt_analysis::PropagationReach>) -> Self
@@ -1109,6 +1123,9 @@ pub fn smackdebt_analysis::WorstOffender::new(impl core::convert::Into<alloc::st
 pub fn smackdebt_analysis::WorstOffender::path(&self) -> &str
 pub const fn smackdebt_analysis::WorstOffender::reason(&self) -> smackdebt_analysis::WorstOffenderReason
 pub fn smackdebt_analysis::WorstOffender::with_identity(self, smackdebt_analysis::UnitIdentity) -> Self
+pub const smackdebt_analysis::AMPLIFICATION_MAX_FILES: u32
+pub const smackdebt_analysis::AMPLIFICATION_MIN_COMMITS: u32
+pub const smackdebt_analysis::AMPLIFICATION_MIN_MEDIAN: u32
 pub const smackdebt_analysis::BROAD_DEBT_UNITS: u32
 pub const smackdebt_analysis::BULK_COMMIT_FILES: usize
 pub const smackdebt_analysis::CLOSURE_NODE_LIMIT: usize
@@ -1164,6 +1181,7 @@ pub fn smackdebt_analysis::largest_component_size(&[alloc::vec::Vec<usize>]) -> 
 pub fn smackdebt_analysis::orphan_files(&[smackdebt_analysis::OrphanCandidate<'_>]) -> alloc::vec::Vec<smackdebt_analysis::OrphanFile>
 pub fn smackdebt_analysis::qualifies_for_finding(smackdebt_analysis::ChangeCoupling) -> bool
 pub fn smackdebt_analysis::reach_in_counts(usize, &[(usize, usize)]) -> alloc::vec::Vec<u32>
+pub fn smackdebt_analysis::scope_amplification(&[smackdebt_analysis::Scope], &smackdebt_analysis::DirectoryTree, &smackdebt_analysis::DirectoryAmplification) -> alloc::vec::Vec<core::option::Option<smackdebt_analysis::ChangeAmplification>>
 pub fn smackdebt_analysis::stable_dependency_findings(&[smackdebt_analysis::PackageEdge], &[smackdebt_analysis::PackageGraphMeasurement]) -> alloc::vec::Vec<smackdebt_analysis::StableDependencyFinding>
 pub fn smackdebt_analysis::strongly_connected_components(usize, &[(usize, usize)]) -> alloc::vec::Vec<alloc::vec::Vec<usize>>
 pub fn smackdebt_analysis::test_declared_files(&alloc::collections::btree::set::BTreeSet<smackdebt_analysis::ModuleDeclaration>) -> alloc::collections::btree::set::BTreeSet<usize>

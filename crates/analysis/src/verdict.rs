@@ -1,6 +1,7 @@
 use crate::architecture::{
     ArchitectureComparison, ArchitectureComparisonId, ArchitectureComparisonKind,
 };
+use crate::change_amplification::{AMPLIFICATION_MIN_COMMITS, AMPLIFICATION_MIN_MEDIAN};
 use crate::comparison::{Comparison, ComparisonKind};
 use crate::evolution::{EvolutionaryComparison, EvolutionaryComparisonId};
 use crate::health::{HealthCounts, Rating};
@@ -348,6 +349,56 @@ impl CoreSize {
     /// The files the file dependency graph is built over.
     pub const fn files(self) -> u32 {
         self.files
+    }
+}
+
+/// How many files a typical change to one scope touches.
+///
+/// The value is the nearest-rank median of the scope's directory histogram, so
+/// it is a member of the sample rather than an average of it: a repository
+/// whose changes touch three files usually says three, whatever one sweeping
+/// commit did. The fact is descriptive — it is never rated, creates no finding,
+/// and changes no verdict — and its sentence is copy owned by analysis, so a
+/// terminal renderer and a machine consumer print the same bytes.
+#[derive(Clone, Copy, Debug, Eq, Hash, PartialEq)]
+pub struct ChangeAmplification {
+    median: u32,
+    commits: u32,
+}
+
+impl ChangeAmplification {
+    /// Completes an amplification fact when the sample is both long enough and
+    /// wide enough to be worth stating.
+    ///
+    /// A handful of commits is an anecdote rather than a typical change, and a
+    /// median of one or two files is what a directory is for, so each floor
+    /// rules out one of those and a scope below either states nothing rather
+    /// than stating noise. Whether the history stream was complete enough to
+    /// hold a sample at all is decided before a histogram is finished, so it
+    /// never reaches here.
+    pub const fn from_counts(median: u32, commits: u32) -> Option<Self> {
+        if commits < AMPLIFICATION_MIN_COMMITS || median < AMPLIFICATION_MIN_MEDIAN {
+            return None;
+        }
+        Some(Self { median, commits })
+    }
+
+    /// The exact sentence every consumer prints for this amplification.
+    ///
+    /// The median is at least the floor, so the plural is always the correct
+    /// form and the sentence needs no singular arm.
+    pub fn sentence(self) -> String {
+        format!("A typical change here touches {} files.", self.median)
+    }
+
+    /// The files a typical change to this scope touches.
+    pub const fn median(self) -> u32 {
+        self.median
+    }
+
+    /// The commits the median was computed from.
+    pub const fn commits(self) -> u32 {
+        self.commits
     }
 }
 
@@ -727,6 +778,7 @@ pub struct Verdict {
     share: Option<VerdictShare>,
     reach: Option<PropagationReach>,
     core_size: Option<CoreSize>,
+    amplification: Option<ChangeAmplification>,
 }
 
 impl Verdict {
@@ -742,6 +794,7 @@ impl Verdict {
             share: None,
             reach: None,
             core_size: None,
+            amplification: None,
         }
     }
 
@@ -761,6 +814,7 @@ impl Verdict {
             share: None,
             reach: None,
             core_size: None,
+            amplification: None,
         }
     }
 
@@ -822,6 +876,22 @@ impl Verdict {
     /// the fact is material.
     pub const fn core_size(&self) -> Option<CoreSize> {
         self.core_size
+    }
+
+    /// Returns the same verdict carrying a change-amplification fact.
+    ///
+    /// The tier was already selected; what a typical change costs never
+    /// changes it.
+    #[must_use]
+    pub const fn with_amplification(mut self, amplification: Option<ChangeAmplification>) -> Self {
+        self.amplification = amplification;
+        self
+    }
+
+    /// How many files a typical change here touches, present at a repository,
+    /// package, or directory scope when the fact is material.
+    pub const fn amplification(&self) -> Option<ChangeAmplification> {
+        self.amplification
     }
 
     pub const fn tier(&self) -> CodebaseTier {
@@ -1062,6 +1132,26 @@ mod tests {
     }
 
     #[test]
+    fn an_amplification_is_material_only_above_both_of_its_floors() {
+        assert!(
+            ChangeAmplification::from_counts(3, AMPLIFICATION_MIN_COMMITS - 1).is_none(),
+            "nine commits are too few to call a median typical"
+        );
+        assert!(
+            ChangeAmplification::from_counts(AMPLIFICATION_MIN_MEDIAN - 1, 40).is_none(),
+            "a typical change of two files is what a directory is for"
+        );
+        let exactly =
+            ChangeAmplification::from_counts(AMPLIFICATION_MIN_MEDIAN, AMPLIFICATION_MIN_COMMITS)
+                .expect("both floors are inclusive");
+        assert_eq!(exactly.median(), 3);
+        assert_eq!(exactly.commits(), 10);
+        assert_eq!(exactly.sentence(), "A typical change here touches 3 files.");
+        let wide = ChangeAmplification::from_counts(4, 40).expect("a busy directory");
+        assert_eq!(wide.sentence(), "A typical change here touches 4 files.");
+    }
+
+    #[test]
     fn reach_and_core_never_move_the_selected_tier() {
         let counts = VerdictCounts::new(HealthCounts::new(3, 1, 1), 0);
         let bare = Verdict::codebase(
@@ -1082,6 +1172,28 @@ mod tests {
         assert_eq!(stated.worst(), bare.worst());
         assert!(stated.reach().is_some() && stated.core_size().is_some());
         assert!(bare.reach().is_none() && bare.core_size().is_none());
+    }
+
+    #[test]
+    fn an_amplification_never_moves_the_selected_tier() {
+        let counts = VerdictCounts::new(HealthCounts::new(3, 1, 1), 0);
+        let bare = Verdict::codebase(
+            counts,
+            vec![WorstOffender::new(
+                "src/work.rs",
+                WorstOffenderReason::MostComplex,
+            )],
+        );
+        let stated = bare
+            .clone()
+            .with_amplification(ChangeAmplification::from_counts(4, 40));
+        assert_eq!(stated.tier(), bare.tier());
+        assert_eq!(stated.sentence(), bare.sentence());
+        assert_eq!(stated.counts(), bare.counts());
+        assert_eq!(stated.worst_offender(), bare.worst_offender());
+        assert_eq!(stated.worst(), bare.worst());
+        assert!(stated.amplification().is_some());
+        assert!(bare.amplification().is_none());
     }
 
     #[test]

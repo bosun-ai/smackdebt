@@ -1943,6 +1943,29 @@
           },
           "additionalProperties": false
         },
+        "amplification": {
+          "type": "object",
+          "required": [
+            "sentence",
+            "median",
+            "commits"
+          ],
+          "properties": {
+            "sentence": {
+              "type": "string",
+              "pattern": "^A typical change here touches [0-9]+ files\\.$"
+            },
+            "median": {
+              "type": "integer",
+              "minimum": 3
+            },
+            "commits": {
+              "type": "integer",
+              "minimum": 10
+            }
+          },
+          "additionalProperties": false
+        },
         "mode": {
           "enum": [
             "codebase",

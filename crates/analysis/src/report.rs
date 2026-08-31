@@ -8,8 +8,8 @@ use crate::propagation::PackageClosure;
 use crate::size::SizeFinding;
 use crate::source::{Language, ParseStatus, SourceRole, SourceSpan, SourceTrust, UnitIdentity};
 use crate::verdict::{
-    CoreSize, CoverageQualifier, DebtDiffSelection, PropagationReach, Verdict, VerdictCounts,
-    VerdictShare, WORST_OFFENDER_LIMIT, WorstOffender, WorstOffenderReason,
+    ChangeAmplification, CoreSize, CoverageQualifier, DebtDiffSelection, PropagationReach, Verdict,
+    VerdictCounts, VerdictShare, WORST_OFFENDER_LIMIT, WorstOffender, WorstOffenderReason,
 };
 use crate::{
     ArchitectureComparison, ArchitectureComparisonId, ArchitectureFinding, ArchitectureFindingId,
@@ -820,6 +820,11 @@ pub struct Report {
     file_reach: Vec<FileReach>,
     /// The largest file dependency cycle, when it is material.
     core_size: Option<CoreSize>,
+    /// What a typical change to each scope touches, by scope position, joined
+    /// once while the report is composed. A scope whose kind states no
+    /// amplification, and one whose directory holds no material fact, has
+    /// `None` here.
+    scope_amplification: Vec<Option<ChangeAmplification>>,
     verdict: Option<Verdict>,
 }
 
@@ -907,6 +912,14 @@ impl ReportBuilder {
         self.report.package_closures = closures;
         self.report.file_reach = file_reach;
         self.report.core_size = core_size;
+    }
+
+    /// Sets what a typical change to each scope touches, by scope position.
+    ///
+    /// The scope-to-directory join runs once, where the directory tree lives,
+    /// so a rendered scope reads one table position and closes over nothing.
+    pub fn set_scope_amplification(&mut self, amplification: Vec<Option<ChangeAmplification>>) {
+        self.report.scope_amplification = amplification;
     }
 
     /// Sets the derived hotspot table, ordered by file table position.
@@ -1127,6 +1140,7 @@ impl Report {
             package_closures: Vec::new(),
             file_reach: Vec::new(),
             core_size: None,
+            scope_amplification: Vec::new(),
             verdict: None,
         }
     }
@@ -1296,6 +1310,22 @@ impl Report {
             .with_share(self.repository_share(selected))
             .with_reach(self.propagation_reach(selected))
             .with_core_size(self.scope_core_size(selected))
+            .with_amplification(self.scope_amplification(selected))
+    }
+
+    /// What a typical change to the selected scope touches.
+    ///
+    /// A diff answers about a change rather than about a tree, so it states no
+    /// amplification however much history it read. Every other answer is a
+    /// table position the composition already decided.
+    fn scope_amplification(&self, selected: ScopeId) -> Option<ChangeAmplification> {
+        if self.mode == ReportMode::Diff {
+            return None;
+        }
+        self.scope_amplification
+            .get(selected.index())
+            .copied()
+            .flatten()
     }
 
     /// How far a change reaches from the selected scope, present at the

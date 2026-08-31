@@ -31,11 +31,11 @@
 
 ## 4. Change amplification
 
-- [ ] 4.1 Accumulate the sparse per-directory histograms during the one history stream, with the observation value clamped at the maximum file count and one observation per commit per touched directory and its ancestors, reusing the directory tree built for pair accumulation rather than building a second one.
-- [ ] 4.2 Add the `ChangeAmplification` value object with its materiality rule — commit floor, median floor, complete history — and chain it into the repository, package, and directory scope verdicts, leaving a file scope without one.
-- [ ] 4.3 Render the sentence verbatim in the verdict block and serialize `verdict.amplification`, extending the checked schema in the same commit.
-- [ ] 4.4 Add pure tests for the exact nearest-rank median, the ancestor de-duplication that counts a commit once per directory, the clamp, and each materiality boundary; prove the fact never moves the tier, its counts, or the worst offender.
-- [ ] 4.5 Add exact acceptance at repository, package, and directory scope, the absence at a file scope, and a 50-column rendering, then regenerate the affected snapshots per case. Extend `bulk_commit_repository()` acceptance to prove the remaining half of the bulk-commit guard: the sweeping commit contributes exactly one amplification observation, so the fact is what it would have been without the guard.
+- [x] 4.1 Accumulate the sparse per-directory histograms during the one history stream, with the observation value clamped at the maximum file count and one observation per commit per touched directory and its ancestors, reusing the directory tree built for pair accumulation rather than building a second one.
+- [x] 4.2 Add the `ChangeAmplification` value object with its materiality rule — commit floor, median floor, complete history — and chain it into the repository, package, and directory scope verdicts, leaving a file scope without one.
+- [x] 4.3 Render the sentence verbatim in the verdict block and serialize `verdict.amplification`, extending the checked schema in the same commit.
+- [x] 4.4 Add pure tests for the exact nearest-rank median, the ancestor de-duplication that counts a commit once per directory, the clamp, and each materiality boundary; prove the fact never moves the tier, its counts, or the worst offender.
+- [x] 4.5 Add exact acceptance at repository, package, and directory scope, the absence at a file scope, and a 50-column rendering, then regenerate the affected snapshots per case. Extend `bulk_commit_repository()` acceptance to prove the remaining half of the bulk-commit guard: the sweeping commit contributes exactly one amplification observation, so the fact is what it would have been without the guard.
 
 ## 5. Leakage detectors and cards
 

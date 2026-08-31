@@ -988,7 +988,7 @@ pub(crate) fn evolution_repository() -> GeneratedRepository {
 const BULK_FIXTURE_ADDED_FILES: usize = 28;
 
 /// A repository whose history holds one sweeping commit beside five ordinary
-/// ones.
+/// ones and five that touch neither of their files.
 ///
 /// `left/src/a.js` and `right/src/b.js` change together in five two-file
 /// commits, which retains one pair four directories apart. The sixth commit
@@ -996,9 +996,17 @@ const BULK_FIXTURE_ADDED_FILES: usize = 28;
 /// change graph at once: the guard holds that commit back from pair
 /// accumulation, and the pair's shared and union counts both stay at five,
 /// while churn, touches, and package change coupling still count it in full.
+///
+/// The five three-file commits in `wide` afterwards touch neither of the pair's
+/// files, so every pair operand is untouched, and they exist for the guard's
+/// other half: the repository's eleven amplification observations are five of
+/// two files, five of three, and the sweep's one of thirty, whose nearest-rank
+/// median is 3. Without the sweeping commit's one observation the sample would
+/// be ten commits at a median of two and the repository would state nothing, so
+/// the stated fact is itself the proof that the guard never reached it.
 pub(crate) fn bulk_commit_repository() -> GeneratedRepository {
     let repository = GeneratedRepository::new("main");
-    for package in ["left", "right"] {
+    for package in ["left", "right", "wide"] {
         repository.write(
             &format!("{package}/package.json"),
             format!("{{\"name\":\"{package}\",\"private\":true}}\n").as_bytes(),
@@ -1048,6 +1056,72 @@ pub(crate) fn bulk_commit_repository() -> GeneratedRepository {
         "bulk@example.invalid",
         "2026-02-06T12:00:00Z",
     ));
+    for version in 1..=5 {
+        let sources: Vec<String> = (0..3)
+            .map(|unit| format!("export const wide{unit} = {version};\n"))
+            .collect();
+        let edits: Vec<_> = sources
+            .iter()
+            .enumerate()
+            .map(|(unit, source)| WorktreeEdit::Write(WIDE_PATHS[unit], source.as_bytes()))
+            .collect();
+        repository.apply(&edits);
+        repository.commit(commit(
+            "three files change together",
+            "Bulk Fixture",
+            "bulk@example.invalid",
+            &format!("2026-02-1{version}T12:00:00Z"),
+        ));
+    }
+    repository
+}
+
+/// The three files the trailing commits of [`bulk_commit_repository`] rewrite,
+/// which sit in one package no pair operand of that fixture names.
+const WIDE_PATHS: [&str; 3] = ["wide/src/one.js", "wide/src/two.js", "wide/src/three.js"];
+
+/// A repository whose commits give three scopes three different answers about
+/// what a typical change costs.
+///
+/// Twelve commits rewrite four files of `core/src`, five rewrite three files of
+/// `edge/src`, and ten rewrite two files of `quiet/src`. The repository root
+/// therefore sees twenty-seven observations — ten of two, five of three, and
+/// twelve of four — whose nearest-rank median is 3, while `core` and `core/src`
+/// see twelve of four and state 4. `edge` has too few commits to state
+/// anything and `quiet` has enough commits but a median below the floor, so
+/// each states nothing rather than something weak.
+pub(crate) fn amplification_repository() -> GeneratedRepository {
+    let repository = GeneratedRepository::new("main");
+    for package in ["core", "edge", "quiet"] {
+        repository.write(
+            &format!("{package}/package.json"),
+            format!("{{\"name\":\"{package}\",\"private\":true}}\n").as_bytes(),
+        );
+    }
+    let mut day = 1;
+    for (package, files, commits) in [("core", 4, 12), ("edge", 3, 5), ("quiet", 2, 10)] {
+        for version in 1..=commits {
+            let paths: Vec<String> = (0..files)
+                .map(|unit| format!("{package}/src/unit{unit}.js"))
+                .collect();
+            let sources: Vec<String> = (0..files)
+                .map(|unit| format!("export const unit{unit} = {version};\n"))
+                .collect();
+            let edits: Vec<_> = paths
+                .iter()
+                .zip(&sources)
+                .map(|(path, source)| WorktreeEdit::Write(path, source.as_bytes()))
+                .collect();
+            repository.apply(&edits);
+            repository.commit(commit(
+                "one change of several files",
+                "Amplification Fixture",
+                "amplification@example.invalid",
+                &format!("2026-01-{day:02}T12:00:00Z"),
+            ));
+            day += 1;
+        }
+    }
     repository
 }
 

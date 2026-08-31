@@ -1152,6 +1152,9 @@ impl Serialize for VerdictView<'_> {
         if let Some(core) = self.0.core_size() {
             map.serialize_entry("core_size", &CoreSizeView(core))?;
         }
+        if let Some(amplification) = self.0.amplification() {
+            map.serialize_entry("amplification", &AmplificationView(amplification))?;
+        }
         map.serialize_entry("mode", mode_name(self.1))?;
         map.end()
     }
@@ -1211,6 +1214,22 @@ impl Serialize for CoreSizeView {
         map.serialize_entry("sentence", &self.0.sentence())?;
         map.serialize_entry("core", &self.0.core())?;
         map.serialize_entry("files", &self.0.files())?;
+        map.end()
+    }
+}
+
+/// What a typical change to the selected scope touches.
+///
+/// The sentence bytes are analysis-owned, so a machine consumer and the
+/// terminal state the same median for the same scope, and the commit count is
+/// the sample it was taken from.
+struct AmplificationView(smackdebt_analysis::ChangeAmplification);
+impl Serialize for AmplificationView {
+    fn serialize<S: Serializer>(&self, serializer: S) -> Result<S::Ok, S::Error> {
+        let mut map = serializer.serialize_map(Some(3))?;
+        map.serialize_entry("sentence", &self.0.sentence())?;
+        map.serialize_entry("median", &self.0.median())?;
+        map.serialize_entry("commits", &self.0.commits())?;
         map.end()
     }
 }

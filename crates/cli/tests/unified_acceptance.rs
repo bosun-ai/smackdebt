@@ -14,12 +14,12 @@ use support::coverage_failure_repository;
 use support::edges::assert_no_dependency_edge_rows;
 use support::hermetic::hermetic_env;
 use support::{
-    GeneratedRepository, Invocation, bulk_commit_repository, copy_language_truth_files,
-    core_repository, deepened_signal_repository, evolution_repository, module_wiring_repository,
-    propagation_repository, ref_diff_repository, rust_test_scope_repository, shallow_clone,
-    signal_table_repository, source_role_repository, stable_dependency_repository,
-    static_architecture_repository, test_scoped_workspace_repository, wide_directory_repository,
-    workspace_manifest_repository, worktree_change_repository,
+    GeneratedRepository, Invocation, amplification_repository, bulk_commit_repository,
+    copy_language_truth_files, core_repository, deepened_signal_repository, evolution_repository,
+    module_wiring_repository, propagation_repository, ref_diff_repository,
+    rust_test_scope_repository, shallow_clone, signal_table_repository, source_role_repository,
+    stable_dependency_repository, static_architecture_repository, test_scoped_workspace_repository,
+    wide_directory_repository, workspace_manifest_repository, worktree_change_repository,
 };
 
 #[derive(Debug, Deserialize)]
@@ -59,12 +59,17 @@ fn verdict_block(text: &str) -> Vec<&str> {
 /// The verdict block without the facts a verdict states only, which is the
 /// scope, the tier sentence, the counts, and the worst offender.
 ///
-/// The propagation facts are the lines the stated-only rule allows to differ
-/// between two trees; everything left here is what it forbids to differ.
+/// The propagation and amplification facts are the lines the stated-only rule
+/// allows to differ between two trees; everything left here is what it forbids
+/// to differ.
 fn rated_verdict_lines(text: &str) -> Vec<&str> {
     verdict_block(text)
         .into_iter()
-        .filter(|line| !line.contains("can reach") && !line.contains("sit in one dependency cycle"))
+        .filter(|line| {
+            !line.contains("can reach")
+                && !line.contains("sit in one dependency cycle")
+                && !line.contains("A typical change here touches")
+        })
         .collect()
 }
 
@@ -750,7 +755,9 @@ fn a_core_is_stated_only_when_the_largest_cycle_clears_both_floors() {
 /// Five ordinary commits change one cross-directory pair. The sixth rewrites
 /// both of its files and adds twenty-eight more, so thirty files enter the
 /// change graph at once: the pair keeps five shared of five union while churn,
-/// touches, and package change coupling all count six commits.
+/// touches, and package change coupling all count six commits. Five later
+/// commits touch a third package alone, so no pair operand moves and the
+/// repository's amplification sample reaches the commit floor.
 #[test]
 fn a_sweeping_commit_is_counted_everywhere_but_in_the_file_pair_table() {
     let repository = bulk_commit_repository();
@@ -762,9 +769,25 @@ fn a_sweeping_commit_is_counted_everywhere_but_in_the_file_pair_table() {
     assert_eq!(result, automatic, "serial and parallel runs must agree");
     let report = checked_json(&result.stdout);
 
-    assert_eq!(report["history_coverage"]["commits"], 6);
+    assert_eq!(report["history_coverage"]["commits"], 11);
     assert_eq!(report["history_coverage"]["bulk_commits"], 1);
     assert_eq!(report["history_coverage"]["declined_pairs"], 0);
+
+    // The other half of the guard: the sweeping commit contributes exactly one
+    // amplification observation, of the thirty files it changed. The other ten
+    // commits are five of two files and five of three, so the sweep is the
+    // eleventh observation and the one that moves the nearest-rank median from
+    // two — below the floor, stating nothing — to three.
+    let amplification = &report["verdict"]["amplification"];
+    assert_eq!(
+        amplification["sentence"],
+        "A typical change here touches 3 files."
+    );
+    assert_eq!(amplification["median"], 3);
+    assert_eq!(
+        amplification["commits"], 11,
+        "one observation from the sweeping commit, not thirty and not none"
+    );
 
     let pairs: Vec<_> = report["file_change_coupling"]
         .as_array()
@@ -836,7 +859,11 @@ fn a_sweeping_commit_is_counted_everywhere_but_in_the_file_pair_table() {
         .collect();
     assert_eq!(
         concentration,
-        [("left".to_owned(), 1, 6, 6), ("right".to_owned(), 1, 6, 6)],
+        [
+            ("left".to_owned(), 1, 6, 6),
+            ("right".to_owned(), 1, 6, 6),
+            ("wide".to_owned(), 1, 5, 5)
+        ],
         "the sweeping commit is one of the six commits concentration counts"
     );
 
@@ -856,6 +883,103 @@ fn a_sweeping_commit_is_counted_everywhere_but_in_the_file_pair_table() {
             assert!(!text.contains(absent), "{arguments:?}: {text}");
         }
     }
+}
+
+/// A scope states what a typical change there touches, at the three scopes
+/// that can answer and at none of the others.
+///
+/// The fixture's root sees ten commits of two files, five of three, and twelve
+/// of four, whose nearest-rank median is 3, while `core` and `core/src` see the
+/// twelve of four alone and state 4: a scope answers about its own directory
+/// rather than about the repository. `edge` has too few commits and `quiet` has
+/// a median below the floor, so each states nothing.
+#[test]
+fn a_scope_states_how_many_files_a_typical_change_there_touches() {
+    let repository = amplification_repository();
+    let history = ["--json", "--history", "36500d"];
+    let result = Invocation::new(history).run(repository.path());
+    result.success();
+    let automatic = Invocation::new(history)
+        .automatic_workers()
+        .run(repository.path());
+    assert_eq!(result, automatic, "serial and parallel runs must agree");
+
+    let stated = |arguments: &[&str]| {
+        let run = Invocation::new(arguments.to_vec()).run(repository.path());
+        run.success();
+        let report = checked_json(&run.stdout);
+        let amplification = &report["verdict"]["amplification"];
+        if amplification.is_null() {
+            return None;
+        }
+        Some((
+            amplification["sentence"].as_str().unwrap().to_owned(),
+            amplification["median"].as_u64().unwrap(),
+            amplification["commits"].as_u64().unwrap(),
+        ))
+    };
+    assert_eq!(
+        stated(&history),
+        Some(("A typical change here touches 3 files.".to_owned(), 3, 27))
+    );
+    let four = Some(("A typical change here touches 4 files.".to_owned(), 4, 12));
+    assert_eq!(stated(&["core", "--json", "--history", "36500d"]), four);
+    assert_eq!(stated(&["core/src", "--json", "--history", "36500d"]), four);
+    assert_eq!(
+        stated(&["core/src/unit0.js", "--json", "--history", "36500d"]),
+        None,
+        "a file scope would state sample noise as a fact"
+    );
+    assert_eq!(
+        stated(&["edge", "--json", "--history", "36500d"]),
+        None,
+        "five commits are an anecdote rather than a typical change"
+    );
+    assert_eq!(
+        stated(&["quiet", "--json", "--history", "36500d"]),
+        None,
+        "a typical change of two files is what a directory is for"
+    );
+
+    // The terminal prints the analysis-owned bytes verbatim, and it fits fifty
+    // columns whole.
+    let rendered = |arguments: Vec<&str>| {
+        let run = Invocation::new(arguments).run(repository.path());
+        run.success();
+        String::from_utf8(run.stdout).unwrap()
+    };
+    let root = rendered(vec!["--history", "36500d"]);
+    assert!(
+        root.contains("  A typical change here touches 3 files.\n"),
+        "{root}"
+    );
+    let directory = rendered(vec!["core/src", "--history", "36500d"]);
+    assert!(
+        directory.contains("  A typical change here touches 4 files.\n"),
+        "{directory}"
+    );
+    // The sentence survives the narrowest supported width whole.
+    let narrow = Invocation::new(["core/src", "--history", "36500d"])
+        .columns(50)
+        .run(repository.path());
+    narrow.success();
+    let narrow_text = String::from_utf8(narrow.stdout).unwrap();
+    assert!(
+        narrow_text.contains("  A typical change here touches 4 files.\n"),
+        "{narrow_text}"
+    );
+    let file = rendered(vec!["core/src/unit0.js", "--history", "36500d"]);
+    assert!(!file.contains("A typical change here"), "{file}");
+
+    // The same tree without a complete history states no typical change and
+    // every rated line of the block is byte-identical: the fact is stated only.
+    let windowed = rendered(vec![]);
+    assert!(!windowed.contains("A typical change here"), "{windowed}");
+    assert_eq!(
+        rated_verdict_lines(&root),
+        rated_verdict_lines(&windowed),
+        "amplification moves no tier, no count, and no worst offender"
+    );
 }
 
 #[test]

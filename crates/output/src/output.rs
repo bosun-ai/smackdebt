@@ -819,8 +819,8 @@ fn stated_verdict_facts(verdict: &Verdict) -> Vec<String> {
         facts.push(format!("{} {}", qualifier.sentence(), qualifier.fact()));
     }
     // A sub-scope answers about itself; the share states what fraction of the
-    // whole that is, and the two propagation facts state how far a change to
-    // this tree travels.
+    // whole that is, the two propagation facts state how far a change to this
+    // tree travels, and the amplification states what one costs.
     if let Some(share) = verdict.share() {
         facts.push(share.sentence());
     }
@@ -829,6 +829,9 @@ fn stated_verdict_facts(verdict: &Verdict) -> Vec<String> {
     }
     if let Some(core) = verdict.core_size() {
         facts.push(core.sentence());
+    }
+    if let Some(amplification) = verdict.amplification() {
+        facts.push(amplification.sentence());
     }
     facts
 }

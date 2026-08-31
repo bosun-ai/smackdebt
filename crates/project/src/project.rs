@@ -133,7 +133,7 @@ pub(super) fn analyze_codebase(request: &CodebaseRequest) -> Result<ProjectRepor
     for (file_index, analysis) in analyses.into_iter().enumerate() {
         builder.add_analysis(file_index, analysis);
     }
-    let report = builder.finish(&work);
+    let report = builder.finish(&work, &directories);
     let _inventory_visits = inventory.visited_entries();
     let selected_path = selection
         .exact_file
@@ -558,7 +558,10 @@ pub(super) fn analyze_diff(request: &DiffRequest) -> Result<ProjectReport, Proje
             .map(|root| report_package_path(root))
             .collect::<Vec<_>>(),
     );
-    let evolution = history.evolution.accumulator.finish(
+    // A diff answers about a change rather than about a tree, so the
+    // amplification the same stream accumulated is dropped here rather than
+    // joined onto a scope.
+    let (evolution, _) = history.evolution.accumulator.finish(
         history.evolution.coverage,
         builder.files().len(),
         package_roots.len(),
@@ -2327,7 +2330,11 @@ impl<'a> CodebaseReportBuilder<'a> {
             .push(Diagnostic::new(id, None, kind, message, 0));
     }
 
-    fn finish(mut self, work: &AnalysisWork) -> Report {
+    /// Composes the report, joining the scope facts that need the one
+    /// directory tree this report streamed its history against: the tree is
+    /// borrowed rather than rebuilt, so the scope a fact is stated at and the
+    /// directory it was accumulated under can never disagree.
+    fn finish(mut self, work: &AnalysisWork, directories: &DirectoryTree) -> Report {
         let architecture = build_architecture(
             work,
             &self.files,
@@ -2348,7 +2355,7 @@ impl<'a> CodebaseReportBuilder<'a> {
                 .map(|root| report_package_path(root))
                 .collect::<Vec<_>>(),
         );
-        let evolution = self.evolution.accumulator.finish(
+        let (evolution, amplification) = self.evolution.accumulator.finish(
             self.evolution.coverage,
             self.files.len(),
             self.package_roots.len(),
@@ -2356,6 +2363,11 @@ impl<'a> CodebaseReportBuilder<'a> {
             &explanation_pairs,
             None,
         );
+        // The scope join runs once, here, where the one directory tree the
+        // histograms were filed under is still in scope: a rendered scope then
+        // reads a table position rather than a tree.
+        let scope_amplification =
+            smackdebt_analysis::scope_amplification(&self.scopes, directories, &amplification);
         let evolutionary_findings = evolution.findings().to_vec();
         let root = ScopeId::from_index(0);
         let mut builder = AnalysisReportBuilder::with_capacity(
@@ -2396,6 +2408,7 @@ impl<'a> CodebaseReportBuilder<'a> {
             architecture.file_reach,
             architecture.core_size,
         );
+        builder.set_scope_amplification(scope_amplification);
         builder.set_hotspots(self.policies.hotspots.hotspots(&self.file_debt));
         builder.set_orphan_files(architecture.orphans);
         builder.set_stable_dependency_findings(architecture.stable_dependencies);

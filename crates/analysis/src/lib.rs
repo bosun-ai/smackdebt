@@ -2,6 +2,7 @@
 
 mod architecture;
 mod architecture_comparison;
+mod change_amplification;
 mod change_coupling;
 mod churn;
 mod comparison;
@@ -41,6 +42,10 @@ pub use architecture::{
     StableDependencyFindingId,
 };
 pub use architecture_comparison::{PackageCycle, compare_architecture};
+pub use change_amplification::{
+    AMPLIFICATION_MAX_FILES, AMPLIFICATION_MIN_COMMITS, AMPLIFICATION_MIN_MEDIAN,
+    DirectoryAmplification, scope_amplification,
+};
 pub use change_coupling::{
     PackageContainment, change_coupling, qualifies_for_finding, unexplained_coupling,
 };
@@ -107,8 +112,8 @@ pub use source::{
     UnitKind, is_symbolic_candidate,
 };
 pub use verdict::{
-    CodebaseTier, CoreSize, CoverageQualifier, DENSITY_EVIDENCE_UNITS, DebtDiffFacts,
-    DebtDiffSelection, DebtFamily, DiffTier, FIGHTS_BACK_PERMILLE, PropagationReach,
+    ChangeAmplification, CodebaseTier, CoreSize, CoverageQualifier, DENSITY_EVIDENCE_UNITS,
+    DebtDiffFacts, DebtDiffSelection, DebtFamily, DiffTier, FIGHTS_BACK_PERMILLE, PropagationReach,
     SMALL_SCOPE_HIGH_UNITS, UNSUPPORTED_QUALIFIER_PERMILLE, VOLUME_FIGHTS_BACK_HIGH,
     VOLUME_LOST_HIGH, Verdict, VerdictCounts, VerdictShare, WORN_PERMILLE, WORST_OFFENDER_LIMIT,
     WorstOffender, WorstOffenderReason,
