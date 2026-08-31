@@ -120,7 +120,7 @@ as counts without identity.
 
 #### Scenario: A root verdict states how far a change reaches
 - **WHEN** a root report whose verdict carries reach, core size, and amplification is written
-- **THEN** the block prints the three analysis-owned sentences verbatim, one per line, in that order, after the counts and with no share line
+- **THEN** the block prints the three analysis-owned sentences verbatim, one per line, in that order, stacked under the tier sentence where the share line would be and above the counts, and with no share line
 
 #### Scenario: One file carries three High findings
 - **WHEN** default codebase output is written for a scope containing that file
