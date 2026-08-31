@@ -181,23 +181,58 @@ fn two_packages_that_cannot_reach_each_other_settle_the_pair_without_a_probe() {
     );
 }
 
-/// A probe that spends its whole budget without settling the question proves
-/// nothing, and a claim that no dependency exists never rests on one.
+/// One chain of `length` nodes hanging off `start`, which is one side of a
+/// pair too large for a single walk when it passes the node budget.
+fn chain_from(start: usize, length: usize) -> Vec<(usize, usize)> {
+    (start..start + length - 1)
+        .map(|node| (node, node + 1))
+        .collect()
+}
+
+/// A pair is decided by whichever of its two sides fits the budget, so the
+/// same repository answers the same way whichever file the walk starts from.
 #[test]
-fn a_probe_that_runs_out_of_budget_creates_no_finding() {
-    // One package, so the package stage cannot separate anything, and one
-    // chain longer than the budget hanging off the pair's second file.
+fn a_pair_is_decided_when_the_smaller_side_of_it_fits_the_budget() {
+    // One package, so the package stage decides nothing, and one chain longer
+    // than the budget hanging off the pair's *second* file: the walk that
+    // explores that side runs out of room, and the walk from the other end
+    // exhausts a single node and proves the pair separate.
     let files = PATH_PROBE_NODES + 3;
-    let chain: Vec<(usize, usize)> = (1..files - 1).map(|node| (node, node + 1)).collect();
-    let graphs = Graphs::new(files, &vec![0; files], &[], &chain);
-    assert_eq!(found(&[pair(0, 1, 6, 9, 3)], &graphs), []);
-    // The same shape inside the budget answers separate and is a finding.
-    let short: Vec<(usize, usize)> = (1..8).map(|node| (node, node + 1)).collect();
-    let small = Graphs::new(10, &[0; 10], &[], &short);
+    let heavy_right = Graphs::new(files, &vec![0; files], &[], &chain_from(1, files - 1));
+    assert_eq!(
+        found(&[pair(0, 1, 6, 9, 3)], &heavy_right),
+        [(ChangeLeakageKind::HiddenCoupling, None)]
+    );
+    // The mirror repository, with the same chain hanging off the *first* file
+    // and the second file alone, states the same finding. A pair is a pair
+    // whichever end is large.
+    let mut mirrored = vec![(0, 2)];
+    mirrored.extend(chain_from(2, files - 2));
+    let heavy_left = Graphs::new(files, &vec![0; files], &[], &mirrored);
+    assert_eq!(
+        found(&[pair(0, 1, 6, 9, 3)], &heavy_left),
+        [(ChangeLeakageKind::HiddenCoupling, None)]
+    );
+    // A short chain inside the budget is settled by the first walk alone.
+    let small = Graphs::new(10, &[0; 10], &[], &chain_from(1, 8));
     assert_eq!(
         found(&[pair(0, 1, 6, 9, 3)], &small),
         [(ChangeLeakageKind::HiddenCoupling, None)]
     );
+}
+
+/// A pair whose two sides both exceed the budget is never named: absence is
+/// proved or it is not claimed, and two exhausted walks prove nothing.
+#[test]
+fn a_pair_whose_every_side_exceeds_the_budget_creates_no_finding() {
+    let side = PATH_PROBE_NODES + 2;
+    let files = side * 2;
+    let mut chains = chain_from(0, side);
+    chains.extend(chain_from(side, side));
+    let graphs = Graphs::new(files, &vec![0; files], &[], &chains);
+    // File 0 heads one over-budget chain and file `side` heads the other, so
+    // neither walk can exhaust the set it explores.
+    assert_eq!(found(&[pair(0, side, 6, 9, 3)], &graphs), []);
 }
 
 /// A repository of one package is decided by the file probes alone, and a path

@@ -193,12 +193,18 @@ impl<'a> ChangeGraph<'a> {
     /// connection graph, proved in two stages.
     ///
     /// The package connection matrix answers first and answers only
-    /// *separate*. Otherwise one budgeted walk settles it: the connection
-    /// graph holds both directions of travel, so a walk that exhausts
-    /// everything reaching the second file without meeting the first has
-    /// proved absence in both directions, and a second walk could only repeat
-    /// the answer under a different budget. A walk that spends its whole
-    /// budget answers undecided, which proves nothing and creates nothing.
+    /// *separate*. Otherwise a budgeted walk settles it. Either walk proves
+    /// the whole claim on its own, because the connection graph holds both
+    /// directions of travel: exhausting everything that reaches one file
+    /// without meeting the other proves no path joins them either way.
+    ///
+    /// The walks are not interchangeable in cost, though, because each
+    /// explores one file's own side of the graph. A walk that spends its
+    /// budget proves nothing about the pair — only that the side it started
+    /// from is large — so the other end is asked before the pair is dropped.
+    /// A pair is therefore decided whenever its *smaller* side fits the
+    /// budget, whichever end that is, and undecided only when both sides
+    /// exceed it.
     fn proves_separate(&self, pair: FileChangeCoupling, probe: &mut Option<PathProbe>) -> bool {
         if self
             .connections
@@ -206,9 +212,15 @@ impl<'a> ChangeGraph<'a> {
         {
             return true;
         }
+        let (left, right) = (pair.left().index(), pair.right().index());
         let probe = probe.get_or_insert_with(|| self.connections.probe());
-        probe.reaches(pair.left().index(), pair.right().index(), PATH_PROBE_NODES)
-            == ReachAnswer::Separate
+        match probe.reaches(left, right, PATH_PROBE_NODES) {
+            ReachAnswer::Separate => true,
+            ReachAnswer::Reaches => false,
+            ReachAnswer::Undecided => {
+                probe.reaches(right, left, PATH_PROBE_NODES) == ReachAnswer::Separate
+            }
+        }
     }
 }
 

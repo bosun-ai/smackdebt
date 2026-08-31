@@ -250,36 +250,40 @@ direction over the connection graph. Absence SHALL be proved in two stages:
    propagation closures already use, and SHALL be distinct from the
    propagation-reach matrix, which answers a different question over a narrower
    graph.
-2. Otherwise, analysis SHALL run one budgeted breadth-first walk over the
-   connection graph, visiting at most `PATH_PROBE_NODES = 4_096` nodes. The
-   walk SHALL answer *reaches*, *separate*, or *undecided*, and SHALL answer
+2. Otherwise, analysis SHALL walk the connection graph breadth first from one
+   end of the pair, visiting at most `PATH_PROBE_NODES = 4_096` nodes, and
+   SHALL walk once more from the other end when that walk answers *undecided*.
+   A walk SHALL answer *reaches*, *separate*, or *undecided*, and SHALL answer
    undecided exactly when it exhausted its budget without settling the
-   question.
+   question. A *separate* answer from either walk SHALL create the finding.
 
-   One walk answers for both directions, because the connection graph holds
-   both directions of travel: a walk that exhausts everything reaching the
-   second file without meeting the first has proved that no path joins the two
-   in either direction. A second walk from the other end would explore the
-   other file's side of the same symmetric relation and could only repeat that
-   answer — except where one side exceeds the node budget and the other does
-   not, and there it would withhold a finding the first walk had already
-   proved. Requiring a walk per direction would therefore buy no proof and
-   would make the answer depend on which side of a pair happens to be large.
+   Either walk proves the whole claim on its own, because the connection graph
+   holds both directions of travel: exhausting everything that reaches one file
+   without meeting the other proves that no path joins the two in either
+   direction. The walks are not interchangeable in cost, though, because each
+   explores one file's own side of the graph, and an undecided answer says only
+   that the side it started from is large. Asking the other end therefore
+   decides every pair whose *smaller* side fits the budget, whichever end that
+   is, so the answer never depends on which file of a pair the walk happened to
+   start from. Requiring both walks to answer separate would do the opposite:
+   it would decide only pairs whose *larger* side fits the budget, and would
+   withhold findings the first walk had already proved.
 
-An undecided probe SHALL produce no finding. A `hidden_coupling` finding claims
-that no dependency explains the co-change, and a claim that strong SHALL NOT
-rest on a search that ran out of budget. The two stages SHALL agree: stage one
-SHALL only ever conclude separate, never reaches.
+An undecided pair SHALL produce no finding: a pair is undecided only when both
+of its sides exceed the budget. A `hidden_coupling` finding claims that no
+dependency explains the co-change, and a claim that strong SHALL NOT rest on a
+search that ran out of budget. The two stages SHALL agree: stage one SHALL only
+ever conclude separate, never reaches.
 
 `PATH_PROBE_NODES` is a proposed value under review and SHALL be implemented as
 a named integer constant.
 
 #### Scenario: Two packages cannot reach each other
 - **WHEN** a qualifying pair lies in two packages with no entry in either direction of the package connection matrix
-- **THEN** one `hidden_coupling` finding is created without running a file-level probe
+- **THEN** one `hidden_coupling` finding is created without running a file-level walk
 
 #### Scenario: A path exists inside one package
-- **WHEN** a qualifying pair lies in one package and a probe finds a path from one file to the other
+- **WHEN** a qualifying pair lies in one package and a walk finds a path from one file to the other
 - **THEN** no finding is created
 
 #### Scenario: An owning pair changes together
@@ -290,13 +294,17 @@ a named integer constant.
 - **WHEN** the only relation between two packages is a module-ownership relation and a qualifying pair spans them
 - **THEN** the package connection matrix reports the two packages connected, the pair falls through to the file-level walk, and no finding is created on the strength of the package stage
 
-#### Scenario: A walk exhausts its budget
-- **WHEN** a walk visits its whole node budget without finding a path or exhausting the reachable set
-- **THEN** the answer is undecided and no finding is created
+#### Scenario: One side of a pair exceeds the budget
+- **WHEN** the walk from one end visits its whole node budget without finding a path or exhausting the reachable set, and the walk from the other end exhausts that end's reachable set
+- **THEN** the pair is separate and one `hidden_coupling` finding is created
+
+#### Scenario: Both sides of a pair exceed the budget
+- **WHEN** the walks from both ends visit their whole node budget without settling the question
+- **THEN** the pair is undecided and no finding is created
 
 #### Scenario: One package holds the whole repository
 - **WHEN** a repository declares a single package so the package stage can never separate a pair
-- **THEN** every qualifying pair is decided by the file-level walk alone and an undecided walk still creates no finding
+- **THEN** every qualifying pair is decided by the file-level walks alone and a pair both walks leave undecided still creates no finding
 
 ### Requirement: Change amplification is a median of files per commit
 Analysis SHALL accumulate, during the one history stream, a sparse per-directory

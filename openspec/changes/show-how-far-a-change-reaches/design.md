@@ -166,14 +166,21 @@ its condensation has no edge between components and the matrix is one component
 label per package rather than a bit set per package: two packages reach each
 other exactly when their labels agree.
 
-Stage two is one budgeted breadth-first walk over the connection graph, bounded
-at `PATH_PROBE_NODES`; a walk that exhausts its budget answers *undecided*, and
-an undecided walk produces no finding. One walk answers for both directions
-because the graph holds both directions of travel, so exhausting everything that
-reaches one end without meeting the other proves absence both ways. A walk per
-direction was specified first and would buy no proof: the second walk explores
-the other end's side of the same relation, and its only effect is to withhold a
-finding whenever that side alone exceeds the budget.
+Stage two is a budgeted breadth-first walk over the connection graph, bounded at
+`PATH_PROBE_NODES`, from one end of the pair and — only when that walk exhausts
+its budget — from the other. Either walk proves the whole claim, because the
+graph holds both directions of travel: exhausting everything that reaches one
+end without meeting the other proves absence both ways. What the two walks do
+not share is cost, because each explores one file's own side of the graph, so an
+undecided answer says only that the side it started from is large. Asking the
+other end decides every pair whose smaller side fits the budget and makes the
+answer independent of which file the walk started from.
+
+The rule was first written as one walk per direction with both required to
+answer separate, which is the same proof read the wrong way round: it decides
+only pairs whose *larger* side fits the budget and withholds findings the first
+walk has already proved. A pair is therefore undecided only when both of its
+sides exceed the budget, and the worst case is still two walks.
 
 The alternative — treat "no path found within budget" as "no path" — would make
 the strongest claim in the product on the weakest evidence, and it would make
