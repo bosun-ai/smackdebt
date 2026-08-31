@@ -287,6 +287,39 @@ fn a_hidden_pair_is_claimed_by_its_lower_indexed_file_or_by_its_own_card() {
     higher.assert_every_finding_is_claimed_once();
 }
 
+/// One file can be both the interface its importers follow and the
+/// lower-indexed member of a pair no dependency explains.
+///
+/// The leakage patterns run in declaration order, so `leaky_interface` cards
+/// the file first and — being file-anchored — claims every leakage finding
+/// that belongs to it, hidden findings included. The pair therefore reaches no
+/// second card, which is the same rule that keeps a `god_file` from being
+/// named twice.
+#[test]
+fn a_file_that_leaks_and_hides_reaches_one_card_that_claims_both() {
+    let mut tables = leaking_pair(0);
+    tables.file("c/third.rs", 0);
+    tables.leaky(0, 1);
+    tables.hidden(0, 2);
+    let cards = tables.cluster();
+    assert_eq!(cards.len(), 1, "one file, one file-anchored card");
+    let card = &cards[0];
+    assert_eq!(card.pattern(), ProblemPattern::LeakyInterface);
+    assert_eq!(card.anchor(), &ProblemAnchor::File(FileId::from_index(0)));
+    assert_eq!(card.claimed_findings(), [leakage(0), leakage(1)]);
+    // The follower count counts the importers that follow the file, so the
+    // hidden pair it also claims never inflates it.
+    assert_eq!(
+        card.evidence(),
+        [
+            ProblemEvidence::Followers(1),
+            ProblemEvidence::ChangeLeakage(ChangeLeakageFindingId::from_index(0)),
+            ProblemEvidence::ChangeLeakage(ChangeLeakageFindingId::from_index(1)),
+        ]
+    );
+    tables.assert_every_finding_is_claimed_once();
+}
+
 #[test]
 fn a_leakage_finding_alone_never_brings_a_measured_card_into_existence() {
     let mut tables = leaking_pair(0);

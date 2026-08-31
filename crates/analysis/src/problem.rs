@@ -1216,6 +1216,14 @@ mod tests {
         coupling: Vec<EvolutionaryFinding>,
         concentration: Vec<KnowledgeConcentrationFinding>,
         reach: Vec<FileReach>,
+        /// The retained pairs and the leakage findings decided from them.
+        ///
+        /// Both are wired through so this harness audits every claimable
+        /// table, the way the harness in `tests/problem_leakage.rs` does; the
+        /// behaviour of the two leakage patterns is exercised there, where the
+        /// cases have room to state themselves.
+        pairs: Vec<FileChangeCoupling>,
+        leakage: Vec<ChangeLeakageFinding>,
     }
 
     impl Tables {
@@ -1344,6 +1352,7 @@ mod tests {
 
         fn input(&self) -> ProblemInput<'_> {
             ProblemInput::new(&self.files, &self.findings)
+                .with_change_leakage(&self.leakage, &self.pairs)
                 .with_packages(&self.packages)
                 .with_size_findings(&self.sizes)
                 .with_architecture(&self.architecture, &self.edges)
@@ -1384,6 +1393,11 @@ mod tests {
             expected.extend((0..self.stable.len()).map(|id| {
                 ClaimedFinding::StableDependency(StableDependencyFindingId::from_index(id))
             }));
+            expected.extend(
+                (0..self.leakage.len()).map(|id| {
+                    ClaimedFinding::ChangeLeakage(ChangeLeakageFindingId::from_index(id))
+                }),
+            );
             let claimed = distinct_claims(&cards);
             assert_eq!(
                 claimed.difference(&expected).collect::<Vec<_>>(),
