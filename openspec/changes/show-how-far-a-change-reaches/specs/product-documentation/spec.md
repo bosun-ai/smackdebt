@@ -18,10 +18,15 @@ together` as the words for `shotgun_pair`, and SHALL NOT keep the earlier
 meant. It SHALL explain that `measured` is
 the fallback so nothing rated disappears, that every card is either a `default`
 card or a `detail` card shown only under `--all`, at its own anchor, and in
-JSON — a widely imported file with no debt of its own, a file whose whole debt
-is advisory or non-primary, and a file whose only evidence is its size are all
-`detail` cards — and that cards are ranked against each other so the first card
-is the problem to look at first.
+JSON — a widely imported file with no debt of its own and no leakage finding
+naming it, a file whose whole debt is advisory or non-primary, and a file whose
+only evidence is its size are all `detail` cards — and that cards are ranked
+against each other so the first card is the problem to look at first.
+
+It SHALL state the qualification plainly rather than leave the example
+contradicting the rule: the same widely imported file becomes a `default` card
+as soon as a change-leakage finding names it, because a file whose importers
+follow its changes is a problem even when the file itself measures clean.
 
 It SHALL explain that a file's leakage numbers appear as extra lines on the card
 that already names that file, and that a card of their own exists only when
@@ -39,6 +44,10 @@ frames how much of the whole problem the selected scope holds.
 #### Scenario: A user misses their per-finding rows
 - **WHEN** a user who knew the old finding list reads the new documentation
 - **THEN** it explains that one card now claims that file's findings and that JSON retains each of them
+
+#### Scenario: A user reads about a clean file that carries a card
+- **WHEN** the user reads the `detail` card examples after seeing a widely imported file in their default view
+- **THEN** the README explains that the file is a `detail` card only while nothing names it, and that a leakage finding makes the same card `default`
 
 #### Scenario: A user reads about two things that change together
 - **WHEN** the user compares the `shotgun_pair` and `hidden_coupling` entries

@@ -41,7 +41,15 @@ constant so review can move it in one place:
   of pairs, and SHALL create no new pair key beyond the pair storage limit.
   Both events SHALL be counted and disclosed rather than silently dropped.
 - A per-package file closure SHALL be skipped above the closure node limit, so
-  the transient bit set stays within a few megabytes.
+  the transient bit set stays within a few megabytes, and only one such bit set
+  SHALL be live at a time. Because every package is closed over eagerly rather
+  than when a scope is rendered, the bound that matters is the aggregate: the
+  total closure work of one report SHALL be the sum over packages of the work
+  each package's own file count implies, each package capped by the closure node
+  limit, and no package's closure SHALL read a file outside that package. The
+  aggregate SHALL be measured by the wide-evolution workload rather than
+  argued, and peak memory SHALL show one closure's bit set rather than one per
+  package.
 - Exact per-file reach SHALL be computed for at most the candidate limit of
   files, one reverse breadth-first search each.
 - Each path probe SHALL visit at most the probe node budget and SHALL answer
@@ -72,6 +80,10 @@ one, and no finding below the detector floors.
 #### Scenario: A wide repository is measured
 - **WHEN** the `evolution-wide` workload runs through the complete correctness-checked flow
 - **THEN** its wall time, peak memory, allocations, reads, and Git process counts are recorded against its own workload identity
+
+#### Scenario: Fifty packages are closed over
+- **WHEN** the `evolution-wide` workload closes over every one of its packages
+- **THEN** the aggregate closure work and peak memory stay inside the recorded budgets, and rendering any package scope from the finished report adds no closure work at all
 
 #### Scenario: A long dependency chain is closed over
 - **WHEN** a two-hundred-thousand node chain is reduced and closed

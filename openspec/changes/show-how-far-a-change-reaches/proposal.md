@@ -30,8 +30,9 @@ and integer arithmetic inside passes that already run.
   file whose importers change with it across a directory boundary: the
   dependency exists and the change still propagates through it, so the interface
   is not doing its job. *Hidden coupling* is a pair of files that change together
-  with **provably** no dependency path between them in either direction — the
-  proof is a two-stage absence check, and an inconclusive probe produces no
+  with **provably** no dependency of any kind between them in either direction,
+  imports and module wiring alike — the proof is a two-stage absence check over
+  one deliberately wide connection graph, and an inconclusive probe produces no
   finding, because absence is proved rather than inferred. Both live in one
   finding table with two kinds, rated Watch, following the `ArchitectureFinding`
   precedent.

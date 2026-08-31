@@ -74,13 +74,20 @@ Three scoped forms SHALL exist, and no other:
   repository holds at least 3 packages and that largest count is at least 2,
   because a repository with one package, or with no cross-package dependency at
   all, has nothing to say.
-- **File reach inside a selected package.** For a package scope, analysis SHALL
-  close over that package's own files and take the largest number of files that
-  transitively depend on one file of the package, counting itself. It SHALL be
-  material only when the package holds at least 20 files. A package holding more
-  than `CLOSURE_NODE_LIMIT = 4_096` files SHALL be skipped and the skip SHALL be
+- **File reach inside a package.** Analysis SHALL close over every package's own
+  files while the architecture graphs are built, producing one value per
+  package: the largest number of files that transitively depend on one file of
+  that package, counting itself. The value SHALL be material only when the
+  package holds at least 20 files. A package holding more than
+  `CLOSURE_NODE_LIMIT = 4_096` files SHALL be skipped and the skip SHALL be
   disclosed rather than silently absent, because the transient bit set is what
   bounds this computation.
+
+  Every package's value SHALL be computed eagerly, never when a scope is
+  rendered. The accepted rule that rendering a retained scope performs no
+  project work admits no lazy closure, and a value computed on demand would make
+  the same report answer differently depending on which scope a consumer asked
+  for first.
 - **Exact reach for a bounded candidate set.** For card evidence only, analysis
   SHALL compute the exact repository-wide reach of each file in a candidate set
   formed from the members of file dependency cycles and the files whose degree
@@ -107,8 +114,12 @@ constants so review can move them in one place.
 - **THEN** the largest reach is 1 and no package reach fact exists
 
 #### Scenario: A package is too large to close over
-- **WHEN** a selected package holds more files than the closure node limit
+- **WHEN** a package holds more files than the closure node limit
 - **THEN** its file reach is absent and the skip is disclosed
+
+#### Scenario: Two package scopes are rendered from one report
+- **WHEN** two package scopes are rendered from the same completed report
+- **THEN** each states the value computed when the report was built and rendering performs no closure, no graph traversal, and no algorithm pass
 
 #### Scenario: A hub carries an exact reach
 - **WHEN** a file is inside the candidate set and 41 files transitively depend on it

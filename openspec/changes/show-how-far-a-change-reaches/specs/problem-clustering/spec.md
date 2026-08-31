@@ -87,6 +87,56 @@ reason the index-integrity audit fails when one reaches two.
 - **WHEN** a completed report is clustered
 - **THEN** the number of distinct claimed findings equals the number of retained findings across every finding table, including size findings and change-leakage findings
 
+### Requirement: Table patterns keep their existing finding facts
+`shotgun_pair`, `bus_risk`, and `unstable_dependency` SHALL each produce one card
+per existing finding of their family — evolutionary coupling, knowledge
+concentration, and stable-dependency violation respectively — carrying that
+finding's rating and its existing operands as evidence, with no change to the
+facts those findings already state.
+
+`measured` SHALL produce one card per file that still holds at least one
+unclaimed source finding or at least one unclaimed size finding, and SHALL
+claim all of them, together with any change-leakage finding that belongs to that
+file. Its trigger SHALL be those two families only: an unclaimed change-leakage
+finding SHALL NOT bring a `measured` card into existence, because the two
+leakage patterns behind `measured` in claiming order exist to name exactly that
+case, and a fallback that fired first would take the name away from them. Its
+head SHALL be the identity of that file's top finding
+under the accepted finding rank, so a `measured` card states exactly what a
+displayed finding row states today, and SHALL be that file's first size finding
+when it claims no source finding at all. Its rating SHALL be the highest rating
+among the findings it claims.
+
+A file whose only unclaimed evidence is a size finding SHALL therefore reach a
+`measured` card carrying that size finding, so the size row today's `--all` view
+prints keeps a home. A file whose only unclaimed findings are advisory or
+non-primary SHALL likewise reach a `measured` card, so recovered and non-primary
+debt keeps the ranking it has today inside `--all` instead of disappearing.
+
+#### Scenario: A coupling finding is clustered
+- **WHEN** an unexplained coupling finding exists for a package pair
+- **THEN** one `shotgun_pair` card anchored on that pair carries the finding's shared commits, union commits, similarity operands, and dependency state unchanged
+
+#### Scenario: A concentration finding is clustered
+- **WHEN** a knowledge-concentration finding exists
+- **THEN** one `bus_risk` card carries its contributor count, numerator, and denominator and no contributor identity
+
+#### Scenario: A file has one ordinary Watch finding
+- **WHEN** no named pattern claims the file
+- **THEN** one `measured` card names that file's top ranked finding and claims its remaining findings
+
+#### Scenario: A file's only unclaimed evidence is its size
+- **WHEN** a file carries a size finding and no unclaimed source finding
+- **THEN** one `measured` card claims that size finding, heads on it, and takes its rating
+
+#### Scenario: A file's only unclaimed evidence is a leakage finding
+- **WHEN** a file holds no unclaimed source finding and no unclaimed size finding, and one `leaky_interface` finding names it
+- **THEN** no `measured` card exists for that file and the finding reaches a `leaky_interface` card instead
+
+#### Scenario: A measured card also holds a leakage finding
+- **WHEN** a file reaches a `measured` card through an unclaimed source finding and a `hidden_coupling` finding belongs to it
+- **THEN** that card claims both and states the leakage finding as evidence
+
 ### Requirement: Card evidence is ordered head first
 A file-anchored card SHALL state its evidence in exactly this order: the top
 claimed source finding when it claims one, then the integer facts that made its
@@ -216,11 +266,12 @@ letting either endpoint claim the finding would make the pair's evidence land
 under whichever file happened to carry debt, so the same report would state the
 same pair in two different places depending on unrelated facts.
 
-`measured` SHALL NOT fire on a change-leakage finding: a file whose only
-unclaimed evidence is a leakage finding SHALL reach that finding's own pattern
-rather than the fallback, which is what keeps the pattern names meaningful. A
-`measured` card that exists for other reasons SHALL still claim its file's
-leakage findings.
+A file whose only unclaimed evidence is a leakage finding therefore reaches that
+finding's own pattern rather than the fallback, because `measured` is triggered
+by unclaimed source and size findings alone under the rule that owns it, which
+this specification does not restate. A `measured` card that exists for other
+reasons still claims its file's leakage findings, the way every file-anchored
+card does.
 
 Every card of both patterns SHALL take the Watch rating of the findings it
 claims, and both patterns SHALL create no measurement, no rating, and no finding

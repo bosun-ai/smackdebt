@@ -94,6 +94,13 @@ amplification observation. Both counters SHALL be added through their own
 builder, mirroring the accepted window builder, so the existing constructor is
 unchanged.
 
+Both counters SHALL be machine-report facts only. No terminal view SHALL state
+them at any scope or detail level, and no warning sentence SHALL be introduced
+for them: they are processing totals of the kind human output already omits, and
+a reader who wants to audit an approximation reads the machine report. This
+SHALL NOT weaken the disclosure obligation — the counters SHALL always be
+present and exact in the machine report, whether or not either is zero.
+
 Contributor concentration SHALL expose package ID, SourceRole, trust,
 contributor count, numerator, and denominator without identity. The
 concentration ratio SHALL be derived from the numerator and denominator for
@@ -120,6 +127,10 @@ so context contributors cannot alter eligible top share.
 #### Scenario: A bulk commit is excluded from pairs
 - **WHEN** one commit exceeds the bulk-commit guard
 - **THEN** coverage states one bulk commit while that commit's churn, touches, package coupling, concentration, and amplification observation are unchanged
+
+#### Scenario: The change-graph counters are looked for in the terminal
+- **WHEN** a report whose history contains bulk commits and declined pairs is rendered at every scope and detail level, `--all` included
+- **THEN** no line states either counter and both are present and exact in the machine report
 
 #### Scenario: Concentration is serialized
 - **WHEN** a concentration row is emitted in the machine report

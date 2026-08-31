@@ -10,7 +10,7 @@
 
 - [ ] 2.1 Retain the file pairs and the file strongly connected components the architecture build already computes, and carry them out of the build so the report can hold them.
 - [ ] 2.2 Compute the package closure matrix and each package's reach-in count, and expose `reach_in` on the package-graph measurement.
-- [ ] 2.3 Compute the per-package file closure on demand, skipping above the closure node limit and disclosing the skip as a `propagation_skipped` diagnostic.
+- [ ] 2.3 Compute the file closure for every package eagerly inside `build_architecture`, one row per package below the closure node limit with one transient bit set live at a time, skipping above the limit and disclosing the skip as a `propagation_skipped` diagnostic; add a work-counter test proving that rendering a package scope from the finished report performs no closure.
 - [ ] 2.4 Compute exact reach for the bounded candidate set — cycle members and hub-degree files, ordered by fan-in descending then path, cut at the candidate limit — and store it as the candidate reach table.
 - [ ] 2.5 Add the `PropagationReach` and `CoreSize` value objects beside the verdict share with smart constructors that return nothing below their materiality rules, chain them into the scope verdict, and prove with a pure test that neither moves the tier, its counts, or the worst offender.
 - [ ] 2.6 Render the two sentences verbatim in the verdict block after the share line, and serialize `verdict.reach`, `verdict.core_size`, the `package_closures` and `file_reach` tables, and `reach_in`, extending the checked schema in the same commit.
@@ -41,18 +41,19 @@
 
 - [ ] 5.1 Add the change leakage module: the finding type with its two kinds, the pure `change_leakage(pairs, graph)` join at report finish, and the finding order of kind, distance descending, shared commits descending, then the two file identities.
 - [ ] 5.2 Implement the leaky-interface rule over edges that enter the file dependency cycle graph, importer side only, with the distance floor, the support floor, and the distance-scaled similarity bar, creating exactly one finding per interface-and-follower pair and none for a mutual dependency.
-- [ ] 5.3 Implement the hidden-coupling rule with the two-stage absence proof: the free package-closure stage, then two budgeted probes, with an undecided answer producing no finding.
-- [ ] 5.4 Append `LeakyInterface` and `HiddenCoupling` after `Measured` in the pattern enum, and prove that every pre-existing card keeps its pattern, claims, and rank position over the same report.
-- [ ] 5.5 Implement hybrid claiming: a leakage finding belongs to its interface file or to the lower-indexed file of its pair, a file-anchored card claims the leakage findings of its file, `measured` never fires on a leakage finding alone, and the two tail patterns card only what is left.
-- [ ] 5.6 Extend the audits: the claimable table set, the pattern list, the evidence kinds, the claimed-once audit, and the coverage audit over the change-leakage table.
-- [ ] 5.7 Add the visibility arm that makes a card claiming a change-leakage finding `default`, with a test proving a healthy hub that leaks reaches the default view.
-- [ ] 5.8 Add the exact evidence wordings and the new pattern names, rename the `shotgun_pair` human name to `packages change together`, and write the file-pair anchor as `<left> ↔ <right>`.
-- [ ] 5.9 Serialize the `change_leakage_findings` table, the new claim and evidence kinds, and the two pattern ids, extending the checked schema in the same commit.
-- [ ] 5.10 Delete the README vocabulary ban on `change together without a dependency`, require the phrase instead, and record the reason where the assertion was written.
-- [ ] 5.11 Update the edge-row invariant and its documentation for the co-change carve-out, and prove a card carrying two file paths still carries no reference count, relation kind, resolution outcome, or ownership wording.
-- [ ] 5.12 Add the `change_leakage_repository()` fixture — a leaky interface three directories away, a hidden pair separated by the package stage, a same-directory pair, and a test importer — with exact acceptance for the two findings and the two absences.
-- [ ] 5.13 Prove the strict launch: at most one new default card over the fixture, the one-screen budget holding at every scope, and a below-floor pair present in JSON and absent from the default view, the file scope, and `--all`.
-- [ ] 5.14 Regenerate every affected terminal and JSON snapshot case by case, never as a batch, keeping the fifty-column display-width audit passing.
+- [ ] 5.3 Build the connection graph — every `uses` and `module_ownership` relation between primary trusted files — and the package connection matrix over it, kept distinct from the verdict-graph propagation matrix, with a pure test proving an owning pair is connected in one and absent from the other.
+- [ ] 5.4 Implement the hidden-coupling rule with the two-stage absence proof over that one graph: the package connection stage, then two budgeted probes, with an undecided answer producing no finding.
+- [ ] 5.5 Append `LeakyInterface` and `HiddenCoupling` after `Measured` in the pattern enum, and prove that every pre-existing card keeps its pattern, claims, and rank position over the same report.
+- [ ] 5.6 Implement hybrid claiming: a leakage finding belongs to its interface file or to the lower-indexed file of its pair, a file-anchored card claims the leakage findings of its file, `measured` fires only on unclaimed source and size findings so a leakage finding alone never triggers it, and the two tail patterns card only what is left.
+- [ ] 5.7 Extend the audits: the claimable table set, the pattern list, the evidence kinds, the claimed-once audit, and the coverage audit over the change-leakage table.
+- [ ] 5.8 Add the visibility arm that makes a card claiming a change-leakage finding `default`, with a test proving a healthy hub that leaks reaches the default view.
+- [ ] 5.9 Add the exact evidence wordings and the new pattern names, rename the `shotgun_pair` human name to `packages change together`, and write the file-pair anchor as `<left> ↔ <right>`.
+- [ ] 5.10 Serialize the `change_leakage_findings` table, the new claim and evidence kinds — the change-leakage index, the anchor reach, and the follower count — and the two pattern ids, extending the checked schema in the same commit.
+- [ ] 5.11 Delete the README vocabulary ban on `change together without a dependency`, require the phrase instead, and record the reason where the assertion was written.
+- [ ] 5.12 Update the edge-row invariant and its documentation for the co-change carve-out, and prove a card carrying two file paths still carries no reference count, relation kind, resolution outcome, or ownership wording.
+- [ ] 5.13 Add the `change_leakage_repository()` fixture — a leaky interface three directories away, a hidden pair separated by the package stage, a same-directory pair, a test importer, and an owning pair that the connection graph joins — with exact acceptance for the two findings and the three absences.
+- [ ] 5.14 Prove the strict launch: at most one new default card over the fixture, the one-screen budget holding at every scope, and a below-floor pair present in JSON and absent from the default view, the file scope, and `--all`.
+- [ ] 5.15 Regenerate every affected terminal and JSON snapshot case by case, never as a batch, keeping the fifty-column display-width audit passing.
 
 ## 6. Calibration, documentation, and close-out
 

@@ -141,11 +141,30 @@ distant pair that ever changed together".
 
 A `hidden_coupling` finding claims that no dependency path explains the
 co-change. That is a strong claim, and the only honest way to make it is to
-prove it. Stage one is free: if the two files live in different packages and the
-package closure matrix shows neither package reaches the other, no file-level
-path can exist. Stage two is two budgeted reverse breadth-first searches, each
-bounded at `PATH_PROBE_NODES`; a probe that exhausts its budget answers
-*undecided*, and an undecided probe produces no finding.
+prove it — against one graph, for both stages.
+
+That graph is the **connection graph**: every `uses` and every
+`module_ownership` relation between primary trusted files. It is wider than the
+file dependency cycle graph the leaky-interface rule reads, deliberately. The
+cycle graph drops the wiring between a Rust parent and the child it declares,
+which is right when asking whether a production import propagates change and
+catastrophic when asking whether any dependency exists at all: an owning pair
+that imports each other would be reported as changing together *without a
+dependency*, which is the one thing the card must never say. The two rules read
+two graphs, and neither admission rule may be substituted for the other.
+
+Stage one is the package projection of that same graph: if the two files live in
+different packages and the package connection matrix shows neither package
+reaches the other, no file-level connection can exist. Building the matrix over
+the connection graph rather than over the verdict-graph package edges is what
+makes a stage-one *separate* answer decisive — a verdict-graph matrix is a
+subset, so its "separate" could be overturned by an ownership edge the wider
+graph admits, and every stage-one hit would have to fall through to the probes
+anyway. The cost is one extra closure over the package graph, which has tens of
+nodes where the file graph has thousands. Stage two is two budgeted reverse
+breadth-first searches over the connection graph, each bounded at
+`PATH_PROBE_NODES`; a probe that exhausts its budget answers *undecided*, and an
+undecided probe produces no finding.
 
 The alternative — treat "no path found within budget" as "no path" — would make
 the strongest claim in the product on the weakest evidence, and it would make
@@ -192,15 +211,22 @@ Exact per-file reach for every file is a closure per node. Instead:
 
 - The **package graph** is small enough to close over completely, so the root
   sentence is exact.
-- A **selected package's** files are closed over on demand, bounded by
-  `CLOSURE_NODE_LIMIT`, so the package sentence is exact for the scope the
-  reader asked about.
+- **Every package's** files are closed over eagerly inside the architecture
+  build, one package at a time and each bounded by `CLOSURE_NODE_LIMIT`, so the
+  report holds one value per package before any scope is rendered. Lazy was
+  considered and rejected: the accepted rule that rendering a retained scope
+  performs no project work leaves no room for a closure behind a getter, and a
+  cached-on-first-read value would make two consumers of one report do different
+  amounts of work. The cost is bounded by construction — each package closes
+  over its own files only, so the aggregate is the sum of per-package work, and
+  one transient bit set is live at a time.
 - **Card evidence** needs exact reach only for the files a card already names,
   so a bounded candidate set — cycle members and hub-degree files, cut at
   `REACH_CANDIDATE_LIMIT` — gets one reverse search each.
 
 This is the same shape as the accepted hotspot rule: compute the expensive fact
-only where a reader will see it.
+only where a reader will see it — but compute it while the report is built, not
+while it is read.
 
 ### Amplification lives at directory scope and up
 

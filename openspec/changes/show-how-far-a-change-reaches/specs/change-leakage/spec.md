@@ -171,7 +171,12 @@ when every one of these holds:
   observable signature of an interface that leaks its internals. The cycle
   graph's admission rule is reused because it already excludes module-ownership
   wiring, so a Rust parent and the child it declares — which change together by
-  construction — can never be named.
+  construction — can never be named. This rule and the hidden-coupling rule
+  therefore read deliberately different graphs: this one wants a production
+  import whose changes follow through it, so ownership wiring is excluded, while
+  hidden coupling claims no dependency of any kind exists and therefore reads
+  the wider connection graph defined below. Neither admission rule SHALL be
+  substituted for the other.
 - `distance(a, b) ≥ LEAKAGE_MIN_DISTANCE = 2`.
 - `shared_commits ≥ LEAKAGE_SHARED_COMMITS = 5`.
 - `shared × 1000 ≥ union × required_permille(distance)`, where
@@ -215,17 +220,38 @@ review can move them in one place.
 - **THEN** the ownership pair is outside the cycle graph and no finding is created
 
 ### Requirement: Hidden coupling proves absence, never infers it
+Absence SHALL be proved against one graph, defined here and used by both stages.
+The **connection graph** SHALL admit every `uses` relation and every
+`module_ownership` relation whose two endpoint files are primary-role and
+trusted, in both directions of travel.
+
+The connection graph is deliberately wider than the file dependency cycle graph
+the leaky-interface rule reads, and the contrast is the point. That rule is
+about a production import whose changes still follow through it, so it excludes
+the wiring a Rust parent and the child it declares share. This rule claims that
+*no code dependency of any kind* explains the co-change, so a pair joined by a
+module declaration, or by the imports that accompany one, is connected and SHALL
+never be named. Reading the cycle graph here would mint a
+`change together without a dependency` card for exactly the pair that owns
+itself.
+
 Analysis SHALL create a `hidden_coupling` finding for a retained pair `(a, b)`
 when the distance, support, and distance-scaled similarity gates of the leaky
-interface rule all hold **and** no dependency path connects the two files in
-either direction. Absence SHALL be proved in two stages:
+interface rule all hold **and** no path connects the two files in either
+direction over the connection graph. Absence SHALL be proved in two stages:
 
-1. When the two files belong to different packages and the package closure
-   matrix shows that neither package reaches the other, the files are
-   separate and the finding is created. This stage costs nothing beyond the
-   closure the report already computes.
+1. When the two files belong to different packages and the package connection
+   matrix — the transitive closure of the package-level projection of the
+   connection graph — shows that neither package reaches the other, the files
+   are separate and the finding is created. The matrix SHALL be built over the
+   connection graph and SHALL NOT be a verdict-graph closure, so a stage-one
+   *separate* answer is decisive rather than a shortcut a wider graph could
+   overturn. It SHALL be derived once with the condensation machinery the
+   propagation closures already use, and SHALL be distinct from the
+   propagation-reach matrix, which answers a different question over a narrower
+   graph.
 2. Otherwise, analysis SHALL run one budgeted reverse breadth-first search per
-   direction over the file dependency graph, each visiting at most
+   direction over the connection graph, each visiting at most
    `PATH_PROBE_NODES = 4_096` nodes. A probe SHALL answer *reaches*, *separate*,
    or *undecided*, and SHALL answer undecided exactly when it exhausted its
    budget without settling the question.
@@ -239,12 +265,20 @@ SHALL only ever conclude separate, never reaches.
 a named integer constant.
 
 #### Scenario: Two packages cannot reach each other
-- **WHEN** a qualifying pair lies in two packages with no closure entry in either direction
+- **WHEN** a qualifying pair lies in two packages with no entry in either direction of the package connection matrix
 - **THEN** one `hidden_coupling` finding is created without running a file-level probe
 
 #### Scenario: A path exists inside one package
 - **WHEN** a qualifying pair lies in one package and a probe finds a path from one file to the other
 - **THEN** no finding is created
+
+#### Scenario: An owning pair changes together
+- **WHEN** a qualifying pair is joined only by a Rust module declaration and the imports that accompany it, which the file dependency cycle graph excludes
+- **THEN** the connection graph admits those relations, the pair is connected, and no `hidden_coupling` finding is created
+
+#### Scenario: Two packages are joined only by module ownership
+- **WHEN** the only relation between two packages is a module-ownership relation and a qualifying pair spans them
+- **THEN** the package connection matrix reports the two packages connected, the pair falls through to the probes, and no finding is created on the strength of the package stage
 
 #### Scenario: A probe exhausts its budget
 - **WHEN** a probe visits its whole node budget without finding a path or exhausting the reachable set
@@ -268,6 +302,12 @@ A scope's amplification SHALL be the nearest-rank median of its directory's
 histogram, which is an integer and needs no interpolation. The nearest-rank
 median SHALL be one shared implementation used by every caller that needs one.
 
+Every scope SHALL map to exactly one directory: the repository scope to the root
+directory, a package scope to that package's root directory, and a directory
+scope to itself. The mapping SHALL be stated rather than inferred, because a
+package whose root directory is the repository root reads the root histogram,
+which is the same fact stated at two scopes rather than two different numbers.
+
 Amplification SHALL exist for the repository, package, and directory scopes only,
 and SHALL be absent at a file scope, where a per-file histogram would state
 sample noise as a fact. It SHALL be material only when the scope's histogram
@@ -285,6 +325,10 @@ SHALL be implemented as named integer constants.
 #### Scenario: A median is computed
 - **WHEN** a directory's histogram holds the observations 2, 3, 3, 4, and 9
 - **THEN** its amplification is the nearest-rank median 3
+
+#### Scenario: A package rooted at the repository root is selected
+- **WHEN** a package whose root directory is the repository root is selected
+- **THEN** it reads the root directory's histogram and states the same median the repository scope states
 
 #### Scenario: The scope has too little history
 - **WHEN** a directory's histogram holds 9 observations

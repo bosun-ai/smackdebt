@@ -42,7 +42,9 @@ row's position is that card's identity. Each row SHALL expose:
 - `evidence`, an ordered array preserving the order analysis stored, where each
   item names its kind and carries either an index into the table its kind names
   or an integer value; the kind vocabulary SHALL include an index into
-  `change_leakage_findings` and the integer reach of a card's anchor;
+  `change_leakage_findings`, the integer reach of a card's anchor, and the
+  integer count of importers that follow a `leaky_interface` card's file, which
+  is a stored item like every other and not a rendering-time derivation;
 - `claimed`, the findings the card claimed, each naming the table it indexes and
   its position in that table, `change_leakage_findings` included.
 
@@ -66,6 +68,10 @@ change in the same slice as the serializer because it uses
 #### Scenario: A leakage card is serialized
 - **WHEN** a `leaky_interface` or `hidden_coupling` card is emitted
 - **THEN** its pattern is the frozen id, its claimed entries index `change_leakage_findings`, and every index resolves
+
+#### Scenario: A follower count is serialized
+- **WHEN** a `leaky_interface` card states how many importers follow its file
+- **THEN** that count is an evidence item of its own kind carrying an integer, so a machine consumer reads it without counting the card's claimed findings
 
 #### Scenario: An evidence index points outside its table
 - **WHEN** acceptance validates the result
@@ -94,10 +100,12 @@ members, every value an integer or a string:
   `file_change_coupling`, and, for a `leaky_interface`, the file index of the
   interface. A row SHALL NOT carry a reference count, a relation kind, a
   resolution outcome, or an edge identity.
-- `package_closures`, one row per package that carries a file-reach value,
+- `package_closures`, one row per package whose file-reach value is material,
   with the package index, that package's file count, and the largest number of
   files that transitively depend on one of its files. A package skipped by the
-  closure node limit SHALL have no row.
+  closure node limit, and a package below the file floor its materiality rule
+  names, SHALL each have no row; the table is therefore never a complete package
+  index and a consumer SHALL join it by package index rather than by position.
 - `file_reach`, one row per candidate file, with the file index and its exact
   repository-wide reach. A file outside the candidate set SHALL have no row, so
   a consumer can never read the table as a complete reach index.
