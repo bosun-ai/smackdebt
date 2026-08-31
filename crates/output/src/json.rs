@@ -1599,7 +1599,12 @@ impl Serialize for ProblemEvidenceView {
                 map.serialize_entry("kind", kind)?;
                 map.serialize_entry("value", &value)?;
             }
-            (None, None) => {}
+            // The two functions partition the whole vocabulary, so this arm is
+            // reached only by a kind added to one enum and to neither of them.
+            // Writing no member makes schema validation fail, which is the
+            // correct end state but a long way from the cause; the assert names
+            // the cause where it happened.
+            (None, None) => debug_assert!(false, "every evidence kind is linked or measured"),
         }
         map.end()
     }

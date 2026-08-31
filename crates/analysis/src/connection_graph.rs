@@ -69,9 +69,21 @@ impl ConnectionGraph {
     ///
     /// This is the first stage of the absence proof and answers only
     /// *separate*: a pair the matrix leaves connected falls through to the
-    /// file-level probe rather than being decided here. A file without a
-    /// package, and two files of one package, are never separated by it.
+    /// file-level probe rather than being decided here. Two files of one
+    /// package are never separated by it.
+    ///
+    /// Both operands are the package of a file that a retained pair names.
+    /// Every file record carries a package, and the change graph the pairs come
+    /// from admits exactly the files the file dependency graph does, so both
+    /// operands are present whenever this is reached. An absent one is a wiring
+    /// mistake rather than a shape to serve — it would answer *not separate*
+    /// and send a decidable pair to the walk — so it fails here rather than
+    /// costing a budget nobody could account for.
     pub fn separates(&self, left: Option<PackageId>, right: Option<PackageId>) -> bool {
+        debug_assert!(
+            left.is_some() && right.is_some(),
+            "every file a retained pair names carries a package"
+        );
         let (Some(left), Some(right)) = (left, right) else {
             return false;
         };
@@ -202,13 +214,11 @@ mod tests {
             Some(PackageId::from_index(0)),
             Some(PackageId::from_index(2))
         ));
-        // A package is never separate from itself, and a file without a
-        // package is never separated from anything.
+        // A package is never separate from itself.
         assert!(!graph.separates(
             Some(PackageId::from_index(2)),
             Some(PackageId::from_index(2))
         ));
-        assert!(!graph.separates(None, Some(PackageId::from_index(2))));
     }
 
     #[test]
