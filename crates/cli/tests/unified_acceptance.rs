@@ -821,6 +821,24 @@ fn a_sweeping_commit_is_counted_everywhere_but_in_the_file_pair_table() {
         [("left".to_owned(), "right".to_owned(), 6, 6)],
         "the guard never reaches package change coupling"
     );
+    let concentration: Vec<_> = report["contributor_concentration"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .map(|row| {
+            (
+                package_path(&report, row["package"].as_u64().unwrap()),
+                row["contributor_count"].as_u64().unwrap(),
+                row["numerator"].as_u64().unwrap(),
+                row["denominator"].as_u64().unwrap(),
+            )
+        })
+        .collect();
+    assert_eq!(
+        concentration,
+        [("left".to_owned(), 1, 6, 6), ("right".to_owned(), 1, 6, 6)],
+        "the sweeping commit is one of the six commits concentration counts"
+    );
 
     // No human view states either counter, at any scope or detail level.
     for arguments in [

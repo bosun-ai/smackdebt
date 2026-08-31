@@ -96,10 +96,18 @@ pub(super) fn analyze_codebase(request: &CodebaseRequest) -> Result<ProjectRepor
             )
         })
         .collect::<Vec<_>>();
+    // The one directory tree of this report, built over every candidate in
+    // file order and unfiltered, which is the identity it reads. It outlives
+    // history streaming on purpose: pair accumulation borrows it here, and the
+    // scope join reads the same tree when the report is composed below, so a
+    // second tree is never built and the two can never disagree.
+    let directories =
+        DirectoryTree::from_file_paths(candidate_paths.iter().map(|path| path.to_string_lossy()));
     let history = load_evolution(
         &selection.inventory_root,
         request.history_days,
         &history_files,
+        &directories,
     );
     let mut builder = CodebaseReportBuilder::new(
         selection.label,
@@ -529,7 +537,17 @@ pub(super) fn analyze_diff(request: &DiffRequest) -> Result<ProjectReport, Proje
             })
         })
         .collect::<Vec<_>>();
-    let history = load_evolution(repository.root(), request.history_days, &history_files);
+    // The diff flow assembles its history files from a filtered list, so its
+    // tree is placed by file identity rather than built from a candidate walk.
+    // A diff states no amplification, so nothing outside pair distances reads
+    // it and it stays local to this call.
+    let directories = DirectoryTree::from_file_paths(history_directory_paths(&history_files));
+    let history = load_evolution(
+        repository.root(),
+        request.history_days,
+        &history_files,
+        &directories,
+    );
     let history_diagnostic = history.diagnostic.clone();
     let current_explanation_pairs = current_architecture.explanation_pairs.clone();
     let before_explanation_pairs = before_architecture.explanation_pairs.clone();
@@ -1533,11 +1551,16 @@ enum HistoryAlias {
 ///
 /// [`DirectoryTree`] reads a file's identity from the position it holds in the
 /// sequence the tree is built from, so the paths are placed by index rather
-/// than pushed in iteration order: the diff flow assembles its history files
-/// from a filtered list, and pushing them in order would shift every directory
-/// lookup and every distance that follows from it with no wrong-looking value
-/// to notice. A position no history file claims holds the empty path, which the
-/// tree files under the repository root and no signal ever asks about.
+/// than pushed in iteration order. The diff flow builds its tree from this list
+/// and assembles it by filtering the report's files, so pushing them in order
+/// would shift every directory lookup and every distance that follows from it,
+/// with no wrong-looking value to notice. A position no history file claims
+/// holds the empty path, which the tree files under the repository root and no
+/// signal ever asks about.
+///
+/// The codebase flow does not use this: it builds its tree over the unfiltered
+/// candidate walk, so every file has a real directory there and the scope join
+/// can read the same tree.
 fn history_directory_paths(
     files: &[(PathBuf, FileId, PackageId, SourceRole, SourceTrust)],
 ) -> Vec<Cow<'_, str>> {
@@ -1553,10 +1576,16 @@ fn history_directory_paths(
     paths
 }
 
+/// Streams history once, fanning every commit out to the evolution signals.
+///
+/// The directory tree is borrowed rather than built here: the caller owns the
+/// one tree of its report, so the same tree that answers a pair's distance also
+/// answers a scope's directory when the report is composed.
 fn load_evolution(
     inventory_root: &Path,
     history_days: u32,
     files: &[(PathBuf, FileId, PackageId, SourceRole, SourceTrust)],
+    directories: &DirectoryTree,
 ) -> LoadedEvolution {
     let Ok(repository) = GitRepository::discover(inventory_root) else {
         return LoadedEvolution {
@@ -1585,7 +1614,6 @@ fn load_evolution(
         .iter()
         .map(|(path, file, _, _, _)| (*file, path.clone()))
         .collect();
-    let directories = DirectoryTree::from_file_paths(history_directory_paths(files));
     let mut contributors = HashMap::<ContributorIdentity, ContributorId>::new();
     let mut accumulator = EvolutionAccumulator::default();
     for (_, file, package, role, trust) in files {
@@ -1670,7 +1698,7 @@ fn load_evolution(
             );
         }
         if !changes.is_empty() {
-            accumulator.accept(HistoryCommitFact::new(contributor, changes), &directories);
+            accumulator.accept(HistoryCommitFact::new(contributor, changes), directories);
         }
         eligible_commits += u32::from(contains_eligible_source);
         Ok(())
@@ -3779,6 +3807,39 @@ mod tests {
         CodebaseTier, DiffTier, ProblemPattern, WorstOffenderReason, duplicate_claim,
     };
     use std::process::Command;
+
+    /// A history file list the diff flow could produce: file 1 was filtered
+    /// out, so the second entry's identity is 2, not 1.
+    #[test]
+    fn history_paths_are_placed_by_file_identity_rather_than_pushed_in_order() {
+        let files = [
+            (PathBuf::from("left/a.rs"), 0),
+            (PathBuf::from("right/b.rs"), 2),
+        ]
+        .map(|(path, index)| {
+            (
+                path,
+                FileId::from_index(index),
+                PackageId::from_index(0),
+                SourceRole::Primary,
+                SourceTrust::Trusted,
+            )
+        });
+        let paths = history_directory_paths(&files);
+        assert_eq!(paths, ["left/a.rs", "", "right/b.rs"]);
+
+        // Pushing in order would file `right/b.rs` under identity 1 and answer
+        // the root for identity 2, so both directories and every distance drawn
+        // from them would be wrong with no wrong-looking value to notice.
+        let tree = DirectoryTree::from_file_paths(paths);
+        let directory = |index| tree.directory_of(FileId::from_index(index));
+        assert_eq!(directory(1), Some(DirectoryTree::ROOT));
+        assert_ne!(directory(2), Some(DirectoryTree::ROOT));
+        assert_eq!(
+            tree.distance(directory(0).unwrap(), directory(2).unwrap()),
+            2
+        );
+    }
 
     fn git<const N: usize>(root: &Path, args: [&str; N]) {
         let output = Command::new("git")

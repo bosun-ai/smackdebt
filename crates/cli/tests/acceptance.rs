@@ -2633,6 +2633,33 @@ fn assert_index_integrity(report: &serde_json::Value) {
         );
     }
 
+    // A retained file pair names the lower file identity first, crosses a
+    // directory boundary, and compares two counts drawn from one population.
+    let mut previous_pair = None;
+    for pair in report["file_change_coupling"].as_array().unwrap() {
+        let left = pair["left"].as_u64().unwrap();
+        let right = pair["right"].as_u64().unwrap();
+        assert!((left as usize) < files.len(), "pair left index is invalid");
+        assert!(
+            (right as usize) < files.len(),
+            "pair right index is invalid"
+        );
+        assert!(left < right, "a pair names the lower file identity first");
+        let key = Some((left, right));
+        assert!(previous_pair < key, "pairs are ordered by file identity");
+        previous_pair = key;
+        let shared = pair["shared_commits"].as_u64().unwrap();
+        let union = pair["union_commits"].as_u64().unwrap();
+        assert!(shared >= 3, "a retained pair clears the support floor");
+        assert!(shared <= union, "shared commits are part of the union");
+        assert!(shared * 10 >= union, "a retained pair clears one tenth");
+        assert!(
+            pair["distance"].as_u64().unwrap() >= 1,
+            "a same-directory pair is never stored"
+        );
+        assert!(pair.get("similarity").is_none(), "no ratio is serialized");
+    }
+
     let mut concentration_packages = HashSet::new();
     for concentration in contributor_concentration {
         let package = concentration["package"].as_u64().unwrap() as usize;
