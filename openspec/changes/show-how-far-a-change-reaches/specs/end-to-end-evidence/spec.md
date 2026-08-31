@@ -149,10 +149,22 @@ human name of the frozen pattern id `hidden_coupling`, so the documentation must
 carry it and an audit that forbids it would forbid documenting a shipped
 feature.
 
-The audit's other banned phrases SHALL be unchanged, and the change that lifts
-this one SHALL record the reason where the assertion is written, so a later
-reader can tell a deliberate revival from an accidental regression.
+The terminal vocabulary audit's ban on ` touches` SHALL narrow to the row it was
+written for, ` touches ·`, by the same rule and with the same recorded reason.
+The banned row was the deleted churn line `<name> · <n> touches · +a -b`, and the
+bare word is now the verb of a shipped verdict sentence — `A typical change here
+touches 4 files.` — so the ban as written would forbid the product's own output.
+Narrowing it to the separator that made it a row keeps the deleted row banned.
+
+Apart from these two, the audits' banned phrases SHALL be unchanged, and a
+change that lifts or narrows one SHALL record the reason where the assertion is
+written, so a later reader can tell a deliberate revival from an accidental
+regression.
 
 #### Scenario: The README vocabulary is audited
 - **WHEN** the documentation audit runs after the leakage cards exist
 - **THEN** it requires `change together without a dependency`, keeps every other banned phrase banned, and the deleted assertion's reason is recorded beside the audit
+
+#### Scenario: A shipped sentence contains a banned word
+- **WHEN** the terminal vocabulary audit runs over output carrying `A typical change here touches 4 files.`
+- **THEN** the sentence passes, the deleted churn row's ` touches ·` shape stays banned, and the narrowing's reason is recorded beside the assertion

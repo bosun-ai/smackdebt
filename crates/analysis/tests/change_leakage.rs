@@ -8,7 +8,7 @@
 use smackdebt_analysis::{
     ChangeGraph, ChangeLeakageKind, ConnectionGraph, Coverage, FileChangeCoupling, FileId,
     FileRecord, HealthCounts, LEAKAGE_MIN_DISTANCE, LEAKAGE_SHARED_COMMITS, PATH_PROBE_NODES,
-    PackageId, Rating, ScopeId, change_leakage, required_permille,
+    PackageId, Rating, ScopeId, WIRING_FILENAMES, change_leakage, required_permille,
 };
 
 /// One retained pair, named the way the accumulator stores it.
@@ -120,25 +120,47 @@ fn a_mutual_import_produces_no_finding_of_either_kind() {
     assert_eq!(found(&[pair(0, 1, 7, 12, 3)], &graphs), []);
 }
 
-/// A conventional entry file is a module's wiring rather than its behavior, so
+/// A wiring file is a module's re-export surface rather than its behavior, so
 /// importers following it means an export was added, not that an abstraction
 /// leaked. The pair keeps its dependency, so it becomes no finding at all.
 #[test]
-fn an_entry_file_is_never_named_as_the_interface_whose_importers_follow_it() {
+fn a_wiring_file_is_never_named_as_the_interface_whose_importers_follow_it() {
     let behavior = Graphs::imports(2, &[(1, 0)]);
     assert_eq!(
         found(&[pair(0, 1, 7, 12, 3)], &behavior),
         [(ChangeLeakageKind::LeakyInterface, Some(0))],
         "a file with a name of its own still leaks"
     );
-    for name in [
-        "core/src/lib.rs",
-        "core/parts/mod.rs",
-        "web/src/index.ts",
-        "app/pkg/__init__.py",
-    ] {
-        let wiring = Graphs::imports(2, &[(1, 0)]).named(0, name);
+    assert_eq!(
+        WIRING_FILENAMES,
+        [
+            "__init__.py",
+            "index.cjs",
+            "index.js",
+            "index.jsx",
+            "index.mjs",
+            "index.ts",
+            "index.tsx",
+            "index.vue",
+            "lib.rs",
+            "mod.rs",
+        ],
+        "the excluded names are the re-export surfaces and nothing else"
+    );
+    for name in WIRING_FILENAMES {
+        let wiring = Graphs::imports(2, &[(1, 0)]).named(0, &format!("core/parts/{name}"));
         assert_eq!(found(&[pair(0, 1, 7, 12, 3)], &wiring), [], "{name}");
+    }
+    // A program entry point holds behavior like any other file, so its
+    // importers following it is a claim worth making. The wider entry-filename
+    // list the orphan rule uses would have silenced these.
+    for name in ["main.rs", "main.py", "build.rs", "setup.py", "__main__.py"] {
+        let program = Graphs::imports(2, &[(1, 0)]).named(0, &format!("core/parts/{name}"));
+        assert_eq!(
+            found(&[pair(0, 1, 7, 12, 3)], &program),
+            [(ChangeLeakageKind::LeakyInterface, Some(0))],
+            "{name}"
+        );
     }
     // The follower's name decides nothing, because the claim is about the
     // interface: it is the file accused of leaking.

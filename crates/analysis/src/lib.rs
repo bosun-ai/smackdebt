@@ -55,7 +55,7 @@ pub use change_leakage::{
     ChangeGraph, ChangeLeakageFinding, ChangeLeakageFindingId, ChangeLeakageKind,
     LEAKAGE_MIN_DISTANCE, LEAKAGE_SHARED_COMMITS, LEAKAGE_SIMILARITY_FLOOR_PERMILLE,
     LEAKAGE_SIMILARITY_PERMILLE, LEAKAGE_SIMILARITY_STEP_PERMILLE, PATH_PROBE_NODES,
-    change_leakage, required_permille,
+    WIRING_FILENAMES, change_leakage, is_wiring_filename, required_permille,
 };
 pub use churn::churn;
 pub use connection_graph::{ConnectionGraph, enters_connection_graph};

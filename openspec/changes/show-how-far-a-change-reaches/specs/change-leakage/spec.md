@@ -177,17 +177,20 @@ when every one of these holds:
   hidden coupling claims no dependency of any kind exists and therefore reads
   the wider connection graph defined below. Neither admission rule SHALL be
   substituted for the other.
-- `a` is not a conventional entry file. The accepted entry filenames — `lib.rs`,
-  `mod.rs`, `index.ts`, `__init__.py`, and the rest of the list the orphan rule
-  already publishes — name a module's wiring rather than its behavior: the file
-  is a list of declarations and re-exports, so it holds no abstraction that
-  could leak, and its importers change with it because adding an export and
-  using it is one edit. Calibration against two real repositories found this to
-  be the rule's entire real-world output — every leaky finding named a crate
-  root or a module root — so a rule that keeps them names a shape a reader
-  cannot act on. A pair excluded here keeps its dependency and therefore
-  produces no finding of either kind. The follower's own name decides nothing,
-  because the claim is about the interface.
+- `a` is not a wiring file. The wiring filenames — `lib.rs`, `mod.rs`, the
+  `index` names a JavaScript or TypeScript barrel uses, and `__init__.py` —
+  name a module's re-export surface rather than its behavior: the file is a list
+  of declarations and re-exports, so it holds no abstraction that could leak,
+  and its importers change with it because adding an export and using it is one
+  edit. Calibration against two real repositories found this to be the rule's
+  entire real-world output — every leaky finding named a crate root or a module
+  root — so a rule that keeps them names a shape a reader cannot act on. The
+  list SHALL be its own named constant rather than the accepted entry-filename
+  list, which also names program entry points such as `main.rs`, `build.rs`, and
+  `setup.py`; those hold behavior like any other file and SHALL stay eligible. A
+  pair excluded here keeps its dependency and therefore produces no finding of
+  either kind. The follower's own name decides nothing, because the claim is
+  about the interface.
 - `distance(a, b) ≥ LEAKAGE_MIN_DISTANCE = 2`.
 - `shared_commits ≥ LEAKAGE_SHARED_COMMITS = 5`.
 - `shared × 1000 ≥ union × required_permille(distance)`, where
@@ -231,8 +234,12 @@ review can move them in one place.
 - **THEN** the ownership pair is outside the cycle graph and no finding is created
 
 #### Scenario: A crate root's importers follow it
-- **WHEN** the interface a qualifying pair would name is `lib.rs`, `mod.rs`, `index.ts`, or another conventional entry file
-- **THEN** no finding of either kind is created, because the file is the module's wiring and has no abstraction to leak
+- **WHEN** the interface a qualifying pair would name is `lib.rs`, `mod.rs`, `index.ts`, or another wiring filename
+- **THEN** no finding of either kind is created, because the file is the module's re-export surface and has no abstraction to leak
+
+#### Scenario: A program entry point's importers follow it
+- **WHEN** the interface a qualifying pair would name is `main.rs` or another program entry point
+- **THEN** the finding is created, because such a file holds behavior and the exclusion covers re-export surfaces only
 
 ### Requirement: Hidden coupling proves absence, never infers it
 Absence SHALL be proved against one graph, defined here and used by both stages.

@@ -3,7 +3,7 @@ use std::collections::BTreeSet;
 
 use crate::{
     ConnectionGraph, FileChangeCoupling, FileChangeCouplingId, FileId, FileRecord, PackageId,
-    PathProbe, Rating, ReachAnswer, is_entry_filename,
+    PathProbe, Rating, ReachAnswer,
 };
 
 macro_rules! leakage_index {
@@ -36,6 +36,39 @@ leakage_index!(
     /// the report's change-leakage finding table.
     ChangeLeakageFindingId
 );
+
+/// The filenames whose content is a module's wiring rather than its behavior.
+///
+/// Each is the name a language gives to a re-export surface: a Rust crate root
+/// or module root, a JavaScript or TypeScript barrel, a Python package
+/// initializer. A file with one of these names is a list of declarations and
+/// re-exports, so it holds no abstraction that could leak.
+///
+/// This is deliberately narrower than the accepted entry filename list the
+/// orphan rule publishes. That list also names program entry points —
+/// `main.rs`, `main.py`, `main.rb`, `build.rs`, `setup.py`, `__main__.py` —
+/// which hold behavior like any other file, and whose importers following their
+/// changes is a claim worth making.
+///
+/// This is a proposed constant under review.
+pub const WIRING_FILENAMES: &[&str] = &[
+    "__init__.py",
+    "index.cjs",
+    "index.js",
+    "index.jsx",
+    "index.mjs",
+    "index.ts",
+    "index.tsx",
+    "index.vue",
+    "lib.rs",
+    "mod.rs",
+];
+
+/// Whether a repository-relative path names a module's wiring.
+pub fn is_wiring_filename(path: &str) -> bool {
+    let name = path.rsplit('/').next().unwrap_or(path);
+    WIRING_FILENAMES.contains(&name)
+}
 
 /// The directories two files sit apart before either rule may name them.
 ///
@@ -185,7 +218,7 @@ impl<'a> ChangeGraph<'a> {
 
     /// Whether a file can be named as an interface whose importers follow it.
     ///
-    /// A conventional entry file holds the module's wiring rather than its
+    /// A wiring file holds the module's re-export surface rather than its
     /// behavior: `lib.rs`, `mod.rs`, `index.ts`, and `__init__.py` are lists of
     /// declarations and re-exports. Its importers change with it because adding
     /// an export and using it is one edit, not because an abstraction leaked —
@@ -195,10 +228,14 @@ impl<'a> ChangeGraph<'a> {
     /// was naming a shape that cannot be fixed rather than a design that
     /// should be. The pair keeps its dependency, so it never falls through to
     /// the hidden rule either.
+    ///
+    /// A program entry point such as `main.rs` is not wiring and stays
+    /// eligible, which is why this reads its own list rather than the wider
+    /// entry-filename one.
     fn leaks(&self, interface: FileId) -> bool {
         self.files
             .get(interface.index())
-            .is_some_and(|file| !is_entry_filename(file.path()))
+            .is_some_and(|file| !is_wiring_filename(file.path()))
     }
 
     /// Whether one file depends on another through an edge that enters the

@@ -118,9 +118,10 @@ It SHALL state which files the two file counts count — the scope's primary,
 parsed files, the population every dependency fact in the report uses — so a
 reader whose package holds more files than the sentence names finds the rule
 rather than a contradiction. It SHALL state that a leaky interface is never a
-conventional entry file, because a file that is a list of declarations and
-re-exports has no abstraction to leak and its importers change with it by
-construction.
+wiring file, because a file that is a list of declarations and re-exports has no
+abstraction to leak and its importers change with it by construction, and it
+SHALL name those files rather than implying that every conventional entry file
+is one.
 
 It SHALL state that these signals are derived from history and therefore never
 enter the ratchet gate, and that they never appear in a diff report.

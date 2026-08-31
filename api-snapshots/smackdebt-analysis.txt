@@ -1196,6 +1196,7 @@ pub const smackdebt_analysis::SMALL_SCOPE_HIGH_UNITS: u32
 pub const smackdebt_analysis::UNSUPPORTED_QUALIFIER_PERMILLE: u32
 pub const smackdebt_analysis::VOLUME_FIGHTS_BACK_HIGH: u32
 pub const smackdebt_analysis::VOLUME_LOST_HIGH: u32
+pub const smackdebt_analysis::WIRING_FILENAMES: &[&str]
 pub const smackdebt_analysis::WORN_PERMILLE: u32
 pub const smackdebt_analysis::WORST_OFFENDER_LIMIT: usize
 pub fn smackdebt_analysis::aggregate_comparisons(&mut [smackdebt_analysis::Scope], &[smackdebt_analysis::Comparison], smackdebt_analysis::ScopeId)
@@ -1219,6 +1220,7 @@ pub fn smackdebt_analysis::graph_file_count(&[smackdebt_analysis::FileRecord]) -
 pub const fn smackdebt_analysis::instability(u32, u32) -> core::option::Option<smackdebt_analysis::Instability>
 pub fn smackdebt_analysis::is_entry_filename(&str) -> bool
 pub fn smackdebt_analysis::is_symbolic_candidate(&str) -> bool
+pub fn smackdebt_analysis::is_wiring_filename(&str) -> bool
 pub fn smackdebt_analysis::knowledge_concentration(&[smackdebt_analysis::ContributorConcentration]) -> alloc::vec::Vec<smackdebt_analysis::KnowledgeConcentrationFinding>
 pub fn smackdebt_analysis::largest_component_size(&[alloc::vec::Vec<usize>]) -> u32
 pub fn smackdebt_analysis::orphan_files(&[smackdebt_analysis::OrphanCandidate<'_>]) -> alloc::vec::Vec<smackdebt_analysis::OrphanFile>

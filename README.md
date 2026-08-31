@@ -709,11 +709,13 @@ declaration, in both directions — from one end of the pair and, if that walk
 runs out of budget, from the other. An inconclusive search reports nothing,
 because absence is proved rather than assumed.
 
-A conventional entry file — `lib.rs`, `mod.rs`, `index.ts`, `__init__.py`, and
-the rest of the entry names — is never named as a leaking interface. Such a file
-is a list of declarations and re-exports rather than behavior, so it holds no
-abstraction to leak, and its importers change with it because adding an export
-and using it is one edit.
+A wiring file — `lib.rs`, `mod.rs`, the `index` names a JavaScript or TypeScript
+barrel uses, and `__init__.py` — is never named as a leaking interface. Such a
+file is a list of declarations and re-exports rather than behavior, so it holds
+no abstraction to leak, and its importers change with it because adding an
+export and using it is one edit. A program entry point such as `main.rs` is not
+in that list: it holds behavior like any other file, so importers following it
+is still worth reporting.
 
 These signals come from history, so they never enter the ratchet gate, which
 only counts signals that do not move with wall-clock time, and they never appear
@@ -788,9 +790,11 @@ report while source and static architecture results remain usable.
 How far apart two files sit is read from their repository-relative paths by
 splitting on `/`, and a pair inside one directory is never recorded. On a
 Windows checkout those paths are written with the platform separator, so every
-file appears to sit in the repository root, the file co-change table stays
-empty, and the two patterns built on it report nothing there. Package coupling,
-churn, activity, and contributor concentration are unaffected.
+file appears to sit in the repository root: the file co-change table stays
+empty, the two patterns built on it report nothing there, and the
+typical-change sentence survives only at the repository root, because no
+package or directory scope has a directory of its own left to read. Package
+coupling, churn, activity, and contributor concentration are unaffected.
 
 Contributor names, addresses, and internal identities stop before the report.
 

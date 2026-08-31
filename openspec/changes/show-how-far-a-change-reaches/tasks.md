@@ -25,7 +25,7 @@
 - [x] 3.4 Serialize the `file_change_coupling` table with the lower file index first, integer shared and union commits, and the directory distance, extending the checked schema in the same commit.
 - [x] 3.5 Add boundary tests: a pair one commit below the retention floor, a pair one permille below it, a same-directory pair storing nothing, a test file and its subject producing no pair, and a pair whose union excludes a bulk commit.
 - [x] 3.6 Add the `bulk_commit_repository()` fixture and prove end to end that a thirty-file commit yields one bulk commit, no pair, and unchanged churn, touches, package coupling, and concentration. The guard's amplification half is proven in 4.5, which has no fact to read until amplification exists.
-- [x] 3.7 Add the `evolution-wide` workload profile — roughly two thousand files, fifty packages, forty commits with real cross-directory pairs, several provably unlinked pairs, and one bulk commit — wiring `PROFILES`, `GRAPH_PROFILES`, the `release-baselines.sh` profile loop from eight to nine, `EXPECTED_WORK`, `test_workload.py`, and a recorded baseline under `benchmarks/baselines/`. The timing record is the one half deferred: every committed baseline shares one workspace revision, so a lone new record would fail `check-baselines.py`, and this change deliberately re-records no release evidence. The profile is in the release loop and its record lands with the next `just release-baselines`, which the delta now states.
+- [ ] 3.7 Add the `evolution-wide` workload profile — roughly two thousand files, fifty packages, forty commits with real cross-directory pairs, several provably unlinked pairs, and one bulk commit — wiring `PROFILES`, `GRAPH_PROFILES`, the `release-baselines.sh` profile loop from eight to nine, `EXPECTED_WORK`, `test_workload.py`, and a recorded baseline under `benchmarks/baselines/`. The timing record is the one half deferred: every committed baseline shares one workspace revision, so a lone new record would fail `check-baselines.py`, and this change deliberately re-records no release evidence. The profile is in the release loop and its record lands with the next `just release-baselines`, which the delta now states.
 - [x] 3.8 Extend `scripts/performance/check-report.py` with the file-pair mirror block: bounds, lower index first, shared at most union, distance at least one, and no finding below the detector floors.
 - [x] 3.9 Assert exact equality of inventory walks, reads, Git processes, parser visits, and algorithm passes with the pre-change values on every affected flow, and regenerate the JSON snapshots per case.
 
@@ -61,7 +61,7 @@
 - [x] 6.2 Freeze or adjust the constants from the recorded runs — the pair guards, the leakage floors and the similarity bar, the amplification clamp and floors, the reach and core materiality rules — updating the specs where a proposed value moved, and record zero findings on a quiet repository as a legitimate outcome rather than a reason to lower a floor.
 - [x] 6.3 Update the README: the two new patterns with their words and thresholds, the `packages change together` rename, the three verdict sentences and when each is absent, the new JSON tables and verdict members, the weak-pairs-are-JSON-only rule, and the statement that these signals never gate and never appear in a diff.
 - [x] 6.4 Update `ARCHITECTURE.md` for the change graph, the join at report finish, the closures and their bounds, and correct its stale claim that weak coupling is available through `--all`.
-- [x] 6.5 Note the stale performance `report_digest` values per precedent, confirm the committed ratchet baseline moves by exactly the one deliberate row with `just gate`, pass `openspec validate --all --strict` and the complete check, and tick every task. The change is **not** archived: the wave is reviewed as a whole first.
+- [x] 6.5 Note the stale performance `report_digest` values per precedent, confirm the committed ratchet baseline moves by exactly the one deliberate row with `just gate`, pass `openspec validate --all --strict` and the complete check, and tick every task that is done. Task 3.7 stays unticked and carries its reason: its baseline record is written by the next release run. The change is **not** archived: the wave is reviewed as a whole first.
 
 ### 6.1 Calibration record
 
@@ -127,7 +127,7 @@ calibration runs showed a true statement that no reader can act on.
 | `CLOSURE_NODE_LIMIT` | 4,096 | Frozen. Fluyt's largest package holds 521 graph files, an eighth of the limit, and no `propagation_skipped` diagnostic appeared on either repository. |
 | `REACH_CANDIDATE_LIMIT` | 64 | Frozen. This workspace fills 23 of it and Fluyt 58, so the cut has never yet decided anything, and the bound still holds. |
 
-**Rule change 1 — a conventional entry file is never a leaking interface.**
+**Rule change 1 — a wiring file is never a leaking interface.**
 Before this rule, every `leaky_interface` finding on both repositories named a
 wiring module: `crates/analysis/src/lib.rs` followed by `project.rs` (20 of 57),
 `output.rs` (19 of 58), and `json.rs` (15 of 40); `crates/project/src/lib.rs`
@@ -136,13 +136,19 @@ followed by `crates/cli/src/app.rs` (5 of 14); and on Fluyt
 `quak/quak-core/src/agents/mod.rs` (6 of 6). Six of six. Each of those files is
 a list of `mod` declarations and re-exports — `tools/mod.rs` is 68 lines of
 exactly that and `agents/mod.rs` is 3 — so the finding says an export was added
-and used, which is one edit, not an abstraction leaking. The rule reuses the
-accepted `ENTRY_FILENAMES` list the orphan rule already publishes, applies to
-the interface side only (the claim is about the file accused of leaking), and
-leaves the pair with its dependency, so nothing falls through to the hidden
-rule. Effect: this workspace 4 findings → 0, Fluyt at 365 days 14 → 12 and 6
-cards → 4. Amended in `specs/change-leakage/spec.md` with a scenario, proved by
-`an_entry_file_is_never_named_as_the_interface_whose_importers_follow_it`, and
+and used, which is one edit, not an abstraction leaking. The rule reads its own
+`WIRING_FILENAMES` — `lib.rs`, `mod.rs`, the `index` barrel names, and
+`__init__.py` — rather than the wider `ENTRY_FILENAMES` the orphan rule
+publishes: that list also names program entry points such as `main.rs`,
+`build.rs`, and `setup.py`, which hold behavior like any other file and whose
+importers following them is a claim worth making. It applies to the interface
+side only (the claim is about the file accused of leaking) and leaves the pair
+with its dependency, so nothing falls through to the hidden rule. Effect: this
+workspace 4 findings → 0, Fluyt at 365 days 14 → 12 and 6 cards → 4, unchanged
+by the narrowing because every excluded finding named a crate root or a module
+root. Amended in `specs/change-leakage/spec.md` with two scenarios, proved by
+`a_wiring_file_is_never_named_as_the_interface_whose_importers_follow_it`, which
+pins the whole list and pins five program entry points as still eligible, and
 documented in the README.
 
 **Rule change 2 — a reach of zero is not a fact.** Fluyt printed `a change here
@@ -226,6 +232,13 @@ is no longer produced at all, because the file is an entry file.
   run racing the forty commits that build `evolution-wide` left the object store
   with a missing blob twice in a row, which `git fsck` confirmed; the workload
   became nondeterministic through no fault of the analysis.
+- **One terminal vocabulary ban narrowed.** `assert_short_terminal_text` banned
+  ` touches`, which the shipped sentence `A typical change here touches 4 files.`
+  contains, so the audit forbade the product's own output. The ban was written
+  for the deleted churn row `<name> · <n> touches · +a -b` and now names the
+  separator that made it a row, with the reason recorded where the assertion
+  lives. Sanctioned in `specs/end-to-end-evidence/spec.md` beside the README ban
+  it already legislates, with its own scenario.
 - **Committed `report_digest` values are stale**, as they were for
   `earn-the-verdict` and `make-problems-legible`: this change moves report bytes
   and re-records no release evidence.
