@@ -24,7 +24,7 @@
 - [x] 3.3 Apply the retention floors and the pair storage limit, counting bulk commits and declined pairs, and add the history coverage builder that discloses both without touching the existing constructor.
 - [x] 3.4 Serialize the `file_change_coupling` table with the lower file index first, integer shared and union commits, and the directory distance, extending the checked schema in the same commit.
 - [x] 3.5 Add boundary tests: a pair one commit below the retention floor, a pair one permille below it, a same-directory pair storing nothing, a test file and its subject producing no pair, and a pair whose union excludes a bulk commit.
-- [x] 3.6 Add the `bulk_commit_repository()` fixture and prove end to end that a thirty-file commit yields one bulk commit, no pair, and unchanged churn, touches, package coupling, concentration, and amplification inputs.
+- [x] 3.6 Add the `bulk_commit_repository()` fixture and prove end to end that a thirty-file commit yields one bulk commit, no pair, and unchanged churn, touches, package coupling, and concentration. The guard's amplification half is proven in 4.5, which has no fact to read until amplification exists.
 - [ ] 3.7 Add the `evolution-wide` workload profile — roughly two thousand files, fifty packages, forty commits with real cross-directory pairs, several provably unlinked pairs, and one bulk commit — wiring `PROFILES`, `GRAPH_PROFILES`, the `release-baselines.sh` profile loop from eight to nine, `EXPECTED_WORK`, `test_workload.py`, and a recorded baseline under `benchmarks/baselines/`.
 - [ ] 3.8 Extend `scripts/performance/check-report.py` with the file-pair mirror block: bounds, lower index first, shared at most union, distance at least one, and no finding below the detector floors.
 - [x] 3.9 Assert exact equality of inventory walks, reads, Git processes, parser visits, and algorithm passes with the pre-change values on every affected flow, and regenerate the JSON snapshots per case.
@@ -35,7 +35,7 @@
 - [ ] 4.2 Add the `ChangeAmplification` value object with its materiality rule — commit floor, median floor, complete history — and chain it into the repository, package, and directory scope verdicts, leaving a file scope without one.
 - [ ] 4.3 Render the sentence verbatim in the verdict block and serialize `verdict.amplification`, extending the checked schema in the same commit.
 - [ ] 4.4 Add pure tests for the exact nearest-rank median, the ancestor de-duplication that counts a commit once per directory, the clamp, and each materiality boundary; prove the fact never moves the tier, its counts, or the worst offender.
-- [ ] 4.5 Add exact acceptance at repository, package, and directory scope, the absence at a file scope, and a 50-column rendering, then regenerate the affected snapshots per case.
+- [ ] 4.5 Add exact acceptance at repository, package, and directory scope, the absence at a file scope, and a 50-column rendering, then regenerate the affected snapshots per case. Extend `bulk_commit_repository()` acceptance to prove the remaining half of the bulk-commit guard: the sweeping commit contributes exactly one amplification observation, so the fact is what it would have been without the guard.
 
 ## 5. Leakage detectors and cards
 
