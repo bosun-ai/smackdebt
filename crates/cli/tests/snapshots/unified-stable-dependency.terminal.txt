@@ -1,5 +1,6 @@
 smackdebt · repository root
   Clean. Ship it.
+  A change in one package can reach 4 of 5 packages.
 0 high · 0 watch · 6 checked
 
 PROBLEMS

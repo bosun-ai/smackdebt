@@ -8,14 +8,14 @@
 
 ## 2. Core size and propagation reach
 
-- [ ] 2.1 Retain the file pairs and the file strongly connected components the architecture build already computes, and carry them out of the build so the report can hold them.
-- [ ] 2.2 Compute the package closure matrix and each package's reach-in count, and expose `reach_in` on the package-graph measurement.
-- [ ] 2.3 Compute the file closure for every package eagerly inside `build_architecture`, one row per package below the closure node limit with one transient bit set live at a time, skipping above the limit and disclosing the skip as a `propagation_skipped` diagnostic; add a work-counter test proving that rendering a package scope from the finished report performs no closure.
-- [ ] 2.4 Compute exact reach for the bounded candidate set — cycle members and hub-degree files, ordered by fan-in descending then path, cut at the candidate limit — and store it as the candidate reach table.
-- [ ] 2.5 Add the `PropagationReach` and `CoreSize` value objects beside the verdict share with smart constructors that return nothing below their materiality rules, chain them into the scope verdict, and prove with a pure test that neither moves the tier, its counts, or the worst offender.
-- [ ] 2.6 Render the two sentences verbatim in the verdict block after the share line, and serialize `verdict.reach`, `verdict.core_size`, the `package_closures` and `file_reach` tables, and `reach_in`, extending the checked schema in the same commit.
-- [ ] 2.7 Add the `propagation_repository()` and `core_repository()` fixtures with their absence cases — a one-package repository stating no reach, a three-of-two-hundred core stating no sentence — and exact acceptance at root and package scope, including a 50-column rendering of each sentence.
-- [ ] 2.8 Regenerate the affected terminal and JSON snapshots one case at a time and record the expected diff shape in the commit body.
+- [x] 2.1 Retain the file pairs and the file strongly connected components the architecture build already computes, and carry them out of the build so the report can hold them.
+- [x] 2.2 Compute the package closure matrix and each package's reach-in count, and expose `reach_in` on the package-graph measurement.
+- [x] 2.3 Compute the file closure for every package eagerly inside `build_architecture`, one row per package below the closure node limit with one transient bit set live at a time, skipping above the limit and disclosing the skip as a `propagation_skipped` diagnostic; add a work-counter test proving that rendering a package scope from the finished report performs no closure.
+- [x] 2.4 Compute exact reach for the bounded candidate set — cycle members and hub-degree files, ordered by fan-in descending then path, cut at the candidate limit — and store it as the candidate reach table.
+- [x] 2.5 Add the `PropagationReach` and `CoreSize` value objects beside the verdict share with smart constructors that return nothing below their materiality rules, chain them into the scope verdict, and prove with a pure test that neither moves the tier, its counts, or the worst offender.
+- [x] 2.6 Render the two sentences verbatim in the verdict block after the share line, and serialize `verdict.reach`, `verdict.core_size`, the `package_closures` and `file_reach` tables, and `reach_in`, extending the checked schema in the same commit.
+- [x] 2.7 Add the `propagation_repository()` and `core_repository()` fixtures with their absence cases — a one-package repository stating no reach, a three-of-two-hundred core stating no sentence — and exact acceptance at root and package scope, including a 50-column rendering of each sentence.
+- [x] 2.8 Regenerate the affected terminal and JSON snapshots one case at a time and record the expected diff shape in the commit body.
 
 ## 3. The file co-change accumulator
 

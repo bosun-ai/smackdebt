@@ -216,6 +216,7 @@ pub struct PackageGraphMeasurement {
     package: PackageId,
     fan_in: u32,
     fan_out: u32,
+    reach_in: u32,
     instability: Option<Instability>,
 }
 
@@ -225,8 +226,17 @@ impl PackageGraphMeasurement {
             package,
             fan_in,
             fan_out,
+            reach_in: 0,
             instability: Instability::new(fan_out, fan_in + fan_out),
         }
+    }
+
+    /// Records how many packages transitively depend on this one, counting
+    /// itself, which is the closure the architecture build already computed.
+    #[must_use]
+    pub const fn with_reach_in(mut self, reach_in: u32) -> Self {
+        self.reach_in = reach_in;
+        self
     }
     pub const fn package(self) -> PackageId {
         self.package
@@ -236,6 +246,10 @@ impl PackageGraphMeasurement {
     }
     pub const fn fan_out(self) -> u32 {
         self.fan_out
+    }
+    /// The packages that transitively depend on this one, counting itself.
+    pub const fn reach_in(self) -> u32 {
+        self.reach_in
     }
     pub const fn instability(self) -> Option<Instability> {
         self.instability

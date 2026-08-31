@@ -4,6 +4,10 @@ use crate::architecture::{
 use crate::comparison::{Comparison, ComparisonKind};
 use crate::evolution::{EvolutionaryComparison, EvolutionaryComparisonId};
 use crate::health::{HealthCounts, Rating};
+use crate::propagation::{
+    CORE_SIZE_FILES, CORE_SIZE_PERCENT, PACKAGE_REACH_FILES, ROOT_REACH_PACKAGES,
+    ROOT_REACH_REACHED,
+};
 use crate::report::{ComparisonId, DiffCounts};
 use crate::source::{SourceRole, UnitIdentity};
 
@@ -219,6 +223,131 @@ impl VerdictShare {
     /// The High units the whole repository holds.
     pub const fn repository_high(self) -> u32 {
         self.repository_high
+    }
+}
+
+/// How far a change to one node of a scope's dependency graph can travel.
+///
+/// The two forms answer the same question at the two scopes that can answer
+/// it: a package's change spreads to packages at the repository root, and a
+/// file's change spreads to files inside its own package. Both counts include
+/// the changed node, which is why a package reachable from eight others reads
+/// "9 of 14". The sentence is copy owned by analysis, so a terminal renderer
+/// and a machine consumer print the same bytes; the fact is stated only and
+/// never moves the tier, exactly as the repository share never does.
+#[derive(Clone, Copy, Debug, Eq, Hash, PartialEq)]
+pub struct PropagationReach {
+    reached: u32,
+    total: u32,
+    subject: ReachSubject,
+}
+
+/// What one reach fact counts, which decides its sentence.
+#[derive(Clone, Copy, Debug, Eq, Hash, PartialEq)]
+enum ReachSubject {
+    Packages,
+    Files,
+}
+
+impl PropagationReach {
+    /// Completes the repository's package reach when it is worth stating.
+    ///
+    /// A repository with fewer than [`ROOT_REACH_PACKAGES`] packages, or whose
+    /// most depended-on package is reached by no other, has nothing to say and
+    /// carries no fact rather than a one-of-one sentence.
+    pub const fn packages(reached: u32, total: u32) -> Option<Self> {
+        if total < ROOT_REACH_PACKAGES || reached < ROOT_REACH_REACHED {
+            return None;
+        }
+        Some(Self {
+            reached,
+            total,
+            subject: ReachSubject::Packages,
+        })
+    }
+
+    /// Completes one package's file reach when the package is large enough for
+    /// the fraction to mean anything.
+    pub const fn files(reached: u32, total: u32) -> Option<Self> {
+        if total < PACKAGE_REACH_FILES {
+            return None;
+        }
+        Some(Self {
+            reached,
+            total,
+            subject: ReachSubject::Files,
+        })
+    }
+
+    /// The exact sentence every consumer prints for this reach.
+    pub fn sentence(self) -> String {
+        match self.subject {
+            ReachSubject::Packages => format!(
+                "A change in one package can reach {} of {} packages.",
+                self.reached, self.total
+            ),
+            ReachSubject::Files => format!(
+                "A change here can reach {} of {} files in this package.",
+                self.reached, self.total
+            ),
+        }
+    }
+
+    /// The nodes one change reaches, counting the changed node itself.
+    pub const fn reached(self) -> u32 {
+        self.reached
+    }
+
+    /// The nodes the graph this reach was closed over holds.
+    pub const fn total(self) -> u32 {
+        self.total
+    }
+}
+
+/// The largest file dependency cycle, against the graph it sits in.
+///
+/// A core is descriptive: it is never rated, creates no finding, and changes
+/// no verdict. The per-component cycle findings and their witnesses are what a
+/// reader acts on; this states how much of the codebase moves together.
+#[derive(Clone, Copy, Debug, Eq, Hash, PartialEq)]
+pub struct CoreSize {
+    core: u32,
+    files: u32,
+}
+
+impl CoreSize {
+    /// Completes a core size when the largest cycle is both absolutely and
+    /// proportionally worth stating.
+    ///
+    /// A three-file cycle is a local knot rather than a core, and a cycle that
+    /// is a rounding error of the codebase says nothing about the codebase, so
+    /// each floor rules out one of those.
+    pub const fn from_counts(core: u32, files: u32) -> Option<Self> {
+        if core < CORE_SIZE_FILES {
+            return None;
+        }
+        if core as u64 * 100 < files as u64 * CORE_SIZE_PERCENT as u64 {
+            return None;
+        }
+        Some(Self { core, files })
+    }
+
+    /// The exact sentence every consumer prints for this core.
+    pub fn sentence(self) -> String {
+        format!(
+            "{} of {} files sit in one dependency cycle.",
+            self.core, self.files
+        )
+    }
+
+    /// The files the largest cycle holds.
+    pub const fn core(self) -> u32 {
+        self.core
+    }
+
+    /// The files the file dependency graph is built over.
+    pub const fn files(self) -> u32 {
+        self.files
     }
 }
 
@@ -596,6 +725,8 @@ pub struct Verdict {
     worst: Vec<WorstOffender>,
     qualifier: Option<CoverageQualifier>,
     share: Option<VerdictShare>,
+    reach: Option<PropagationReach>,
+    core_size: Option<CoreSize>,
 }
 
 impl Verdict {
@@ -609,6 +740,8 @@ impl Verdict {
             worst,
             qualifier: None,
             share: None,
+            reach: None,
+            core_size: None,
         }
     }
 
@@ -626,6 +759,8 @@ impl Verdict {
             worst,
             qualifier: None,
             share: None,
+            reach: None,
+            core_size: None,
         }
     }
 
@@ -657,6 +792,36 @@ impl Verdict {
     /// for a scope below the repository root.
     pub const fn share(&self) -> Option<VerdictShare> {
         self.share
+    }
+
+    /// Returns the same verdict carrying a propagation-reach fact.
+    ///
+    /// The tier was already selected; the reach never changes it.
+    #[must_use]
+    pub const fn with_reach(mut self, reach: Option<PropagationReach>) -> Self {
+        self.reach = reach;
+        self
+    }
+
+    /// How far a change can travel from this scope, present at the repository
+    /// root and at a package scope when the fact is material.
+    pub const fn reach(&self) -> Option<PropagationReach> {
+        self.reach
+    }
+
+    /// Returns the same verdict carrying a core-size fact.
+    ///
+    /// The tier was already selected; the core never changes it.
+    #[must_use]
+    pub const fn with_core_size(mut self, core_size: Option<CoreSize>) -> Self {
+        self.core_size = core_size;
+        self
+    }
+
+    /// The largest file dependency cycle, present at the repository root when
+    /// the fact is material.
+    pub const fn core_size(&self) -> Option<CoreSize> {
+        self.core_size
     }
 
     pub const fn tier(&self) -> CodebaseTier {
@@ -823,6 +988,100 @@ mod tests {
         assert_eq!(framed.counts(), bare.counts());
         assert_eq!(framed.worst_offender(), bare.worst_offender());
         assert!(framed.share().is_some());
+    }
+
+    #[test]
+    fn package_reach_is_material_only_above_both_of_its_floors() {
+        assert!(
+            PropagationReach::packages(2, 2).is_none(),
+            "two packages are not a system"
+        );
+        assert!(
+            PropagationReach::packages(1, 14).is_none(),
+            "a package nothing depends on has nothing to say"
+        );
+        let reach = PropagationReach::packages(9, 14).expect("nine of fourteen is material");
+        assert_eq!(reach.reached(), 9);
+        assert_eq!(reach.total(), 14);
+        assert_eq!(
+            reach.sentence(),
+            "A change in one package can reach 9 of 14 packages."
+        );
+        // Exactly at both floors the fact exists.
+        assert_eq!(
+            PropagationReach::packages(2, 3)
+                .expect("both floors are inclusive")
+                .sentence(),
+            "A change in one package can reach 2 of 3 packages."
+        );
+    }
+
+    #[test]
+    fn file_reach_is_material_only_from_a_package_of_twenty_files() {
+        assert!(
+            PropagationReach::files(19, 19).is_none(),
+            "nineteen files are too few to divide"
+        );
+        let reach = PropagationReach::files(34, 98).expect("a package of ninety-eight files");
+        assert_eq!(reach.reached(), 34);
+        assert_eq!(reach.total(), 98);
+        assert_eq!(
+            reach.sentence(),
+            "A change here can reach 34 of 98 files in this package."
+        );
+        assert_eq!(
+            PropagationReach::files(1, 20)
+                .expect("the file floor is inclusive")
+                .sentence(),
+            "A change here can reach 1 of 20 files in this package."
+        );
+    }
+
+    #[test]
+    fn a_core_is_material_only_above_both_of_its_floors() {
+        assert!(
+            CoreSize::from_counts(4, 20).is_none(),
+            "four files are a knot rather than a core"
+        );
+        assert!(
+            CoreSize::from_counts(3, 200).is_none(),
+            "three of two hundred is below both floors"
+        );
+        assert!(
+            CoreSize::from_counts(5, 300).is_none(),
+            "five of three hundred is below the proportional floor alone"
+        );
+        let exactly = CoreSize::from_counts(5, 250).expect("exactly two percent is material");
+        assert_eq!(exactly.core(), 5);
+        assert_eq!(exactly.files(), 250);
+        let core = CoreSize::from_counts(34, 210).expect("a large core");
+        assert_eq!(
+            core.sentence(),
+            "34 of 210 files sit in one dependency cycle."
+        );
+    }
+
+    #[test]
+    fn reach_and_core_never_move_the_selected_tier() {
+        let counts = VerdictCounts::new(HealthCounts::new(3, 1, 1), 0);
+        let bare = Verdict::codebase(
+            counts,
+            vec![WorstOffender::new(
+                "src/work.rs",
+                WorstOffenderReason::MostComplex,
+            )],
+        );
+        let stated = bare
+            .clone()
+            .with_reach(PropagationReach::packages(9, 14))
+            .with_core_size(CoreSize::from_counts(34, 210));
+        assert_eq!(stated.tier(), bare.tier());
+        assert_eq!(stated.sentence(), bare.sentence());
+        assert_eq!(stated.counts(), bare.counts());
+        assert_eq!(stated.worst_offender(), bare.worst_offender());
+        assert_eq!(stated.worst(), bare.worst());
+        assert!(stated.reach().is_some() && stated.core_size().is_some());
+        assert!(bare.reach().is_none() && bare.core_size().is_none());
     }
 
     #[test]

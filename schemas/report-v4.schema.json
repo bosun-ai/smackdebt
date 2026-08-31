@@ -39,6 +39,8 @@
     "hotspots",
     "size_findings",
     "orphan_files",
+    "package_closures",
+    "file_reach",
     "problems"
   ],
   "properties": {
@@ -231,6 +233,18 @@
         "$ref": "#/$defs/index"
       },
       "uniqueItems": true
+    },
+    "package_closures": {
+      "type": "array",
+      "items": {
+        "$ref": "#/$defs/package_closure"
+      }
+    },
+    "file_reach": {
+      "type": "array",
+      "items": {
+        "$ref": "#/$defs/file_reach"
+      }
     },
     "problems": {
       "type": "array",
@@ -717,6 +731,7 @@
             "parse_failure",
             "ambiguous_identity",
             "unsafe_reference",
+            "propagation_skipped",
             "other"
           ]
         },
@@ -1066,6 +1081,7 @@
         "package",
         "fan_in",
         "fan_out",
+        "reach_in",
         "instability"
       ],
       "properties": {
@@ -1079,6 +1095,10 @@
         "fan_out": {
           "type": "integer",
           "minimum": 0
+        },
+        "reach_in": {
+          "type": "integer",
+          "minimum": 1
         },
         "instability": {
           "oneOf": [
@@ -1860,6 +1880,52 @@
           },
           "additionalProperties": false
         },
+        "reach": {
+          "type": "object",
+          "required": [
+            "sentence",
+            "reached",
+            "total"
+          ],
+          "properties": {
+            "sentence": {
+              "type": "string",
+              "pattern": "^(A change in one package can reach [0-9]+ of [0-9]+ packages|A change here can reach [0-9]+ of [0-9]+ files in this package)\\.$"
+            },
+            "reached": {
+              "type": "integer",
+              "minimum": 1
+            },
+            "total": {
+              "type": "integer",
+              "minimum": 3
+            }
+          },
+          "additionalProperties": false
+        },
+        "core_size": {
+          "type": "object",
+          "required": [
+            "sentence",
+            "core",
+            "files"
+          ],
+          "properties": {
+            "sentence": {
+              "type": "string",
+              "pattern": "^[0-9]+ of [0-9]+ files sit in one dependency cycle\\.$"
+            },
+            "core": {
+              "type": "integer",
+              "minimum": 5
+            },
+            "files": {
+              "type": "integer",
+              "minimum": 0
+            }
+          },
+          "additionalProperties": false
+        },
         "mode": {
           "enum": [
             "codebase",
@@ -1950,6 +2016,45 @@
           "items": {
             "$ref": "#/$defs/worst_offender"
           }
+        }
+      },
+      "additionalProperties": false
+    },
+    "package_closure": {
+      "type": "object",
+      "required": [
+        "package",
+        "files",
+        "reach"
+      ],
+      "properties": {
+        "package": {
+          "$ref": "#/$defs/index"
+        },
+        "files": {
+          "type": "integer",
+          "minimum": 20
+        },
+        "reach": {
+          "type": "integer",
+          "minimum": 1
+        }
+      },
+      "additionalProperties": false
+    },
+    "file_reach": {
+      "type": "object",
+      "required": [
+        "file",
+        "reach"
+      ],
+      "properties": {
+        "file": {
+          "$ref": "#/$defs/index"
+        },
+        "reach": {
+          "type": "integer",
+          "minimum": 0
         }
       },
       "additionalProperties": false
@@ -2299,7 +2404,8 @@
                 "fan_out",
                 "hot",
                 "rated_units",
-                "members"
+                "members",
+                "reach_in"
               ]
             },
             "value": {

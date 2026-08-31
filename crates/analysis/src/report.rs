@@ -1,13 +1,15 @@
 use crate::comparison::{Comparison, ComparisonDirection};
+use crate::file_reach::FileReach;
 use crate::health::{HealthAssessment, HealthCounts, Measurements, Rating};
 use crate::hotspot::Hotspot;
 use crate::orphan::OrphanFile;
 use crate::problem::{ProblemCard, ProblemInput, cluster_problems};
+use crate::propagation::PackageClosure;
 use crate::size::SizeFinding;
 use crate::source::{Language, ParseStatus, SourceRole, SourceSpan, SourceTrust, UnitIdentity};
 use crate::verdict::{
-    CoverageQualifier, DebtDiffSelection, Verdict, VerdictCounts, VerdictShare,
-    WORST_OFFENDER_LIMIT, WorstOffender, WorstOffenderReason,
+    CoreSize, CoverageQualifier, DebtDiffSelection, PropagationReach, Verdict, VerdictCounts,
+    VerdictShare, WORST_OFFENDER_LIMIT, WorstOffender, WorstOffenderReason,
 };
 use crate::{
     ArchitectureComparison, ArchitectureComparisonId, ArchitectureFinding, ArchitectureFindingId,
@@ -706,6 +708,13 @@ pub enum DiagnosticKind {
     ParseFailure,
     AmbiguousIdentity,
     UnsafeReference,
+    /// A package whose file closure exceeded the node limit, so its file reach
+    /// is absent rather than wrong.
+    ///
+    /// This is a machine-report disclosure only: it bounds an optional
+    /// descriptive fact rather than narrowing what was analyzed, so no
+    /// terminal warning states it.
+    PropagationSkipped,
     Other,
 }
 
@@ -797,6 +806,15 @@ pub struct Report {
     /// The named problems the report's own findings cluster into, ranked once
     /// when the report is finished.
     problems: Vec<ProblemCard>,
+    /// How far a change to one file of a package travels inside it, one row
+    /// per package whose value is material and none for any other, so a
+    /// consumer joins it by package rather than by position.
+    package_closures: Vec<PackageClosure>,
+    /// The exact repository-wide reach of the bounded candidate set, in file
+    /// order; a file outside the set has no row.
+    file_reach: Vec<FileReach>,
+    /// The largest file dependency cycle, when it is material.
+    core_size: Option<CoreSize>,
     verdict: Option<Verdict>,
 }
 
@@ -869,6 +887,21 @@ impl ReportBuilder {
         self.report.package_graph = facts.graph.package_graph;
         self.report.architecture_findings = facts.findings;
         self.report.architecture_comparisons = facts.comparisons;
+    }
+
+    /// Sets the propagation facts the architecture build closed over.
+    ///
+    /// Every value is computed once, when the report is built, so rendering a
+    /// scope reads a table rather than closing over a graph.
+    pub fn set_propagation(
+        &mut self,
+        closures: Vec<PackageClosure>,
+        file_reach: Vec<FileReach>,
+        core_size: Option<CoreSize>,
+    ) {
+        self.report.package_closures = closures;
+        self.report.file_reach = file_reach;
+        self.report.core_size = core_size;
     }
 
     /// Sets the derived hotspot table, ordered by file table position.
@@ -1084,6 +1117,9 @@ impl Report {
             stable_dependency_findings: Vec::new(),
             knowledge_concentration_findings: Vec::new(),
             problems: Vec::new(),
+            package_closures: Vec::new(),
+            file_reach: Vec::new(),
+            core_size: None,
             verdict: None,
         }
     }
@@ -1190,6 +1226,19 @@ impl Report {
     pub fn orphan_files(&self) -> &[OrphanFile] {
         &self.orphan_files
     }
+    /// How far a change reaches inside each package whose value is material,
+    /// in package order.
+    pub fn package_closures(&self) -> &[PackageClosure] {
+        &self.package_closures
+    }
+    /// The exact repository-wide reach of each candidate file, in file order.
+    pub fn file_reach(&self) -> &[FileReach] {
+        &self.file_reach
+    }
+    /// The largest file dependency cycle, when it is material.
+    pub const fn core_size(&self) -> Option<CoreSize> {
+        self.core_size
+    }
     pub fn stable_dependency_findings(&self) -> &[StableDependencyFinding] {
         &self.stable_dependency_findings
     }
@@ -1230,6 +1279,47 @@ impl Report {
         verdict
             .with_qualifier(self.coverage_qualifier(scope))
             .with_share(self.repository_share(selected))
+            .with_reach(self.propagation_reach(selected))
+            .with_core_size(self.scope_core_size(selected))
+    }
+
+    /// How far a change reaches from the selected scope, present at the
+    /// repository root and at a package scope only.
+    ///
+    /// A diff answers about a change rather than about a tree, so it carries
+    /// no propagation fact. Every operand is read from a table the report
+    /// already holds: the root takes the largest package reach-in the package
+    /// graph recorded, and a package scope reads its own closure row.
+    fn propagation_reach(&self, selected: ScopeId) -> Option<PropagationReach> {
+        if self.mode == ReportMode::Diff {
+            return None;
+        }
+        let root = self.root?;
+        if root == selected {
+            let reached = self
+                .package_graph
+                .iter()
+                .map(|measurement| measurement.reach_in())
+                .max()?;
+            return PropagationReach::packages(reached, self.packages.len() as u32);
+        }
+        let package = self
+            .packages
+            .iter()
+            .find(|package| package.scope() == selected)?;
+        let closure = self
+            .package_closures
+            .iter()
+            .find(|closure| closure.package() == package.id())?;
+        PropagationReach::files(closure.reach(), closure.files())
+    }
+
+    /// The core the repository root states, and nothing anywhere else.
+    fn scope_core_size(&self, selected: ScopeId) -> Option<CoreSize> {
+        if self.mode == ReportMode::Diff || self.root != Some(selected) {
+            return None;
+        }
+        self.core_size
     }
 
     /// The frame a scope below the repository root carries.
@@ -1487,6 +1577,7 @@ impl Report {
                 &self.knowledge_concentration_findings,
             )
             .with_hotspots(&self.hotspots)
+            .with_file_reach(&self.file_reach)
     }
 
     /// Completes scope summaries from the report's owned tables.

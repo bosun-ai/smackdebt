@@ -15,8 +15,9 @@ use crate::output::{
     scope_kind,
 };
 use smackdebt_analysis::{
-    ClaimedFinding, Hotspot, KnowledgeConcentrationFinding, OrphanFile, ProblemAnchor, ProblemCard,
-    ProblemEvidence, SizeFinding, SizeSubject, StableDependencyFinding, Verdict, WorstOffender,
+    ClaimedFinding, FileReach, Hotspot, KnowledgeConcentrationFinding, OrphanFile, PackageClosure,
+    ProblemAnchor, ProblemCard, ProblemEvidence, SizeFinding, SizeSubject, StableDependencyFinding,
+    Verdict, WorstOffender,
 };
 
 /// Streams JSON schema version 4 without cloning report strings or arrays.
@@ -49,7 +50,7 @@ impl Serialize for ReportView<'_> {
                 .cloned()
                 .expect("a built report always carries a root verdict"),
         };
-        let mut map = serializer.serialize_map(Some(36))?;
+        let mut map = serializer.serialize_map(Some(38))?;
         map.serialize_entry("schema_version", &report.schema_version())?;
         map.serialize_entry("mode", mode_name(report.mode()))?;
         // The head is written before every table so `--json | head` answers the
@@ -129,6 +130,11 @@ impl Serialize for ReportView<'_> {
         map.serialize_entry("hotspots", &Hotspots(report.hotspots()))?;
         map.serialize_entry("size_findings", &SizeFindings(report.size_findings()))?;
         map.serialize_entry("orphan_files", &OrphanFiles(report.orphan_files()))?;
+        map.serialize_entry(
+            "package_closures",
+            &PackageClosures(report.package_closures()),
+        )?;
+        map.serialize_entry("file_reach", &FileReaches(report.file_reach()))?;
         map.serialize_entry("problems", &Problems(report.problems()))?;
         map.end()
     }
@@ -530,10 +536,11 @@ impl Serialize for PackageGraph<'_> {
 struct PackageGraphView(PackageGraphMeasurement);
 impl Serialize for PackageGraphView {
     fn serialize<S: Serializer>(&self, serializer: S) -> Result<S::Ok, S::Error> {
-        let mut map = serializer.serialize_map(Some(4))?;
+        let mut map = serializer.serialize_map(Some(5))?;
         map.serialize_entry("package", &self.0.package().get())?;
         map.serialize_entry("fan_in", &self.0.fan_in())?;
         map.serialize_entry("fan_out", &self.0.fan_out())?;
+        map.serialize_entry("reach_in", &self.0.reach_in())?;
         let instability = self
             .0
             .instability()
@@ -1105,6 +1112,12 @@ impl Serialize for VerdictView<'_> {
         if let Some(share) = self.0.share() {
             map.serialize_entry("share", &ShareView(share))?;
         }
+        if let Some(reach) = self.0.reach() {
+            map.serialize_entry("reach", &ReachView(reach))?;
+        }
+        if let Some(core) = self.0.core_size() {
+            map.serialize_entry("core_size", &CoreSizeView(core))?;
+        }
         map.serialize_entry("mode", mode_name(self.1))?;
         map.end()
     }
@@ -1136,6 +1149,34 @@ impl Serialize for ShareView {
         map.serialize_entry("sentence", &self.0.sentence())?;
         map.serialize_entry("high", &self.0.high())?;
         map.serialize_entry("repository_high", &self.0.repository_high())?;
+        map.end()
+    }
+}
+
+/// How far a change reaches from the selected scope.
+///
+/// The sentence bytes are analysis-owned, so a machine consumer and the
+/// terminal state the same reach for the same scope. Both counts include the
+/// changed node, which is what the sentence says.
+struct ReachView(smackdebt_analysis::PropagationReach);
+impl Serialize for ReachView {
+    fn serialize<S: Serializer>(&self, serializer: S) -> Result<S::Ok, S::Error> {
+        let mut map = serializer.serialize_map(Some(3))?;
+        map.serialize_entry("sentence", &self.0.sentence())?;
+        map.serialize_entry("reached", &self.0.reached())?;
+        map.serialize_entry("total", &self.0.total())?;
+        map.end()
+    }
+}
+
+/// The largest file dependency cycle, against the graph it sits in.
+struct CoreSizeView(smackdebt_analysis::CoreSize);
+impl Serialize for CoreSizeView {
+    fn serialize<S: Serializer>(&self, serializer: S) -> Result<S::Ok, S::Error> {
+        let mut map = serializer.serialize_map(Some(3))?;
+        map.serialize_entry("sentence", &self.0.sentence())?;
+        map.serialize_entry("core", &self.0.core())?;
+        map.serialize_entry("files", &self.0.files())?;
         map.end()
     }
 }
@@ -1204,6 +1245,56 @@ impl Serialize for WorstOffenderView<'_> {
             &identity.map(|identity| unit_kind_name(identity.kind())),
         )?;
         map.serialize_entry("reason", self.0.reason().id())?;
+        map.end()
+    }
+}
+
+/// The file reach of every package whose value is material.
+///
+/// A package below the file floor and a package the closure node limit skipped
+/// each have no row, so a consumer joins this table by package index rather
+/// than by position.
+struct PackageClosures<'a>(&'a [PackageClosure]);
+impl Serialize for PackageClosures<'_> {
+    fn serialize<S: Serializer>(&self, serializer: S) -> Result<S::Ok, S::Error> {
+        let mut sequence = serializer.serialize_seq(Some(self.0.len()))?;
+        for closure in self.0 {
+            sequence.serialize_element(&PackageClosureView(*closure))?;
+        }
+        sequence.end()
+    }
+}
+struct PackageClosureView(PackageClosure);
+impl Serialize for PackageClosureView {
+    fn serialize<S: Serializer>(&self, serializer: S) -> Result<S::Ok, S::Error> {
+        let mut map = serializer.serialize_map(Some(3))?;
+        map.serialize_entry("package", &self.0.package().get())?;
+        map.serialize_entry("files", &self.0.files())?;
+        map.serialize_entry("reach", &self.0.reach())?;
+        map.end()
+    }
+}
+
+/// The exact repository-wide reach of each candidate file.
+///
+/// A file outside the candidate set has no row, so this table is never a
+/// complete reach index.
+struct FileReaches<'a>(&'a [FileReach]);
+impl Serialize for FileReaches<'_> {
+    fn serialize<S: Serializer>(&self, serializer: S) -> Result<S::Ok, S::Error> {
+        let mut sequence = serializer.serialize_seq(Some(self.0.len()))?;
+        for reach in self.0 {
+            sequence.serialize_element(&FileReachView(*reach))?;
+        }
+        sequence.end()
+    }
+}
+struct FileReachView(FileReach);
+impl Serialize for FileReachView {
+    fn serialize<S: Serializer>(&self, serializer: S) -> Result<S::Ok, S::Error> {
+        let mut map = serializer.serialize_map(Some(2))?;
+        map.serialize_entry("file", &self.0.file().get())?;
+        map.serialize_entry("reach", &self.0.reach())?;
         map.end()
     }
 }
@@ -1454,6 +1545,10 @@ impl Serialize for ProblemEvidenceView {
             }
             ProblemEvidence::Members(value) => {
                 map.serialize_entry("kind", "members")?;
+                map.serialize_entry("value", &value)?;
+            }
+            ProblemEvidence::ReachIn(value) => {
+                map.serialize_entry("kind", "reach_in")?;
                 map.serialize_entry("value", &value)?;
             }
         }

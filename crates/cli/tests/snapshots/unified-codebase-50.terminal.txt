@@ -1,5 +1,7 @@
 smackdebt · repository root
   Worn in the usual places.
+  A change in one package can reach 3 of 9
+        packages.
 1 high · 2 watch · 6 checked
 worst: b/main.js — most complex
 
@@ -14,6 +16,7 @@ PROBLEMS
         → d/main.js
         → c/main.js
         2 files in the cycle
+        a change here reaches 2 files
   high b · function · b/main.js:1
         cognitive 6 · cyclomatic 4 · statements 2
   watch renamed · function · e/new.js:1

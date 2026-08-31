@@ -14,11 +14,12 @@ use support::coverage_failure_repository;
 use support::edges::assert_no_dependency_edge_rows;
 use support::hermetic::hermetic_env;
 use support::{
-    GeneratedRepository, Invocation, copy_language_truth_files, deepened_signal_repository,
-    evolution_repository, module_wiring_repository, ref_diff_repository,
-    rust_test_scope_repository, shallow_clone, signal_table_repository, source_role_repository,
-    stable_dependency_repository, static_architecture_repository, test_scoped_workspace_repository,
-    wide_directory_repository, workspace_manifest_repository, worktree_change_repository,
+    GeneratedRepository, Invocation, copy_language_truth_files, core_repository,
+    deepened_signal_repository, evolution_repository, module_wiring_repository,
+    propagation_repository, ref_diff_repository, rust_test_scope_repository, shallow_clone,
+    signal_table_repository, source_role_repository, stable_dependency_repository,
+    static_architecture_repository, test_scoped_workspace_repository, wide_directory_repository,
+    workspace_manifest_repository, worktree_change_repository,
 };
 
 #[derive(Debug, Deserialize)]
@@ -48,6 +49,11 @@ fn problem_heads(text: &str) -> Vec<&str> {
         .into_iter()
         .filter(|line| !line.starts_with("        "))
         .collect()
+}
+
+/// The verdict block, which is every line before the first blank one.
+fn verdict_block(text: &str) -> Vec<&str> {
+    text.lines().take_while(|line| !line.is_empty()).collect()
 }
 
 /// The repository path of one file in a report.
@@ -463,6 +469,246 @@ fn a_diff_over_test_explained_coupling_reports_no_evolutionary_change() {
     assert!(!text.contains("no code dependency"), "{text}");
 }
 
+/// The layered fixture answers both reach sentences with hand-calculated
+/// operands, and the machine report carries the same integers from the same
+/// invocation.
+///
+/// `a` -> `b` -> `c` -> `d` makes `d` reachable from three other packages, so
+/// its reach is four of the six packages. `wide` chains twenty modules under a
+/// library root that only declares them, so the last module is reached by
+/// twenty of that package's twenty-one files.
+#[test]
+fn a_layered_repository_states_its_package_reach_and_its_file_reach() {
+    let repository = propagation_repository();
+    let result = Invocation::new(["--json"]).run(repository.path());
+    result.success();
+    let automatic = Invocation::new(["--json"])
+        .automatic_workers()
+        .run(repository.path());
+    assert_eq!(result, automatic, "serial and parallel runs must agree");
+    let report = checked_json(&result.stdout);
+    assert_eq!(
+        report["verdict"]["reach"]["sentence"],
+        "A change in one package can reach 4 of 6 packages."
+    );
+    assert_eq!(report["verdict"]["reach"]["reached"], 4);
+    assert_eq!(report["verdict"]["reach"]["total"], 6);
+    assert!(
+        report["verdict"]["core_size"].is_null(),
+        "a repository without a file cycle states no core"
+    );
+    let reach_in: Vec<_> = report["package_graph"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .map(|row| {
+            (
+                package_path(&report, row["package"].as_u64().unwrap()),
+                row["reach_in"].as_u64().unwrap(),
+            )
+        })
+        .collect();
+    assert_eq!(
+        reach_in,
+        [
+            ("crates/a".to_owned(), 1),
+            ("crates/b".to_owned(), 2),
+            ("crates/c".to_owned(), 3),
+            ("crates/d".to_owned(), 4),
+            ("crates/e".to_owned(), 1),
+            ("crates/wide".to_owned(), 1),
+        ]
+    );
+    let closures: Vec<_> = report["package_closures"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .map(|row| {
+            (
+                package_path(&report, row["package"].as_u64().unwrap()),
+                row["files"].as_u64().unwrap(),
+                row["reach"].as_u64().unwrap(),
+            )
+        })
+        .collect();
+    assert_eq!(
+        closures,
+        [("crates/wide".to_owned(), 21, 20)],
+        "only a package above the file floor carries a closure row"
+    );
+
+    let root = Invocation::new([] as [&str; 0]).run(repository.path());
+    root.success();
+    let text = String::from_utf8(root.stdout).unwrap();
+    assert!(
+        text.contains("  A change in one package can reach 4 of 6 packages.\n"),
+        "{text}"
+    );
+    assert!(!text.contains("sit in one dependency cycle"), "{text}");
+
+    let package = Invocation::new(["crates/wide"]).run(repository.path());
+    package.success();
+    let package_text = String::from_utf8(package.stdout).unwrap();
+    assert!(
+        package_text.contains("  A change here can reach 20 of 21 files in this package.\n"),
+        "{package_text}"
+    );
+    let scoped = Invocation::new(["crates/wide", "--json"]).run(repository.path());
+    scoped.success();
+    let scoped_report = checked_json(&scoped.stdout);
+    assert_eq!(
+        scoped_report["verdict"]["reach"]["sentence"],
+        "A change here can reach 20 of 21 files in this package."
+    );
+    assert_eq!(scoped_report["verdict"]["reach"]["reached"], 20);
+    assert_eq!(scoped_report["verdict"]["reach"]["total"], 21);
+
+    // A package below the file floor states nothing, and neither does a
+    // directory or a file inside the wide package.
+    for scope in ["crates/a", "crates/wide/src", "crates/wide/src/step00.rs"] {
+        let narrow = Invocation::new([scope, "--json"]).run(repository.path());
+        narrow.success();
+        let narrow_report = checked_json(&narrow.stdout);
+        assert!(
+            narrow_report["verdict"]["reach"].is_null(),
+            "{scope} states no reach"
+        );
+        let rendered = Invocation::new([scope]).run(repository.path());
+        rendered.success();
+        let rendered_text = String::from_utf8(rendered.stdout).unwrap();
+        assert!(!rendered_text.contains("can reach"), "{rendered_text}");
+    }
+
+    // Both sentences survive the narrowest supported width: they stack rather
+    // than clip, and every operand stays on the page.
+    let narrow = Invocation::new([] as [&str; 0])
+        .columns(50)
+        .run(repository.path());
+    narrow.success();
+    let narrow_text = String::from_utf8(narrow.stdout).unwrap();
+    assert!(
+        narrow_text.contains("  A change in one package can reach 4 of 6\n        packages.\n"),
+        "{narrow_text}"
+    );
+    let narrow_package = Invocation::new(["crates/wide"])
+        .columns(50)
+        .run(repository.path());
+    narrow_package.success();
+    let narrow_package_text = String::from_utf8(narrow_package.stdout).unwrap();
+    assert!(
+        narrow_package_text
+            .contains("  A change here can reach 20 of 21 files in this\n        package.\n"),
+        "{narrow_package_text}"
+    );
+}
+
+/// A repository with one package has no cross-package reach to state, so the
+/// fact is absent rather than a one-of-one sentence.
+#[test]
+fn a_single_package_repository_states_no_reach_at_all() {
+    let repository = rust_test_scope_repository();
+    let result = Invocation::new(["--json"]).run(repository.path());
+    result.success();
+    let report = checked_json(&result.stdout);
+    assert!(report["verdict"]["reach"].is_null());
+    assert!(report["package_closures"].as_array().unwrap().is_empty());
+    let terminal = Invocation::new(["--all"]).run(repository.path());
+    terminal.success();
+    let text = String::from_utf8(terminal.stdout).unwrap();
+    assert!(!text.contains("can reach"), "{text}");
+}
+
+/// The core is stated only when the largest file cycle clears both floors, and
+/// the cycle's own findings are the same either way.
+#[test]
+fn a_core_is_stated_only_when_the_largest_cycle_clears_both_floors() {
+    let repository = core_repository(20, 6);
+    let result = Invocation::new(["--json"]).run(repository.path());
+    result.success();
+    let automatic = Invocation::new(["--json"])
+        .automatic_workers()
+        .run(repository.path());
+    assert_eq!(result, automatic, "serial and parallel runs must agree");
+    let report = checked_json(&result.stdout);
+    assert_eq!(
+        report["verdict"]["core_size"]["sentence"],
+        "6 of 20 files sit in one dependency cycle."
+    );
+    assert_eq!(report["verdict"]["core_size"]["core"], 6);
+    assert_eq!(report["verdict"]["core_size"]["files"], 20);
+    let cycles = report["architecture_findings"].as_array().unwrap().len();
+    assert_eq!(cycles, 1, "one component, one finding");
+    // Every member of the cycle is a candidate and states the same reach, which
+    // excludes the file itself.
+    let reaches: Vec<_> = report["file_reach"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .map(|row| row["reach"].as_u64().unwrap())
+        .collect();
+    assert_eq!(reaches, [5; 6]);
+    let terminal = Invocation::new([] as [&str; 0]).run(repository.path());
+    terminal.success();
+    let text = String::from_utf8(terminal.stdout).unwrap();
+    assert!(
+        text.contains("  6 of 20 files sit in one dependency cycle.\n"),
+        "{text}"
+    );
+    assert!(
+        text.contains("        a change here reaches 5 files"),
+        "{text}"
+    );
+    let narrow = Invocation::new([] as [&str; 0])
+        .columns(50)
+        .run(repository.path());
+    narrow.success();
+    let narrow_text = String::from_utf8(narrow.stdout).unwrap();
+    assert!(
+        narrow_text.contains("  6 of 20 files sit in one dependency cycle.\n"),
+        "the core sentence fits fifty columns whole: {narrow_text}"
+    );
+
+    // The same twenty files without the cycle state no core, and the rest of
+    // the verdict block is byte-identical: the fact is stated only.
+    let plain = core_repository(20, 0);
+    let plain_terminal = Invocation::new([] as [&str; 0]).run(plain.path());
+    plain_terminal.success();
+    let plain_text = String::from_utf8(plain_terminal.stdout).unwrap();
+    let stated: Vec<_> = verdict_block(&text)
+        .into_iter()
+        .filter(|line| !line.contains("sit in one dependency cycle"))
+        .collect();
+    assert_eq!(
+        stated,
+        verdict_block(&plain_text),
+        "the core moves no tier, count, or worst offender"
+    );
+
+    let small = core_repository(200, 3);
+    let small_result = Invocation::new(["--json"]).run(small.path());
+    small_result.success();
+    let small_report = checked_json(&small_result.stdout);
+    assert!(
+        small_report["verdict"]["core_size"].is_null(),
+        "three of two hundred is below both floors"
+    );
+    assert_eq!(
+        small_report["architecture_findings"]
+            .as_array()
+            .unwrap()
+            .len(),
+        1,
+        "the cycle keeps its own finding whether or not the core is stated"
+    );
+    let small_terminal = Invocation::new([] as [&str; 0]).run(small.path());
+    small_terminal.success();
+    let small_text = String::from_utf8(small_terminal.stdout).unwrap();
+    assert!(
+        !small_text.contains("sit in one dependency cycle"),
+        "{small_text}"
+    );
+}
+
 #[test]
 fn a_primary_dependency_direction_publishes_a_stable_dependency_finding() {
     let repository = stable_dependency_repository(false);
@@ -825,6 +1071,17 @@ fn worktree_diff_reports_the_declared_mixed_change_outcomes_once() {
     assert_eq!(json, parallel_json);
     let report = checked_json(&json.stdout);
     assert_golden("unified-worktree-diff.json", &json.stdout);
+    // A diff answers about a change rather than about a tree, so it carries no
+    // propagation fact even though its package graph keeps its reach counts.
+    assert!(report["verdict"]["reach"].is_null());
+    assert!(report["verdict"]["core_size"].is_null());
+    assert!(
+        report["package_graph"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .all(|row| row["reach_in"].as_u64().is_some())
+    );
     assert!(
         report["packages"]
             .as_array()
@@ -2706,6 +2963,49 @@ fn assert_index_integrity(report: &Value) {
         assert!(orphans.insert(file), "one orphan row per file");
         assert_eq!(report["files"][file]["role"], "primary");
     }
+    for row in report["package_graph"].as_array().unwrap() {
+        assert!(
+            row["reach_in"].as_u64().unwrap() >= 1,
+            "a package always reaches itself"
+        );
+    }
+    // A closure row exists only for a package the file floor admits, so the
+    // table is joined by package and is never a complete package index.
+    let mut closed = HashSet::new();
+    let mut previous = None;
+    for closure in report["package_closures"].as_array().unwrap() {
+        let package = closure["package"].as_u64().unwrap() as usize;
+        assert!(package < packages, "closure package index is invalid");
+        assert!(closed.insert(package), "one closure row per package");
+        assert!(
+            previous.is_none_or(|earlier| earlier < package),
+            "closures are ordered by package"
+        );
+        previous = Some(package);
+        let held = closure["files"].as_u64().unwrap();
+        let reach = closure["reach"].as_u64().unwrap();
+        assert!(held >= 20, "a closure row is above the file floor");
+        assert!(
+            (1..=held).contains(&reach),
+            "a reach counts the changed file and no file outside the package"
+        );
+    }
+    let mut reached = HashSet::new();
+    let mut previous = None;
+    for row in report["file_reach"].as_array().unwrap() {
+        let file = row["file"].as_u64().unwrap() as usize;
+        assert!(file < files, "reach file index is invalid");
+        assert!(reached.insert(file), "one reach row per file");
+        assert!(
+            previous.is_none_or(|earlier| earlier < file),
+            "candidate reaches are ordered by file"
+        );
+        previous = Some(file);
+        assert!(
+            (row["reach"].as_u64().unwrap() as usize) < files,
+            "an exact reach excludes the file itself"
+        );
+    }
     for finding in report["stable_dependency_findings"].as_array().unwrap() {
         assert!((finding["source"].as_u64().unwrap() as usize) < packages);
         assert!((finding["target"].as_u64().unwrap() as usize) < packages);
@@ -2846,7 +3146,15 @@ fn assert_problem_evidence(report: &Value, evidence: &Value) {
             assert!(index < rows, "evidence {kind} {index} of {rows} rows");
         } else {
             assert!(
-                ["fan_in", "fan_out", "hot", "rated_units", "members"].contains(&kind),
+                [
+                    "fan_in",
+                    "fan_out",
+                    "hot",
+                    "rated_units",
+                    "members",
+                    "reach_in"
+                ]
+                .contains(&kind),
                 "unknown evidence kind {kind}"
             );
             fact["value"].as_u64().expect("a fact carries an integer");

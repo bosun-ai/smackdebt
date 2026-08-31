@@ -705,6 +705,90 @@ pub(crate) fn stable_dependency_repository(test_scoped: bool) -> GeneratedReposi
     repository
 }
 
+/// A workspace whose packages form one dependency chain beside one package
+/// wide enough to state a file reach.
+///
+/// `a` depends on `b`, `b` on `c`, and `c` on `d`, so a change in `d` reaches
+/// four of the six packages, counting `d` itself. `e` depends on nothing and
+/// nothing depends on it. `wide` holds a library root that declares twenty
+/// modules chained one into the next, so a change in the last module reaches
+/// twenty of that package's twenty-one files: the module declarations are
+/// ownership rather than use, so the library root itself stays outside the
+/// chain.
+pub(crate) fn propagation_repository() -> GeneratedRepository {
+    let repository = GeneratedRepository::new("main");
+    for (name, source) in [
+        ("a", "use b::one;\n\npub fn run() -> u32 {\n    one()\n}\n"),
+        ("b", "use c::two;\n\npub fn one() -> u32 {\n    two()\n}\n"),
+        (
+            "c",
+            "use d::three;\n\npub fn two() -> u32 {\n    three()\n}\n",
+        ),
+        ("d", "pub fn three() -> u32 {\n    3\n}\n"),
+        ("e", "pub fn alone() -> u32 {\n    1\n}\n"),
+    ] {
+        repository.write(
+            &format!("crates/{name}/Cargo.toml"),
+            format!("[package]\nname = \"{name}\"\nversion = \"0.1.0\"\nedition = \"2024\"\n")
+                .as_bytes(),
+        );
+        repository.write(&format!("crates/{name}/src/lib.rs"), source.as_bytes());
+    }
+    repository.write(
+        "crates/wide/Cargo.toml",
+        b"[package]\nname = \"wide\"\nversion = \"0.1.0\"\nedition = \"2024\"\n",
+    );
+    let mut root = String::new();
+    for index in 0..WIDE_PACKAGE_MODULES {
+        root.push_str(&format!("mod step{index:02};\n"));
+        let source = if index + 1 == WIDE_PACKAGE_MODULES {
+            format!("pub fn step{index:02}() -> u32 {{\n    1\n}}\n")
+        } else {
+            let next = index + 1;
+            format!(
+                "use crate::step{next:02}::step{next:02};\n\npub fn step{index:02}() -> u32 {{\n    step{next:02}() + 1\n}}\n"
+            )
+        };
+        repository.write(
+            &format!("crates/wide/src/step{index:02}.rs"),
+            source.as_bytes(),
+        );
+    }
+    repository.write("crates/wide/src/lib.rs", root.as_bytes());
+    repository.commit(scope_commit("test: propagation reach", &scope_date(1)));
+    repository
+}
+
+/// The modules the wide package of [`propagation_repository`] declares, which
+/// is one more than the file floor the reach sentence needs once the library
+/// root is counted.
+const WIDE_PACKAGE_MODULES: usize = 20;
+
+/// A repository whose files hold one import cycle, sized by its caller.
+///
+/// With `files` files and a cycle of `cycle` of them, the largest component is
+/// stated only when it clears both core floors: six of twenty does, and three
+/// of two hundred is below the absolute floor and the proportional one alike.
+/// A cycle of none writes the same files with no import at all, which is the
+/// same tree without the fact.
+pub(crate) fn core_repository(files: usize, cycle: usize) -> GeneratedRepository {
+    let repository = GeneratedRepository::new("main");
+    repository.write("package.json", b"{\"name\":\"core\",\"private\":true}\n");
+    for index in 0..files {
+        let source = if index < cycle {
+            let next = (index + 1) % cycle;
+            format!(
+                "import {{ unit{next:03} }} from './unit{next:03}.js';\nexport function unit{index:03}() {{ return unit{next:03}(); }}\n"
+            )
+        } else {
+            format!("export function unit{index:03}() {{ return 1; }}\n")
+        };
+        repository.write(&format!("src/unit{index:03}.js"), source.as_bytes());
+    }
+    repository.commit(scope_commit("test: core size", &scope_date(2)));
+    repository
+}
+
 /// A workspace whose packages import each other by declared manifest name.
 pub(crate) fn workspace_manifest_repository() -> GeneratedRepository {
     let repository = GeneratedRepository::new("main");

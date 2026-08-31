@@ -11,18 +11,19 @@ use rayon::prelude::*;
 use smackdebt_analysis::{
     ArchitectureComparison, ArchitectureComparisonId, ArchitectureFinding, ArchitectureFindingId,
     ArchitectureFindingKind, ArchitectureGraph, ArchitectureReportFacts, Comparison, ComparisonId,
-    ContributorId, Coverage, DependencyCoverage, DependencyEdge, DependencyEdgeId,
+    ContributorId, CoreSize, Coverage, DependencyCoverage, DependencyEdge, DependencyEdgeId,
     DependencySyntax, DependencySyntaxState, Diagnostic, DiagnosticId, DiagnosticKind,
     EvolutionAccumulator, ExternalDependency, FileActivity, FileAnalysis, FileDebt, FileId,
-    FileRecord, Finding, FindingId, HealthAssessment, HealthCounts, HealthPolicy,
+    FileReach, FileRecord, Finding, FindingId, HealthAssessment, HealthCounts, HealthPolicy,
     HistoryAvailability, HistoryChangeFact, HistoryCommitFact, HistoryCoverage, HistoryWindow,
-    HotspotPolicy, Language, ModuleDeclaration, OrphanCandidate, OrphanFile, PackageContainment,
-    PackageEdge, PackageEdgeId, PackageGraphMeasurement, PackageId, PackageRecord, ParseStatus,
-    Rating, Report, ReportBuilder as AnalysisReportBuilder, ReportMode, ResolutionDiagnostic,
-    ResolutionIssueKind, Scope, ScopeId, ScopeKind, SizeFinding, SizePolicy, SourceCoverageOutcome,
-    SourceRole, SourceTrust, StableDependencyFinding, compare_architecture, compare_units,
-    cycle_witness, dependency_degree, orphan_files, stable_dependency_findings,
-    strongly_connected_components, test_declared_files,
+    HotspotPolicy, Language, ModuleDeclaration, OrphanCandidate, OrphanFile, PackageClosure,
+    PackageContainment, PackageEdge, PackageEdgeId, PackageGraphMeasurement, PackageId,
+    PackageRecord, ParseStatus, Rating, Report, ReportBuilder as AnalysisReportBuilder, ReportMode,
+    ResolutionDiagnostic, ResolutionIssueKind, Scope, ScopeId, ScopeKind, SizeFinding, SizePolicy,
+    SourceCoverageOutcome, SourceRole, SourceTrust, StableDependencyFinding, close_over_packages,
+    compare_architecture, compare_units, cycle_witness, dependency_degree, enters_file_graph,
+    file_reaches, graph_file_count, largest_component_size, orphan_files, reach_in_counts,
+    stable_dependency_findings, strongly_connected_components, test_declared_files,
 };
 use smackdebt_discovery::{DiscoveredFile, Inventory, generic_source_roles, glob_matches};
 use smackdebt_git::{Change, ContributorIdentity, GitRepository};
@@ -2250,13 +2251,27 @@ impl<'a> CodebaseReportBuilder<'a> {
         ));
     }
 
+    /// Discloses every package whose file closure the node limit skipped.
+    ///
+    /// The skip is a fact the machine report owes its reader: the package has a
+    /// file reach and this report does not state it.
+    fn disclose_skipped_closures(&mut self, skipped: &[PackageId]) {
+        for package in skipped {
+            let path = report_package_path(&self.package_roots[package.index()]);
+            self.add_general_diagnostic(
+                DiagnosticKind::PropagationSkipped,
+                format!("{path} holds more files than one closure may reach over"),
+            );
+        }
+    }
+
     fn add_general_diagnostic(&mut self, kind: DiagnosticKind, message: impl Into<String>) {
         let id = DiagnosticId::from_index(self.diagnostics.len());
         self.diagnostics
             .push(Diagnostic::new(id, None, kind, message, 0));
     }
 
-    fn finish(self, work: &AnalysisWork) -> Report {
+    fn finish(mut self, work: &AnalysisWork) -> Report {
         let architecture = build_architecture(
             work,
             &self.files,
@@ -2268,6 +2283,7 @@ impl<'a> CodebaseReportBuilder<'a> {
         );
         let architecture_findings_for_links = architecture.findings.clone();
         let explanation_pairs = architecture.explanation_pairs.clone();
+        self.disclose_skipped_closures(&architecture.skipped_closures);
         work.record_algorithm_pass();
         let containment = PackageContainment::from_paths(
             &self
@@ -2319,6 +2335,11 @@ impl<'a> CodebaseReportBuilder<'a> {
             architecture.findings,
             Vec::new(),
         ));
+        builder.set_propagation(
+            architecture.package_closures,
+            architecture.file_reach,
+            architecture.core_size,
+        );
         builder.set_hotspots(self.policies.hotspots.hotspots(&self.file_debt));
         builder.set_orphan_files(architecture.orphans);
         builder.set_stable_dependency_findings(architecture.stable_dependencies);
@@ -2372,6 +2393,15 @@ struct ArchitectureBuild {
     /// Cross-package pairs that explain change coupling, whether or not they
     /// enter a verdict graph.
     explanation_pairs: BTreeSet<(PackageId, PackageId)>,
+    /// How far a change reaches inside each package whose value is material.
+    package_closures: Vec<PackageClosure>,
+    /// The packages whose closure the node limit skipped, which the machine
+    /// report discloses rather than leaving silently absent.
+    skipped_closures: Vec<PackageId>,
+    /// The exact repository-wide reach of the bounded candidate set.
+    file_reach: Vec<FileReach>,
+    /// The largest file dependency cycle, when it is material.
+    core_size: Option<CoreSize>,
 }
 
 #[derive(Clone)]
@@ -3044,11 +3074,15 @@ fn build_architecture(
         .map(|edge| (edge.source().index(), edge.target().index()))
         .collect();
     let degrees = dependency_degree(package_count, &package_pairs);
+    // The package graph is small enough to close over whole: its node count is
+    // the package count, so no limit gates it.
+    let package_reach = reach_in_counts(package_count, &package_pairs);
     let measurements: Vec<_> = degrees
         .into_iter()
         .enumerate()
         .map(|(index, (incoming, outgoing))| {
             PackageGraphMeasurement::new(PackageId::from_index(index), incoming, outgoing)
+                .with_reach_in(package_reach[index])
         })
         .collect();
 
@@ -3144,8 +3178,17 @@ fn build_architecture(
         manifest_names,
         &index,
     );
-    for component in strongly_connected_components(files.len(), &file_pairs)
-        .into_iter()
+    // The components the cycle findings are made of are also the core and the
+    // reach candidates, so they are retained rather than recomputed.
+    let file_components = strongly_connected_components(files.len(), &file_pairs);
+    let core_size = CoreSize::from_counts(
+        largest_component_size(&file_components),
+        graph_file_count(files),
+    );
+    let closures = close_over_packages(package_count, &graph_packages(files), &file_pairs);
+    let file_reach = file_reaches(files, &file_components, &file_pairs);
+    for component in file_components
+        .iter()
         .filter(|component| component.len() > 1)
     {
         let packages: std::collections::BTreeSet<_> = component
@@ -3155,7 +3198,7 @@ fn build_architecture(
         if packages.len() != 1 {
             continue;
         }
-        let witness = cycle_witness(&component, &file_pairs).unwrap_or_default();
+        let witness = cycle_witness(component, &file_pairs).unwrap_or_default();
         let witness_edges: Vec<_> = witness
             .iter()
             .filter_map(|&(source, target)| {
@@ -3170,14 +3213,14 @@ fn build_architecture(
             })
             .collect();
         let id = ArchitectureFindingId::from_index(findings.len());
-        for file in &component {
+        for file in component {
             finding_links.push((files[*file].scope(), id));
         }
         findings.push(ArchitectureFinding::new(
             id,
             ArchitectureFindingKind::FileCycle,
             packages.into_iter().collect(),
-            component.into_iter().map(FileId::from_index).collect(),
+            component.iter().copied().map(FileId::from_index).collect(),
             witness_edges,
         ));
     }
@@ -3195,7 +3238,23 @@ fn build_architecture(
         finding_links,
         cycles,
         explanation_pairs,
+        package_closures: closures.closures().to_vec(),
+        skipped_closures: closures.skipped().to_vec(),
+        file_reach,
+        core_size,
     }
+}
+
+/// The package of every file that enters the file dependency graph, by file
+/// table position.
+///
+/// A file outside the graph belongs to no package closure, so the fraction a
+/// package states is a fraction of one population.
+fn graph_packages(files: &[FileRecord]) -> Vec<Option<PackageId>> {
+    files
+        .iter()
+        .map(|file| file.package().filter(|_| enters_file_graph(file)))
+        .collect()
 }
 
 /// Orders one file pair so a relation and its reverse read as the same pair.

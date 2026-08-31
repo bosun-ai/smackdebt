@@ -7,6 +7,7 @@ use crate::evolution::{
     EvolutionaryFinding, EvolutionaryFindingId, KnowledgeConcentrationFinding,
     KnowledgeConcentrationFindingId,
 };
+use crate::file_reach::FileReach;
 use crate::health::Rating;
 use crate::hotspot::Hotspot;
 use crate::median::nearest_rank_median;
@@ -130,6 +131,9 @@ pub enum ProblemEvidence {
     RatedUnits(u32),
     /// Files in an anchor file set.
     Members(u32),
+    /// Files that transitively depend on the anchor, excluding the anchor
+    /// itself, for a file inside the bounded reach candidate set.
+    ReachIn(u32),
 }
 
 /// The identity of one finding a card claimed.
@@ -380,6 +384,7 @@ pub struct ProblemInput<'a> {
     evolutionary_findings: &'a [EvolutionaryFinding],
     knowledge_concentration_findings: &'a [KnowledgeConcentrationFinding],
     hotspots: &'a [Hotspot],
+    file_reach: &'a [FileReach],
     policy: ProblemPolicy,
 }
 
@@ -396,6 +401,7 @@ impl<'a> ProblemInput<'a> {
             evolutionary_findings: &[],
             knowledge_concentration_findings: &[],
             hotspots: &[],
+            file_reach: &[],
             policy: ProblemPolicy::new(
                 CONCENTRATED_HIGH_FINDINGS,
                 BROAD_DEBT_UNITS,
@@ -458,10 +464,26 @@ impl<'a> ProblemInput<'a> {
         self
     }
 
+    /// Adds the exact reach of the candidate files, which is ordered by file
+    /// table position.
+    #[must_use]
+    pub const fn with_file_reach(mut self, file_reach: &'a [FileReach]) -> Self {
+        self.file_reach = file_reach;
+        self
+    }
+
     #[must_use]
     pub const fn with_policy(mut self, policy: ProblemPolicy) -> Self {
         self.policy = policy;
         self
+    }
+
+    /// The exact reach of a file inside the bounded candidate set.
+    fn exact_reach(&self, file: FileId) -> Option<u32> {
+        self.file_reach
+            .binary_search_by_key(&file, |reach| reach.file())
+            .ok()
+            .map(|position| self.file_reach[position].reach())
     }
 
     /// The touch count of a hot file.
@@ -646,6 +668,11 @@ fn tangles(input: &ProblemInput<'_>, cards: &mut Vec<ProblemCard>) {
             ProblemEvidence::Architecture(finding.id()),
             ProblemEvidence::Members(members.len() as u32),
         ];
+        // Every member of a cycle reaches exactly what the others reach, so the
+        // first member that carries a value answers for the whole cycle.
+        if let Some(reach) = members.iter().find_map(|&file| input.exact_reach(file)) {
+            evidence.push(ProblemEvidence::ReachIn(reach));
+        }
         if let Some(touches) = members
             .iter()
             .filter_map(|&file| input.hot_touches(file))
@@ -747,6 +774,11 @@ impl<'a, 'b> FilePass<'a, 'b> {
             }
             if outbound {
                 evidence.push(ProblemEvidence::FanOut(fan_out));
+            }
+            // How far the change spreads is why the degree matters, so it
+            // follows the degree that made the pattern fire.
+            if let Some(reach) = self.input.exact_reach(FileId::from_index(index)) {
+                evidence.push(ProblemEvidence::ReachIn(reach));
             }
             let rating = self.claimed_rating(index);
             let card = self.card(index, ProblemPattern::Hub, rating, evidence);
@@ -1025,6 +1057,7 @@ mod tests {
         stable: Vec<StableDependencyFinding>,
         coupling: Vec<EvolutionaryFinding>,
         concentration: Vec<KnowledgeConcentrationFinding>,
+        reach: Vec<FileReach>,
     }
 
     impl Tables {
@@ -1143,6 +1176,14 @@ mod tests {
             ));
         }
 
+        /// Records the exact reach of one candidate file, keeping the table in
+        /// file order the way the report builds it.
+        fn reach(&mut self, file: usize, reach: u32) {
+            self.reach
+                .push(FileReach::new(FileId::from_index(file), reach));
+            self.reach.sort_unstable_by_key(|value| value.file());
+        }
+
         fn input(&self) -> ProblemInput<'_> {
             ProblemInput::new(&self.files, &self.findings)
                 .with_packages(&self.packages)
@@ -1151,6 +1192,7 @@ mod tests {
                 .with_stable_dependencies(&self.stable)
                 .with_evolution(&self.coupling, &self.concentration)
                 .with_hotspots(&self.hotspots)
+                .with_file_reach(&self.reach)
         }
 
         fn cluster(&self) -> Vec<ProblemCard> {
@@ -1449,6 +1491,51 @@ mod tests {
         assert_eq!(card.visibility(), ProblemVisibility::Detail);
         assert!(card.claimed_findings().is_empty());
         assert_eq!(card.evidence(), [ProblemEvidence::FanIn(8)]);
+    }
+
+    #[test]
+    fn a_hub_states_its_exact_reach_after_the_degree_that_made_it_fire() {
+        let mut tables = imported_file(8);
+        tables.size(0, 15);
+        tables.reach(0, 41);
+        let cards = tables.cluster();
+        assert_eq!(
+            cards[0].evidence(),
+            [
+                ProblemEvidence::FanIn(8),
+                ProblemEvidence::ReachIn(41),
+                ProblemEvidence::Size(SizeFindingId::from_index(0)),
+            ],
+            "reach follows the degree and precedes every claimed finding"
+        );
+        // A file outside the candidate set states no reach at all.
+        let mut bare = imported_file(8);
+        bare.reach(1, 41);
+        assert_eq!(bare.cluster()[0].evidence(), [ProblemEvidence::FanIn(8)]);
+    }
+
+    #[test]
+    fn a_tangle_states_its_reach_between_its_member_count_and_its_heat() {
+        let mut tables = Tables::default();
+        let package = tables.package("a");
+        for index in 0..3 {
+            tables.file(&format!("a/member{index}.rs"), package, 0, 0);
+        }
+        tables.cycle(&[0, 1, 2]);
+        tables.hotspot(1, 14);
+        // Only the second member is a candidate; every member of a cycle
+        // reaches what the others reach, so one value answers for the card.
+        tables.reach(1, 12);
+        let cards = tables.cluster();
+        assert_eq!(
+            cards[0].evidence(),
+            [
+                ProblemEvidence::Architecture(ArchitectureFindingId::from_index(0)),
+                ProblemEvidence::Members(3),
+                ProblemEvidence::ReachIn(12),
+                ProblemEvidence::Hot(14),
+            ]
+        );
     }
 
     #[test]

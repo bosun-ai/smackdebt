@@ -807,6 +807,32 @@ fn cycle_first_path<'a>(report: &'a Report, witness_edges: &[DependencyEdgeId]) 
     Some(report.files()[edge.source().index()].path())
 }
 
+/// The analysis-owned lines a verdict stacks under its tier sentence, in the
+/// accepted order.
+///
+/// Every one of them is copy analysis owns: the renderer places them and
+/// composes none of them, and a fact a verdict does not carry contributes no
+/// line at all.
+fn stated_verdict_facts(verdict: &Verdict) -> Vec<String> {
+    let mut facts = Vec::new();
+    if let Some(qualifier) = verdict.qualifier() {
+        facts.push(format!("{} {}", qualifier.sentence(), qualifier.fact()));
+    }
+    // A sub-scope answers about itself; the share states what fraction of the
+    // whole that is, and the two propagation facts state how far a change to
+    // this tree travels.
+    if let Some(share) = verdict.share() {
+        facts.push(share.sentence());
+    }
+    if let Some(reach) = verdict.reach() {
+        facts.push(reach.sentence());
+    }
+    if let Some(core) = verdict.core_size() {
+        facts.push(core.sentence());
+    }
+    facts
+}
+
 /// One evidence item, stated in the words its kind owns.
 ///
 /// Every kind states one line, except a cycle witness, which is one fact
@@ -844,6 +870,9 @@ fn counted_evidence(fact: ProblemEvidence) -> Option<String> {
             Counted::new(value as usize, "rated unit", "rated units").to_string()
         }
         ProblemEvidence::Members(value) => format!("{} in the cycle", counted_files(value)),
+        ProblemEvidence::ReachIn(value) => {
+            format!("a change here reaches {}", counted_files(value))
+        }
         _ => return None,
     })
 }
@@ -1521,15 +1550,9 @@ impl<'a, W: Write> Renderer<'a, W> {
             write!(self.writer, "  ")?;
         }
         self.write_text(view.verdict.sentence(), 2)?;
-        if let Some(qualifier) = view.verdict.qualifier() {
+        for fact in stated_verdict_facts(&view.verdict) {
             write!(self.writer, "  ")?;
-            self.write_text(&format!("{} {}", qualifier.sentence(), qualifier.fact()), 2)?;
-        }
-        // A sub-scope answers about itself; the analysis-owned share states
-        // what fraction of the whole that is, verbatim.
-        if let Some(share) = view.verdict.share() {
-            write!(self.writer, "  ")?;
-            self.write_text(&share.sentence(), 2)?;
+            self.write_text(&fact, 2)?;
         }
         self.write_text(&verdict_counts(&view.verdict, view.mode), 0)?;
         if let Some(worst) = view.verdict.worst_offender()
@@ -1787,6 +1810,14 @@ const fn diagnostic_predicate(kind: DiagnosticKind) -> (&'static str, &'static s
             "contains an unsafe reference.",
             "contain unsafe references.",
         ),
+        // A skipped closure is a machine-report disclosure about an optional
+        // descriptive fact, so the grouped warning list never carries it. The
+        // wording exists so the vocabulary stays complete and correct if it
+        // ever does.
+        DiagnosticKind::PropagationSkipped => (
+            "has more files than one closure may reach over.",
+            "have more files than one closure may reach over.",
+        ),
         DiagnosticKind::Other => ("could not be analyzed.", "could not be analyzed."),
     }
 }
@@ -1796,11 +1827,14 @@ const fn diagnostic_predicate(kind: DiagnosticKind) -> (&'static str, &'static s
 /// Every sentence agrees with its own count, because a grouped sentence states
 /// its kind at every scope and one file is the common case.
 fn diagnostic_summary(kind: DiagnosticKind, count: usize) -> String {
-    // A pruned checkout is not a source file, so it names its own subject.
-    let subject = if kind == DiagnosticKind::NestedRepository {
-        Counted::new(count, "nested repository", "nested repositories")
-    } else {
-        Counted::new(count, "source file", "source files")
+    // A pruned checkout and a package are not source files, so each names its
+    // own subject.
+    let subject = match kind {
+        DiagnosticKind::NestedRepository => {
+            Counted::new(count, "nested repository", "nested repositories")
+        }
+        DiagnosticKind::PropagationSkipped => Counted::new(count, "package", "packages"),
+        _ => Counted::new(count, "source file", "source files"),
     };
     let (singular, plural) = diagnostic_predicate(kind);
     format!("{subject} {}", if count == 1 { singular } else { plural })
@@ -2152,6 +2186,7 @@ pub(super) fn diagnostic_name(kind: DiagnosticKind) -> &'static str {
         DiagnosticKind::ParseFailure => "parse_failure",
         DiagnosticKind::AmbiguousIdentity => "ambiguous_identity",
         DiagnosticKind::UnsafeReference => "unsafe_reference",
+        DiagnosticKind::PropagationSkipped => "propagation_skipped",
         DiagnosticKind::Other => "other",
     }
 }
@@ -2774,6 +2809,11 @@ mod tests {
             // the only activity wording a card states.
             (ProblemEvidence::Hot(1), "hot (1 commit)"),
             (ProblemEvidence::Hot(14), "hot (14 commits)"),
+            (ProblemEvidence::ReachIn(1), "a change here reaches 1 file"),
+            (
+                ProblemEvidence::ReachIn(41),
+                "a change here reaches 41 files",
+            ),
         ] {
             assert_eq!(
                 evidence_lines(&report, fact, false),
@@ -3270,6 +3310,91 @@ mod tests {
         let value: serde_json::Value = serde_json::from_slice(&json).unwrap();
         assert_eq!(value["schema_version"], 4);
         assert_eq!(value["mode"], "codebase");
+    }
+
+    /// The propagation facts are analysis-owned bytes the renderer only
+    /// places: after the share line, reach before core, and nothing where a
+    /// fact is absent.
+    #[test]
+    fn a_verdict_states_its_reach_and_then_its_core_after_the_share() {
+        let mut builder = ReportBuilder::new(ReportMode::Codebase);
+        let root = ScopeId::from_index(0);
+        let mut root_scope = Scope::new(root, ScopeKind::Repository, ".", None);
+        for index in 1..4 {
+            root_scope.add_child(ScopeId::from_index(index));
+        }
+        builder.add_scope(root_scope);
+        let mut packages = Vec::new();
+        let mut graph = Vec::new();
+        for (index, name) in ["a", "b", "c"].into_iter().enumerate() {
+            let scope = ScopeId::from_index(index + 1);
+            builder.add_scope(Scope::new(scope, ScopeKind::Package, name, Some(root)));
+            packages.push(PackageRecord::current(
+                PackageId::from_index(index),
+                scope,
+                name,
+            ));
+            graph.push(
+                smackdebt_analysis::PackageGraphMeasurement::new(
+                    PackageId::from_index(index),
+                    0,
+                    0,
+                )
+                .with_reach_in(index as u32 + 1),
+            );
+        }
+        builder.set_root(root);
+        builder.set_packages(packages);
+        builder.set_architecture(ArchitectureReportFacts::new(
+            ArchitectureGraph::new(
+                DependencyCoverage::default(),
+                Vec::new(),
+                Vec::new(),
+                Vec::new(),
+                Vec::new(),
+                graph,
+            ),
+            Vec::new(),
+            Vec::new(),
+        ));
+        builder.set_propagation(
+            Vec::new(),
+            Vec::new(),
+            smackdebt_analysis::CoreSize::from_counts(34, 210),
+        );
+        let report = builder.finish();
+        let mut bytes = Vec::new();
+        write_terminal(&mut bytes, &report, Some(root), TerminalOptions::default()).unwrap();
+        let terminal = String::from_utf8(bytes).unwrap();
+        assert!(
+            terminal.starts_with(concat!(
+                "smackdebt \u{b7} repository root\n",
+                "  Nothing was checked.\n",
+                "  A change in one package can reach 3 of 3 packages.\n",
+                "  34 of 210 files sit in one dependency cycle.\n",
+                "0 high \u{b7} 0 watch \u{b7} 0 checked\n",
+            )),
+            "{terminal}"
+        );
+        // A package scope of this report states neither fact, because no
+        // closure row is material and the core belongs to the root.
+        let mut package_bytes = Vec::new();
+        write_terminal(
+            &mut package_bytes,
+            &report,
+            Some(ScopeId::from_index(1)),
+            TerminalOptions::default(),
+        )
+        .unwrap();
+        let package_terminal = String::from_utf8(package_bytes).unwrap();
+        assert!(
+            !package_terminal.contains("can reach"),
+            "{package_terminal}"
+        );
+        assert!(
+            !package_terminal.contains("dependency cycle"),
+            "{package_terminal}"
+        );
     }
 
     /// Both qualifications a verdict can carry are analysis-owned bytes the

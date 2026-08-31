@@ -1,5 +1,6 @@
 smackdebt · repository root
   Worn in the usual places.
+  A change in one package can reach 2 of 3 packages.
 0 high · 0 watch · 7 checked
 worst: app/main.js — package dependency cycle
 
@@ -9,11 +10,13 @@ PROBLEMS
         → core/main.js
         → app/main.js
         2 files in the cycle
+        a change here reaches 1 file
   watch circular dependency · app/choice.js
         app/choice.js
         → app/helper.js
         → app/choice.js
         2 files in the cycle
+        a change here reaches 1 file
 
 WARNINGS
   warning History is unavailable.

@@ -70,6 +70,44 @@ impl PathProbe {
         self.walk_back(from, to, budget)
     }
 
+    /// How many nodes transitively depend on `node`, **excluding itself**.
+    ///
+    /// This is the other reach convention: the scoped reach sentences count the
+    /// changed node, while card evidence states how many *other* files a change
+    /// here reaches, so the walk returns what it visited beyond its start. The
+    /// walk is exhaustive rather than budgeted, because an exact count has no
+    /// undecided answer; the caller bounds the cost by bounding how many nodes
+    /// it asks about.
+    pub fn dependents(&mut self, node: usize) -> u32 {
+        let inside = node < self.incoming.len();
+        debug_assert!(inside, "a path probe reads node indexes of its own graph");
+        if !inside {
+            return 0;
+        }
+        let Self {
+            incoming,
+            visited,
+            probes,
+            pending,
+        } = self;
+        *probes += 1;
+        pending.clear();
+        pending.push_back(node);
+        visited[node] = *probes;
+        let mut dependents = 0;
+        while let Some(current) = pending.pop_front() {
+            for &source in &incoming[current] {
+                if visited[source] == *probes {
+                    continue;
+                }
+                visited[source] = *probes;
+                dependents += 1;
+                pending.push_back(source);
+            }
+        }
+        dependents
+    }
+
     /// Walks back from `to` until it meets `from`, exhausts what reaches `to`,
     /// or spends its node budget.
     fn walk_back(&mut self, from: usize, to: usize, budget: usize) -> ReachAnswer {
@@ -164,6 +202,27 @@ mod tests {
         let mut split = PathProbe::over(4, &[(0, 1), (2, 3)]);
         assert_eq!(split.reaches(2, 1, 2), ReachAnswer::Separate);
         assert_eq!(split.reaches(2, 1, 1), ReachAnswer::Undecided);
+    }
+
+    #[test]
+    fn an_exhaustive_walk_counts_every_dependent_except_the_node_itself() {
+        // 1 and 2 depend on 0, 3 depends on 1, and 4 depends on nothing.
+        let mut probe = PathProbe::over(5, &[(1, 0), (2, 0), (3, 1)]);
+        assert_eq!(probe.dependents(0), 3);
+        assert_eq!(probe.dependents(1), 1);
+        assert_eq!(probe.dependents(3), 0, "a leaf is depended on by nothing");
+        assert_eq!(probe.dependents(4), 0);
+        // The scratch is shared with the bounded probe, so an interleaved run
+        // must not read a visit mark the other walk left behind.
+        assert_eq!(probe.reaches(3, 0, 4_096), ReachAnswer::Reaches);
+        assert_eq!(probe.dependents(0), 3);
+    }
+
+    #[test]
+    fn every_member_of_a_cycle_depends_on_every_other() {
+        let mut probe = PathProbe::over(4, &[(0, 1), (1, 2), (2, 0), (3, 0)]);
+        assert_eq!(probe.dependents(0), 3);
+        assert_eq!(probe.dependents(3), 0);
     }
 
     #[test]

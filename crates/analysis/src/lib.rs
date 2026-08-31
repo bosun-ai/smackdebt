@@ -11,6 +11,7 @@ mod dependency_degree;
 mod directory_tree;
 mod evolution;
 mod evolutionary_comparison;
+mod file_reach;
 mod gate;
 mod health;
 mod history_window;
@@ -20,6 +21,7 @@ mod median;
 mod orphan;
 mod path_probe;
 mod problem;
+mod propagation;
 mod reachability;
 mod report;
 mod size;
@@ -58,6 +60,7 @@ pub use evolution::{
     KnowledgeConcentrationFindingId, PackageHistory,
 };
 pub use evolutionary_comparison::compare_evolution;
+pub use file_reach::{FileReach, REACH_CANDIDATE_LIMIT, file_reaches};
 pub use gate::{GateComparison, GateDelta, GateRow, GateSignal, GateSnapshot};
 pub use history_window::HistoryWindow;
 pub use hotspot::{DEFAULT_MINIMUM_TOUCHES, FileDebt, Hotspot, HotspotPolicy};
@@ -69,6 +72,11 @@ pub use problem::{
     HUB_MEDIAN_MULTIPLE, ProblemAnchor, ProblemCard, ProblemEvidence, ProblemId, ProblemInput,
     ProblemPattern, ProblemPolicy, ProblemRank, ProblemVisibility, cluster_problems,
     duplicate_claim,
+};
+pub use propagation::{
+    CLOSURE_NODE_LIMIT, CORE_SIZE_FILES, CORE_SIZE_PERCENT, PACKAGE_REACH_FILES, PackageClosure,
+    PackageClosures, ROOT_REACH_PACKAGES, ROOT_REACH_REACHED, close_over_packages,
+    enters_file_graph, graph_file_count,
 };
 pub use reachability::{largest_component_size, reach_in_counts};
 pub use size::{SizeFinding, SizeFindingId, SizePolicy, SizeSubject};
@@ -94,9 +102,9 @@ pub use source::{
     UnitKind, is_symbolic_candidate,
 };
 pub use verdict::{
-    CodebaseTier, CoverageQualifier, DENSITY_EVIDENCE_UNITS, DebtDiffFacts, DebtDiffSelection,
-    DebtFamily, DiffTier, FIGHTS_BACK_PERMILLE, SMALL_SCOPE_HIGH_UNITS,
-    UNSUPPORTED_QUALIFIER_PERMILLE, VOLUME_FIGHTS_BACK_HIGH, VOLUME_LOST_HIGH, Verdict,
-    VerdictCounts, VerdictShare, WORN_PERMILLE, WORST_OFFENDER_LIMIT, WorstOffender,
-    WorstOffenderReason,
+    CodebaseTier, CoreSize, CoverageQualifier, DENSITY_EVIDENCE_UNITS, DebtDiffFacts,
+    DebtDiffSelection, DebtFamily, DiffTier, FIGHTS_BACK_PERMILLE, PropagationReach,
+    SMALL_SCOPE_HIGH_UNITS, UNSUPPORTED_QUALIFIER_PERMILLE, VOLUME_FIGHTS_BACK_HIGH,
+    VOLUME_LOST_HIGH, Verdict, VerdictCounts, VerdictShare, WORN_PERMILLE, WORST_OFFENDER_LIMIT,
+    WorstOffender, WorstOffenderReason,
 };
