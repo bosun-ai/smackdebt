@@ -389,8 +389,9 @@ interface, since a file of declarations and re-exports has no abstraction to
 leak.
 
 Propagation facts come from the same architecture build. The package graph
-yields each package's reach-in count; every package below the closure node limit
-is closed over eagerly, one transient bit set at a time, so rendering a scope
+yields each package's reach-in count; every package large enough for the fact to
+mean anything and small enough for the closure node limit is closed over
+eagerly, one transient bit set at a time, so rendering a scope
 from a finished report performs no closure; the file components already computed
 for cycle findings give the core size; and a bounded candidate set of cycle
 members and hub-degree files carries one exact reverse reach each. Every one of

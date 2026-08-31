@@ -2407,9 +2407,9 @@ fn readme_console_examples_use_the_simple_terminal_vocabulary() {
         "| `bus_risk` | `one author` |",
         "| `unstable_dependency` | `depends on less stable code` |",
         "| `measured` |",
-        "changed together in 32 of 97 commits · 33% · no direct dependency · linked via crates/output",
+        "changed together in 33 of 98 commits · 34% · no direct dependency · linked via crates/output",
         "29% · no code dependency",
-        "one contributor made 56 of 59 commits",
+        "one contributor made 57 of 60 commits",
         // The four sentences a verdict may carry beyond its tier, each shown
         // as captured output rather than described.
         "A change in one package can reach 6 of 12 packages.",

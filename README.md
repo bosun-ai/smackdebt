@@ -34,7 +34,7 @@ smackdebt · repository root
   Worn in the usual places.
   A change in one package can reach 6 of 12 packages.
   9 of 86 files sit in one dependency cycle.
-20 high · 63 watch · 3,304 checked
+20 high · 63 watch · 3,305 checked
 worst: crates/project/src/project.rs — hot AND complex
 
 AREAS
@@ -153,9 +153,9 @@ PROBLEMS
   watch GateSnapshot::from_report · method · crates/analysis/src/gate.rs:150
         cognitive 15
   watch packages change together · crates/analysis ↔ crates/cli
-        changed together in 32 of 97 commits · 33% · no direct dependency · linked via crates/output
+        changed together in 33 of 98 commits · 34% · no direct dependency · linked via crates/output
   watch one author · crates/analysis
-        one contributor made 56 of 59 commits
+        one contributor made 57 of 60 commits
   watch OrphanCandidate<'a>::new · method · crates/analysis/src/orphan.rs:44
         parameters 6
 
@@ -373,7 +373,7 @@ thresholds are:
 | Directories apart two files must sit before either co-change pattern names them | 2 |
 | Commits two files must share before either co-change pattern names them | 5 |
 | Share of their commits two files two directories apart must share | 40% |
-| Percentage that bar falls for each further directory between them | 5% |
+| Percentage points that bar falls for each further directory between them | 5 |
 | Share no distance lowers that bar below | 20% |
 
 A `god_file` needs both halves: concentrated debt alone means a file has bugs,
@@ -485,9 +485,9 @@ PROBLEMS
         a change here reaches 14 files
         hot (13 commits)
   watch packages change together · crates/analysis ↔ crates/cli
-        changed together in 32 of 97 commits · 33% · no direct dependency · linked via crates/output
+        changed together in 33 of 98 commits · 34% · no direct dependency · linked via crates/output
   watch one author · crates/analysis
-        one contributor made 56 of 59 commits
+        one contributor made 57 of 60 commits
 ```
 
 The verdict counts rate units: `0 high · 0 watch · 22 checked` counts the
@@ -747,7 +747,7 @@ contributor concentration, and the two file-level co-change patterns described
 in [Read how far a change reaches](#read-how-far-a-change-reaches), each keeping
 its finding's exact evidence and each
 ranked against every other problem rather than sitting in a section of its own.
-A `one author` card states counts only, such as `one contributor made 48 of 48
+A `one author` card states counts only, such as `one contributor made 57 of 60
 commits`. A coupling pair that a code dependency already explains is context
 rather than debt: it produces no finding, so no card names it at any scope or
 detail level, `--all` included, and its complete row stays in the machine
