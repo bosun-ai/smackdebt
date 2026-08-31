@@ -374,6 +374,15 @@ histogram of how many change-graph files each commit touched, deduplicated
 through the directory's ancestors, from which the nearest-rank median becomes
 one scope sentence.
 
+That tree splits paths on `/` and nothing else, which is a real limit rather
+than an oversight to read past. On a checkout whose repository-relative paths
+carry the platform separator instead, every path is one component, the tree is
+the root alone, and both signals built on it degrade honestly rather than
+wrongly: every pair sits in one directory, so the file co-change table is empty
+and the two file-level patterns name nothing, and every commit deduplicates to
+the root, so the typical-change sentence survives only there. Package coupling,
+churn, activity, and concentration read no directory and are unaffected.
+
 History streams before the dependency graph exists, so pair accumulation is
 graph-blind and the join runs once at report composition, where both the pairs
 and the graphs are in hand. The join reads two graphs and never substitutes one
