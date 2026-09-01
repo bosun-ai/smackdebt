@@ -1434,6 +1434,11 @@ fn add_diff_result(
     policy: HealthPolicy,
 ) {
     let file_id = FileId::from_index(result.index);
+    let has_ambiguous_identity = included_in_code_diff
+        && result
+            .comparisons
+            .iter()
+            .any(Comparison::is_anonymous_ambiguity);
 
     for comparison in result.comparisons.iter().filter(|_| included_in_code_diff) {
         let comparison_id = ComparisonId::from_index(indexes.comparison);
@@ -1450,9 +1455,21 @@ fn add_diff_result(
         if let Some(span) = comparison.span() {
             retained = retained.with_span(span);
         }
+        if comparison.is_anonymous_ambiguity() {
+            retained = retained.with_anonymous_ambiguity();
+        }
         report.add_comparison(retained);
         report.link_comparison(scope_id, comparison_id);
         indexes.comparison += 1;
+    }
+    if has_ambiguous_identity {
+        report.add_diagnostic(Diagnostic::new(
+            DiagnosticId::from_index(report.diagnostic_count()),
+            Some(file_id),
+            DiagnosticKind::AmbiguousIdentity,
+            "anonymous units could not be matched safely",
+            0,
+        ));
     }
 
     let selected = match &result.current {
@@ -7597,6 +7614,131 @@ mod tests {
                 .moved(smackdebt_analysis::DebtFamily::Architecture)
         );
         assert!(!verdict.selection().has_duplicate_identity());
+    }
+
+    #[test]
+    fn a_real_diff_pairs_only_safe_anonymous_units() {
+        let root = tempfile::tempdir().unwrap();
+        let repository_path = root.path();
+        git(repository_path, ["init", "-q"]);
+        git(
+            repository_path,
+            ["config", "user.email", "test@example.invalid"],
+        );
+        git(repository_path, ["config", "user.name", "Smackdebt Test"]);
+        fs::write(
+            repository_path.join("callbacks.js"),
+            "watch('ready', () => work());\nrepeat(() => same());\ngone(() => old());\n",
+        )
+        .unwrap();
+        git(repository_path, ["add", "."]);
+        git(repository_path, ["commit", "-qm", "callback base"]);
+        fs::write(
+            repository_path.join("callbacks.js"),
+            "\nwatch('ready', () => { if (ready) work(); });\nrepeat(() => same());\nrepeat(() => same());\nonly(() => new_one());\nonly(() => new_one());\n",
+        )
+        .unwrap();
+
+        let report =
+            analyze_diff(&DiffRequest::new(repository_path).with_reference("HEAD")).unwrap();
+        let report = report.report();
+        let kinds: Vec<_> = report
+            .comparisons()
+            .iter()
+            .map(smackdebt_analysis::Comparison::kind)
+            .collect();
+        assert_eq!(
+            kinds
+                .iter()
+                .filter(|kind| **kind == smackdebt_analysis::ComparisonKind::Ambiguous)
+                .count(),
+            1
+        );
+        assert_eq!(
+            kinds
+                .iter()
+                .filter(|kind| **kind == smackdebt_analysis::ComparisonKind::Added)
+                .count(),
+            2
+        );
+        assert_eq!(
+            kinds
+                .iter()
+                .filter(|kind| **kind == smackdebt_analysis::ComparisonKind::Removed)
+                .count(),
+            1
+        );
+        assert_eq!(
+            kinds
+                .iter()
+                .filter(|kind| **kind == smackdebt_analysis::ComparisonKind::MetricChanged)
+                .count(),
+            1
+        );
+        let diagnostics: Vec<_> = report
+            .diagnostics()
+            .iter()
+            .filter(|value| value.kind() == DiagnosticKind::AmbiguousIdentity)
+            .collect();
+        assert_eq!(diagnostics.len(), 1);
+        assert_eq!(diagnostics[0].file(), Some(FileId::from_index(0)));
+        assert!(
+            report
+                .comparisons()
+                .iter()
+                .any(Comparison::is_anonymous_ambiguity)
+        );
+        assert_eq!(
+            report.verdict().unwrap().diff_tier(),
+            Some(DiffTier::NoDebtChange)
+        );
+        assert!(
+            !report
+                .verdict()
+                .unwrap()
+                .selection()
+                .has_duplicate_identity()
+        );
+    }
+
+    #[test]
+    fn repeated_declared_names_do_not_create_an_anonymous_warning() {
+        let root = tempfile::tempdir().unwrap();
+        let repository_path = root.path();
+        git(repository_path, ["init", "-q"]);
+        git(
+            repository_path,
+            ["config", "user.email", "test@example.invalid"],
+        );
+        git(repository_path, ["config", "user.name", "Smackdebt Test"]);
+        fs::write(
+            repository_path.join("duplicate.js"),
+            "function same() { return 1; }\nfunction same() { return 2; }\n",
+        )
+        .unwrap();
+        git(repository_path, ["add", "."]);
+        git(repository_path, ["commit", "-qm", "duplicate base"]);
+        fs::write(
+            repository_path.join("duplicate.js"),
+            "function same() { return 1; }\nfunction same() { if (ready) return 2; }\n",
+        )
+        .unwrap();
+
+        let report =
+            analyze_diff(&DiffRequest::new(repository_path).with_reference("HEAD")).unwrap();
+        let report = report.report();
+        assert_eq!(report.comparisons().len(), 1);
+        assert_eq!(
+            report.comparisons()[0].kind(),
+            smackdebt_analysis::ComparisonKind::Ambiguous
+        );
+        assert!(!report.comparisons()[0].is_anonymous_ambiguity());
+        assert!(
+            report
+                .diagnostics()
+                .iter()
+                .all(|value| value.kind() != DiagnosticKind::AmbiguousIdentity)
+        );
     }
 
     #[test]

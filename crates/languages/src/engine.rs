@@ -1,6 +1,6 @@
 use smackdebt_analysis::{
     DependencySyntax, FileAnalysis, LocalUnitId, Measurements, ParseStatus, SourceSpan, UnitFact,
-    UnitIdentity,
+    UnitIdentity, UnitMatchEvidence,
 };
 use tree_sitter::{Node, Parser, Query, QueryCursor, StreamingIterator};
 
@@ -47,6 +47,8 @@ struct QueryState {
 
 struct UnitDraft {
     identity: UnitIdentity,
+    declared_identity: bool,
+    match_evidence: UnitMatchEvidence,
     span: SourceSpan,
     measurements: Measurements,
     parent: Option<usize>,
@@ -205,17 +207,37 @@ fn collect_units<L: Language>(
         }
         let mut child_parent = parent;
         if let Some(kind) = classification.unit {
+            let declared_identity = L::has_declared_identity(node, source);
             let name = L::name(node, source);
             let index = scratch.unit_drafts.len();
             let measurements = measure::<L>(node, source, scratch);
-            let identity = match enclosing_container::<L>(node, source).or_else(|| {
+            let declared_container = enclosing_container::<L>(node, source);
+            let display_container = declared_container.clone().or_else(|| {
                 parent.map(|parent| scratch.unit_drafts[parent].identity.name().to_owned())
-            }) {
+            });
+            let identity = match display_container {
                 Some(container) => UnitIdentity::new(name, kind).in_container(container),
                 None => UnitIdentity::new(name, kind),
             };
+            let enclosing_declared = nearest_declared_unit(parent, &scratch.unit_drafts).cloned();
+            let match_evidence = if declared_identity {
+                UnitMatchEvidence::declared()
+            } else if let Some(anchor) = L::match_anchor(node, source) {
+                UnitMatchEvidence::semantic(
+                    declared_container.as_deref(),
+                    enclosing_declared.as_ref(),
+                    kind,
+                    anchor,
+                )
+            } else {
+                source
+                    .get(node.start_byte()..node.end_byte())
+                    .map_or_else(UnitMatchEvidence::none, UnitMatchEvidence::exact_syntax)
+            };
             scratch.unit_drafts.push(UnitDraft {
                 identity,
+                declared_identity,
+                match_evidence,
                 span: SourceSpan::new(
                     node.start_position().row as u32 + 1 + line_offset,
                     node.end_position().row as u32 + 1 + line_offset,
@@ -244,11 +266,23 @@ fn collect_units<L: Language>(
                         .parent
                         .map(|parent| LocalUnitId::from_index(parent + id_offset)),
                 )
+                .with_match_evidence(draft.match_evidence)
             }),
     );
     let mut dependencies = Vec::with_capacity(scratch.dependencies.len());
     dependencies.append(&mut scratch.dependencies);
     (units, dependencies)
+}
+
+fn nearest_declared_unit(mut parent: Option<usize>, drafts: &[UnitDraft]) -> Option<&UnitIdentity> {
+    while let Some(index) = parent {
+        let draft = &drafts[index];
+        if draft.declared_identity {
+            return Some(&draft.identity);
+        }
+        parent = draft.parent;
+    }
+    None
 }
 
 fn offset_dependency(dependency: DependencySyntax, line_offset: u32) -> DependencySyntax {

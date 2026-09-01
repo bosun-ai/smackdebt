@@ -98,6 +98,128 @@ fn diff_reports_metric_changes_from_the_worktree() {
 }
 
 #[test]
+fn anonymous_diff_matching_is_safe_and_worker_output_is_equal() {
+    let project = anonymous_diff_fixture();
+    let terminal = |jobs| {
+        let output = smackdebt()
+            .current_dir(project.path())
+            .env("COLUMNS", "120")
+            .args(["diff", "HEAD", "--all", "--color", "never", "--jobs", jobs])
+            .output()
+            .unwrap();
+        assert!(
+            output.status.success(),
+            "{}",
+            String::from_utf8_lossy(&output.stderr)
+        );
+        output.stdout
+    };
+    let serial_terminal = terminal("1");
+    let automatic_terminal = terminal("4");
+    assert_eq!(serial_terminal, automatic_terminal);
+    let text = String::from_utf8(serial_terminal).unwrap();
+    assert_eq!(
+        text.matches("1 file has anonymous units that could not be matched safely.")
+            .count(),
+        1,
+        "{text}"
+    );
+
+    let machine = |jobs| {
+        let output = smackdebt()
+            .current_dir(project.path())
+            .args(["diff", "HEAD", "--json", "--jobs", jobs])
+            .output()
+            .unwrap();
+        assert!(
+            output.status.success(),
+            "{}",
+            String::from_utf8_lossy(&output.stderr)
+        );
+        output.stdout
+    };
+    let serial_json = machine("1");
+    let automatic_json = machine("4");
+    assert_eq!(serial_json, automatic_json);
+    let report: serde_json::Value = serde_json::from_slice(&serial_json).unwrap();
+    validate_schema(&report);
+    assert_index_integrity(&report);
+    let kinds: Vec<_> = report["comparisons"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .map(|value| value["kind"].as_str().unwrap())
+        .collect();
+    assert_eq!(kinds.iter().filter(|kind| **kind == "ambiguous").count(), 1);
+    assert_eq!(kinds.iter().filter(|kind| **kind == "added").count(), 2);
+    assert_eq!(kinds.iter().filter(|kind| **kind == "removed").count(), 3);
+    assert_eq!(
+        kinds
+            .iter()
+            .filter(|kind| **kind == "metric_changed")
+            .count(),
+        1
+    );
+    assert_eq!(
+        report["diagnostics"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .filter(|value| value["kind"] == "ambiguous_identity")
+            .count(),
+        1
+    );
+    let json_text = String::from_utf8(serial_json).unwrap();
+    assert!(!json_text.contains("binding:"));
+    assert!(!json_text.contains("argument:"));
+    assert!(
+        report["comparisons"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .all(|value| value["name"] != "steady"),
+        "the unchanged moved callback must disappear"
+    );
+}
+
+#[test]
+fn repeated_declared_names_do_not_emit_an_anonymous_warning() {
+    let project = named_duplicate_fixture();
+    let terminal = smackdebt()
+        .current_dir(project.path())
+        .args(["diff", "HEAD", "--all", "--color", "never"])
+        .output()
+        .unwrap();
+    assert!(terminal.status.success());
+    let terminal = String::from_utf8(terminal.stdout).unwrap();
+    assert!(!terminal.contains("anonymous units"), "{terminal}");
+
+    let output = smackdebt()
+        .current_dir(project.path())
+        .args(["diff", "HEAD", "--json"])
+        .output()
+        .unwrap();
+    assert!(output.status.success());
+    let report: serde_json::Value = serde_json::from_slice(&output.stdout).unwrap();
+    assert_eq!(
+        report["comparisons"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .filter(|value| value["kind"] == "ambiguous")
+            .count(),
+        1
+    );
+    assert!(
+        report["diagnostics"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .all(|value| value["kind"] != "ambiguous_identity")
+    );
+}
+
+#[test]
 fn added_and_removed_diff_cards_state_the_measurements_of_the_side_that_exists() {
     let project = one_sided_diff_fixture();
     let output = smackdebt()
@@ -3871,6 +3993,64 @@ fn one_sided_diff_fixture() -> tempfile::TempDir {
     fs::write(
         project.path().join("src/fresh.js"),
         "export function fresh(value) {\n  if (value) {\n    if (value > 1) {\n      return value;\n    }\n  }\n  return 0;\n}\n",
+    )
+    .unwrap();
+    project
+}
+
+fn anonymous_diff_fixture() -> tempfile::TempDir {
+    let project = tempfile::tempdir().unwrap();
+    fs::write(
+        project.path().join("package.json"),
+        "{\"name\":\"anonymous-diff\",\"private\":true}\n",
+    )
+    .unwrap();
+    fs::write(
+        project.path().join("callbacks.js"),
+        "watch('ready', () => work());\nrepeat(() => same());\ngone(() => old());\nold_only(() => retired());\nold_only(() => retired());\nconst steady = () => keep();\n",
+    )
+    .unwrap();
+    for index in 0..100 {
+        fs::write(
+            project.path().join(format!("stable-{index}.js")),
+            format!("export function stable{index}() {{ return {index}; }}\n"),
+        )
+        .unwrap();
+    }
+    git(project.path(), ["init", "-b", "main"]);
+    git(project.path(), ["config", "user.name", "Smackdebt Test"]);
+    git(
+        project.path(),
+        ["config", "user.email", "smackdebt@example.invalid"],
+    );
+    git(project.path(), ["add", "."]);
+    git(project.path(), ["commit", "-m", "test: anonymous base"]);
+    fs::write(
+        project.path().join("callbacks.js"),
+        "\nwatch('ready', () => { if (ready) work(); });\nrepeat(() => same());\nrepeat(() => same());\nonly(() => new_one());\nonly(() => new_one());\n\nconst steady = () => keep();\n",
+    )
+    .unwrap();
+    project
+}
+
+fn named_duplicate_fixture() -> tempfile::TempDir {
+    let project = tempfile::tempdir().unwrap();
+    fs::write(
+        project.path().join("duplicate.js"),
+        "function same() { return 1; }\nfunction same() { return 2; }\n",
+    )
+    .unwrap();
+    git(project.path(), ["init", "-b", "main"]);
+    git(project.path(), ["config", "user.name", "Smackdebt Test"]);
+    git(
+        project.path(),
+        ["config", "user.email", "smackdebt@example.invalid"],
+    );
+    git(project.path(), ["add", "."]);
+    git(project.path(), ["commit", "-m", "test: duplicate names"]);
+    fs::write(
+        project.path().join("duplicate.js"),
+        "function same() { return 1; }\nfunction same() { if (ready) return 2; }\n",
     )
     .unwrap();
     project

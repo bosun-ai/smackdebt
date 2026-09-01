@@ -345,9 +345,11 @@ pub const fn smackdebt_analysis::Comparison::direction(&self) -> smackdebt_analy
 pub const fn smackdebt_analysis::Comparison::file(&self) -> core::option::Option<smackdebt_analysis::FileId>
 pub const fn smackdebt_analysis::Comparison::id(&self) -> smackdebt_analysis::ComparisonId
 pub fn smackdebt_analysis::Comparison::identity(&self) -> &smackdebt_analysis::UnitIdentity
+pub const fn smackdebt_analysis::Comparison::is_anonymous_ambiguity(&self) -> bool
 pub const fn smackdebt_analysis::Comparison::kind(&self) -> smackdebt_analysis::ComparisonKind
 pub fn smackdebt_analysis::Comparison::new(smackdebt_analysis::ComparisonId, smackdebt_analysis::UnitIdentity, smackdebt_analysis::ComparisonKind, core::option::Option<smackdebt_analysis::Measurements>, core::option::Option<smackdebt_analysis::Measurements>, core::option::Option<smackdebt_analysis::Rating>, core::option::Option<smackdebt_analysis::Rating>) -> Self
 pub const fn smackdebt_analysis::Comparison::span(&self) -> core::option::Option<smackdebt_analysis::SourceSpan>
+pub const fn smackdebt_analysis::Comparison::with_anonymous_ambiguity(self) -> Self
 pub fn smackdebt_analysis::Comparison::with_file(self, smackdebt_analysis::FileId) -> Self
 pub const fn smackdebt_analysis::Comparison::with_span(self, smackdebt_analysis::SourceSpan) -> Self
 pub struct smackdebt_analysis::ComparisonId(_)
@@ -1227,6 +1229,7 @@ pub const fn smackdebt_analysis::UnitFact::measurements(&self) -> smackdebt_anal
 pub fn smackdebt_analysis::UnitFact::new(smackdebt_analysis::LocalUnitId, smackdebt_analysis::UnitIdentity, smackdebt_analysis::SourceSpan, smackdebt_analysis::Measurements, core::option::Option<smackdebt_analysis::LocalUnitId>) -> Self
 pub const fn smackdebt_analysis::UnitFact::parent(&self) -> core::option::Option<smackdebt_analysis::LocalUnitId>
 pub const fn smackdebt_analysis::UnitFact::span(&self) -> smackdebt_analysis::SourceSpan
+pub fn smackdebt_analysis::UnitFact::with_match_evidence(self, smackdebt_analysis::UnitMatchEvidence) -> Self
 pub struct smackdebt_analysis::UnitIdentity
 impl smackdebt_analysis::UnitIdentity
 pub fn smackdebt_analysis::UnitIdentity::container(&self) -> core::option::Option<&str>
@@ -1234,6 +1237,14 @@ pub fn smackdebt_analysis::UnitIdentity::in_container(self, impl core::convert::
 pub const fn smackdebt_analysis::UnitIdentity::kind(&self) -> smackdebt_analysis::UnitKind
 pub fn smackdebt_analysis::UnitIdentity::name(&self) -> &str
 pub fn smackdebt_analysis::UnitIdentity::new(impl core::convert::Into<alloc::string::String>, smackdebt_analysis::UnitKind) -> Self
+pub struct smackdebt_analysis::UnitMatchEvidence(_)
+impl smackdebt_analysis::UnitMatchEvidence
+pub const fn smackdebt_analysis::UnitMatchEvidence::declared() -> Self
+pub fn smackdebt_analysis::UnitMatchEvidence::exact_syntax(&[u8]) -> Self
+pub const fn smackdebt_analysis::UnitMatchEvidence::none() -> Self
+pub fn smackdebt_analysis::UnitMatchEvidence::semantic(core::option::Option<&str>, core::option::Option<&smackdebt_analysis::UnitIdentity>, smackdebt_analysis::UnitKind, impl core::convert::Into<alloc::string::String>) -> Self
+impl core::fmt::Debug for smackdebt_analysis::UnitMatchEvidence
+pub fn smackdebt_analysis::UnitMatchEvidence::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
 pub struct smackdebt_analysis::Verdict
 impl smackdebt_analysis::Verdict
 pub const fn smackdebt_analysis::Verdict::amplification(&self) -> core::option::Option<smackdebt_analysis::ChangeAmplification>

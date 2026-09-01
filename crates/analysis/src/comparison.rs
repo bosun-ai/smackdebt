@@ -1,8 +1,9 @@
 use std::cmp::Ordering;
+use std::collections::BTreeMap;
 
 use crate::health::{HealthPolicy, Measurements, Rating};
 use crate::report::{ComparisonId, FileId};
-use crate::source::{SourceSpan, UnitFact, UnitIdentity};
+use crate::source::{SourceSpan, UnitFact, UnitIdentity, UnitMatchKey};
 
 /// Whether a diff unit was added, removed, or changed.
 #[derive(Clone, Copy, Debug, Eq, Hash, Ord, PartialEq, PartialOrd)]
@@ -36,6 +37,7 @@ pub struct Comparison {
     after_rating: Option<Rating>,
     file: Option<FileId>,
     span: Option<SourceSpan>,
+    anonymous_ambiguity: bool,
 }
 
 impl Comparison {
@@ -58,6 +60,7 @@ impl Comparison {
             after_rating,
             file: None,
             span: None,
+            anonymous_ambiguity: false,
         }
     }
 
@@ -100,6 +103,13 @@ impl Comparison {
         self.span = Some(span);
         self
     }
+    pub const fn is_anonymous_ambiguity(&self) -> bool {
+        self.anonymous_ambiguity
+    }
+    pub const fn with_anonymous_ambiguity(mut self) -> Self {
+        self.anonymous_ambiguity = true;
+        self
+    }
     pub const fn direction(&self) -> ComparisonDirection {
         match self.kind {
             ComparisonKind::Regressed => ComparisonDirection::Worse,
@@ -119,163 +129,199 @@ impl Comparison {
     }
 }
 
-/// Compares units after both sides have been reduced to sorted identities.
+#[derive(Clone, Debug, Eq, Ord, PartialEq, PartialOrd)]
+enum CandidateKey {
+    Declared(UnitIdentity),
+    Semantic(UnitMatchKey),
+    Fingerprint(UnitMatchKey),
+}
+
+struct PendingComparison<'a> {
+    identity: UnitIdentity,
+    kind: ComparisonKind,
+    before: Option<&'a UnitFact>,
+    after: Option<&'a UnitFact>,
+    span: SourceSpan,
+    anonymous_ambiguity: bool,
+}
+
+type CandidateGroups = BTreeMap<CandidateKey, Vec<usize>>;
+
+struct MatchState<'a> {
+    before: &'a [UnitFact],
+    after: &'a [UnitFact],
+    used_before: Vec<bool>,
+    used_after: Vec<bool>,
+    pending: Vec<PendingComparison<'a>>,
+    policy: HealthPolicy,
+}
+
+impl<'a> MatchState<'a> {
+    fn new(before: &'a [UnitFact], after: &'a [UnitFact], policy: HealthPolicy) -> Self {
+        Self {
+            before,
+            after,
+            used_before: vec![false; before.len()],
+            used_after: vec![false; after.len()],
+            pending: Vec::with_capacity(before.len() + after.len()),
+            policy,
+        }
+    }
+
+    fn append_shared(&mut self, before_groups: &CandidateGroups, after_groups: &CandidateGroups) {
+        for (key, before_indexes) in before_groups {
+            let Some(after_indexes) = after_groups.get(key) else {
+                continue;
+            };
+            mark_used(&mut self.used_before, before_indexes);
+            mark_used(&mut self.used_after, after_indexes);
+            if before_indexes.len() == 1 && after_indexes.len() == 1 {
+                let left = &self.before[before_indexes[0]];
+                let right = &self.after[after_indexes[0]];
+                self.pending.push(PendingComparison {
+                    identity: right.identity().clone(),
+                    kind: paired_kind(left, right, self.policy),
+                    before: Some(left),
+                    after: Some(right),
+                    span: right.span(),
+                    anonymous_ambiguity: false,
+                });
+                continue;
+            }
+            let representative = &self.after[after_indexes[0]];
+            self.pending.push(PendingComparison {
+                identity: representative.identity().clone(),
+                kind: ComparisonKind::Ambiguous,
+                before: None,
+                after: None,
+                span: representative.span(),
+                anonymous_ambiguity: !matches!(key, CandidateKey::Declared(_)),
+            });
+        }
+    }
+}
+
+fn candidate_key(unit: &UnitFact) -> Option<CandidateKey> {
+    match unit.match_evidence().key() {
+        UnitMatchKey::Declared => Some(CandidateKey::Declared(unit.identity().clone())),
+        value @ UnitMatchKey::Semantic { .. } => Some(CandidateKey::Semantic(value.clone())),
+        value @ UnitMatchKey::Fingerprint { .. } => Some(CandidateKey::Fingerprint(value.clone())),
+        UnitMatchKey::None => None,
+    }
+}
+
+fn paired_kind(before: &UnitFact, after: &UnitFact, policy: HealthPolicy) -> ComparisonKind {
+    let before_assessment = policy.assess(before.measurements());
+    let after_assessment = policy.assess(after.measurements());
+    match before_assessment.rating().cmp(&after_assessment.rating()) {
+        Ordering::Less => ComparisonKind::Regressed,
+        Ordering::Greater => ComparisonKind::Improved,
+        Ordering::Equal if before.measurements().rated() != after.measurements().rated() => {
+            ComparisonKind::MetricChanged
+        }
+        Ordering::Equal => ComparisonKind::Unchanged,
+    }
+}
+
+fn group_units(units: &[UnitFact]) -> CandidateGroups {
+    let mut groups = CandidateGroups::new();
+    for (index, unit) in units.iter().enumerate() {
+        if let Some(key) = candidate_key(unit) {
+            groups.entry(key).or_default().push(index);
+        }
+    }
+    groups
+}
+
+fn mark_used(used: &mut [bool], indexes: &[usize]) {
+    for index in indexes {
+        used[*index] = true;
+    }
+}
+
+fn append_one_sided<'a>(
+    units: &'a [UnitFact],
+    used: &[bool],
+    kind: ComparisonKind,
+    pending: &mut Vec<PendingComparison<'a>>,
+) {
+    for unit in units
+        .iter()
+        .enumerate()
+        .filter(|(index, _)| !used[*index])
+        .map(|(_, unit)| unit)
+    {
+        let (before, after) = match kind {
+            ComparisonKind::Removed => (Some(unit), None),
+            ComparisonKind::Added => (None, Some(unit)),
+            _ => unreachable!("one-sided comparison kind"),
+        };
+        pending.push(PendingComparison {
+            identity: unit.identity().clone(),
+            kind,
+            before,
+            after,
+            span: unit.span(),
+            anonymous_ambiguity: false,
+        });
+    }
+}
+
+fn finish_comparisons(
+    mut pending: Vec<PendingComparison<'_>>,
+    policy: HealthPolicy,
+) -> Vec<Comparison> {
+    pending.sort_unstable_by(|left, right| {
+        left.identity
+            .cmp(&right.identity)
+            .then_with(|| left.span.cmp(&right.span))
+            .then_with(|| left.kind.cmp(&right.kind))
+    });
+    pending
+        .into_iter()
+        .enumerate()
+        .map(|(index, value)| {
+            let before = value.before.map(UnitFact::measurements);
+            let after = value.after.map(UnitFact::measurements);
+            let mut comparison = Comparison::new(
+                ComparisonId::from_index(index),
+                value.identity,
+                value.kind,
+                before,
+                after,
+                before.map(|value| policy.assess(value).rating()),
+                after.map(|value| policy.assess(value).rating()),
+            )
+            .with_span(value.span);
+            if value.anonymous_ambiguity {
+                comparison = comparison.with_anonymous_ambiguity();
+            }
+            comparison
+        })
+        .collect()
+}
+
+/// Compares units through the strongest safe evidence each unit owns.
 pub fn compare_units(
     before: &[UnitFact],
     after: &[UnitFact],
     policy: HealthPolicy,
 ) -> Vec<Comparison> {
-    let mut left: Vec<&UnitFact> = before.iter().collect();
-    let mut right: Vec<&UnitFact> = after.iter().collect();
-    left.sort_unstable_by(|a, b| a.identity().cmp(b.identity()));
-    right.sort_unstable_by(|a, b| a.identity().cmp(b.identity()));
-
-    let mut comparisons = Vec::with_capacity(left.len() + right.len());
-    let mut left_index = 0;
-    let mut right_index = 0;
-    let mut comparison_id = 0;
-    while left_index < left.len() || right_index < right.len() {
-        let left_identity = left.get(left_index).map(|unit| unit.identity());
-        let right_identity = right.get(right_index).map(|unit| unit.identity());
-        let identity_order = match (left_identity, right_identity) {
-            (Some(left_identity), Some(right_identity)) => left_identity.cmp(right_identity),
-            (Some(_), None) => Ordering::Less,
-            (None, Some(_)) => Ordering::Greater,
-            (None, None) => Ordering::Equal,
-        };
-
-        if identity_order == Ordering::Equal {
-            let left_start = left_index;
-            while left_index < left.len()
-                && left[left_index].identity() == left[left_start].identity()
-            {
-                left_index += 1;
-            }
-            let right_start = right_index;
-            while right_index < right.len()
-                && right[right_index].identity() == right[right_start].identity()
-            {
-                right_index += 1;
-            }
-            let identity = left[left_start].identity().clone();
-            if left_index - left_start != 1 || right_index - right_start != 1 {
-                comparisons.push(
-                    Comparison::new(
-                        ComparisonId::from_index(comparison_id),
-                        identity,
-                        ComparisonKind::Ambiguous,
-                        None,
-                        None,
-                        None,
-                        None,
-                    )
-                    .with_span(right[right_start].span()),
-                );
-            } else {
-                let left_unit = left[left_start];
-                let right_unit = right[right_start];
-                let left_assessment = policy.assess(left_unit.measurements());
-                let right_assessment = policy.assess(right_unit.measurements());
-                let kind = match left_assessment.rating().cmp(&right_assessment.rating()) {
-                    Ordering::Less => ComparisonKind::Regressed,
-                    Ordering::Greater => ComparisonKind::Improved,
-                    // Only the rated measurements classify a change, so an
-                    // unrated collected value never invents a diff outcome.
-                    Ordering::Equal
-                        if left_unit.measurements().rated()
-                            != right_unit.measurements().rated() =>
-                    {
-                        ComparisonKind::MetricChanged
-                    }
-                    Ordering::Equal => ComparisonKind::Unchanged,
-                };
-                comparisons.push(
-                    Comparison::new(
-                        ComparisonId::from_index(comparison_id),
-                        identity,
-                        kind,
-                        Some(left_unit.measurements()),
-                        Some(right_unit.measurements()),
-                        Some(left_assessment.rating()),
-                        Some(right_assessment.rating()),
-                    )
-                    .with_span(right_unit.span()),
-                );
-            }
-        } else if identity_order == Ordering::Less {
-            let start = left_index;
-            while left_index < left.len() && left[left_index].identity() == left[start].identity() {
-                left_index += 1;
-            }
-            let identity = left[start].identity().clone();
-            if left_index - start != 1 {
-                comparisons.push(
-                    Comparison::new(
-                        ComparisonId::from_index(comparison_id),
-                        identity,
-                        ComparisonKind::Ambiguous,
-                        None,
-                        None,
-                        None,
-                        None,
-                    )
-                    .with_span(left[start].span()),
-                );
-            } else {
-                let unit = left[start];
-                let assessment = policy.assess(unit.measurements());
-                comparisons.push(
-                    Comparison::new(
-                        ComparisonId::from_index(comparison_id),
-                        identity,
-                        ComparisonKind::Removed,
-                        Some(unit.measurements()),
-                        None,
-                        Some(assessment.rating()),
-                        None,
-                    )
-                    .with_span(unit.span()),
-                );
-            }
-        } else {
-            let start = right_index;
-            while right_index < right.len()
-                && right[right_index].identity() == right[start].identity()
-            {
-                right_index += 1;
-            }
-            let identity = right[start].identity().clone();
-            if right_index - start != 1 {
-                comparisons.push(
-                    Comparison::new(
-                        ComparisonId::from_index(comparison_id),
-                        identity,
-                        ComparisonKind::Ambiguous,
-                        None,
-                        None,
-                        None,
-                        None,
-                    )
-                    .with_span(right[start].span()),
-                );
-            } else {
-                let unit = right[start];
-                let assessment = policy.assess(unit.measurements());
-                comparisons.push(
-                    Comparison::new(
-                        ComparisonId::from_index(comparison_id),
-                        identity,
-                        ComparisonKind::Added,
-                        None,
-                        Some(unit.measurements()),
-                        None,
-                        Some(assessment.rating()),
-                    )
-                    .with_span(unit.span()),
-                );
-            }
-        }
-        comparison_id += 1;
-    }
-    comparisons
+    let before_groups = group_units(before);
+    let after_groups = group_units(after);
+    let mut state = MatchState::new(before, after, policy);
+    state.append_shared(&before_groups, &after_groups);
+    append_one_sided(
+        before,
+        &state.used_before,
+        ComparisonKind::Removed,
+        &mut state.pending,
+    );
+    append_one_sided(
+        after,
+        &state.used_after,
+        ComparisonKind::Added,
+        &mut state.pending,
+    );
+    finish_comparisons(state.pending, policy)
 }

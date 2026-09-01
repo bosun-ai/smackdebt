@@ -265,6 +265,69 @@ pub struct UnitIdentity {
     name: String,
 }
 
+/// Private evidence used to pair one unit across two versions of a file.
+///
+/// Language adapters can create this value, but only analysis can inspect it.
+#[derive(Clone, Eq, Hash, Ord, PartialEq, PartialOrd)]
+pub struct UnitMatchEvidence(UnitMatchKey);
+
+impl std::fmt::Debug for UnitMatchEvidence {
+    fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        formatter.write_str("UnitMatchEvidence")
+    }
+}
+
+#[derive(Clone, Debug, Eq, Hash, Ord, PartialEq, PartialOrd)]
+pub(crate) enum UnitMatchKey {
+    Declared,
+    Semantic {
+        language_container: Option<String>,
+        declared_unit: Option<UnitIdentity>,
+        kind: UnitKind,
+        anchor: String,
+    },
+    Fingerprint {
+        digest: [u8; 32],
+        syntax_len: u64,
+    },
+    None,
+}
+
+impl UnitMatchEvidence {
+    pub const fn declared() -> Self {
+        Self(UnitMatchKey::Declared)
+    }
+
+    pub fn semantic(
+        language_container: Option<&str>,
+        declared_unit: Option<&UnitIdentity>,
+        kind: UnitKind,
+        anchor: impl Into<String>,
+    ) -> Self {
+        Self(UnitMatchKey::Semantic {
+            language_container: language_container.map(str::to_owned),
+            declared_unit: declared_unit.cloned(),
+            kind,
+            anchor: anchor.into(),
+        })
+    }
+
+    pub fn exact_syntax(syntax: &[u8]) -> Self {
+        Self(UnitMatchKey::Fingerprint {
+            digest: *blake3::hash(syntax).as_bytes(),
+            syntax_len: syntax.len() as u64,
+        })
+    }
+
+    pub const fn none() -> Self {
+        Self(UnitMatchKey::None)
+    }
+
+    pub(crate) const fn key(&self) -> &UnitMatchKey {
+        &self.0
+    }
+}
+
 impl UnitIdentity {
     pub fn new(name: impl Into<String>, kind: UnitKind) -> Self {
         Self {
@@ -308,6 +371,7 @@ pub struct UnitFact {
     span: SourceSpan,
     measurements: Measurements,
     parent: Option<LocalUnitId>,
+    match_evidence: UnitMatchEvidence,
 }
 
 impl UnitFact {
@@ -324,7 +388,13 @@ impl UnitFact {
             span,
             measurements,
             parent,
+            match_evidence: UnitMatchEvidence::declared(),
         }
+    }
+
+    pub fn with_match_evidence(mut self, match_evidence: UnitMatchEvidence) -> Self {
+        self.match_evidence = match_evidence;
+        self
     }
 
     pub const fn local_id(&self) -> LocalUnitId {
@@ -345,6 +415,10 @@ impl UnitFact {
 
     pub const fn parent(&self) -> Option<LocalUnitId> {
         self.parent
+    }
+
+    pub(crate) const fn match_evidence(&self) -> &UnitMatchEvidence {
+        &self.match_evidence
     }
 }
 

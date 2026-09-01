@@ -2533,15 +2533,6 @@ mod tests {
     }
 
     #[test]
-    fn duplicate_identity_is_ambiguous_instead_of_guessing() {
-        let first = unit("same", Measurements::new(1, 1, 1));
-        let second = unit_with_id(1, "same", Measurements::new(2, 1, 1));
-        let comparisons = compare_units(&[first, second], &[], HealthPolicy::default());
-        assert_eq!(comparisons.len(), 1);
-        assert_eq!(comparisons[0].kind(), ComparisonKind::Ambiguous);
-    }
-
-    #[test]
     fn comparison_distinguishes_improvement_regression_and_unchanged_units() {
         let before = [
             unit("improved", Measurements::new(25, 1, 1)),

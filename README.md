@@ -268,9 +268,18 @@ smackdebt diff main
 smackdebt diff main crates/analysis
 ```
 
-The diff report matches named functions and code containers across both sides.
-When a match is unclear, it reports the file change and explains why it could
-not produce a symbol-level comparison.
+The diff report matches named functions and methods by their declared identity.
+It matches anonymous callbacks only when a unique assignment, binding, call
+site, neighboring label, Ruby example or context description, or unchanged
+exact syntax identifies the same unit on both sides. Local anchors include the
+nearest declared function or method, so equal local names in separate units do
+not collide. Line numbers,
+measurements, and source order never decide a match. If anonymous language or
+syntax evidence exists on both sides and names several candidates on either
+side, Smackdebt keeps one unclear machine row and groups the file into one
+warning instead of guessing. A repeated declared name remains an unclear
+machine row without that anonymous-unit warning. Any repeated group stays as
+additions or removals only when its evidence is absent from the other side.
 
 ## Read the report
 

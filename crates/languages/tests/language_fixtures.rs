@@ -1,8 +1,9 @@
 use std::path::Path;
 
 use smackdebt_analysis::{
-    DependencyIntent, DependencyKind, DependencyScope, DependencySyntax, DependencySyntaxState,
-    Language, ParseStatus, SourceSpan, StaticRelationKind, UnitKind,
+    ComparisonKind, DependencyIntent, DependencyKind, DependencyScope, DependencySyntax,
+    DependencySyntaxState, HealthPolicy, Language, ParseStatus, SourceSpan, StaticRelationKind,
+    UnitKind, compare_units,
 };
 use smackdebt_languages::Analyzer;
 
@@ -1583,6 +1584,145 @@ fn ruby_modifiers_use_the_same_structural_events_as_block_conditions() {
     assert_eq!(unit.measurements().cognitive_complexity(), 1);
     assert_eq!(unit.measurements().cyclomatic_complexity(), 2);
     assert_eq!(unit.measurements().logical_lines(), 2);
+}
+
+#[test]
+fn language_anchors_pair_moved_and_edited_callbacks_once() {
+    let cases: [(&str, &[u8], &[u8]); 4] = [
+        (
+            "callbacks.js",
+            b"watch('ready', () => work());\n",
+            b"const gap = true;\nwatch('ready', () => { if (gap) work(); });\n",
+        ),
+        (
+            "callbacks.ts",
+            b"items.map((value: number) => value);\n",
+            b"const gap = true;\nitems.map((value: number) => gap ? value : 0);\n",
+        ),
+        (
+            "Callbacks.vue",
+            b"<script setup lang=\"ts\">\nwatch('ready', () => work());\n</script>\n",
+            b"<script setup lang=\"ts\">\nconst gap = true;\nwatch('ready', () => { if (gap) work(); });\n</script>\n",
+        ),
+        (
+            "callbacks.rb",
+            b"it 'works' do\n  work\nend\n",
+            b"\n\nit 'works' do\n  work if ready\nend\n",
+        ),
+    ];
+    for (path, before, after) in cases {
+        let mut analyzer = Analyzer::default();
+        let before = analyzer.analyze(Path::new(path), before.to_vec()).unwrap();
+        let after = analyzer.analyze(Path::new(path), after.to_vec()).unwrap();
+        let comparisons = compare_units(before.units(), after.units(), HealthPolicy::default());
+        let changed: Vec<_> = comparisons
+            .iter()
+            .filter(|value| value.kind() != ComparisonKind::Unchanged)
+            .collect();
+        assert_eq!(changed.len(), 1, "{path}: {comparisons:?}");
+        assert_eq!(changed[0].kind(), ComparisonKind::MetricChanged, "{path}");
+        assert!(changed[0].before().is_some(), "{path}");
+        assert!(changed[0].after().is_some(), "{path}");
+    }
+}
+
+#[test]
+fn exact_syntax_pairs_an_unchanged_callback_after_a_move() {
+    let mut analyzer = Analyzer::default();
+    let before = analyzer
+        .analyze(
+            Path::new("callbacks.rs"),
+            b"fn run() { let f = || save(); }\n".to_vec(),
+        )
+        .unwrap();
+    let after = analyzer
+        .analyze(
+            Path::new("callbacks.rs"),
+            b"\n\nfn run() { let f = || save(); }\n".to_vec(),
+        )
+        .unwrap();
+    let comparisons = compare_units(before.units(), after.units(), HealthPolicy::default());
+    assert!(
+        comparisons
+            .iter()
+            .all(|value| value.kind() == ComparisonKind::Unchanged)
+    );
+}
+
+#[test]
+fn ruby_context_descriptions_distinguish_repeated_example_names() {
+    let before = b"context 'one' do\n  it 'works' do\n    work\n  end\nend\ncontext 'two' do\n  it 'works' do\n    work\n  end\nend\n";
+    let after = b"context 'two' do\n  it 'works' do\n    work\n  end\nend\ncontext 'one' do\n  it 'works' do\n    work if ready\n  end\nend\n";
+    let mut analyzer = Analyzer::default();
+    let before = analyzer
+        .analyze(Path::new("contexts.rb"), before.to_vec())
+        .unwrap();
+    let after = analyzer
+        .analyze(Path::new("contexts.rb"), after.to_vec())
+        .unwrap();
+    let comparisons = compare_units(before.units(), after.units(), HealthPolicy::default());
+    assert_eq!(
+        comparisons
+            .iter()
+            .filter(|value| value.kind() == ComparisonKind::MetricChanged)
+            .count(),
+        1,
+        "{comparisons:?}"
+    );
+    assert!(
+        comparisons.iter().all(|value| matches!(
+            value.kind(),
+            ComparisonKind::MetricChanged | ComparisonKind::Unchanged
+        )),
+        "{comparisons:?}"
+    );
+}
+
+#[test]
+fn local_anchors_are_scoped_to_the_nearest_declared_unit() {
+    let cases: [(&str, &[u8], &[u8]); 4] = [
+        (
+            "containers.js",
+            b"function one() { const handler = () => left(); }\nfunction two() { const handler = () => right(); }\n",
+            b"function two() { const handler = () => { if (ready) right(); }; }\nfunction one() { const handler = () => left(); }\n",
+        ),
+        (
+            "containers.ts",
+            b"function one() { const handler = () => left(); }\nfunction two() { const handler = () => right(); }\n",
+            b"function two() { const handler = () => { if (ready) right(); }; }\nfunction one() { const handler = () => left(); }\n",
+        ),
+        (
+            "Containers.vue",
+            b"<script setup lang=\"ts\">\nfunction one() { const handler = () => left(); }\nfunction two() { const handler = () => right(); }\n</script>\n",
+            b"<script setup lang=\"ts\">\nfunction two() { const handler = () => { if (ready) right(); }; }\nfunction one() { const handler = () => left(); }\n</script>\n",
+        ),
+        (
+            "containers.rb",
+            b"def one\n  handler = -> { left }\nend\ndef two\n  handler = -> { right }\nend\n",
+            b"def two\n  handler = -> { right if ready }\nend\ndef one\n  handler = -> { left }\nend\n",
+        ),
+    ];
+    for (path, before, after) in cases {
+        let mut analyzer = Analyzer::default();
+        let before = analyzer.analyze(Path::new(path), before.to_vec()).unwrap();
+        let after = analyzer.analyze(Path::new(path), after.to_vec()).unwrap();
+        let comparisons = compare_units(before.units(), after.units(), HealthPolicy::default());
+        assert_eq!(
+            comparisons
+                .iter()
+                .filter(|value| value.kind() == ComparisonKind::MetricChanged)
+                .count(),
+            1,
+            "{path}: {comparisons:?}"
+        );
+        assert!(
+            comparisons.iter().all(|value| matches!(
+                value.kind(),
+                ComparisonKind::MetricChanged | ComparisonKind::Unchanged
+            )),
+            "{path}: {comparisons:?}"
+        );
+    }
 }
 
 const fn file<'a>(

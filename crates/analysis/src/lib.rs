@@ -122,7 +122,7 @@ pub use source::{
     CRATE_ROOT_CANDIDATE, DECLARING_FILE_CANDIDATE, DependencyIntent, DependencyKind,
     DependencyScope, DependencySyntax, DependencySyntaxState, FileAnalysis, Language, LocalUnitId,
     ParseStatus, SourceRole, SourceSpan, SourceTrust, StaticRelationKind, UnitFact, UnitIdentity,
-    UnitKind, is_symbolic_candidate,
+    UnitKind, UnitMatchEvidence, is_symbolic_candidate,
 };
 pub use verdict::{
     ChangeAmplification, CodebaseTier, CoreSize, CoverageQualifier, DENSITY_EVIDENCE_UNITS,

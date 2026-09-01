@@ -51,6 +51,16 @@ pub(super) trait Language {
     fn name(node: Node<'_>, source: &[u8]) -> String {
         node_name(node, source)
     }
+
+    fn has_declared_identity(node: Node<'_>, source: &[u8]) -> bool {
+        node.child_by_field_name("name")
+            .and_then(|name| name.utf8_text(source).ok())
+            .is_some_and(|name| !name.trim().is_empty())
+    }
+
+    fn match_anchor(_node: Node<'_>, _source: &[u8]) -> Option<String> {
+        None
+    }
 }
 
 pub(super) fn node_name(node: Node<'_>, source: &[u8]) -> String {

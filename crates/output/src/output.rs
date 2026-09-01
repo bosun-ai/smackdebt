@@ -407,10 +407,15 @@ impl Presentation {
         let withheld_graph_comparison = report
             .diff_graph_evidence()
             .is_some_and(|evidence| evidence.suppressed_total() > 0);
+        let ambiguous_identity = report.diagnostics().iter().any(|diagnostic| {
+            diagnostic.kind() == DiagnosticKind::AmbiguousIdentity
+                && diagnostic_belongs_to_scope(report, diagnostic, selected)
+        });
         let verdict_only = report.mode() == ReportMode::Diff
             && verdict.diff_tier() == Some(DiffTier::NoDebtChange)
             && verdict.qualifier().is_none()
-            && !withheld_graph_comparison;
+            && !withheld_graph_comparison
+            && !ambiguous_identity;
         let next = match report.mode() {
             ReportMode::Codebase => first_problem_path(report, displayed, selected, all)
                 .or_else(|| drill_path_from_visible(report, selected, areas.first()))
@@ -2250,8 +2255,8 @@ const fn diagnostic_predicate(kind: DiagnosticKind) -> (&'static str, &'static s
             ("could not be fully parsed.", "could not be fully parsed.")
         }
         DiagnosticKind::AmbiguousIdentity => (
-            "contains code that could not be matched.",
-            "contain code that could not be matched.",
+            "has anonymous units that could not be matched safely.",
+            "have anonymous units that could not be matched safely.",
         ),
         DiagnosticKind::UnsafeReference => (
             "contains an unsafe reference.",
@@ -2281,6 +2286,7 @@ fn diagnostic_summary(kind: DiagnosticKind, count: usize) -> String {
             Counted::new(count, "nested repository", "nested repositories")
         }
         DiagnosticKind::PropagationSkipped => Counted::new(count, "package", "packages"),
+        DiagnosticKind::AmbiguousIdentity => Counted::new(count, "file", "files"),
         _ => Counted::new(count, "source file", "source files"),
     };
     let (singular, plural) = diagnostic_predicate(kind);
@@ -3336,8 +3342,8 @@ mod tests {
             ),
             (
                 DiagnosticKind::AmbiguousIdentity,
-                "1 source file contains code that could not be matched.",
-                "3 source files contain code that could not be matched.",
+                "1 file has anonymous units that could not be matched safely.",
+                "3 files have anonymous units that could not be matched safely.",
             ),
             (
                 DiagnosticKind::UnsafeReference,

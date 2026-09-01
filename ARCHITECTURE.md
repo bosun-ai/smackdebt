@@ -215,6 +215,25 @@ remain visible unsupported files and contribute no healthy unit. Astro has a
 compiled language identity and participates in current and ref inventories,
 coverage, diagnostics, and graph trust, but has no analysis dispatch.
 
+Each unit also carries an analysis-owned match-evidence value that language
+adapters can create but no other crate can inspect. Human identity remains
+unchanged. Named functions and methods use declared identity. Anonymous units
+use a language anchor when assignment, binding, callback position, a nearby
+literal, or a Ruby example or context description supplies one; otherwise they
+carry a BLAKE3-256 fingerprint and byte length of their exact syntax. The
+anchor also includes the nearest declared function or method and its language
+container, so equal local names in separate declared units stay separate. The
+fingerprint is created while the source buffer is active, and neither syntax
+bytes nor readable match evidence leave analysis.
+
+One file comparison pairs unique declared identities first, then unique
+language anchors, then unique exact-syntax fingerprints. A candidate present on
+both sides and repeated on either side produces one unclear comparison group. A
+repeated candidate produces one removal or addition per unit only when it is
+absent from the other side. Measurements, ratings, lines, source order, and
+approximate syntax never create a pair. Unclear rows do not move the verdict,
+and their file is counted once in the grouped warning for a rendered scope.
+
 Vue is a document grammar. It parses each JavaScript or TypeScript `script`
 region from a borrowed slice, keeps the region's original line offset, and
 creates a separate template unit. Template directives and expressions feed the
@@ -383,8 +402,9 @@ result scratch remain with the worker and retain capacity between files.
 Compiled unit queries are retained by grammar and their mutable cursors are not
 shared between workers. Vue borrows included source ranges instead of copying
 the complete document. A diff worker holds at most the base and worktree buffers
-for its current file. Source memory therefore follows active worker count
-instead of repository size.
+for its current file. Exact unit syntax is reduced to fixed-size private match
+evidence before those buffers are released. Source memory therefore follows
+active worker count instead of repository size.
 
 Health policy runs on analysis workers. Healthy details are reduced before
 results return to aggregation. Terminal and JSON output write directly to an
@@ -492,10 +512,15 @@ renamed, deleted, and non-ignored untracked worktree changes. One
 `git cat-file --batch` process supplies base objects through a small queue. The
 number of Git processes does not grow with the changed-file count.
 
-Named units match by path after rename handling, container, kind, and name.
-Results are added, removed, improved, regressed, metric-changed, ambiguous, or
-unchanged. Unclear identity, unsupported source, and parse failure produce a
-file-level comparison diagnostic instead of a guessed match.
+Units match after rename handling through unique declared identity, then unique
+language meaning, then unique exact syntax. Results are added, removed,
+improved, regressed, metric-changed, ambiguous, or unchanged. An anonymous
+language-anchor or fingerprint candidate present on both sides that repeats on
+either side produces one ambiguous row and a file-level diagnostic. A repeated
+declared identity stays machine-ambiguous without the anonymous-unit diagnostic.
+Any repeated candidate remains one-sided only when the other side has none.
+Unsupported source and parse failure also produce file-level comparison
+diagnostics rather than a guessed match.
 
 ## Output and failure behavior
 

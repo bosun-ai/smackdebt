@@ -55,6 +55,14 @@ macro_rules! javascript_language {
                 javascript_name::<Self>(node, source)
             }
 
+            fn has_declared_identity(node: Node<'_>, source: &[u8]) -> bool {
+                javascript_has_declared_identity(node, source)
+            }
+
+            fn match_anchor(node: Node<'_>, source: &[u8]) -> Option<String> {
+                javascript_match_anchor(node, source)
+            }
+
             fn syntax(node: Node<'_>, source: &[u8]) -> Syntax {
                 javascript_syntax(node, source)
             }
@@ -153,6 +161,66 @@ fn javascript_name<L: Language>(node: Node<'_>, source: &[u8]) -> String {
         let _ = std::marker::PhantomData::<L>;
         node_name(node, source)
     }
+}
+
+fn javascript_has_declared_identity(node: Node<'_>, source: &[u8]) -> bool {
+    if node.kind() == "arrow_function" {
+        return false;
+    }
+    node.child_by_field_name("name")
+        .and_then(|name| name.utf8_text(source).ok())
+        .is_some_and(|name| !name.trim().is_empty())
+}
+
+fn javascript_match_anchor(node: Node<'_>, source: &[u8]) -> Option<String> {
+    binding_anchor(node, source).or_else(|| call_anchor(node, source))
+}
+
+fn binding_anchor(node: Node<'_>, source: &[u8]) -> Option<String> {
+    let parent = node.parent()?;
+    let binding = match parent.kind() {
+        "variable_declarator" | "pair" | "public_field_definition" => parent
+            .child_by_field_name("name")
+            .or_else(|| parent.child_by_field_name("key"))
+            .or_else(|| parent.child_by_field_name("property")),
+        "assignment_expression" => parent.child_by_field_name("left"),
+        _ => None,
+    }?;
+    let text = binding.utf8_text(source).ok()?.trim();
+    (!text.is_empty()).then(|| format!("binding:{text}"))
+}
+
+fn call_anchor(node: Node<'_>, source: &[u8]) -> Option<String> {
+    let arguments = node.parent()?;
+    if arguments.kind() != "arguments" {
+        return None;
+    }
+    let call = arguments.parent()?;
+    if call.kind() != "call_expression" {
+        return None;
+    }
+    let callee = call
+        .child_by_field_name("function")?
+        .utf8_text(source)
+        .ok()?
+        .trim();
+    if callee.is_empty() {
+        return None;
+    }
+    let mut cursor = arguments.walk();
+    let children: Vec<_> = arguments.named_children(&mut cursor).collect();
+    let position = children.iter().position(|child| child.id() == node.id())?;
+    let literal = children
+        .iter()
+        .filter(|child| child.id() != node.id())
+        .find(|child| matches!(child.kind(), "string" | "template_string"))
+        .and_then(|child| child.utf8_text(source).ok())
+        .map(str::trim)
+        .filter(|text| !text.is_empty());
+    Some(match literal {
+        Some(literal) => format!("call:{callee}:argument:{position}:literal:{literal}"),
+        None => format!("call:{callee}:argument:{position}"),
+    })
 }
 
 fn javascript_syntax(node: Node<'_>, source: &[u8]) -> Syntax {

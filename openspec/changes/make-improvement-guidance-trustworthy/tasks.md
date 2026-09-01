@@ -57,22 +57,40 @@
 
 ## 2. Anonymous-unit matching
 
-- [ ] 2.1 Add the opaque analysis-owned match-evidence type at the private
+- [x] 2.1 Add the opaque analysis-owned match-evidence type at the private
       language seam, update its API snapshot, and keep display identity unchanged.
-- [ ] 2.2 Supply tested semantic anchors from JavaScript, TypeScript, Vue, and
+- [x] 2.2 Supply tested semantic anchors from JavaScript, TypeScript, Vue, and
       Ruby adapters without exposing syntax nodes or digests.
-- [ ] 2.3 Implement declared, unique-anchor, and unique fingerprint matching in
+- [x] 2.3 Implement declared, unique-anchor, and unique fingerprint matching in
       that order, with no metric, line, ordinal, fuzzy, or retained-source fallback.
-- [ ] 2.4 Retain only shared collision groups as ambiguous machine comparisons;
+- [x] 2.4 Retain only shared collision groups as ambiguous machine comparisons;
       keep one-sided groups Added or Removed and emit one scope warning counting
       each affected file once without moving the verdict.
-- [ ] 2.5 Prove unchanged moved callbacks disappear, moved-and-edited callbacks
+- [x] 2.5 Prove unchanged moved callbacks disappear, moved-and-edited callbacks
       become one comparison, genuine additions and removals stay one-sided,
       repeated-current-only and repeated-base-only groups stay one-sided,
       two-to-one groups remain ambiguous, and worker policies produce equal bytes.
-- [ ] 2.6 Build the release binary and verify the recorded Smackdebt closures,
+- [x] 2.6 Build the release binary and verify the recorded Smackdebt closures,
       Fluyt `WorkflowRunMiniMap.vue`, and both `GraphEditor.vue` revisions in
       terminal and JSON before committing this slice.
+
+      **Completion note (2026-09-01).** The final release build passed the full
+      `rtk just check` gate with no debt-ratchet regressions. Generated policy,
+      language, project, and CLI tests prove safe pairs, one-sided repeats,
+      shared collisions, one warning per file, private JSON, and equal serial
+      and parallel bytes. The Smackdebt `d4e78ba` review retained 190 Added, 21
+      Removed, and 64 ambiguous closure groups across the current 29-file diff;
+      16 files carried the grouped warning; jobs 1 and jobs 4 JSON both hashed
+      to `1be49d292685fa404e4187c731b61365d744dccb10020ac78b716828a0c26d4b`.
+      `WorkflowRunMiniMap.vue` is
+      unchanged from `master`, so terminal and JSON retained no source
+      comparison. The exact `GraphEditor.vue` revisions changed from the
+      recorded 125 Added, 95 Removed, and 20 MetricChanged rows to 27 Added, 1
+      Removed, 20 MetricChanged, and 11 ambiguous groups. Its one file warning
+      appeared once, its terminal and JSON conclusions agreed, and jobs 1 and
+      jobs 4 JSON both hashed to
+      `4205f47d8bdd270be062a189130441cd275e6e290e4fe06f33baa3517abe4376`.
+      Temporary revision source and output were removed after aggregate review.
 
 ## 3. Generated JavaScript context
 
