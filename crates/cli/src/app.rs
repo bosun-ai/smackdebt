@@ -367,6 +367,10 @@ fn fail(error: &ProjectError) -> ExitCode {
                 path.display()
             )
         }
+        ProjectError::NoSourceFiles(path) => {
+            format!("no source files found under: {}", path.display())
+        }
+        ProjectError::NotSourceFile(path) => format!("not a source file: {}", path.display()),
     };
     let status = if matches!(error, ProjectError::SourceRoleConflict { .. }) {
         2

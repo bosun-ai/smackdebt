@@ -117,13 +117,6 @@ pub const VOLUME_FIGHTS_BACK_HIGH: u32 = 100;
 /// The High count that floors the tier at `lost` at any density.
 pub const VOLUME_LOST_HIGH: u32 = 1000;
 
-/// The unsupported byte permille above which a verdict qualifies itself.
-///
-/// Above this share of selected source bytes in languages Smackdebt cannot
-/// analyze, the verdict states that not all source was checked. The value is
-/// a proposed constant under review.
-pub const UNSUPPORTED_QUALIFIER_PERMILLE: u32 = 100;
-
 /// The coverage honesty a qualified verdict carries.
 ///
 /// The sentence and the share fact are copy owned by analysis, so a terminal
@@ -131,29 +124,35 @@ pub const UNSUPPORTED_QUALIFIER_PERMILLE: u32 = 100;
 /// The qualifier informs the reader only — it never moves the selected tier.
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct CoverageQualifier {
+    selected_files: u32,
+    analyzed_files: u32,
     share_permille: u32,
-    largest_language: String,
+    largest_language: Option<String>,
 }
 
 impl CoverageQualifier {
-    /// Completes a qualifier when the unsupported byte share is material.
+    /// Completes a qualifier whenever some selected source was not analyzed.
     ///
-    /// The share is the integer permille of unsupported source bytes over
-    /// selected source bytes; at or below the threshold, and for a scope
-    /// without selected bytes, no qualifier exists.
-    pub fn from_shares(
+    pub fn from_coverage(
+        selected_files: u32,
+        analyzed_files: u32,
         selected_bytes: u64,
         unsupported_bytes: u64,
-        largest_language: impl Into<String>,
+        largest_language: Option<String>,
     ) -> Option<Self> {
-        if selected_bytes == 0 {
+        if analyzed_files >= selected_files {
             return None;
         }
         // The share never exceeds 1000, so the narrowing cast is exact.
-        let share_permille = (unsupported_bytes.saturating_mul(1000) / selected_bytes) as u32;
-        (share_permille > UNSUPPORTED_QUALIFIER_PERMILLE).then(|| Self {
+        let share_permille = unsupported_bytes
+            .saturating_mul(1000)
+            .checked_div(selected_bytes)
+            .unwrap_or_default() as u32;
+        Some(Self {
+            selected_files,
+            analyzed_files,
             share_permille,
-            largest_language: largest_language.into(),
+            largest_language,
         })
     }
 
@@ -162,13 +161,20 @@ impl CoverageQualifier {
         "Not all source was checked."
     }
 
-    /// The exact fact naming the share and the largest unsupported language.
-    pub fn fact(&self) -> String {
+    /// The exact file-count detail every consumer prints.
+    pub fn detail(&self) -> String {
         format!(
-            "{}% of source bytes are {}.",
-            self.share_permille / 10,
-            self.largest_language
+            "{} of {} source files were analyzed.",
+            self.analyzed_files, self.selected_files
         )
+    }
+
+    pub const fn selected_files(&self) -> u32 {
+        self.selected_files
+    }
+
+    pub const fn analyzed_files(&self) -> u32 {
+        self.analyzed_files
     }
 
     /// Unsupported source bytes per thousand selected source bytes.
@@ -177,8 +183,8 @@ impl CoverageQualifier {
     }
 
     /// The unsupported language owning the most selected bytes.
-    pub fn largest_language(&self) -> &str {
-        &self.largest_language
+    pub fn largest_language(&self) -> Option<&str> {
+        self.largest_language.as_deref()
     }
 }
 
@@ -1048,21 +1054,27 @@ mod tests {
     }
 
     #[test]
-    fn the_coverage_qualifier_fires_only_above_the_permille_threshold() {
+    fn the_coverage_qualifier_fires_for_every_file_count_gap() {
         assert!(
-            CoverageQualifier::from_shares(1000, 100, "Go").is_none(),
-            "a share exactly at the threshold stays unqualified"
+            CoverageQualifier::from_coverage(1, 1, 1000, 100, Some("Go".to_owned())).is_none(),
+            "complete file coverage stays unqualified"
         );
-        let qualifier = CoverageQualifier::from_shares(1000, 101, "Go")
-            .expect("one permille above the threshold qualifies");
-        assert_eq!(qualifier.share_permille(), 101);
+        let qualifier = CoverageQualifier::from_coverage(1000, 999, 1000, 1, Some("Go".to_owned()))
+            .expect("one missed file qualifies");
+        assert_eq!(qualifier.share_permille(), 1);
         assert_eq!(qualifier.sentence(), "Not all source was checked.");
-        assert_eq!(qualifier.fact(), "10% of source bytes are Go.");
-        assert_eq!(qualifier.largest_language(), "Go");
-        assert!(
-            CoverageQualifier::from_shares(0, 0, "Go").is_none(),
-            "a scope without selected bytes has no share to state"
+        assert_eq!(
+            qualifier.detail(),
+            "999 of 1000 source files were analyzed."
         );
+        assert_eq!(qualifier.selected_files(), 1000);
+        assert_eq!(qualifier.analyzed_files(), 999);
+        assert_eq!(qualifier.largest_language(), Some("Go"));
+
+        let failed = CoverageQualifier::from_coverage(1, 0, 10, 0, None)
+            .expect("failed-only coverage is disclosed");
+        assert_eq!(failed.share_permille(), 0);
+        assert_eq!(failed.largest_language(), None);
     }
 
     #[test]
@@ -1247,7 +1259,13 @@ mod tests {
         let bare = Verdict::codebase(counts, Vec::new());
         let qualified = bare
             .clone()
-            .with_qualifier(CoverageQualifier::from_shares(10, 9, "Go"));
+            .with_qualifier(CoverageQualifier::from_coverage(
+                1,
+                0,
+                10,
+                9,
+                Some("Go".to_owned()),
+            ));
         assert_eq!(qualified.tier(), bare.tier());
         assert_eq!(qualified.sentence(), bare.sentence());
         assert!(qualified.qualifier().is_some());

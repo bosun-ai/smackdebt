@@ -114,6 +114,7 @@ pub smackdebt_analysis::HistoryAvailability::Complete
 pub smackdebt_analysis::HistoryAvailability::Incomplete
 pub smackdebt_analysis::HistoryAvailability::Unavailable
 pub enum smackdebt_analysis::Language
+pub smackdebt_analysis::Language::Astro
 pub smackdebt_analysis::Language::C
 pub smackdebt_analysis::Language::Cpp
 pub smackdebt_analysis::Language::Java
@@ -428,9 +429,11 @@ pub const fn smackdebt_analysis::Coverage::unsupported_files(self) -> u32
 pub const fn smackdebt_analysis::Coverage::with_bytes(self, u64, u64) -> Self
 pub struct smackdebt_analysis::CoverageQualifier
 impl smackdebt_analysis::CoverageQualifier
-pub fn smackdebt_analysis::CoverageQualifier::fact(&self) -> alloc::string::String
-pub fn smackdebt_analysis::CoverageQualifier::from_shares(u64, u64, impl core::convert::Into<alloc::string::String>) -> core::option::Option<Self>
-pub fn smackdebt_analysis::CoverageQualifier::largest_language(&self) -> &str
+pub const fn smackdebt_analysis::CoverageQualifier::analyzed_files(&self) -> u32
+pub fn smackdebt_analysis::CoverageQualifier::detail(&self) -> alloc::string::String
+pub fn smackdebt_analysis::CoverageQualifier::from_coverage(u32, u32, u64, u64, core::option::Option<alloc::string::String>) -> core::option::Option<Self>
+pub fn smackdebt_analysis::CoverageQualifier::largest_language(&self) -> core::option::Option<&str>
+pub const fn smackdebt_analysis::CoverageQualifier::selected_files(&self) -> u32
 pub const fn smackdebt_analysis::CoverageQualifier::sentence(&self) -> &'static str
 pub const fn smackdebt_analysis::CoverageQualifier::share_permille(&self) -> u32
 pub struct smackdebt_analysis::DebtDiffFacts
@@ -1309,7 +1312,6 @@ pub const smackdebt_analysis::RETAINED_FILE_PAIR_SIMILARITY_PERMILLE: u32
 pub const smackdebt_analysis::ROOT_REACH_PACKAGES: u32
 pub const smackdebt_analysis::ROOT_REACH_REACHED: u32
 pub const smackdebt_analysis::SMALL_SCOPE_HIGH_UNITS: u32
-pub const smackdebt_analysis::UNSUPPORTED_QUALIFIER_PERMILLE: u32
 pub const smackdebt_analysis::VOLUME_FIGHTS_BACK_HIGH: u32
 pub const smackdebt_analysis::VOLUME_LOST_HIGH: u32
 pub const smackdebt_analysis::WIRING_FILENAMES: &[&str]

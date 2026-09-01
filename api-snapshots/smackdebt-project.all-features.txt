@@ -15,6 +15,8 @@ pub smackdebt_project::ProjectError::Inspect
 pub smackdebt_project::ProjectError::Inspect::path: std::path::PathBuf
 pub smackdebt_project::ProjectError::Inspect::source: core::io::error::Error
 pub smackdebt_project::ProjectError::MissingReference
+pub smackdebt_project::ProjectError::NoSourceFiles(std::path::PathBuf)
+pub smackdebt_project::ProjectError::NotSourceFile(std::path::PathBuf)
 pub smackdebt_project::ProjectError::SourceRoleConflict
 pub smackdebt_project::ProjectError::SourceRoleConflict::path: std::path::PathBuf
 pub smackdebt_project::ProjectError::SourceRoleConflict::roles: alloc::string::String

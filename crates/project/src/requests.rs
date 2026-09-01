@@ -327,4 +327,8 @@ pub enum ProjectError {
     UnknownReference(String),
     #[error("source role conflict for {path}: {roles}")]
     SourceRoleConflict { path: PathBuf, roles: String },
+    #[error("no source files found under: {0}")]
+    NoSourceFiles(PathBuf),
+    #[error("not a source file: {0}")]
+    NotSourceFile(PathBuf),
 }

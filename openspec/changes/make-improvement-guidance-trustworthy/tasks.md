@@ -42,16 +42,16 @@
 
 ## 1. Scope and coverage
 
-- [ ] 1.1 Add `.astro` as recognized, explicitly unsupported source and pin its
+- [x] 1.1 Add `.astro` as recognized, explicitly unsupported source and pin its
       codebase and diff inventory behavior with discovery and language fixtures.
-- [ ] 1.2 Remove explicit-path fallback and add exact supported file,
+- [x] 1.2 Remove explicit-path fallback and add exact supported file,
       unsupported file, source directory, empty directory, non-source file, and
       missing-path acceptance cases.
-- [ ] 1.3 Make every incomplete file selection carry both exact qualifier
+- [x] 1.3 Make every incomplete file selection carry both exact qualifier
       sentences and add its selected and analyzed counts to JSON version 4.
-- [ ] 1.4 Update schema, index checks, API snapshots, terminal snapshots, README,
+- [x] 1.4 Update schema, index checks, API snapshots, terminal snapshots, README,
       and architecture documentation for the verified behavior.
-- [ ] 1.5 Run focused discovery, language, project, output, and CLI tests, build a
+- [x] 1.5 Run focused discovery, language, project, output, and CLI tests, build a
       release binary, and verify marketing root, Astro file, Astro directory,
       and diff output in terminal and JSON before committing this slice.
 

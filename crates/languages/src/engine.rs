@@ -178,7 +178,9 @@ const fn language_slot(language: smackdebt_analysis::Language) -> usize {
         smackdebt_analysis::Language::Tsx => 8,
         smackdebt_analysis::Language::Ruby => 9,
         smackdebt_analysis::Language::Vue => 10,
-        smackdebt_analysis::Language::Kotlin | smackdebt_analysis::Language::Unknown => 10,
+        smackdebt_analysis::Language::Astro
+        | smackdebt_analysis::Language::Kotlin
+        | smackdebt_analysis::Language::Unknown => 10,
     }
 }
 

@@ -30,6 +30,7 @@ use smackdebt_analysis::{
 };
 use smackdebt_discovery::{
     DiscoveredFile, Inventory, discover_snapshot, generic_source_roles, glob_matches,
+    is_source_path,
 };
 use smackdebt_git::{Change, ContributorIdentity, GitRepository};
 use smackdebt_languages::{AnalysisError as LanguageError, Analyzer};
@@ -45,17 +46,30 @@ const RETAINED_RELATION_LOCATIONS: usize = 3;
 /// Analyzes the selected codebase.
 pub(super) fn analyze_codebase(request: &CodebaseRequest) -> Result<ProjectReport, ProjectError> {
     let selection = Selection::resolve(&request.path, request.automatic_scope)?;
-    let inventory =
-        Inventory::discover_sources(&selection.inventory_root, request.excludes.clone()).map_err(
-            |source| ProjectError::Inspect {
-                path: selection.inventory_root.clone(),
-                source,
-            },
-        )?;
+    let inventory = if request.automatic_scope {
+        Inventory::discover_sources(&selection.inventory_root, request.excludes.clone())
+    } else {
+        Inventory::discover_selected_sources(
+            &selection.inventory_root,
+            &selection.discovery_root,
+            request.excludes.clone(),
+        )
+    }
+    .map_err(|source| ProjectError::Inspect {
+        path: selection.discovery_root.clone(),
+        source,
+    })?;
     #[cfg(feature = "evidence-stats")]
     crate::evidence::record_inventory(inventory.visited_entries());
     let aliases = load_resolution_aliases(&selection.inventory_root, &inventory);
     let candidates: Vec<&DiscoveredFile> = inventory.source_files().collect();
+    if !request.automatic_scope
+        && !candidates
+            .iter()
+            .any(|file| selection.includes(file.path().as_path()))
+    {
+        return Err(ProjectError::NoSourceFiles(request.path.clone()));
+    }
     let work = AnalysisWork::default();
     let mut analyses = analyze_current_files(
         &inventory,
@@ -153,8 +167,9 @@ pub(super) fn analyze_codebase(request: &CodebaseRequest) -> Result<ProjectRepor
             .iter()
             .find(|scope| scope.name() == selected_path && scope.kind() != ScopeKind::Repository)
             .map(Scope::id)
-            .or_else(|| report.root())
     };
+    let selected_scope =
+        Some(selected_scope.ok_or_else(|| ProjectError::NoSourceFiles(request.path.clone()))?);
     Ok(ProjectReport {
         report,
         selected_scope,
@@ -201,6 +216,9 @@ pub(super) fn analyze_diff(request: &DiffRequest) -> Result<ProjectReport, Proje
     let path_filter = (!request.automatic_scope)
         .then(|| diff_filter(repository.root(), &request.path))
         .flatten();
+    if !request.automatic_scope && request.path.is_file() && !is_source_path(&request.path) {
+        return Err(ProjectError::NotSourceFile(request.path.clone()));
+    }
     let work = AnalysisWork::default();
     let width = request.width.threads().min(changed.len().max(1));
     let mut batch = repository.object_reader(width * 2)?;
@@ -220,6 +238,23 @@ pub(super) fn analyze_diff(request: &DiffRequest) -> Result<ProjectReport, Proje
         path: repository.root().to_path_buf(),
         source,
     })?;
+    if !request.automatic_scope {
+        let includes = |path: &Path| {
+            path_filter
+                .as_ref()
+                .is_some_and(|selected| path.starts_with(selected))
+        };
+        let has_selected_source = inventory
+            .source_files()
+            .any(|file| includes(file.path().as_path()))
+            || base_inventory
+                .source_paths()
+                .iter()
+                .any(|path| includes(path));
+        if !has_selected_source {
+            return Err(ProjectError::NoSourceFiles(request.path.clone()));
+        }
+    }
     let current_sources = inventory
         .source_files()
         .map(|file| file.path().as_path().to_path_buf())
@@ -427,6 +462,7 @@ pub(super) fn analyze_diff(request: &DiffRequest) -> Result<ProjectReport, Proje
     let mut indexes = DiffIndexes::default();
     let mut current_dependencies = Vec::new();
     let mut before_dependencies = Vec::new();
+    let mut current_files = Vec::with_capacity(selected_count);
     let mut before_files = Vec::with_capacity(selected_count);
     for result in results {
         let file_id = FileId::from_index(result.index);
@@ -471,6 +507,13 @@ pub(super) fn analyze_diff(request: &DiffRequest) -> Result<ProjectReport, Proje
                     .unwrap_or(0),
             )
         });
+        current_files.push(diff_side_file_record(
+            file_id,
+            scope_id,
+            result.change.current_path(),
+            result.change.current_exists().then_some(package),
+            &result.current,
+        ));
         before_files.push(diff_side_file_record(
             file_id,
             scope_id,
@@ -536,6 +579,7 @@ pub(super) fn analyze_diff(request: &DiffRequest) -> Result<ProjectReport, Proje
             }
             FileResult::RoleConflict { .. } => unreachable!("role conflicts stop composition"),
         }
+        current_files.push(record.clone());
         builder.add_file(record);
         let before_package_root =
             nearest_package_root(file.path().as_path(), &before_package_roots);
@@ -576,7 +620,7 @@ pub(super) fn analyze_diff(request: &DiffRequest) -> Result<ProjectReport, Proje
     let current_manifest_names = manifest_names_for(&inventory, &package_roots);
     let current_architecture = build_architecture(
         &work,
-        builder.files(),
+        &current_files,
         &current_dependencies,
         &aliases,
         &current_package_roots,
@@ -621,7 +665,7 @@ pub(super) fn analyze_diff(request: &DiffRequest) -> Result<ProjectReport, Proje
         &before_architecture.file_edges,
         &current_architecture.file_edges,
         &before_files,
-        builder.files(),
+        &current_files,
     );
     for comparison in &mut architecture_comparisons {
         if comparison.relation().is_some() {
@@ -724,7 +768,7 @@ pub(super) fn analyze_diff(request: &DiffRequest) -> Result<ProjectReport, Proje
     let evolutionary_findings = evolution.findings().to_vec();
     let evolutionary_comparisons = evolution.comparisons().to_vec();
     let (current_leakage_candidates, current_leakage, suppressed_leakage) =
-        leakage_findings(&current_architecture, &evolution, builder.files());
+        leakage_findings(&current_architecture, &evolution, &current_files);
     let (before_leakage_candidates, _, _) =
         leakage_findings(&before_architecture, &evolution, &before_files);
     let (propagation_comparisons, propagation_suppression) = propagation_comparisons(
@@ -740,7 +784,7 @@ pub(super) fn analyze_diff(request: &DiffRequest) -> Result<ProjectReport, Proje
         pairs: evolution.file_coupling(),
         current: &current_architecture,
         base: &before_architecture,
-        current_files: builder.files(),
+        current_files: &current_files,
         base_files: &before_files,
     };
     let (change_leakage_comparisons, leakage_suppression) = leakage_comparisons(
@@ -882,21 +926,23 @@ pub(super) fn analyze_diff(request: &DiffRequest) -> Result<ProjectReport, Proje
     }
     builder.set_packages(package_records);
     let report = builder.finish();
-    let selected_scope = path_filter
-        .as_ref()
-        .and_then(|path| {
-            let name = if path.as_os_str().is_empty() {
-                ".".to_owned()
-            } else {
-                path.display().to_string()
-            };
-            report
-                .scopes()
-                .iter()
-                .find(|scope| scope.name() == name)
-                .map(Scope::id)
-        })
-        .or(Some(root));
+    let selected_scope = path_filter.as_ref().and_then(|path| {
+        let name = if path.as_os_str().is_empty() {
+            ".".to_owned()
+        } else {
+            path.display().to_string()
+        };
+        report
+            .scopes()
+            .iter()
+            .find(|scope| scope.name() == name)
+            .map(Scope::id)
+    });
+    let selected_scope = if request.automatic_scope {
+        Some(root)
+    } else {
+        Some(selected_scope.ok_or_else(|| ProjectError::NoSourceFiles(request.path.clone()))?)
+    };
     Ok(ProjectReport {
         report,
         selected_scope,
@@ -1634,7 +1680,10 @@ fn analyze_current_files(
     let analyze = |analyzer: &mut Analyzer, (index, file): (usize, &&DiscoveredFile)| {
         let path = file.path().as_path();
         let language = Analyzer::language(path);
-        if matches!(language, Language::Kotlin | Language::Unknown) {
+        if matches!(
+            language,
+            Language::Astro | Language::Kotlin | Language::Unknown
+        ) {
             return match role_for_unavailable_source(path, role_rules) {
                 Ok(role) => FileResult::Unsupported { language, role },
                 Err(roles) => FileResult::RoleConflict {
@@ -1857,9 +1906,12 @@ fn analyze_bytes(
     work: &AnalysisWork,
 ) -> Result<FileAnalysis, LanguageError> {
     let _ = file;
-    work.record_parser_visit();
-    work.record_algorithm_pass();
-    analyzer.analyze(path, source)
+    let result = analyzer.analyze(path, source);
+    if !matches!(result, Err(LanguageError::Unsupported(_))) {
+        work.record_parser_visit();
+        work.record_algorithm_pass();
+    }
+    result
 }
 
 struct EvolutionInput {
@@ -2357,6 +2409,7 @@ fn rated_health(analysis: &FileAnalysis, role: SourceRole, policy: HealthPolicy)
 
 struct Selection {
     inventory_root: PathBuf,
+    discovery_root: PathBuf,
     exact_file: Option<PathBuf>,
     prefix: Option<PathBuf>,
     label: String,
@@ -2368,6 +2421,9 @@ impl Selection {
             path: path.to_path_buf(),
             source,
         })?;
+        if !automatic_scope && absolute.is_file() && !is_source_path(&absolute) {
+            return Err(ProjectError::NotSourceFile(path.to_path_buf()));
+        }
         if let Ok(repository) = GitRepository::discover(&absolute) {
             let root = repository
                 .root()
@@ -2390,15 +2446,22 @@ impl Selection {
                     .unwrap_or(Path::new(""))
                     .to_path_buf()
             });
+            let label = if automatic_scope {
+                ".".to_owned()
+            } else {
+                prefix
+                    .as_deref()
+                    .filter(|path| !path.as_os_str().is_empty())
+                    .unwrap_or(Path::new("."))
+                    .display()
+                    .to_string()
+            };
             return Ok(Self {
                 inventory_root: root,
+                discovery_root: selected_absolute,
                 exact_file,
                 prefix,
-                label: if automatic_scope {
-                    ".".to_owned()
-                } else {
-                    path.display().to_string()
-                },
+                label,
             });
         }
         if absolute.is_file() {
@@ -2406,17 +2469,30 @@ impl Selection {
             let exact_file = absolute.file_name().map(PathBuf::from);
             return Ok(Self {
                 inventory_root: root,
+                discovery_root: absolute,
                 exact_file,
                 prefix: None,
                 label: path.display().to_string(),
             });
         }
         Ok(Self {
-            inventory_root: absolute,
+            inventory_root: absolute.clone(),
+            discovery_root: absolute,
             exact_file: None,
             prefix: None,
             label: path.display().to_string(),
         })
+    }
+
+    fn includes(&self, path: &Path) -> bool {
+        self.exact_file.as_deref().map_or_else(
+            || {
+                self.prefix
+                    .as_deref()
+                    .is_none_or(|prefix| path.starts_with(prefix))
+            },
+            |file| path == file,
+        )
     }
 }
 
@@ -6264,7 +6340,7 @@ mod tests {
     }
 
     #[test]
-    fn path_view_keeps_the_codebase_package_table() {
+    fn path_view_keeps_only_the_selected_package_table() {
         let root = repository();
         let repo = root.path().join("repo");
         for package in ["a", "b"] {
@@ -6286,9 +6362,10 @@ mod tests {
                 .map(|package| (package.id(), package.path().to_owned()))
                 .collect::<Vec<_>>()
         };
+        assert_eq!(package_paths(codebase.report()).len(), 2);
         assert_eq!(
-            package_paths(codebase.report()),
-            package_paths(path.report())
+            package_paths(path.report()),
+            [(PackageId::from_index(0), "b".to_owned())]
         );
     }
 
@@ -7732,7 +7809,7 @@ mod tests {
     }
 
     #[test]
-    fn package_selection_keeps_explanatory_incoming_edges_from_the_root_graph() {
+    fn package_selection_does_not_read_incoming_sibling_source() {
         let root = tempfile::tempdir().unwrap();
         git(root.path(), ["init", "-q"]);
         for package in ["app", "core"] {
@@ -7747,8 +7824,10 @@ mod tests {
         fs::write(root.path().join("core/b.js"), "function core() {}\n").unwrap();
 
         let result = analyze_codebase(&CodebaseRequest::new(root.path().join("core"))).unwrap();
-        assert_eq!(result.report().files().len(), 2);
-        assert_eq!(result.report().dependency_edges().len(), 1);
+        assert_eq!(result.report().files().len(), 1);
+        assert!(result.report().dependency_edges().is_empty());
+        assert_eq!(result.stats().inventory_walks, 1);
+        assert_eq!(result.stats().source_reads, 1);
         let selected = result.selected_scope().unwrap();
         assert_eq!(result.report().scopes()[selected.index()].name(), "core");
     }
@@ -7768,6 +7847,25 @@ mod tests {
                 .any(|file| file.path() == "sample.rs")
         );
         assert_eq!(result.report().scopes()[0].name(), ".");
+    }
+
+    #[test]
+    fn explicit_file_reads_only_that_repository_relative_source() {
+        let root = repository();
+        let repository_path = root.path().join("repo");
+        fs::write(
+            repository_path.join("outside.rs"),
+            "fn outside() { if true {} }\n",
+        )
+        .unwrap();
+
+        let result =
+            analyze_codebase(&CodebaseRequest::new(repository_path.join("sample.rs"))).unwrap();
+
+        assert_eq!(result.report().files().len(), 1);
+        assert_eq!(result.report().files()[0].path(), "sample.rs");
+        assert_eq!(result.stats().inventory_walks, 1);
+        assert_eq!(result.stats().source_reads, 1);
     }
 
     #[test]
@@ -8149,6 +8247,72 @@ mod tests {
         assert_eq!(evidence.propagation().current(), 0);
         assert_eq!(evidence.propagation().base(), 1);
         assert!(result.report().propagation_comparisons().is_empty());
+    }
+
+    fn astro_diff_result(change: &str) -> ProjectReport {
+        let root = tempfile::tempdir().unwrap();
+        let repository_path = root.path();
+        git(repository_path, ["init", "-q"]);
+        git(
+            repository_path,
+            ["config", "user.email", "test@example.invalid"],
+        );
+        git(repository_path, ["config", "user.name", "Smackdebt Test"]);
+        fs::write(repository_path.join("package.json"), "{}\n").unwrap();
+        if change != "added" {
+            fs::write(repository_path.join("page.astro"), "<h1>Before</h1>\n").unwrap();
+        }
+        git(repository_path, ["add", "."]);
+        git(repository_path, ["commit", "-qm", "base"]);
+        match change {
+            "added" => fs::write(repository_path.join("page.astro"), "<h1>Added</h1>\n").unwrap(),
+            "modified" => {
+                fs::write(repository_path.join("page.astro"), "<h1>After</h1>\n").unwrap()
+            }
+            "deleted" => fs::remove_file(repository_path.join("page.astro")).unwrap(),
+            _ => unreachable!("test chooses an Astro change"),
+        }
+        analyze_diff(&DiffRequest::new(repository_path).with_reference("HEAD")).unwrap()
+    }
+
+    fn assert_astro_diff_is_retained(result: &ProjectReport) {
+        let report = result.report();
+        let root = report.root().unwrap();
+        let coverage = report.scopes()[root.index()].coverage();
+        assert_eq!(coverage.selected_files(), 1);
+        assert_eq!(coverage.unsupported_files(), 1);
+        assert_eq!(report.files().len(), 1);
+        assert_eq!(report.files()[0].language(), Some(Language::Astro));
+        assert_eq!(report.files()[0].trust(), SourceTrust::Failed);
+        assert!(report.findings().is_empty());
+        assert!(report.dependency_edges().is_empty());
+    }
+
+    #[test]
+    fn added_astro_makes_only_current_diff_graph_evidence_incomplete() {
+        let result = astro_diff_result("added");
+        assert_astro_diff_is_retained(&result);
+        let evidence = result.report().diff_graph_evidence().unwrap();
+        assert!(!evidence.current().is_complete());
+        assert!(evidence.base().is_complete());
+    }
+
+    #[test]
+    fn modified_astro_makes_both_diff_graph_evidence_sides_incomplete() {
+        let result = astro_diff_result("modified");
+        assert_astro_diff_is_retained(&result);
+        let evidence = result.report().diff_graph_evidence().unwrap();
+        assert!(!evidence.current().is_complete());
+        assert!(!evidence.base().is_complete());
+    }
+
+    #[test]
+    fn deleted_astro_makes_only_base_diff_graph_evidence_incomplete() {
+        let result = astro_diff_result("deleted");
+        assert_astro_diff_is_retained(&result);
+        let evidence = result.report().diff_graph_evidence().unwrap();
+        assert!(evidence.current().is_complete());
+        assert!(!evidence.base().is_complete());
     }
 
     #[test]

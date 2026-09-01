@@ -117,11 +117,14 @@ family that moved. The worst offender is the top of the same finding rank with
 its path resolved once, falling back to the first witness of a package cycle.
 The root verdict completes while the report is built, and any other retained
 scope is answered by a pure function of the completed report, so no renderer
-performs analysis to get one. A verdict for a scope below the repository root
-also carries a repository-share fact — both integer High counts and one frozen
-sentence — owned beside the tier sentence so every consumer prints identical
-bytes, absent at the root and when the repository holds no High debt, and proven
-never to move a tier, a count, or the worst offender.
+performs analysis to get one. A retained sub-scope from a completed repository
+report may carry a repository-share fact because both High counts were measured.
+The fact owns both integers and one frozen sentence beside the tier sentence so
+every consumer prints identical bytes. It is absent at the root, when the
+repository holds no High debt, when the retained sub-scope and root have equal
+selected-file totals, and in fresh explicit file or directory reports whose
+limited discovery did not measure repository totals. It never moves a tier, a
+count, or the worst offender.
 
 Analysis also owns the problem table: the named problems a report states, built
 once when the report is finished. Clustering reads borrowed slices of the
@@ -166,6 +169,16 @@ nearest-package policy from path prefixes. Diff reports derive package roots
 from current and changed manifests because no discovery inventory exists for
 the base tree.
 
+Project composition resolves an explicit path once. A recognized source file
+selects its file scope and a source-bearing directory selects its directory
+scope. An explicit directory with no recognized source and an explicit
+non-source file stop with their short path errors; neither can select the
+repository scope as a substitute. Missing paths keep their existing error.
+Inside a repository, discovery walks only that selected file or directory.
+Repository-relative identity is retained while each ancestor directory is
+inspected once for non-ignored package manifests and resolution configuration;
+sibling source is neither inventoried nor read.
+
 Unreadable paths, links, unsupported source, oversized files, and parse errors
 remain visible as coverage diagnostics. They are never counted as healthy.
 
@@ -197,8 +210,10 @@ them.
 The engine constructs analysis-owned `FileAnalysis` and `UnitFact` values
 directly. Tree-sitter nodes, trees, grammars, and semantic traversal values do
 not cross the language crate seam. C, C++, Java, JavaScript, JSX, Python, Rust,
-TypeScript, TSX, Ruby, and Vue have checked exact fixtures. Kotlin remains a
-visible unsupported file and contributes no healthy unit.
+TypeScript, TSX, Ruby, and Vue have checked exact fixtures. Astro and Kotlin
+remain visible unsupported files and contribute no healthy unit. Astro has a
+compiled language identity and participates in current and ref inventories,
+coverage, diagnostics, and graph trust, but has no analysis dispatch.
 
 Vue is a document grammar. It parses each JavaScript or TypeScript `script`
 region from a borrowed slice, keeps the region's original line offset, and
@@ -543,7 +558,12 @@ tier color. Each occupies one display cell. Undecorated output contains no
 codepoint in U+E000–U+F8FF, which every public piped flow asserts.
 
 The verdict block always appears, carrying the analysis-owned qualifier and
-repository-share bytes when the completed verdict holds them. Reach, core, and
+repository-share bytes when the completed verdict holds them. The qualifier
+exists whenever analyzed source files are fewer than selected source files and
+owns two lines: `Not all source was checked.` and the exact analyzed-versus-
+selected file count. The same value supplies both counts to JSON; unsupported
+byte share remains supporting machine detail and does not decide whether the
+qualifier exists. Reach, core, and
 change-size aggregates stay out of the terminal verdict because they do not name
 an action. `AREAS` appears
 only for several debt-bearing children and shows at most five with word-labeled

@@ -119,7 +119,6 @@ $ smackdebt crates/analysis
 
 smackdebt · crates/analysis
   Worn in the usual places.
-  4 of the repository's 20 high live here.
 4 high · 17 watch · 1,405 checked
 worst: crates/analysis/src/evolution.rs — hot AND complex
 
@@ -157,11 +156,15 @@ PROBLEMS
   next: smackdebt crates/analysis/src
 ```
 
-Below the repository root the verdict block gains one sentence framing how much
-of the whole problem the selected scope holds: `4 of the repository's 20 high
-live here.` The repository root prints no such sentence, because there it would
-only restate the counts on the line below it, and no sentence appears when the
-repository holds no High debt at all.
+A fresh explicit file or directory command inspects only that selection. Its
+verdict therefore omits repository share because whole-repository High debt was
+not measured. A consumer drilling into a sub-scope of an already completed root
+report may show the analysis-owned sentence, for example `4 of the repository's
+20 high live here.`, because both counts exist in that report and selected
+source also exists outside the sub-scope. It omits the sentence when that child
+contains the root report's complete selected source inventory because the
+denominator adds no information. The repository root itself prints no such
+sentence, and neither does a repository with no High debt.
 
 The default terminal view shows at most five affected areas and spends a fixed
 one-screen budget on problems, so zooming in changes which problems fill the
@@ -430,7 +433,6 @@ $ smackdebt --top 6 crates/analysis
 
 smackdebt · crates/analysis
   Worn in the usual places.
-  4 of the repository's 20 high live here.
   A change here can reach 17 of 36 files in this package.
   A typical change here touches 4 files.
 4 high · 17 watch · 1,405 checked
@@ -472,7 +474,6 @@ $ smackdebt crates/analysis/src/change_coupling.rs
 
 smackdebt · crates/analysis/src/change_coupling.rs
   Clean. Ship it.
-  0 of the repository's 20 high live here.
 0 high · 0 watch · 22 checked
 
 PROBLEMS
@@ -840,6 +841,13 @@ without a known manifest get one root package. Git ignore rules apply by
 default, along with explicit exclusions and dependency directories. A supported
 file is not ignored only because its directory looks generated.
 
+An explicit path stays the selected path. A supported or recognized
+unsupported source file produces a file report, and a directory containing
+source produces a report for that directory. Smackdebt does not replace an
+explicit path with repository results when the path has nothing to analyze.
+Inside a repository, that inspection reads source only from the selected file
+or directory subtree while keeping displayed paths repository-relative.
+
 Every selected file has one source role: primary, test, example, benchmark,
 fixture, or generated. Classification checks explicit `source_roles`
 configuration first, then language-owned generated markers, generic filenames
@@ -865,8 +873,9 @@ One tree-sitter source engine supports:
 - Ruby
 - Vue single-file components, including script and template regions
 
-Kotlin files remain visible as unsupported coverage; they are not counted as
-healthy. Language dispatch is compiled into the binary. Each language translates
+Astro and Kotlin files remain visible as unsupported coverage; they are not
+counted as healthy. Astro documents stay in codebase and diff inventories, but
+Smackdebt does not parse Astro yet. Language dispatch is compiled into the binary. Each language translates
 its own syntax into the same cognitive, cyclomatic, and logical-statement rules.
 Exact fixtures check units, recovery, spans, nesting, and measurements before a
 language is listed here.
@@ -907,10 +916,25 @@ terminal prints for it. In a diff the tier and sentence are the diff answer and
 path strings. Every value in the head also exists in a table, and both come from
 the same completed report.
 
-Below the repository root the verdict head also carries `verdict.share`, holding
-the same sentence the terminal prints and both integer counts behind it. The
-member is absent at the repository root and absent when the repository holds no
-High debt, the way the unsupported-coverage qualifier is:
+When any selected source file was not analyzed, the verdict block always says:
+
+```text
+Not all source was checked.
+<analyzed> of <selected> source files were analyzed.
+```
+
+One missed file is enough; there is no percentage threshold. JSON puts the same
+`sentence` and `detail` in `verdict.qualifier`, together with integer
+`selected_files` and `analyzed_files` counts. Coverage tables retain the same
+counts plus unsupported and failed file detail.
+
+A retained sub-scope from a completed root report may carry `verdict.share`,
+holding the same sentence the terminal prints and both integer counts behind it.
+A retained sub-scope with the same selected-file total as the root omits the
+member because its denominator adds no information.
+A fresh explicit file or directory report omits this member because its limited
+inventory did not measure repository High debt. The member is also absent at the
+repository root and when the repository holds no High debt:
 
 ```json
 "verdict": {
@@ -1055,11 +1079,13 @@ could produce a report:
 | 2 | Invalid arguments or configuration |
 | 3 | Gate baseline exceeded |
 
-Four common mistakes get one exact line on standard error, an empty standard
+Common mistakes get one exact line on standard error, an empty standard
 output, and no usage tail:
 
 ```console
 smackdebt: path not found: does/not/exist
+smackdebt: no source files found under: docs
+smackdebt: not a source file: README.txt
 smackdebt: Git ref not found: no-such-ref
 smackdebt: --all cannot be used with --json
 smackdebt: baseline not found: .smackdebt-baseline.tsv

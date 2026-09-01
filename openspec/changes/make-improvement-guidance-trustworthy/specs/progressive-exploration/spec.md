@@ -56,7 +56,12 @@ percentage threshold for showing these lines.
 When the verdict carries a repository-share fact, the share row SHALL render
 inside the verdict block directly under the qualifier detail when one exists and
 directly under the tier sentence otherwise, using the analysis-owned share
-bytes. The block SHALL omit healthy counts, summary ratios, and decorative
+bytes. A sub-scope derived from an already completed repository report MAY carry
+this fact because that report measured both counts, but SHALL omit it when the
+sub-scope and root have equal selected-file totals because the denominator adds
+no information. A fresh explicit file or directory report SHALL omit the fact
+because limited discovery did not measure whole-repository High debt. The block
+SHALL omit healthy counts, summary ratios, and decorative
 quality bars used as data. Coverage gaps SHALL also use one grouped warning
 sentence per cause only when a gap exists.
 
@@ -72,9 +77,17 @@ sentence per cause only when a gap exists.
 - **WHEN** a recognized unsupported file is the selected scope and no unit is checked
 - **THEN** the verdict block states the `empty` tier sentence, zero counts with their words, and `0 of 1 source files were analyzed.`
 
-#### Scenario: A sub-scope view frames the repository
-- **WHEN** a package or directory scope is selected, coverage is incomplete, and the repository holds High debt
+#### Scenario: A partial retained sub-scope view frames a measured repository
+- **WHEN** a package or directory scope is rendered from an already completed repository report, coverage is incomplete, the repository holds High debt, and selected source also exists outside the sub-scope
 - **THEN** both qualifier lines precede the analysis-owned repository-share line
+
+#### Scenario: One retained child covers all selected source
+- **WHEN** a retained sub-scope and the completed root report have equal selected-file totals
+- **THEN** the verdict omits repository share because the denominator adds no information
+
+#### Scenario: A fresh explicit scope omits unmeasured repository share
+- **WHEN** a file or directory is analyzed directly with limited discovery
+- **THEN** the verdict omits repository share because whole-repository High debt was not measured
 
 ### Requirement: Coverage notes describe source-analysis gaps
 Coverage notes SHALL report selected source files that could not be analyzed.

@@ -82,6 +82,15 @@ they no longer decide whether it exists. The grouped warning still names the
 unsupported or failed file count and its cause; it is supporting detail, not a
 replacement for the qualifier.
 
+Repository share requires two measured totals. A sub-scope rendered from a
+completed repository report may state its High count against the measured root
+High count when selected source also exists outside that sub-scope. When the
+sub-scope and root selected-file totals are equal, it omits the share because
+the denominator adds no information. A fresh explicit file or directory report
+uses limited discovery, so it also omits repository share instead of treating
+the selected inventory as the whole repository. Qualifier lines still precede
+a share when a completed report provides both facts.
+
 ### Anonymous match evidence crosses one narrow inward seam
 
 Display identity and match identity serve different jobs. Display identity may

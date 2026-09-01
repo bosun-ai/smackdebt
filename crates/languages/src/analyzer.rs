@@ -46,6 +46,7 @@ fn language_name(language: Language) -> &'static str {
         Language::TypeScript | Language::Tsx => "TypeScript",
         Language::Ruby => "Ruby",
         Language::Vue => "Vue",
+        Language::Astro => "Astro",
         Language::Kotlin => "Kotlin",
         Language::Unknown => "Unknown",
     }
@@ -75,6 +76,7 @@ fn detect(path: &Path) -> Language {
         "tsx" => Language::Tsx,
         "rb" | "rake" | "gemspec" => Language::Ruby,
         "vue" => Language::Vue,
+        "astro" => Language::Astro,
         "kt" | "kts" => Language::Kotlin,
         _ => Language::Unknown,
     }
@@ -135,7 +137,7 @@ impl Analyzer {
             Language::Tsx => Tsx::generated_marker(path, source),
             Language::Ruby => Ruby::generated_marker(path, source),
             Language::Vue => crate::vue::has_generated_marker(source),
-            Language::Kotlin | Language::Unknown => false,
+            Language::Astro | Language::Kotlin | Language::Unknown => false,
         }
     }
 
@@ -164,7 +166,7 @@ impl Analyzer {
                 &source,
                 &mut self.scratch,
             ),
-            language @ (Language::Kotlin | Language::Unknown) => {
+            language @ (Language::Astro | Language::Kotlin | Language::Unknown) => {
                 return Err(AnalysisError::Unsupported(language));
             }
         };
@@ -212,7 +214,7 @@ mod tests {
     }
 
     #[test]
-    fn listed_languages_use_owned_parsers_and_kotlin_stays_unsupported() {
+    fn listed_languages_use_owned_parsers_and_recognized_documents_stay_explicit() {
         for (path, source) in [
             ("x.c", "int x(void) { return 1; }"),
             ("x.cpp", "int x() { return 1; }"),
@@ -232,6 +234,11 @@ mod tests {
         assert!(matches!(
             Analyzer::default().analyze(Path::new("x.kt"), b"fun x() {}".to_vec()),
             Err(AnalysisError::Unsupported(Language::Kotlin))
+        ));
+        assert_eq!(Analyzer::language(Path::new("x.astro")), Language::Astro);
+        assert!(matches!(
+            Analyzer::default().analyze(Path::new("x.astro"), b"<h1>Hello</h1>".to_vec()),
+            Err(AnalysisError::Unsupported(Language::Astro))
         ));
     }
 

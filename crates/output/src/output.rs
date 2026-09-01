@@ -1,6 +1,7 @@
 //! Stable terminal and JSON views over the shared report.
 
 use std::cmp::Reverse;
+use std::collections::BTreeSet;
 use std::fmt;
 use std::io::{self, Write};
 use std::num::NonZeroUsize;
@@ -9,9 +10,9 @@ use std::path::{Path, PathBuf};
 use anstyle::{Ansi256Color, AnsiColor, Style};
 use smackdebt_analysis::{
     ArchitectureComparisonKind, ArchitectureFindingId, ChangeLeakageFindingId, CodebaseTier,
-    Comparison, ComparisonDirection, ComparisonKind, CouplingLink, DebtDiffSelection, DebtFamily,
-    DependencyEdgeId, Diagnostic, DiagnosticKind, DiffTier, EvolutionaryFindingId,
-    FileChangeCoupling, FileId, FileRecord, Finding, FindingId, Instability,
+    Comparison, ComparisonDirection, ComparisonKind, CouplingLink, CoverageQualifier,
+    DebtDiffSelection, DebtFamily, DependencyEdgeId, Diagnostic, DiagnosticKind, DiffTier,
+    EvolutionaryFindingId, FileChangeCoupling, FileId, FileRecord, Finding, FindingId, Instability,
     KnowledgeConcentrationFindingId, Language, Measurements, PackageId, ProblemAnchor, ProblemCard,
     ProblemEvidence, ProblemPattern, ProblemVisibility, PropagationReach, Rating, Report,
     ReportMode, ResolutionIssueKind, Scope, ScopeId, ScopeKind, Signal, SizeFinding, SizeFindingId,
@@ -408,6 +409,7 @@ impl Presentation {
             .is_some_and(|evidence| evidence.suppressed_total() > 0);
         let verdict_only = report.mode() == ReportMode::Diff
             && verdict.diff_tier() == Some(DiffTier::NoDebtChange)
+            && verdict.qualifier().is_none()
             && !withheld_graph_comparison;
         let next = match report.mode() {
             ReportMode::Codebase => first_problem_path(report, displayed, selected, all)
@@ -942,7 +944,7 @@ fn cycle_first_path<'a>(report: &'a Report, witness_edges: &[DependencyEdgeId]) 
 fn stated_verdict_facts(verdict: &Verdict) -> Vec<String> {
     let mut facts = Vec::new();
     if let Some(qualifier) = verdict.qualifier() {
-        facts.push(format!("{} {}", qualifier.sentence(), qualifier.fact()));
+        facts.extend(coverage_qualifier_lines(qualifier));
     }
     // A sub-scope answers about itself; the share states what fraction of the
     // whole that is. Architecture and history facts need a named row rather
@@ -951,6 +953,10 @@ fn stated_verdict_facts(verdict: &Verdict) -> Vec<String> {
         facts.push(share.sentence());
     }
     facts
+}
+
+fn coverage_qualifier_lines(qualifier: &CoverageQualifier) -> [String; 2] {
+    [qualifier.sentence().to_owned(), qualifier.detail()]
 }
 
 /// One evidence item, stated in the words its kind owns.
@@ -1807,7 +1813,9 @@ fn diagnostic_warnings(report: &Report, selected: &Scope) -> Vec<Row> {
         DiagnosticKind::UnsafeReference,
         DiagnosticKind::Other,
     ] {
-        let count = report
+        let mut files = BTreeSet::new();
+        let mut count = 0;
+        for diagnostic in report
             .diagnostics()
             .iter()
             .filter(|diagnostic| {
@@ -1815,7 +1823,11 @@ fn diagnostic_warnings(report: &Report, selected: &Scope) -> Vec<Row> {
                     && diagnostic.kind() == kind
             })
             .filter(|diagnostic| !diagnostic.message().starts_with("Git history"))
-            .count();
+        {
+            if diagnostic.file().is_none_or(|file| files.insert(file)) {
+                count += 1;
+            }
+        }
         if count > 0 {
             warnings.push(Row::new(
                 Some(Word::Warning),
@@ -2595,20 +2607,32 @@ pub(super) fn scope_kind(kind: ScopeKind) -> &'static str {
 }
 
 pub(super) fn language_name(language: Language) -> &'static str {
+    common_language_name(language).unwrap_or_else(|| additional_language_name(language))
+}
+
+fn common_language_name(language: Language) -> Option<&'static str> {
     match language {
-        Language::C => "c",
-        Language::Cpp => "cpp",
-        Language::Java => "java",
-        Language::JavaScript => "javascript",
-        Language::Jsx => "jsx",
-        Language::Python => "python",
-        Language::Rust => "rust",
+        Language::C => Some("c"),
+        Language::Cpp => Some("cpp"),
+        Language::Java => Some("java"),
+        Language::JavaScript => Some("javascript"),
+        Language::Jsx => Some("jsx"),
+        Language::Python => Some("python"),
+        Language::Rust => Some("rust"),
+        _ => None,
+    }
+}
+
+fn additional_language_name(language: Language) -> &'static str {
+    match language {
         Language::TypeScript => "typescript",
         Language::Tsx => "tsx",
         Language::Ruby => "ruby",
         Language::Vue => "vue",
+        Language::Astro => "astro",
         Language::Kotlin => "kotlin",
         Language::Unknown => "unknown",
+        _ => unreachable!("common languages are handled before this point"),
     }
 }
 
@@ -3989,13 +4013,11 @@ mod tests {
         );
     }
 
-    /// Both qualifications a verdict can carry are analysis-owned bytes the
-    /// renderer only places, and the accepted placement puts the share
-    /// directly under the qualifier row when one exists. No generated fixture
-    /// is both mostly unsupported and drilled into, so the stacked order is
-    /// proven here over a report built with both.
+    /// A completed root report measured both repository and sub-scope counts.
+    /// Its two analysis-owned verdict facts are only placed by the renderer,
+    /// with share directly under qualifier detail.
     #[test]
-    fn a_qualified_sub_scope_stacks_the_share_under_the_qualifier_row() {
+    fn a_retained_sub_scope_stacks_measured_share_under_the_qualifier() {
         let mut builder = ReportBuilder::new(ReportMode::Codebase);
         let (root, package, outside) = (
             ScopeId::from_index(0),
@@ -4060,13 +4082,14 @@ mod tests {
         )
         .unwrap();
         let terminal = String::from_utf8(bytes).unwrap();
-        // Scope, tier sentence, qualifier, share, counts — in that order and
-        // with no line between them.
+        // Scope, tier sentence, qualifier sentence, qualifier detail, share,
+        // counts — in that order and with no line between them.
         assert!(
             terminal.starts_with(concat!(
                 "smackdebt · app\n",
                 "  Worn in the usual places.\n",
-                "  Not all source was checked. 66% of source bytes are Go.\n",
+                "  Not all source was checked.\n",
+                "  1 of 2 source files were analyzed.\n",
                 "  1 of the repository's 2 high live here.\n",
                 "1 high · 0 watch · 1 checked\n",
             )),

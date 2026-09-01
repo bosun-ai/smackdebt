@@ -127,7 +127,6 @@ pub use source::{
 pub use verdict::{
     ChangeAmplification, CodebaseTier, CoreSize, CoverageQualifier, DENSITY_EVIDENCE_UNITS,
     DebtDiffFacts, DebtDiffSelection, DebtFamily, DiffTier, FIGHTS_BACK_PERMILLE, PropagationReach,
-    SMALL_SCOPE_HIGH_UNITS, UNSUPPORTED_QUALIFIER_PERMILLE, VOLUME_FIGHTS_BACK_HIGH,
-    VOLUME_LOST_HIGH, Verdict, VerdictCounts, VerdictShare, WORN_PERMILLE, WORST_OFFENDER_LIMIT,
-    WorstOffender, WorstOffenderReason,
+    SMALL_SCOPE_HIGH_UNITS, VOLUME_FIGHTS_BACK_HIGH, VOLUME_LOST_HIGH, Verdict, VerdictCounts,
+    VerdictShare, WORN_PERMILLE, WORST_OFFENDER_LIMIT, WorstOffender, WorstOffenderReason,
 };

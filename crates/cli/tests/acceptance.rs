@@ -660,8 +660,9 @@ fn a_mostly_unsupported_selection_qualifies_its_verdict() {
         include_bytes!("snapshots/unsupported-share.terminal.txt"),
     );
     let text = String::from_utf8(terminal).unwrap();
+    assert!(text.contains("Not all source was checked."), "{text}");
     assert!(
-        text.contains("Not all source was checked. 62% of source bytes are Go."),
+        text.contains("1 of 2 source files were analyzed."),
         "{text}"
     );
 
@@ -670,6 +671,9 @@ fn a_mostly_unsupported_selection_qualifies_its_verdict() {
     validate_schema(&report);
     let qualifier = &report["verdict"]["qualifier"];
     assert_eq!(qualifier["sentence"], "Not all source was checked.");
+    assert_eq!(qualifier["detail"], "1 of 2 source files were analyzed.");
+    assert_eq!(qualifier["selected_files"], 2);
+    assert_eq!(qualifier["analyzed_files"], 1);
     assert_eq!(qualifier["share_permille"], 625);
     assert_eq!(qualifier["largest_language"], "Go");
     let coverage = &report["scopes"][0]["coverage"];
@@ -681,7 +685,7 @@ fn a_mostly_unsupported_selection_qualifies_its_verdict() {
 }
 
 #[test]
-fn a_marginal_unsupported_share_leaves_the_verdict_head_unqualified() {
+fn fully_analyzed_coverage_leaves_the_verdict_head_unqualified() {
     let project = tempfile::tempdir().unwrap();
     fs::write(
         project.path().join("kept.js"),
@@ -698,11 +702,162 @@ fn a_marginal_unsupported_share_leaves_the_verdict_head_unqualified() {
     );
 }
 
-/// A sub-scope verdict answers about that scope, which leaves the reader
-/// without a sense of proportion; the share states it in analysis-owned bytes,
-/// and the root, which would only restate its own counts, carries none.
+fn explicit_scope_fixture() -> tempfile::TempDir {
+    let project = tempfile::tempdir().unwrap();
+    fs::create_dir_all(project.path().join("src")).unwrap();
+    fs::create_dir(project.path().join("empty")).unwrap();
+    fs::write(
+        project.path().join("src/good.js"),
+        "export function good() { return 1; }\n",
+    )
+    .unwrap();
+    fs::write(
+        project.path().join("src/page.astro"),
+        "---\nconst title = 'Hello';\n---\n<h1>{title}</h1>\n",
+    )
+    .unwrap();
+    fs::write(project.path().join("README.txt"), "notes\n").unwrap();
+    git(project.path(), ["init", "-q"]);
+    project
+}
+
 #[test]
-fn a_sub_scope_verdict_frames_the_repositorys_high_debt() {
+fn explicit_source_scopes_are_exact_and_absolute_input_keeps_repository_identity() {
+    let project = explicit_scope_fixture();
+    for (path, expected_kind, selected, analyzed) in [
+        ("src/good.js", "file", 1, 1),
+        ("src/page.astro", "file", 1, 0),
+        ("src", "directory", 2, 1),
+    ] {
+        let output = smackdebt()
+            .current_dir(project.path())
+            .args([path, "--json", "--jobs", "1"])
+            .output()
+            .unwrap();
+        assert!(
+            output.status.success(),
+            "{}: {}",
+            path,
+            String::from_utf8_lossy(&output.stderr)
+        );
+        let report: serde_json::Value = serde_json::from_slice(&output.stdout).unwrap();
+        validate_schema(&report);
+        let scope = &report["scopes"][report["selected_scope"].as_u64().unwrap() as usize];
+        assert_eq!(scope["kind"], expected_kind, "{path}");
+        assert_eq!(
+            report["paths"][scope["path"].as_u64().unwrap() as usize],
+            path
+        );
+        assert_eq!(scope["coverage"]["selected_files"], selected);
+        assert_eq!(scope["coverage"]["analyzed_files"], analyzed);
+    }
+
+    let absolute = project.path().join("src/good.js");
+    let absolute_output = smackdebt()
+        .current_dir(project.path())
+        .args([absolute.as_os_str(), std::ffi::OsStr::new("--json")])
+        .output()
+        .unwrap();
+    assert!(absolute_output.status.success());
+    let absolute_report: serde_json::Value =
+        serde_json::from_slice(&absolute_output.stdout).unwrap();
+    let selected = absolute_report["selected_scope"].as_u64().unwrap() as usize;
+    let scope = &absolute_report["scopes"][selected];
+    assert_eq!(
+        absolute_report["paths"][scope["path"].as_u64().unwrap() as usize],
+        "src/good.js"
+    );
+    assert!(
+        !String::from_utf8_lossy(&absolute_output.stdout)
+            .contains(project.path().to_str().unwrap())
+    );
+}
+
+#[test]
+fn modified_astro_diff_retains_coverage_and_counts_one_unsupported_file() {
+    let project = explicit_scope_fixture();
+    let astro = smackdebt()
+        .current_dir(project.path())
+        .args(["src/page.astro", "--json", "--jobs", "1"])
+        .output()
+        .unwrap();
+    let report: serde_json::Value = serde_json::from_slice(&astro.stdout).unwrap();
+    assert_eq!(report["files"][0]["language"], "astro");
+    assert_eq!(report["verdict"]["qualifier"]["selected_files"], 1);
+    assert_eq!(report["verdict"]["qualifier"]["analyzed_files"], 0);
+    assert_eq!(
+        report["verdict"]["qualifier"]["detail"],
+        "0 of 1 source files were analyzed."
+    );
+
+    git(project.path(), ["config", "user.name", "Smackdebt Test"]);
+    git(
+        project.path(),
+        ["config", "user.email", "smackdebt@example.invalid"],
+    );
+    git(project.path(), ["add", "."]);
+    git(project.path(), ["commit", "-qm", "test: add source"]);
+    fs::write(
+        project.path().join("src/page.astro"),
+        "---\nconst title = 'Changed';\n---\n<h1>{title}</h1>\n",
+    )
+    .unwrap();
+    let diff = smackdebt()
+        .current_dir(project.path())
+        .args(["diff", "HEAD", "--json", "--jobs", "1"])
+        .output()
+        .unwrap();
+    assert!(
+        diff.status.success(),
+        "{}",
+        String::from_utf8_lossy(&diff.stderr)
+    );
+    let diff: serde_json::Value = serde_json::from_slice(&diff.stdout).unwrap();
+    validate_schema(&diff);
+    assert!(
+        diff["files"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .any(|file| file["language"] == "astro")
+    );
+    assert_eq!(diff["scopes"][0]["coverage"]["selected_files"], 1);
+    assert_eq!(diff["scopes"][0]["coverage"]["analyzed_files"], 0);
+    let diff_terminal = String::from_utf8(run_in(
+        project.path(),
+        ["diff", "HEAD", "--color", "never", "--jobs", "1"],
+    ))
+    .unwrap();
+    assert!(
+        diff_terminal.contains("warning 1 source file uses an unsupported language."),
+        "{diff_terminal}"
+    );
+    assert!(!diff_terminal.contains("2 source files"), "{diff_terminal}");
+}
+
+#[test]
+fn invalid_and_source_free_paths_return_exact_errors_without_repository_fallback() {
+    let project = explicit_scope_fixture();
+    for (path, message) in [
+        ("empty", "smackdebt: no source files found under: empty\n"),
+        ("README.txt", "smackdebt: not a source file: README.txt\n"),
+        ("missing", "smackdebt: path not found: missing\n"),
+    ] {
+        let output = smackdebt()
+            .current_dir(project.path())
+            .arg(path)
+            .output()
+            .unwrap();
+        assert_eq!(output.status.code(), Some(1), "{path}");
+        assert!(output.stdout.is_empty(), "{path}");
+        assert_eq!(String::from_utf8(output.stderr).unwrap(), message, "{path}");
+    }
+}
+
+/// Limited explicit analysis knows the selected High count but does not read
+/// the rest of the repository to invent a denominator.
+#[test]
+fn fresh_explicit_scopes_omit_unmeasured_repository_share() {
     let packages = problem_pattern_fixture();
     let root = packages.path().to_str().unwrap().to_owned();
     let god = packages.path().join("god");
@@ -721,60 +876,36 @@ fn a_sub_scope_verdict_frames_the_repositorys_high_debt() {
         root_report["verdict"]
     );
 
-    // The share row sits inside the verdict block, under the tier sentence and
-    // above the counts, at package scope.
+    // A limited explicit report does not pretend its retained root is the
+    // complete repository, so it carries no repository share.
     let package_terminal = String::from_utf8(run(["--color", "never", god])).unwrap();
     let package_lines: Vec<&str> = package_terminal.lines().collect();
     assert_eq!(package_lines[0], "smackdebt · god");
     assert_eq!(package_lines[1], "  Worn in the usual places.");
-    assert_eq!(
-        package_lines[2],
-        "  3 of the repository's 4 high live here."
-    );
-    assert!(package_lines[3].contains(" high · "), "{package_terminal}");
+    assert!(package_lines[2].contains(" high · "), "{package_terminal}");
     let package_report: serde_json::Value = serde_json::from_slice(&run(["--json", god])).unwrap();
     validate_schema(&package_report);
-    let share = &package_report["verdict"]["share"];
-    assert_eq!(share["sentence"], "3 of the repository's 4 high live here.");
-    assert_eq!(share["high"], 3);
-    assert_eq!(share["repository_high"], 4);
-    // Both consumers state the analysis-owned bytes, never their own.
-    assert!(
-        package_terminal.contains(share["sentence"].as_str().unwrap()),
-        "{package_terminal}"
-    );
-    // The frame informs the reader and decides nothing.
+    assert!(package_report["verdict"].get("share").is_none());
+    // The selected result remains truthful without claiming the measured root
+    // count belongs to this separate limited report.
     assert_eq!(package_report["summary"]["high"], 3);
     assert_eq!(root_report["summary"]["high"], 4);
     assert_eq!(package_report["verdict"]["tier"], "worn");
 
-    // A directory below a package states the same fact about itself.
+    // Other limited directories likewise avoid a repository-wide claim.
     let split = split_debt_fixture();
     let messy = split.path().join("messy");
     let messy = messy.to_str().unwrap();
     let clean = split.path().join("clean");
     let clean = clean.to_str().unwrap();
     let messy_terminal = String::from_utf8(run(["--color", "never", messy])).unwrap();
-    assert!(
-        messy_terminal.contains("\n  4 of the repository's 4 high live here.\n"),
-        "{messy_terminal}"
-    );
+    assert!(!messy_terminal.contains("live here."), "{messy_terminal}");
     let messy_report: serde_json::Value = serde_json::from_slice(&run(["--json", messy])).unwrap();
     validate_schema(&messy_report);
-    let messy_share = &messy_report["verdict"]["share"];
-    assert_eq!(
-        messy_share["sentence"],
-        "4 of the repository's 4 high live here."
-    );
-    assert_eq!(messy_share["high"], 4);
-    assert_eq!(messy_share["repository_high"], 4);
-    // A sub-scope holding none of it says so rather than staying silent.
+    assert!(messy_report["verdict"].get("share").is_none());
     let clean_report: serde_json::Value = serde_json::from_slice(&run(["--json", clean])).unwrap();
     validate_schema(&clean_report);
-    assert_eq!(
-        clean_report["verdict"]["share"]["sentence"],
-        "0 of the repository's 4 high live here."
-    );
+    assert!(clean_report["verdict"].get("share").is_none());
 }
 
 /// A repository without High debt has no fraction to divide, so no sub-scope
@@ -985,16 +1116,16 @@ fn architecture_path_drill_shows_findings_without_edge_rows() {
     git(project.path(), ["init", "-b", "main"]);
     let output = run_in(project.path(), ["app", "--all", "--color", "never"]);
     let text = String::from_utf8(output).unwrap();
-    // The relationship that crosses the selected path reaches the reader
-    // through the cycle it belongs to, never as a row of its own.
+    // Sibling source outside the selected path is not read. The local cycle
+    // remains visible and the cross-scope import becomes unresolved evidence.
     assert!(!text.contains("core/main.js → app/main.js"), "{text}");
     assert!(!text.contains("app/main.js → core/main.js"), "{text}");
     assert!(
-        text.contains("high circular dependency · app/main.js"),
+        text.contains("watch circular dependency · app/choice.js"),
         "{text}"
     );
-    assert!(text.contains("        → core/main.js"), "{text}");
-    assert!(text.contains("2 imports could not be followed"), "{text}");
+    assert!(!text.contains("        → core/main.js"), "{text}");
+    assert!(text.contains("3 imports could not be followed"), "{text}");
     assert!(!text.contains("native/src/helper.rs"));
 
     // Module wiring is a relationship too: a Rust package states no ownership.
@@ -1064,20 +1195,15 @@ fn diff_and_path_views_state_findings_without_current_edges() {
         assert!(!terminal.contains("HISTORY"), "{terminal}");
         assert!(!terminal.contains("WARNINGS"), "{terminal}");
     }
-    // The current relationship is a graph fact: either endpoint states the
-    // cycle it belongs to and no edge row at all.
-    for arguments in [["app", "--color", "never"], ["core", "--color", "never"]] {
-        let terminal = String::from_utf8(run_in(project.path(), arguments)).unwrap();
-        assert!(
-            !terminal.contains("app/main.js → core/main.js"),
-            "{terminal}"
-        );
-        assert!(!terminal.contains(" · 2 imports"), "{terminal}");
-        assert!(
-            terminal.contains("high circular dependency · app/main.js"),
-            "{terminal}"
-        );
-    }
+    let app = String::from_utf8(run_in(project.path(), ["app", "--color", "never"])).unwrap();
+    assert!(!app.contains("app/main.js → core/main.js"), "{app}");
+    assert!(
+        app.contains("watch circular dependency · app/choice.js"),
+        "{app}"
+    );
+    let core = String::from_utf8(run_in(project.path(), ["core", "--color", "never"])).unwrap();
+    assert!(!core.contains("app/main.js → core/main.js"), "{core}");
+    assert!(!core.contains("circular dependency"), "{core}");
 }
 
 #[test]
@@ -1189,10 +1315,12 @@ fn unresolved_and_ambiguous_relations_reach_a_file_scope_and_all_only() {
         }
         // The warning breakdown may repeat a cause's words, so each relation's
         // own status is matched together with its target.
-        for status in [
-            "./choice · matched more than one file",
-            "require(moduleName) · could not be matched",
-        ] {
+        let choice_status = if case == 0 {
+            "./choice · could not be matched"
+        } else {
+            "./choice · matched more than one file"
+        };
+        for status in [choice_status, "require(moduleName) · could not be matched"] {
             assert_eq!(
                 terminal.matches(status).count(),
                 1,
@@ -2211,8 +2339,7 @@ fn a_selected_package_states_actionable_history_only() {
         ["a", "--json", "--history", "36500d"],
     ))
     .unwrap();
-    assert_eq!(report["change_coupling"].as_array().unwrap().len(), 1);
-    assert_eq!(report["change_coupling"][0]["shared_commits"], 3);
+    assert!(report["change_coupling"].as_array().unwrap().is_empty());
 }
 
 #[test]
@@ -2474,6 +2601,18 @@ fn assert_head_agrees_with_tables(report: &serde_json::Value) {
         return;
     };
     let health = report["scopes"][answered]["health"].as_u64().unwrap() as usize;
+    let coverage = &report["scopes"][answered]["coverage"];
+    match report["verdict"].get("qualifier") {
+        Some(qualifier) => {
+            assert_eq!(qualifier["selected_files"], coverage["selected_files"]);
+            assert_eq!(qualifier["analyzed_files"], coverage["analyzed_files"]);
+            assert!(
+                coverage["analyzed_files"].as_u64().unwrap()
+                    < coverage["selected_files"].as_u64().unwrap()
+            );
+        }
+        None => assert_eq!(coverage["analyzed_files"], coverage["selected_files"]),
+    }
     let counts = &report["health"][health];
     assert_eq!(summary["high"], counts["high"]);
     assert_eq!(summary["watch"], counts["watch"]);

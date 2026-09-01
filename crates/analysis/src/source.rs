@@ -192,6 +192,7 @@ pub enum Language {
     Tsx,
     Ruby,
     Vue,
+    Astro,
     Kotlin,
     Unknown,
 }

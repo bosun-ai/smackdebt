@@ -47,6 +47,37 @@ SHALL remain 4 because existing members retain their meaning.
 - **WHEN** analyzed files equal selected source files
 - **THEN** the verdict head carries no qualifier member rather than an empty one
 
+### Requirement: Version 4 frames a sub-scope verdict
+The `verdict` head SHALL carry the analysis-owned repository-share fact beside
+`tier` and `sentence` for a retained sub-scope of an already completed root
+report when that measured root holds High debt. The fact SHALL expose the
+sub-scope High count, repository High count, and analysis-owned sentence, with
+both counts serialized as integers. The serializer SHALL omit `share` when the
+retained sub-scope and root have equal selected-file totals because the root
+denominator adds no information.
+
+A fresh explicit file or directory report SHALL omit `share` because limited
+discovery did not measure the repository denominator. The checked version-4
+schema SHALL continue to allow `share` as an optional verdict member, and the
+serializer SHALL omit the member rather than emit an empty or inferred value
+whenever measured repository share is unavailable.
+
+#### Scenario: A partial retained sub-scope from a completed root report is serialized
+- **WHEN** JSON renders a retained package or directory from a completed root report whose measured root holds High debt and additional selected source outside that sub-scope
+- **THEN** the verdict head carries `share` with both integer counts and the same sentence bytes the terminal prints
+
+#### Scenario: A retained sub-scope covers the complete selected inventory
+- **WHEN** a completed root report and its retained sub-scope have equal selected-file totals
+- **THEN** the verdict head omits `share` because the repository denominator adds no information
+
+#### Scenario: A fresh explicit limited report is serialized
+- **WHEN** JSON is requested for a directly selected file or directory whose limited discovery did not measure repository High debt
+- **THEN** the verdict head omits `share` rather than treating the selected inventory as the repository denominator
+
+#### Scenario: A root report is serialized
+- **WHEN** no path is selected
+- **THEN** the verdict head carries no share member rather than an empty or zero one
+
 ## ADDED Requirements
 
 ### Requirement: Version 4 never exposes anonymous match keys

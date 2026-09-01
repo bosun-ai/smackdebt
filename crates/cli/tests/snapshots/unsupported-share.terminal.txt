@@ -1,6 +1,7 @@
 smackdebt · repository root
   Clean. Ship it.
-  Not all source was checked. 62% of source bytes are Go.
+  Not all source was checked.
+  1 of 2 source files were analyzed.
 0 high · 0 watch · 1 checked
 
 WARNINGS

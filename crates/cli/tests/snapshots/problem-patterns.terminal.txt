@@ -1,5 +1,7 @@
 smackdebt · repository root
   Worn in the usual places.
+  Not all source was checked.
+  15 of 17 source files were analyzed.
 4 high · 2 watch · 6 checked
 worst: hot/hot.js — hot AND complex
 

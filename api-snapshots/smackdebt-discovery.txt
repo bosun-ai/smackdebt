@@ -9,6 +9,7 @@ pub struct smackdebt_discovery::Inventory
 impl smackdebt_discovery::Inventory
 pub fn smackdebt_discovery::Inventory::absolute_path(&self, &smackdebt_discovery::RelativePath) -> core::option::Option<std::path::PathBuf>
 pub fn smackdebt_discovery::Inventory::discover(impl core::convert::AsRef<std::path::Path>) -> core::io::error::Result<Self>
+pub fn smackdebt_discovery::Inventory::discover_selected_sources(impl core::convert::AsRef<std::path::Path>, impl core::convert::AsRef<std::path::Path>, alloc::vec::Vec<alloc::string::String>) -> core::io::error::Result<Self>
 pub fn smackdebt_discovery::Inventory::discover_sources(impl core::convert::AsRef<std::path::Path>, alloc::vec::Vec<alloc::string::String>) -> core::io::error::Result<Self>
 pub fn smackdebt_discovery::Inventory::nested_checkouts(&self) -> impl core::iter::traits::iterator::Iterator<Item = &smackdebt_discovery::RelativePath>
 pub fn smackdebt_discovery::Inventory::packages(&self) -> &[smackdebt_discovery::Package]
@@ -35,3 +36,4 @@ pub fn smackdebt_discovery::SnapshotInventory::source_paths(&self) -> &[std::pat
 pub fn smackdebt_discovery::discover_snapshot(&std::path::Path, &[std::path::PathBuf], impl core::ops::function::FnMut(&std::path::Path) -> core::io::error::Result<alloc::vec::Vec<u8>>) -> core::io::error::Result<smackdebt_discovery::SnapshotInventory>
 pub fn smackdebt_discovery::generic_source_roles(&std::path::Path) -> alloc::vec::Vec<smackdebt_analysis::source::SourceRole>
 pub fn smackdebt_discovery::glob_matches(&str, &str) -> bool
+pub fn smackdebt_discovery::is_source_path(&std::path::Path) -> bool

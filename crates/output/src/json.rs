@@ -1395,10 +1395,15 @@ impl Serialize for VerdictView<'_> {
 struct QualifierView<'a>(&'a smackdebt_analysis::CoverageQualifier);
 impl Serialize for QualifierView<'_> {
     fn serialize<S: Serializer>(&self, serializer: S) -> Result<S::Ok, S::Error> {
-        let mut map = serializer.serialize_map(Some(3))?;
+        let mut map = serializer.serialize_map(None)?;
         map.serialize_entry("sentence", self.0.sentence())?;
+        map.serialize_entry("detail", &self.0.detail())?;
+        map.serialize_entry("selected_files", &self.0.selected_files())?;
+        map.serialize_entry("analyzed_files", &self.0.analyzed_files())?;
         map.serialize_entry("share_permille", &self.0.share_permille())?;
-        map.serialize_entry("largest_language", self.0.largest_language())?;
+        if let Some(language) = self.0.largest_language() {
+            map.serialize_entry("largest_language", language)?;
+        }
         map.end()
     }
 }

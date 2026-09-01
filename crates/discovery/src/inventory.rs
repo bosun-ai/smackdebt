@@ -309,6 +309,21 @@ impl<'a> SnapshotIgnorePolicy<'a> {
     }
 
     fn is_ignored(&self, path: &Path, is_directory: bool) -> bool {
+        let mut parent = if is_directory {
+            Some(path)
+        } else {
+            path.parent()
+        };
+        while let Some(directory) = parent.filter(|path| !path.as_os_str().is_empty()) {
+            if self.matches_ignore(directory, true) {
+                return true;
+            }
+            parent = directory.parent();
+        }
+        self.matches_ignore(path, is_directory)
+    }
+
+    fn matches_ignore(&self, path: &Path, is_directory: bool) -> bool {
         let absolute = self.root.join(path);
         let mut matched = self.global.matched(&absolute, is_directory);
         let local = self.local_excludes.matched(&absolute, is_directory);
@@ -518,6 +533,31 @@ impl Inventory {
         )
     }
 
+    /// Walks one selected file or directory while keeping paths relative to a
+    /// surrounding repository root.
+    pub fn discover_selected_sources(
+        root: impl AsRef<Path>,
+        selected: impl AsRef<Path>,
+        excludes: Vec<String>,
+    ) -> io::Result<Self> {
+        let root = root.as_ref();
+        let selected = selected.as_ref();
+        if !selected.starts_with(root) {
+            return Err(io::Error::new(
+                io::ErrorKind::InvalidInput,
+                "inventory selection is outside its identity root",
+            ));
+        }
+        Self::discover_with_roots(
+            root,
+            selected,
+            InventoryOptions {
+                excludes,
+                include_other_files: false,
+            },
+        )
+    }
+
     /// Walks a directory once with explicit ignore options.
     fn discover_with(root: impl AsRef<Path>, options: InventoryOptions) -> io::Result<Self> {
         let root = root.as_ref();
@@ -528,14 +568,33 @@ impl Inventory {
                 "inventory root is not a directory",
             ));
         }
+        Self::discover_with_roots(root, root, options)
+    }
+
+    fn discover_with_roots(
+        root: &Path,
+        selected: &Path,
+        options: InventoryOptions,
+    ) -> io::Result<Self> {
+        let selected_metadata = fs::metadata(selected)?;
+        if !selected_metadata.is_dir() && !selected_metadata.is_file() {
+            return Err(io::Error::new(
+                io::ErrorKind::InvalidInput,
+                "inventory selection is not a file or directory",
+            ));
+        }
         let root = root.to_path_buf();
         let excludes = config_excludes(&root, &options.excludes);
         let nested_checkouts = Arc::new(Mutex::new(Vec::new()));
         let mut walker = Walker::new(options);
-        for entry in source_walk(&root, excludes, Arc::clone(&nested_checkouts)) {
-            match entry {
-                Ok(entry) => walker.visit(&entry, &root),
-                Err(error) => walker.record_error(&error, &root),
+        let selection_ignored =
+            walker.visit_ancestor_metadata(&root, selected, selected_metadata.is_file())?;
+        if !selection_ignored {
+            for entry in source_walk(selected, excludes, Arc::clone(&nested_checkouts)) {
+                match entry {
+                    Ok(entry) => walker.visit(&entry, &root),
+                    Err(error) => walker.record_error(&error, &root),
+                }
             }
         }
         let nested_checkouts = std::mem::take(
@@ -625,6 +684,24 @@ struct RawFile {
     size_bytes: u64,
 }
 
+fn ancestor_directories(root: &Path, selected: &Path, selected_is_file: bool) -> Vec<PathBuf> {
+    let mut directory = if selected_is_file {
+        selected.parent()
+    } else {
+        selected.parent().filter(|_| selected != root)
+    };
+    let mut ancestors = Vec::new();
+    while let Some(path) = directory.filter(|path| path.starts_with(root)) {
+        ancestors.push(path.to_path_buf());
+        if path == root {
+            break;
+        }
+        directory = path.parent();
+    }
+    ancestors.reverse();
+    ancestors
+}
+
 impl Walker {
     fn new(options: InventoryOptions) -> Self {
         Self {
@@ -638,12 +715,79 @@ impl Walker {
         }
     }
 
+    /// Reads package and resolution metadata from each directory between the
+    /// identity root and the selected subtree without walking sibling source.
+    fn visit_ancestor_metadata(
+        &mut self,
+        root: &Path,
+        selected: &Path,
+        selected_is_file: bool,
+    ) -> io::Result<bool> {
+        let ancestors = ancestor_directories(root, selected, selected_is_file);
+        let ignore_policy = AncestorMetadataIgnore::new(root, &ancestors, &self.options.excludes);
+        for directory in ancestors {
+            self.visit_ancestor_directory(root, &directory, &ignore_policy)?;
+        }
+        let selected_relative = selected
+            .strip_prefix(root)
+            .expect("selection stays under its identity root");
+        Ok(ignore_policy.is_ignored(selected_relative, !selected_is_file))
+    }
+
+    fn visit_ancestor_directory(
+        &mut self,
+        root: &Path,
+        directory: &Path,
+        ignore_policy: &AncestorMetadataIgnore,
+    ) -> io::Result<()> {
+        self.stats.directories_visited += 1;
+        for entry in fs::read_dir(directory)? {
+            self.visit_ancestor_entry(root, entry?, ignore_policy)?;
+        }
+        Ok(())
+    }
+
+    fn visit_ancestor_entry(
+        &mut self,
+        root: &Path,
+        entry: fs::DirEntry,
+        ignore_policy: &AncestorMetadataIgnore,
+    ) -> io::Result<()> {
+        if !entry.file_type()?.is_file() {
+            return Ok(());
+        }
+        let absolute = entry.path();
+        let relative_path = absolute
+            .strip_prefix(root)
+            .expect("ancestor metadata stays under its identity root")
+            .to_path_buf();
+        let Some(relative) = RelativePath::new(relative_path.clone()) else {
+            return Ok(());
+        };
+        if ignore_policy.is_ignored(&relative_path, false) {
+            return Ok(());
+        }
+        self.record_resolution_config(&relative_path, &relative);
+        let Some(manifest) = ManifestKind::for_file(&relative_path) else {
+            return Ok(());
+        };
+        let parent = relative_path.parent().unwrap_or_else(|| Path::new(""));
+        self.manifest_dirs
+            .entry(parent.to_path_buf())
+            .or_default()
+            .push(manifest);
+        if manifest.declares_a_name() {
+            self.record_manifest_name(parent, manifest, &absolute);
+        }
+        Ok(())
+    }
+
     /// Records one entry the walk yielded.
     ///
     /// The depth-zero root entry only counts as a visited directory; every
     /// deeper entry is classified by its own file type.
     fn visit(&mut self, entry: &ignore::DirEntry, root: &Path) {
-        if entry.depth() == 0 {
+        if is_walk_root_directory(entry) {
             self.stats.directories_visited += 1;
             return;
         }
@@ -804,6 +948,81 @@ impl Walker {
     }
 }
 
+fn is_walk_root_directory(entry: &ignore::DirEntry) -> bool {
+    entry.depth() == 0 && entry.file_type().is_some_and(|kind| kind.is_dir())
+}
+
+struct AncestorMetadataIgnore {
+    root: PathBuf,
+    global: ignore::gitignore::Gitignore,
+    repository: ignore::gitignore::Gitignore,
+    by_directory: Vec<(PathBuf, ignore::gitignore::Gitignore)>,
+    configured: ignore::gitignore::Gitignore,
+}
+
+impl AncestorMetadataIgnore {
+    fn new(root: &Path, ancestors: &[PathBuf], excludes: &[String]) -> Self {
+        let global = GitignoreBuilder::new(root).build_global().0;
+        let mut repository_builder = GitignoreBuilder::new(root);
+        let _ = repository_builder.add(root.join(".git/info/exclude"));
+        let repository = repository_builder
+            .build()
+            .unwrap_or_else(|_| ignore::gitignore::Gitignore::empty());
+        let by_directory = ancestors
+            .iter()
+            .filter_map(|directory| {
+                let path = directory.join(".gitignore");
+                path.is_file().then(|| {
+                    let mut builder = GitignoreBuilder::new(directory);
+                    let _ = builder.add(path);
+                    (
+                        directory
+                            .strip_prefix(root)
+                            .unwrap_or(Path::new(""))
+                            .to_path_buf(),
+                        builder
+                            .build()
+                            .unwrap_or_else(|_| ignore::gitignore::Gitignore::empty()),
+                    )
+                })
+            })
+            .collect();
+        Self {
+            root: root.to_path_buf(),
+            global,
+            repository,
+            by_directory,
+            configured: config_excludes(root, excludes),
+        }
+    }
+
+    fn is_ignored(&self, path: &Path, is_directory: bool) -> bool {
+        let absolute = self.root.join(path);
+        let mut matched = self
+            .global
+            .matched_path_or_any_parents(&absolute, is_directory);
+        let repository = self
+            .repository
+            .matched_path_or_any_parents(&absolute, is_directory);
+        if !repository.is_none() {
+            matched = repository;
+        }
+        for (directory, matcher) in &self.by_directory {
+            if path.starts_with(directory) {
+                let candidate = matcher.matched_path_or_any_parents(&absolute, is_directory);
+                if !candidate.is_none() {
+                    matched = candidate;
+                }
+            }
+        }
+        matched.is_ignore()
+            || self
+                .configured
+                .matched_path_or_any_parents(&absolute, is_directory)
+                .is_ignore()
+    }
+}
+
 fn resolution_config_priority(path: &Path) -> Option<u8> {
     match path.file_name()?.to_str()? {
         "tsconfig.json" => Some(0),
@@ -853,6 +1072,7 @@ fn file_kind(path: &Path) -> FileKind {
             | "cts"
             | "rb"
             | "vue"
+            | "astro"
             | "kt"
             | "kts"
             | "go"
@@ -873,6 +1093,11 @@ fn file_kind(path: &Path) -> FileKind {
     } else {
         FileKind::Other
     }
+}
+
+/// Returns whether a path name identifies recognized source.
+pub fn is_source_path(path: &Path) -> bool {
+    matches!(file_kind(path), FileKind::Source)
 }
 
 fn nearest_package(path: &Path, packages: &BTreeMap<PathBuf, PackageId>) -> Option<PackageId> {
@@ -925,6 +1150,29 @@ mod tests {
     }
 
     #[test]
+    fn astro_is_source_in_filesystem_and_ref_inventories() {
+        let directory = tempfile::tempdir().unwrap();
+        fs::create_dir(directory.path().join("src")).unwrap();
+        fs::write(directory.path().join("src/page.astro"), "<h1>Hello</h1>\n").unwrap();
+
+        let inventory = Inventory::discover_sources(directory.path(), Vec::new()).unwrap();
+        assert_eq!(
+            inventory
+                .source_files()
+                .map(|file| file.path().as_path())
+                .collect::<Vec<_>>(),
+            [Path::new("src/page.astro")]
+        );
+
+        let paths = vec![PathBuf::from("src/page.astro")];
+        let snapshot = discover_snapshot(directory.path(), &paths, |path| {
+            fs::read(directory.path().join(path))
+        })
+        .unwrap();
+        assert_eq!(snapshot.source_paths(), paths);
+    }
+
+    #[test]
     fn nested_file_uses_nearest_package() {
         let directory = tempfile::tempdir().unwrap();
         fs::create_dir_all(directory.path().join("nested/src")).unwrap();
@@ -935,6 +1183,141 @@ mod tests {
         let file = inventory.source_files().next().unwrap();
         assert_eq!(file.package(), inventory.packages()[1].id());
         assert_eq!(file.path().as_path(), Path::new("nested/src/main.js"));
+    }
+
+    #[test]
+    fn selected_walk_keeps_repository_paths_and_reads_each_package_ancestor_once() {
+        let directory = tempfile::tempdir().unwrap();
+        fs::create_dir_all(directory.path().join("nested/src")).unwrap();
+        fs::create_dir(directory.path().join("outside")).unwrap();
+        fs::write(
+            directory.path().join("Cargo.toml"),
+            "[package]\nname='root'\n",
+        )
+        .unwrap();
+        fs::write(
+            directory.path().join("nested/package.json"),
+            "{\"name\":\"nested\"}\n",
+        )
+        .unwrap();
+        fs::write(directory.path().join("nested/tsconfig.json"), "{}\n").unwrap();
+        fs::write(
+            directory.path().join("nested/src/main.ts"),
+            "export const value = 1;\n",
+        )
+        .unwrap();
+        fs::write(
+            directory.path().join("outside/ignored.rs"),
+            "fn ignored() {}\n",
+        )
+        .unwrap();
+
+        let inventory = Inventory::discover_selected_sources(
+            directory.path(),
+            directory.path().join("nested/src"),
+            Vec::new(),
+        )
+        .unwrap();
+
+        assert_eq!(source_paths(&inventory), ["nested/src/main.ts"]);
+        assert_eq!(inventory.stats().directories_visited, 3);
+        assert_eq!(inventory.stats().files_visited, 1);
+        assert_eq!(inventory.stats().source_candidates, 1);
+        assert_eq!(inventory.packages().len(), 2);
+        let file = inventory.source_files().next().unwrap();
+        let package = &inventory.packages()[file.package().index()];
+        assert_eq!(package.root().as_path(), Path::new("nested"));
+        assert_eq!(
+            package.resolution_config().map(RelativePath::as_path),
+            Some(Path::new("nested/tsconfig.json"))
+        );
+    }
+
+    #[test]
+    fn selected_walk_does_not_restore_ignored_or_excluded_ancestor_metadata() {
+        let directory = tempfile::tempdir().unwrap();
+        fs::create_dir_all(directory.path().join("nested/src")).unwrap();
+        fs::write(
+            directory.path().join(".gitignore"),
+            "nested/package.json\nnested/tsconfig.json\n",
+        )
+        .unwrap();
+        fs::write(directory.path().join("nested/package.json"), "{}\n").unwrap();
+        fs::write(directory.path().join("nested/tsconfig.json"), "{}\n").unwrap();
+        fs::write(directory.path().join("nested/src/main.ts"), "export {};\n").unwrap();
+
+        let ignored = Inventory::discover_selected_sources(
+            directory.path(),
+            directory.path().join("nested/src"),
+            Vec::new(),
+        )
+        .unwrap();
+        assert_eq!(ignored.packages().len(), 1);
+        assert_eq!(ignored.packages()[0].root().as_path(), Path::new(""));
+        assert_eq!(ignored.packages()[0].resolution_config(), None);
+
+        fs::write(directory.path().join(".gitignore"), "nested/\n").unwrap();
+        let ignored_directory = Inventory::discover_selected_sources(
+            directory.path(),
+            directory.path().join("nested/src"),
+            Vec::new(),
+        )
+        .unwrap();
+        assert!(ignored_directory.source_files().next().is_none());
+        assert_eq!(ignored_directory.packages().len(), 1);
+        assert_eq!(
+            ignored_directory.packages()[0].root().as_path(),
+            Path::new("")
+        );
+
+        fs::write(directory.path().join(".gitignore"), "").unwrap();
+        fs::write(
+            directory.path().join("nested/.gitignore"),
+            "/package.json\n/tsconfig.json\n",
+        )
+        .unwrap();
+        let nested_ignored = Inventory::discover_selected_sources(
+            directory.path(),
+            directory.path().join("nested/src"),
+            Vec::new(),
+        )
+        .unwrap();
+        assert_eq!(nested_ignored.packages().len(), 1);
+        assert_eq!(nested_ignored.packages()[0].root().as_path(), Path::new(""));
+        assert_eq!(nested_ignored.packages()[0].resolution_config(), None);
+
+        fs::write(directory.path().join("nested/.gitignore"), "").unwrap();
+        let excluded = Inventory::discover_selected_sources(
+            directory.path(),
+            directory.path().join("nested/src"),
+            vec![
+                "/nested/package.json".to_owned(),
+                "/nested/tsconfig.json".to_owned(),
+            ],
+        )
+        .unwrap();
+        assert_eq!(excluded.packages().len(), 1);
+        assert_eq!(excluded.packages()[0].root().as_path(), Path::new(""));
+        assert_eq!(excluded.packages()[0].resolution_config(), None);
+    }
+
+    #[test]
+    fn source_free_selected_directory_never_visits_repository_source() {
+        let directory = tempfile::tempdir().unwrap();
+        fs::create_dir(directory.path().join("docs")).unwrap();
+        fs::write(directory.path().join("outside.rs"), "fn outside() {}\n").unwrap();
+
+        let inventory = Inventory::discover_selected_sources(
+            directory.path(),
+            directory.path().join("docs"),
+            Vec::new(),
+        )
+        .unwrap();
+
+        assert!(inventory.source_files().next().is_none());
+        assert_eq!(inventory.stats().directories_visited, 2);
+        assert_eq!(inventory.stats().files_visited, 0);
+        assert_eq!(inventory.stats().source_candidates, 0);
     }
 
     #[test]
@@ -1312,17 +1695,17 @@ mod tests {
     #[test]
     fn a_linked_worktree_with_a_git_file_is_pruned_and_recorded() {
         let directory = tempfile::tempdir().unwrap();
-        fs::create_dir_all(directory.path().join(".worktrees/pr-48")).unwrap();
+        fs::create_dir_all(directory.path().join("linked/pr-48")).unwrap();
         fs::write(
-            directory.path().join(".worktrees/pr-48/.git"),
+            directory.path().join("linked/pr-48/.git"),
             "gitdir: /elsewhere/.git/worktrees/pr-48\n",
         )
         .unwrap();
-        fs::write(directory.path().join(".worktrees/pr-48/lost.rs"), "").unwrap();
+        fs::write(directory.path().join("linked/pr-48/lost.rs"), "").unwrap();
         fs::write(directory.path().join("kept.rs"), "").unwrap();
         let inventory = Inventory::discover(directory.path()).unwrap();
         assert_eq!(source_paths(&inventory), ["kept.rs"]);
-        assert_eq!(nested_checkout_paths(&inventory), [".worktrees/pr-48"]);
+        assert_eq!(nested_checkout_paths(&inventory), ["linked/pr-48"]);
         assert_eq!(inventory.stats().nested_checkouts_skipped, 1);
     }
 

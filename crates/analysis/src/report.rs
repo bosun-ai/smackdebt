@@ -1436,7 +1436,7 @@ impl Report {
             ReportMode::Diff => Verdict::diff(counts, self.debt_diff(scope), worst),
         };
         verdict
-            .with_qualifier(self.coverage_qualifier(scope))
+            .with_qualifier(coverage_qualifier(self, scope))
             .with_share(self.repository_share(selected))
             .with_reach(self.propagation_reach(selected))
             .with_core_size(self.scope_core_size(selected))
@@ -1534,35 +1534,15 @@ impl Report {
     /// health totals and does no work.
     fn repository_share(&self, selected: ScopeId) -> Option<VerdictShare> {
         let root = self.root?;
-        if root == selected {
+        if root == selected
+            || self.scopes[root.index()].coverage().selected_files()
+                == self.scopes[selected.index()].coverage().selected_files()
+        {
             return None;
         }
         VerdictShare::from_counts(
             self.scopes[selected.index()].health().high(),
             self.scopes[root.index()].health().high(),
-        )
-    }
-
-    /// The coverage qualifier one scope's byte totals earn, when they earn
-    /// one.
-    ///
-    /// The subtree is walked only when unsupported bytes exist at all, and the
-    /// largest unsupported language is chosen by selected bytes with ties
-    /// broken by name so two runs state the same language.
-    fn coverage_qualifier(&self, scope: &Scope) -> Option<CoverageQualifier> {
-        let coverage = scope.coverage();
-        if coverage.unsupported_bytes() == 0 {
-            return None;
-        }
-        let mut totals: BTreeMap<String, u64> = BTreeMap::new();
-        self.collect_unsupported_bytes(scope, &mut totals);
-        let largest = totals
-            .into_iter()
-            .reduce(|best, entry| if entry.1 > best.1 { entry } else { best })?;
-        CoverageQualifier::from_shares(
-            coverage.selected_bytes(),
-            coverage.unsupported_bytes(),
-            largest.0,
         )
     }
 
@@ -1805,6 +1785,31 @@ impl Report {
         aggregate_comparison_scope(&mut self.scopes, &self.comparisons, root);
         self.verdict = Some(self.scope_verdict(root));
     }
+}
+
+/// The coverage qualifier one scope's file totals earn, when they earn one.
+fn coverage_qualifier(report: &Report, scope: &Scope) -> Option<CoverageQualifier> {
+    let coverage = scope.coverage();
+    if coverage.analyzed_files() >= coverage.selected_files() {
+        return None;
+    }
+    CoverageQualifier::from_coverage(
+        coverage.selected_files(),
+        coverage.analyzed_files(),
+        coverage.selected_bytes(),
+        coverage.unsupported_bytes(),
+        largest_unsupported_language(report, scope),
+    )
+}
+
+/// The unsupported language with the most selected bytes in one subtree.
+fn largest_unsupported_language(report: &Report, scope: &Scope) -> Option<String> {
+    let mut totals: BTreeMap<String, u64> = BTreeMap::new();
+    report.collect_unsupported_bytes(scope, &mut totals);
+    totals
+        .into_iter()
+        .reduce(|best, entry| if entry.1 > best.1 { entry } else { best })
+        .map(|entry| entry.0)
 }
 
 /// Aggregates flat scope summaries in one post-order pass.
@@ -2088,14 +2093,24 @@ mod tests {
         let qualifier = verdict
             .qualifier()
             .expect("a majority-unsupported selection is disclosed");
-        assert_eq!(qualifier.sentence(), "Not all source was checked.");
-        assert_eq!(qualifier.share_permille(), 555);
-        assert_eq!(qualifier.largest_language(), "Go");
-        assert_eq!(qualifier.fact(), "55% of source bytes are Go.");
+        assert_eq!(
+            (
+                qualifier.sentence(),
+                qualifier.detail(),
+                qualifier.share_permille(),
+                qualifier.largest_language(),
+            ),
+            (
+                "Not all source was checked.",
+                "1 of 3 source files were analyzed.".to_owned(),
+                555,
+                Some("Go"),
+            )
+        );
     }
 
     #[test]
-    fn a_marginal_unsupported_byte_share_leaves_the_verdict_unqualified() {
+    fn a_marginal_unsupported_byte_share_still_qualifies_the_verdict() {
         let mut fixture = ReportFixture::new(ReportMode::Codebase);
         fixture.add_coverage_file(
             "src/main.rs",
@@ -2109,10 +2124,9 @@ mod tests {
         );
         let report = fixture.finish();
         let verdict = report.verdict().expect("a built report answers");
-        assert!(
-            verdict.qualifier().is_none(),
-            "a share at the threshold stays unqualified"
-        );
+        let qualifier = verdict.qualifier().expect("one missed file qualifies");
+        assert_eq!(qualifier.detail(), "1 of 2 source files were analyzed.");
+        assert_eq!(qualifier.share_permille(), 100);
     }
 
     #[test]
@@ -2214,7 +2228,7 @@ mod tests {
     }
 
     #[test]
-    fn a_sub_scope_verdict_frames_the_repository_and_the_root_states_no_share() {
+    fn a_sub_scope_from_a_completed_root_report_carries_measured_share() {
         let mut fixture = ReportFixture::new(ReportMode::Codebase);
         let (heavy, heavy_file) = fixture.add_file("src/heavy.rs", HealthCounts::new(0, 0, 2));
         fixture.add_finding(heavy, heavy_file, "heavy", 25);
@@ -2245,13 +2259,14 @@ mod tests {
     }
 
     #[test]
-    fn a_repository_without_high_debt_frames_no_sub_scope() {
+    fn a_retained_child_covering_all_selected_source_omits_share() {
         let mut fixture = ReportFixture::new(ReportMode::Codebase);
-        let (scope, _) = fixture.add_file("src/work.rs", HealthCounts::new(9, 1, 0));
+        let (child, _) = fixture.add_file("src/work.rs", HealthCounts::new(0, 0, 1));
         let report = fixture.finish();
+        assert_eq!(report.scope_verdict(child).counts().high(), 1);
         assert!(
-            report.scope_verdict(scope).share().is_none(),
-            "a zero-of-zero sentence states nothing"
+            report.scope_verdict(child).share().is_none(),
+            "an equal selected-file denominator adds no information"
         );
     }
 

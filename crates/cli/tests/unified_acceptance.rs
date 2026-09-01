@@ -14,8 +14,8 @@ use support::coverage_failure_repository;
 use support::edges::assert_no_dependency_edge_rows;
 use support::hermetic::hermetic_env;
 use support::{
-    GeneratedRepository, Invocation, amplification_repository, bulk_commit_repository,
-    change_leakage_repository, copy_language_truth_files, core_repository,
+    Commit, GeneratedRepository, Identity, Invocation, amplification_repository,
+    bulk_commit_repository, change_leakage_repository, copy_language_truth_files, core_repository,
     deepened_signal_repository, evolution_repository, module_wiring_repository,
     propagation_repository, ref_diff_repository, rust_test_scope_repository, shallow_clone,
     signal_table_repository, source_role_repository, stable_dependency_repository,
@@ -1155,7 +1155,7 @@ fn the_leakage_fixture_gains_one_default_card_and_states_no_weak_pair() {
         let with = rendered(vec![scope, "--history", "36500d"]);
         let without = rendered(vec![scope, "--history", "1d"]);
         let gained = problem_heads(&with).len() - problem_heads(&without).len();
-        let expected = usize::from(scope == "." || scope.starts_with("data"));
+        let expected = usize::from(scope == "." || scope == "data");
         assert_eq!(gained, expected, "{scope}: {with}{without}");
         assert!(
             problem_body(&with).len() <= SCREEN_BUDGET,
@@ -2419,8 +2419,7 @@ fn readme_console_examples_use_the_simple_terminal_vocabulary() {
         "changed together in 33 of 98 commits · 34% · no direct dependency · linked via crates/output",
         "29% · no code dependency",
         "one contributor made 57 of 60 commits",
-        // The four sentences a verdict may carry beyond its tier, each shown
-        // as captured output rather than described.
+        // Verdict facts shown in captured output.
         "A change in one package can reach 6 of 12 packages.",
         "A change here can reach 17 of 36 files in this package.",
         "9 of 86 files sit in one dependency cycle.",
@@ -2434,9 +2433,15 @@ fn readme_console_examples_use_the_simple_terminal_vocabulary() {
         "11 files import this",
         "GraphEditor.vue · closure",
         "next: smackdebt scripts",
-        "4 of the repository's 20 high live here.",
         "worse 0 · better 0 · changed 0",
+        "Not all source was checked.",
+        "<analyzed> of <selected> source files were analyzed.",
+        // Repository share is available only when both totals were measured.
+        "A fresh explicit file or directory command inspects only that selection.",
+        "A retained sub-scope from a completed root report may carry `verdict.share`",
         "smackdebt: path not found: does/not/exist",
+        "smackdebt: no source files found under: docs",
+        "smackdebt: not a source file: README.txt",
         "smackdebt: Git ref not found: no-such-ref",
         "smackdebt: --all cannot be used with --json",
         "smackdebt: baseline not found: .smackdebt-baseline.tsv",
@@ -2521,6 +2526,74 @@ fn selected_binary_contains_the_requested_evidence_feature() {
 
 #[cfg(feature = "evidence-stats")]
 #[test]
+fn explicit_astro_scopes_have_limited_work_evidence() {
+    let repository = GeneratedRepository::new("main");
+    repository.write("package.json", b"{}\n");
+    repository.write("page.astro", b"<h1>Before</h1>\n");
+    repository.write("outside.rs", b"fn outside() {}\n");
+    repository.commit(Commit {
+        message: "base",
+        identity: Identity {
+            name: "Scope Evidence",
+            address: "scope@example.invalid",
+        },
+        date: "2026-01-01T12:00:00Z",
+    });
+
+    let codebase = Invocation::new(["page.astro", "--json"])
+        .evidence()
+        .run(repository.path());
+    assert_eq!(
+        codebase.status.code(),
+        Some(0),
+        "{}",
+        codebase.stderr_text()
+    );
+    let report = checked_json(&codebase.stdout);
+    assert_eq!(report["files"].as_array().unwrap().len(), 1);
+    assert_eq!(report["files"][0]["language"], "astro");
+    assert_eq!(report["files"][0]["trust"], "failed");
+    assert_eq!(report["scopes"][0]["coverage"]["unsupported_files"], 1);
+    assert!(report["findings"].as_array().unwrap().is_empty());
+    assert!(report["dependency_edges"].as_array().unwrap().is_empty());
+    let codebase_stats = evidence_stats(&codebase);
+    assert_eq!(codebase_stats["inventory_walks"], 1);
+    assert_eq!(codebase_stats["source_reads"], 0);
+    assert_eq!(codebase_stats["parser_visits"], 0);
+
+    fs::remove_file(repository.path().join("outside.rs")).unwrap();
+    repository.commit(Commit {
+        message: "remove outside source",
+        identity: Identity {
+            name: "Scope Evidence",
+            address: "scope@example.invalid",
+        },
+        date: "2026-01-02T12:00:00Z",
+    });
+    repository.write("page.astro", b"<h1>After</h1>\n");
+    let diff = Invocation::new(["diff", "HEAD", "--json"])
+        .evidence()
+        .run(repository.path());
+    assert_eq!(diff.status.code(), Some(0), "{}", diff.stderr_text());
+    let report = checked_json(&diff.stdout);
+    assert_eq!(report["files"][0]["language"], "astro");
+    assert_eq!(report["files"][0]["trust"], "failed");
+    assert_eq!(report["scopes"][0]["coverage"]["unsupported_files"], 1);
+    assert_eq!(
+        report["diff_graph_evidence"]["current"]["status"],
+        "incomplete"
+    );
+    assert_eq!(
+        report["diff_graph_evidence"]["base"]["status"],
+        "incomplete"
+    );
+    assert!(report["findings"].as_array().unwrap().is_empty());
+    assert!(report["dependency_edges"].as_array().unwrap().is_empty());
+    assert_eq!(evidence_stats(&diff)["parser_visits"], 0);
+}
+
+#[cfg(feature = "evidence-stats")]
+#[test]
 fn composition_work_counts_are_visible_without_changing_report_bytes() {
     let repository = worktree_change_repository();
     for (name, arguments, expected) in [
@@ -2539,18 +2612,18 @@ fn composition_work_counts_are_visible_without_changing_report_bytes() {
         (
             "package terminal",
             vec!["a", "--all"],
-            [1, 29, 8, 0, 3, 8, 10],
+            [1, 4, 1, 0, 3, 1, 3],
         ),
-        ("package JSON", vec!["a", "--json"], [1, 29, 8, 0, 3, 8, 10]),
+        ("package JSON", vec!["a", "--json"], [1, 4, 1, 0, 3, 1, 3]),
         (
             "file terminal",
             vec!["a/main.js", "--all"],
-            [1, 29, 8, 0, 3, 8, 10],
+            [1, 3, 1, 0, 3, 1, 3],
         ),
         (
             "file JSON",
             vec!["a/main.js", "--json"],
-            [1, 29, 8, 0, 3, 8, 10],
+            [1, 3, 1, 0, 3, 1, 3],
         ),
     ] {
         assert_evidence_flow(name, arguments, repository.path(), expected);
@@ -2576,7 +2649,7 @@ fn composition_work_counts_are_visible_without_changing_report_bytes() {
         ("directory terminal", vec!["src", "--all"]),
         ("directory JSON", vec!["src", "--json"]),
     ] {
-        assert_evidence_flow(name, arguments, languages.path(), [1, 15, 11, 0, 3, 11, 13]);
+        assert_evidence_flow(name, arguments, languages.path(), [1, 13, 11, 0, 3, 11, 13]);
     }
 
     let roles = source_role_repository();
@@ -3257,6 +3330,19 @@ fn assert_index_integrity(report: &Value) {
     for field in ["root", "selected_scope"] {
         if let Some(scope) = report[field].as_u64() {
             assert!((scope as usize) < scopes, "{field} points outside scopes");
+        }
+    }
+    if let Some(answered) = report["selected_scope"]
+        .as_u64()
+        .or_else(|| report["root"].as_u64())
+    {
+        let coverage = &report["scopes"][answered as usize]["coverage"];
+        match report["verdict"].get("qualifier") {
+            Some(qualifier) => {
+                assert_eq!(qualifier["selected_files"], coverage["selected_files"]);
+                assert_eq!(qualifier["analyzed_files"], coverage["analyzed_files"]);
+            }
+            None => assert_eq!(coverage["selected_files"], coverage["analyzed_files"]),
         }
     }
     for table in [
