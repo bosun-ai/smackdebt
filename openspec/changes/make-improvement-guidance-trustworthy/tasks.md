@@ -1,6 +1,6 @@
 ## 0. Pre-change evidence
 
-- [ ] 0.1 Before task 1.1, run the current release binary in terminal and JSON
+- [x] 0.1 Before task 1.1, run the current release binary in terminal and JSON
       mode over the complete review matrix: Smackdebt root and `diff d4e78ba`;
       Fluyt root and `diff master`, including `WorkflowRunMiniMap.vue`;
       `bow/src/components/graph-editor/GraphEditor.vue` at current
@@ -14,7 +14,31 @@
       beneath this task. Record aggregates and already-emitted paths only; copy
       no source, contributor identity, raw Git history, secret, or complete
       private terminal or JSON output. The observed GraphEditor starting point
-      is 112 Added, 95 Removed, and 1 MetricChanged closure rows.
+      is 125 Added, 95 Removed, and 20 MetricChanged closure rows.
+
+      **Completion note (2026-09-01).** Built `target/release/smackdebt` at
+      `26c0336`. Every command below ran once as terminal output and once with
+      `--json`; the digest is SHA-256 of the complete JSON bytes. Coverage is
+      selected/analyzed/unsupported/failed. Graph is current/base for diffs and
+      current for codebase reports. Suppression is propagation/core/leakage.
+      Comparison counts are source/emitted package-cycle/propagation/core/
+      leakage/history rows.
+      Every invocation exited 0.
+
+      | Case and command | JSON digest | Coverage | Graph; suppression | Comparisons | Terminal |
+      | --- | --- | --- | --- | --- | --- |
+      | Smackdebt: `smackdebt`, `smackdebt diff d4e78ba` | `441da3e26b6861d989a351b731ef94592169e8616fed704b6bef8ceae50ccf90`, `1da573177195a4005f853767d8a24fa51bf403fbf838bd20984d062aff63cd21` | 119/119/0/0, 20/20/0/0 | incomplete; 1/1/0, incomplete/incomplete; 0/0/0 | 0/0/0/0/0/0, 1465/0/0/0/0/0 | worn; mixed 4 worse, 5 better, 6 changed; footer present |
+      | Fluyt: `smackdebt`, `smackdebt diff master` | `cab3d3e0aff0823fe89c29809aedd58cc903192bcb4f56d815da62458d797d02`, `fafccc7de0baa9a5cb2e3be010901b9b2e344b247df83b5d3b0acdb7f295b0e0` | 1877/1877/0/0, 23/23/0/0 | incomplete; 4/0/0, incomplete/incomplete; 1/0/0 | 0/0/0/0/0/0, 261/0/0/0/0/0 | fights back; mixed 1 worse, 1 better; footer present |
+      | GraphEditor detached `f42f3ae8e...` versus `02caca0d3...`: `smackdebt diff 02caca0d3bf05599e1232130cf9265cc9926c9b3` | `cfde35c92821933254c1cd0f8c64d650b2ed01a806ac4f941b9e84d77e919abe` | 24/24/0/0 | incomplete/incomplete; 2/0/0 | 842/0/0/0/0/0 | mixed 7 worse, 2 better, 2 changed; footer present; the named file has 125 Added, 95 Removed, and 20 MetricChanged closure rows |
+      | Marketing: `smackdebt`, `smackdebt src/pages/demo.astro`, `smackdebt src/pages`, `smackdebt diff HEAD` | `89a3283b59fd0e582ad510e571222b336906ffefbb2532e0dc4f1b1946dd0be5`, `3a16549e0c53ebf5c5eb4e920894c30b0257bbeb190aa4ed91e0a072f88e28ac`, `ab3a9e07eb3b55b7319fbec171b852e78b014f7011c6b84be95222cf7f02d91e`, `5363603bfa69e37ec7700f5d2df9ad72fe2e7a6e7b0b859cb820d4930cdd2069` | 2/2/0/0, 2/2/0/0, 2/2/0/0, 0/0/0/0 | complete; 0/0/0 for all codebase runs, complete/complete; 0/0/0 | all comparison counts zero | root, explicit Astro file, and Astro directory all return the same worn repository result and `next:` target; diff says no debt changed with no footer |
+      | Netdisco: `smackdebt`, `smackdebt diff HEAD~1` | `29571f9bfb2e6a98d1195f50b0901a1fc2c38f3c404a44e27fca412e2f658264`, `890a9aa5a332779807f4dff399c03511d67f42cd37232cc6c91fa42c3ebe7dbd` | 90/90/0/0, 0/0/0/0 | incomplete; 2/0/0, incomplete/incomplete; 0/0/0 | all comparison counts zero | root fights back and navigates to `share/public/swagger-ui/swagger-ui-bundle.js`; diff says no debt changed with no footer |
+      | Swiftide: `smackdebt`, `smackdebt diff HEAD~1` | `cc940aa1f1366dae64c0d121b430d7ce53f695722a971fbbe5a893577745f11b`, `de51733c3dfd68e0bb8bea3abdea29cc8cf160b913be191ee6fa8ebbf03cc315` | 207/207/0/0, 3/3/0/0 | incomplete; 3/0/0, incomplete/incomplete; 0/0/0 | 0/0/0/0/0/0, 58/0/0/0/0/0 | worn; no debt changed with 1 changed source row and no footer |
+      | Clean detached Parity: `smackdebt diff HEAD~1` | `70375eeb0f8af0542f8a592c9760df58b8ff78028ca2cc33fcf9091c45c4bb24` | 7/7/0/0 | incomplete/incomplete; 0/0/0 | 259/0/0/0/0/0 | no debt changed with 2 changed source rows and no footer |
+
+      The Fluyt `diff master` report contained no comparison for
+      `WorkflowRunMiniMap.vue` in either checkout. The detached worktrees kept
+      dirty user files out of the GraphEditor and Parity measurements. No source,
+      contributor identity, raw history, or complete private output was retained.
 
 ## 1. Scope and coverage
 
