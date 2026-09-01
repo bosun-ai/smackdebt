@@ -41,14 +41,15 @@ and integer arithmetic inside passes that already run.
   similarity bar an integer step at a time: two files four directories apart need
   weaker agreement to be interesting than two files in sibling folders, because
   distance is what makes co-change surprising.
-- **Three system numbers reach the verdict head.** *Propagation reach* answers
+- **Three system numbers reach the report.** *Propagation reach* answers
   how many packages one package's change can reach at the repository root and how
   many files one change can reach inside the selected package; *core size*
   answers how much of the repository sits in one file dependency cycle; *change
-  amplification* answers how many files a typical change here touches. All three
-  are analysis-owned sentences beside the existing repository-share fact, and all
-  three are **stated only**: they never move a tier, a count, or the worst
-  offender.
+  amplification* answers how many files a typical change here touches. Reach is
+  shown only beside the package or file that produces it, core size only beside
+  the cycle it measures, and amplification stays machine-only until it can name
+  a narrower place to inspect. All three are **stated only**: they never move a
+  tier, a count, or the worst offender.
 - **Hybrid surfacing, not more cards.** A file's leakage findings become evidence
   lines on the card that already names that file. A standalone card exists only
   when nothing else names the file or the pair. Propagation reach reaches a
@@ -78,8 +79,16 @@ and integer arithmetic inside passes that already run.
   gate snapshot identical to the same tree analyzed without history. The future
   shape of a `core_size` gate row is recorded in `design.md` and deliberately not
   specified as accepted behavior.
-- **Diff mode is untouched.** The new tables and facts are codebase-mode only;
-  nothing enters a comparison, a debt-diff selection, or a diff verdict.
+- **A diff explains architecture movement.** Reach, core size, and change
+  leakage compare the current tree with the selected ref when both graph sides
+  have sufficient evidence. The comparison names a package, file, cycle, or
+  pair and counts in the existing architecture family. Amplification remains a
+  codebase-only history fact.
+- **Graph claims require sufficient evidence.** Package-local TypeScript and
+  JavaScript aliases are resolved from the source package's configuration.
+  Parse failures, unresolved or ambiguous internal references, and unusable
+  configuration suppress affected human claims while machine diagnostics retain
+  the reason.
 
 ## Capabilities
 
@@ -152,9 +161,9 @@ and integer arithmetic inside passes that already run.
   taken at the end: new analysis modules are sized and structured to stay under
   the accepted file and container thresholds, and every regression the gate
   reported during the wave was restructured away rather than accepted. The
-  closing slice ratchets in the one improvement the wave earned —
-  `crates/output/src/json.rs · cyclomatic · watch 1 → 0`, from splitting the
-  evidence serialization — so the slack the baseline still allowed closes.
+  closing slice ratchets in `crates/project/src/project.rs · nesting · watch
+  4 → 3`, earned by the architecture-composition cleanup, so that part of the
+  slack the baseline still allowed closes.
 - Live work counts are load-bearing: every new computation rides an existing
   pass — the history stream callback, the architecture build, and report finish —
   and no new algorithm pass is recorded, so the exact `algorithm_passes`

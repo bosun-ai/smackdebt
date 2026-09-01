@@ -237,6 +237,14 @@ a fixed package target; a dynamic or malformed target stays unresolved. Several
 matches are ambiguous. Supported project configuration is read as data and is
 never executed.
 
+Discovery also records the nearest `tsconfig.json` or `jsconfig.json` for each
+package during the same walk. Project resolution parses JSON with comments,
+follows only repository-local relative `extends` chains, and applies `baseUrl`
+and `paths` to files from that package. Alias rules never leak into a sibling
+package. Runtime JavaScript suffixes may resolve to their TypeScript source
+forms after the ordinary exact lookup fails. Invalid, cyclic, external, or
+escaping configuration becomes graph evidence rather than a guessed rule.
+
 A recorded reference carries `role.max(Test)` when its scope is test, so a
 `#[cfg(test)]` import inside production source becomes a test relation while a
 fixture or generated file keeps its own role. A Rust file is reclassified as
@@ -298,6 +306,40 @@ the return paths needed by each graph. Rename aliases are entered before
 resolution. The comparison therefore detects a changed edge that closes or
 opens a path through unchanged files. Introduced package cycles are Worse,
 removed package cycles are Better, and other edge changes are Changed.
+
+The current and base graphs also produce exact comparisons for material reach,
+dependency cores, and history-to-code leakage. Each side derives file presence,
+package ownership, source role, and trust from its own tree. Reach uses the
+union of each side's selected subjects and compares every named package or file
+with itself. Core movement compares the components containing one file present
+on both sides, so disjoint largest cycles become separate old and new movements
+instead of one mixed row. These comparisons retain the values computed during
+the existing graph builds and add no walk, parser pass, or Git process.
+
+The base inventory comes from tree objects read through the diff's existing
+batch object process. Git owns tree decoding, discovery applies its source,
+ignore, manifest, package, and configuration policy to the stable path stream,
+and project reads only the selected base source blobs. Inventory itself reads
+only name-bearing manifests and ignore files whose parent directories remain
+visible after applying ancestor rules. A missing or invalid metadata object
+fails the diff instead of silently changing file presence or package identity.
+Every Git change is reconciled with each inventory before source reads, so an
+ignored modified file cannot enter that side's analysis. Changed nested ignore
+rules, negations, and gemspec package names therefore use base facts without a
+second filesystem walk or another Git process.
+
+A diff retains graph evidence for the current and base trees separately. It
+counts material reach, core, and leakage comparison candidates before evidence
+filtering, then records each withheld count by family and by incomplete side.
+Only candidates supported by both sides enter comparison tables or the verdict.
+Change amplification remains a codebase-only history fact.
+
+Graph evidence records incomplete packages, primary parse failures, internal
+references that could not be resolved safely, configuration failures, and
+withheld human facts. Reach, core, hidden-coupling, and leaky-interface claims
+appear in human output only when the part of the graph they rely on is complete.
+JSON retains the evidence and withheld counts so automation can distinguish no
+problem from insufficient proof.
 
 Edges are a machine fact. No human view prints one at any scope or detail level;
 a relationship reaches a reader only as aggregate problem-card evidence — a
@@ -501,7 +543,9 @@ tier color. Each occupies one display cell. Undecorated output contains no
 codepoint in U+E000–U+F8FF, which every public piped flow asserts.
 
 The verdict block always appears, carrying the analysis-owned qualifier and
-repository-share bytes when the completed verdict holds them. `AREAS` appears
+repository-share bytes when the completed verdict holds them. Reach, core, and
+change-size aggregates stay out of the terminal verdict because they do not name
+an action. `AREAS` appears
 only for several debt-bearing children and shows at most five with word-labeled
 counts. `WARNINGS` groups one sentence per kind. A diff that moves no debt
 writes the verdict block and nothing after it.
@@ -519,8 +563,10 @@ witness costs one slot however many steps it stacks. `--top N` selects the rung
 `N` selects, `--all` and a selected file show every card in scope with complete
 evidence, and a card's `detail` visibility is applied as a display filter that
 never reorders the cards that remain. Diff output keeps `FINDINGS`,
-`ARCHITECTURE`, and `HISTORY` with their accepted limits and orders this
-release, so the two modes speak different vocabularies for one cycle.
+`ARCHITECTURE`, and `HISTORY` with their accepted limits and orders.
+Architecture rows include cycle, reach, core, and leakage movement, each with a
+named subject and exact evidence. Navigation opens the first visible row against
+the same comparison ref.
 
 Empty optional sections, healthy rows, bars, summary ratios, processing totals,
 raw dependency edges, references outside the repository, churn totals,
@@ -572,7 +618,8 @@ version selector.
 
 Static architecture adds dependency coverage, file relations, package edges,
 external summaries, resolution diagnostics, package measurements, architecture
-findings, and architecture comparisons. These are flat indexed tables; source
+findings, architecture comparisons, graph evidence, reach comparisons, core
+comparisons, and leakage comparisons. These are flat indexed tables; source
 and architecture health remain independent. Codebase terminal output states a
 rated cycle as one problem card carrying its witness, and states no edge row and
 no edge total at any detail level; unmatched and multiple-match evidence keeps

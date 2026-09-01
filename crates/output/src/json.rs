@@ -50,9 +50,10 @@ impl Serialize for ReportView<'_> {
                 .cloned()
                 .expect("a built report always carries a root verdict"),
         };
-        let mut map = serializer.serialize_map(Some(38))?;
+        let mut map = serializer.serialize_map(Some(44))?;
         map.serialize_entry("schema_version", &report.schema_version())?;
         map.serialize_entry("mode", mode_name(report.mode()))?;
+        map.serialize_entry("comparison_ref", &report.comparison_ref())?;
         // The head is written before every table so `--json | head` answers the
         // question the tool exists to answer without one index lookup.
         map.serialize_entry("verdict", &VerdictView(&verdict, report.mode()))?;
@@ -72,6 +73,7 @@ impl Serialize for ReportView<'_> {
             "dependency_coverage",
             &DependencyCoverageView(report.dependency_coverage()),
         )?;
+        serialize_graph_comparisons(&mut map, report)?;
         map.serialize_entry(
             "dependency_edges",
             &DependencyEdges(report.dependency_edges()),
@@ -143,7 +145,65 @@ impl Serialize for ReportView<'_> {
             &PackageClosures(report.package_closures()),
         )?;
         map.serialize_entry("file_reach", &FileReaches(report.file_reach()))?;
+        let core_component =
+            (!report.core_members().is_empty()).then_some(CoreComponentView(report.core_members()));
+        map.serialize_entry("core_component", &core_component)?;
         map.serialize_entry("problems", &Problems(report.problems()))?;
+        map.end()
+    }
+}
+
+fn serialize_graph_comparisons<M: SerializeMap>(
+    map: &mut M,
+    report: &Report,
+) -> Result<(), M::Error> {
+    map.serialize_entry(
+        "graph_evidence",
+        &GraphEvidenceView(report.graph_evidence()),
+    )?;
+    if let Some(evidence) = report.diff_graph_evidence() {
+        map.serialize_entry("diff_graph_evidence", &DiffGraphEvidenceView(evidence))?;
+    }
+    map.serialize_entry(
+        "propagation_comparisons",
+        &PropagationComparisons(report.propagation_comparisons()),
+    )?;
+    map.serialize_entry(
+        "core_comparisons",
+        &CoreComparisons(report.core_comparisons()),
+    )?;
+    map.serialize_entry(
+        "change_leakage_comparisons",
+        &ChangeLeakageComparisons(report.change_leakage_comparisons()),
+    )
+}
+
+struct DiffGraphEvidenceView<'a>(&'a smackdebt_analysis::DiffGraphEvidence);
+impl Serialize for DiffGraphEvidenceView<'_> {
+    fn serialize<S: Serializer>(&self, serializer: S) -> Result<S::Ok, S::Error> {
+        let mut map = serializer.serialize_map(Some(5))?;
+        map.serialize_entry("current", &GraphEvidenceView(self.0.current()))?;
+        map.serialize_entry("base", &GraphEvidenceView(self.0.base()))?;
+        map.serialize_entry(
+            "suppressed_propagation",
+            &ComparisonSuppressionView(self.0.propagation()),
+        )?;
+        map.serialize_entry("suppressed_core", &ComparisonSuppressionView(self.0.core()))?;
+        map.serialize_entry(
+            "suppressed_leakage",
+            &ComparisonSuppressionView(self.0.leakage()),
+        )?;
+        map.end()
+    }
+}
+
+struct ComparisonSuppressionView(smackdebt_analysis::ComparisonSuppression);
+impl Serialize for ComparisonSuppressionView {
+    fn serialize<S: Serializer>(&self, serializer: S) -> Result<S::Ok, S::Error> {
+        let mut map = serializer.serialize_map(Some(3))?;
+        map.serialize_entry("total", &self.0.total())?;
+        map.serialize_entry("current", &self.0.current())?;
+        map.serialize_entry("base", &self.0.base())?;
         map.end()
     }
 }
@@ -203,7 +263,7 @@ impl Serialize for ScopeView<'_> {
         S: Serializer,
     {
         let scope = self.0;
-        let mut map = serializer.serialize_map(Some(14))?;
+        let mut map = serializer.serialize_map(Some(17))?;
         map.serialize_entry("id", &scope.id().get())?;
         map.serialize_entry("kind", scope_kind(scope.kind()))?;
         map.serialize_entry("parent", &scope.parent().map(|id| id.get()))?;
@@ -218,6 +278,18 @@ impl Serialize for ScopeView<'_> {
         map.serialize_entry(
             "architecture_comparisons",
             &ArchitectureComparisonIds(scope.architecture_comparisons()),
+        )?;
+        map.serialize_entry(
+            "propagation_comparisons",
+            &PropagationComparisonIds(scope.propagation_comparisons()),
+        )?;
+        map.serialize_entry(
+            "core_comparisons",
+            &CoreComparisonIds(scope.core_comparisons()),
+        )?;
+        map.serialize_entry(
+            "change_leakage_comparisons",
+            &ChangeLeakageComparisonIds(scope.change_leakage_comparisons()),
         )?;
         map.serialize_entry(
             "evolutionary_findings",
@@ -266,6 +338,39 @@ impl Serialize for ArchitectureFindingIds<'_> {
 }
 struct ArchitectureComparisonIds<'a>(&'a [smackdebt_analysis::ArchitectureComparisonId]);
 impl Serialize for ArchitectureComparisonIds<'_> {
+    fn serialize<S: Serializer>(&self, serializer: S) -> Result<S::Ok, S::Error> {
+        let mut sequence = serializer.serialize_seq(Some(self.0.len()))?;
+        for id in self.0 {
+            sequence.serialize_element(&id.get())?;
+        }
+        sequence.end()
+    }
+}
+
+struct PropagationComparisonIds<'a>(&'a [smackdebt_analysis::PropagationComparisonId]);
+impl Serialize for PropagationComparisonIds<'_> {
+    fn serialize<S: Serializer>(&self, serializer: S) -> Result<S::Ok, S::Error> {
+        let mut sequence = serializer.serialize_seq(Some(self.0.len()))?;
+        for id in self.0 {
+            sequence.serialize_element(&id.get())?;
+        }
+        sequence.end()
+    }
+}
+
+struct CoreComparisonIds<'a>(&'a [smackdebt_analysis::CoreComparisonId]);
+impl Serialize for CoreComparisonIds<'_> {
+    fn serialize<S: Serializer>(&self, serializer: S) -> Result<S::Ok, S::Error> {
+        let mut sequence = serializer.serialize_seq(Some(self.0.len()))?;
+        for id in self.0 {
+            sequence.serialize_element(&id.get())?;
+        }
+        sequence.end()
+    }
+}
+
+struct ChangeLeakageComparisonIds<'a>(&'a [smackdebt_analysis::ChangeLeakageComparisonId]);
+impl Serialize for ChangeLeakageComparisonIds<'_> {
     fn serialize<S: Serializer>(&self, serializer: S) -> Result<S::Ok, S::Error> {
         let mut sequence = serializer.serialize_seq(Some(self.0.len()))?;
         for id in self.0 {
@@ -864,6 +969,96 @@ impl Serialize for ArchitectureComparisonView<'_> {
         map.end()
     }
 }
+
+struct PropagationComparisons<'a>(&'a [smackdebt_analysis::PropagationComparison]);
+impl Serialize for PropagationComparisons<'_> {
+    fn serialize<S: Serializer>(&self, serializer: S) -> Result<S::Ok, S::Error> {
+        let mut sequence = serializer.serialize_seq(Some(self.0.len()))?;
+        for comparison in self.0 {
+            sequence.serialize_element(&PropagationComparisonView(*comparison))?;
+        }
+        sequence.end()
+    }
+}
+struct PropagationComparisonView(smackdebt_analysis::PropagationComparison);
+impl Serialize for PropagationComparisonView {
+    fn serialize<S: Serializer>(&self, serializer: S) -> Result<S::Ok, S::Error> {
+        let mut map = serializer.serialize_map(Some(9))?;
+        map.serialize_entry("id", &self.0.id().get())?;
+        map.serialize_entry("direction", direction_name(self.0.direction()))?;
+        match self.0.subject() {
+            smackdebt_analysis::PropagationSubject::Package { source } => {
+                map.serialize_entry("subject", "package")?;
+                map.serialize_entry("source", &source.get())?;
+                map.serialize_entry("package", &Option::<u32>::None)?;
+            }
+            smackdebt_analysis::PropagationSubject::File { package, source } => {
+                map.serialize_entry("subject", "file")?;
+                map.serialize_entry("source", &source.get())?;
+                map.serialize_entry("package", &Some(package.get()))?;
+            }
+        }
+        let before = self.0.before();
+        let after = self.0.after();
+        map.serialize_entry("before_reached", &before.0)?;
+        map.serialize_entry("before_total", &before.1)?;
+        map.serialize_entry("after_reached", &after.0)?;
+        map.serialize_entry("after_total", &after.1)?;
+        map.end()
+    }
+}
+
+struct CoreComparisons<'a>(&'a [smackdebt_analysis::CoreComparison]);
+impl Serialize for CoreComparisons<'_> {
+    fn serialize<S: Serializer>(&self, serializer: S) -> Result<S::Ok, S::Error> {
+        let mut sequence = serializer.serialize_seq(Some(self.0.len()))?;
+        for comparison in self.0 {
+            sequence.serialize_element(&CoreComparisonView(comparison))?;
+        }
+        sequence.end()
+    }
+}
+struct CoreComparisonView<'a>(&'a smackdebt_analysis::CoreComparison);
+impl Serialize for CoreComparisonView<'_> {
+    fn serialize<S: Serializer>(&self, serializer: S) -> Result<S::Ok, S::Error> {
+        let mut map = serializer.serialize_map(Some(10))?;
+        map.serialize_entry("id", &self.0.id().get())?;
+        map.serialize_entry("direction", direction_name(self.0.direction()))?;
+        map.serialize_entry("anchor", &self.0.anchor().get())?;
+        let before = self.0.before();
+        let after = self.0.after();
+        map.serialize_entry("before_core", &before.0)?;
+        map.serialize_entry("before_files", &before.1)?;
+        map.serialize_entry("after_core", &after.0)?;
+        map.serialize_entry("after_files", &after.1)?;
+        map.serialize_entry("before_members", &FileIds(self.0.before_members()))?;
+        map.serialize_entry("after_members", &FileIds(self.0.after_members()))?;
+        map.end()
+    }
+}
+
+struct ChangeLeakageComparisons<'a>(&'a [smackdebt_analysis::ChangeLeakageComparison]);
+impl Serialize for ChangeLeakageComparisons<'_> {
+    fn serialize<S: Serializer>(&self, serializer: S) -> Result<S::Ok, S::Error> {
+        let mut sequence = serializer.serialize_seq(Some(self.0.len()))?;
+        for comparison in self.0 {
+            sequence.serialize_element(&ChangeLeakageComparisonView(*comparison))?;
+        }
+        sequence.end()
+    }
+}
+struct ChangeLeakageComparisonView(smackdebt_analysis::ChangeLeakageComparison);
+impl Serialize for ChangeLeakageComparisonView {
+    fn serialize<S: Serializer>(&self, serializer: S) -> Result<S::Ok, S::Error> {
+        let mut map = serializer.serialize_map(Some(5))?;
+        map.serialize_entry("id", &self.0.id().get())?;
+        map.serialize_entry("kind", self.0.kind().id())?;
+        map.serialize_entry("direction", direction_name(self.0.direction()))?;
+        map.serialize_entry("left", &self.0.left().get())?;
+        map.serialize_entry("right", &self.0.right().get())?;
+        map.end()
+    }
+}
 struct PackageIds<'a>(&'a [smackdebt_analysis::PackageId]);
 impl Serialize for PackageIds<'_> {
     fn serialize<S: Serializer>(&self, serializer: S) -> Result<S::Ok, S::Error> {
@@ -1353,10 +1548,65 @@ impl Serialize for PackageClosures<'_> {
 struct PackageClosureView(PackageClosure);
 impl Serialize for PackageClosureView {
     fn serialize<S: Serializer>(&self, serializer: S) -> Result<S::Ok, S::Error> {
-        let mut map = serializer.serialize_map(Some(3))?;
+        let mut map = serializer.serialize_map(Some(4))?;
         map.serialize_entry("package", &self.0.package().get())?;
+        map.serialize_entry("source", &self.0.source().get())?;
         map.serialize_entry("files", &self.0.files())?;
         map.serialize_entry("reach", &self.0.reach())?;
+        map.end()
+    }
+}
+
+struct GraphEvidenceView<'a>(&'a smackdebt_analysis::GraphEvidence);
+impl Serialize for GraphEvidenceView<'_> {
+    fn serialize<S: Serializer>(&self, serializer: S) -> Result<S::Ok, S::Error> {
+        let mut map = serializer.serialize_map(Some(9))?;
+        map.serialize_entry(
+            "status",
+            if self.0.is_complete() {
+                "complete"
+            } else {
+                "incomplete"
+            },
+        )?;
+        let packages: Vec<_> = self
+            .0
+            .incomplete_packages()
+            .iter()
+            .map(|package| package.get())
+            .collect();
+        map.serialize_entry("incomplete_packages", &packages)?;
+        map.serialize_entry("parse_failures", &self.0.parse_failures())?;
+        map.serialize_entry("unresolved_internal", &self.0.unresolved_internal())?;
+        map.serialize_entry("ambiguous_internal", &self.0.ambiguous_internal())?;
+        map.serialize_entry(
+            "configuration_failures",
+            &GraphConfigurationFailures(self.0.configuration_failures()),
+        )?;
+        map.serialize_entry("suppressed_reach", &self.0.suppressed_reach())?;
+        map.serialize_entry("suppressed_core", &self.0.suppressed_core())?;
+        map.serialize_entry("suppressed_leakage", &self.0.suppressed_leakage())?;
+        map.end()
+    }
+}
+
+struct GraphConfigurationFailures<'a>(&'a [smackdebt_analysis::GraphConfigurationFailure]);
+impl Serialize for GraphConfigurationFailures<'_> {
+    fn serialize<S: Serializer>(&self, serializer: S) -> Result<S::Ok, S::Error> {
+        let mut sequence = serializer.serialize_seq(Some(self.0.len()))?;
+        for failure in self.0 {
+            sequence.serialize_element(&GraphConfigurationFailureView(failure))?;
+        }
+        sequence.end()
+    }
+}
+
+struct GraphConfigurationFailureView<'a>(&'a smackdebt_analysis::GraphConfigurationFailure);
+impl Serialize for GraphConfigurationFailureView<'_> {
+    fn serialize<S: Serializer>(&self, serializer: S) -> Result<S::Ok, S::Error> {
+        let mut map = serializer.serialize_map(Some(2))?;
+        map.serialize_entry("package", &self.0.package().get())?;
+        map.serialize_entry("reason", self.0.reason())?;
         map.end()
     }
 }
@@ -1381,6 +1631,18 @@ impl Serialize for FileReachView {
         let mut map = serializer.serialize_map(Some(2))?;
         map.serialize_entry("file", &self.0.file().get())?;
         map.serialize_entry("reach", &self.0.reach())?;
+        map.end()
+    }
+}
+
+#[derive(Clone, Copy)]
+struct CoreComponentView<'a>(&'a [smackdebt_analysis::FileId]);
+impl Serialize for CoreComponentView<'_> {
+    fn serialize<S: Serializer>(&self, serializer: S) -> Result<S::Ok, S::Error> {
+        let mut map = serializer.serialize_map(Some(2))?;
+        map.serialize_entry("anchor", &self.0[0].get())?;
+        let members: Vec<_> = self.0.iter().map(|file| file.get()).collect();
+        map.serialize_entry("members", &members)?;
         map.end()
     }
 }

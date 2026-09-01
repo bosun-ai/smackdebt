@@ -51,14 +51,47 @@ pub const CORE_SIZE_PERCENT: u32 = 2;
 #[derive(Clone, Copy, Debug, Eq, Hash, PartialEq)]
 pub struct PackageClosure {
     package: PackageId,
+    source: crate::FileId,
     files: u32,
     reach: u32,
+}
+
+/// One file's reach inside its package, retained for identity-safe diffing.
+#[derive(Clone, Copy, Debug, Eq, Hash, PartialEq)]
+pub struct PackageFileReach {
+    package: PackageId,
+    source: crate::FileId,
+    files: u32,
+    reach: u32,
+}
+
+impl PackageFileReach {
+    /// The package whose graph owns this value.
+    pub const fn package(self) -> PackageId {
+        self.package
+    }
+    /// The file whose dependants were counted.
+    pub const fn source(self) -> crate::FileId {
+        self.source
+    }
+    /// The number of graph files in the package.
+    pub const fn files(self) -> u32 {
+        self.files
+    }
+    /// The number of package files reached from this source.
+    pub const fn reach(self) -> u32 {
+        self.reach
+    }
 }
 
 impl PackageClosure {
     /// The package this closure answers for.
     pub const fn package(self) -> PackageId {
         self.package
+    }
+    /// The stable file whose change has this maximum reach.
+    pub const fn source(self) -> crate::FileId {
+        self.source
     }
     /// The files of this package the file dependency graph is built over.
     pub const fn files(self) -> u32 {
@@ -75,6 +108,7 @@ impl PackageClosure {
 #[derive(Clone, Debug, Default, Eq, PartialEq)]
 pub struct PackageClosures {
     closures: Vec<PackageClosure>,
+    file_reaches: Vec<PackageFileReach>,
     skipped: Vec<PackageId>,
 }
 
@@ -82,6 +116,10 @@ impl PackageClosures {
     /// The material rows, in package order.
     pub fn closures(&self) -> &[PackageClosure] {
         &self.closures
+    }
+    /// Every computed per-file value, retained for stable diff subjects.
+    pub fn file_reaches(&self) -> &[PackageFileReach] {
+        &self.file_reaches
     }
     /// The packages whose closure the node limit skipped, in package order.
     pub fn skipped(&self) -> &[PackageId] {
@@ -122,6 +160,7 @@ pub fn close_over_packages(
 ) -> PackageClosures {
     let members = package_members(package_count, file_packages);
     let mut closures = Vec::new();
+    let mut file_reaches = Vec::new();
     let mut skipped = Vec::new();
     let mut local = vec![usize::MAX; file_packages.len()];
     for (index, files) in members.iter().enumerate() {
@@ -137,12 +176,26 @@ pub fn close_over_packages(
             local[file] = position;
         }
         let inside = inside_edges(edges, &local);
-        let reach = reach_in_counts(files.len(), &inside)
+        let reaches = reach_in_counts(files.len(), &inside);
+        file_reaches.extend(
+            files
+                .iter()
+                .zip(&reaches)
+                .map(|(&source, &reach)| PackageFileReach {
+                    package,
+                    source: crate::FileId::from_index(source),
+                    files: files.len() as u32,
+                    reach,
+                }),
+        );
+        let (source, reach) = reaches
             .into_iter()
-            .max()
-            .unwrap_or(0);
+            .enumerate()
+            .max_by(|left, right| left.1.cmp(&right.1).then_with(|| right.0.cmp(&left.0)))
+            .map_or((0, 0), |(source, reach)| (files[source], reach));
         closures.push(PackageClosure {
             package,
+            source: crate::FileId::from_index(source),
             files: files.len() as u32,
             reach,
         });
@@ -150,7 +203,11 @@ pub fn close_over_packages(
             local[file] = usize::MAX;
         }
     }
-    PackageClosures { closures, skipped }
+    PackageClosures {
+        closures,
+        file_reaches,
+        skipped,
+    }
 }
 
 /// The graph files of each package, in file table order.
@@ -213,6 +270,7 @@ mod tests {
         assert_eq!(closures.closures().len(), 1);
         let row = closures.closures()[0];
         assert_eq!(row.package(), PackageId::from_index(0));
+        assert_eq!(row.source(), FileId::from_index(19));
         assert_eq!(row.files(), 20);
         // Nineteen edges chain twenty files, so the last one is reached by all.
         assert_eq!(row.reach(), 20);

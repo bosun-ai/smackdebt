@@ -59,9 +59,49 @@
 
 - [x] 6.1 Calibrate against real repositories: run the release binary over this workspace at the repository root, `crates/analysis`, and `crates/output`, and over the private Fluyt repository at its root and one busy directory, each at a 90-day and a 365-day window; record every resulting card set in this file before any constant is frozen.
 - [x] 6.2 Freeze or adjust the constants from the recorded runs — the pair guards, the leakage floors and the similarity bar, the amplification clamp and floors, the reach and core materiality rules — updating the specs where a proposed value moved, and record zero findings on a quiet repository as a legitimate outcome rather than a reason to lower a floor.
-- [x] 6.3 Update the README: the two new patterns with their words and thresholds, the `packages change together` rename, the three verdict sentences and when each is absent, the new JSON tables and verdict members, the weak-pairs-are-JSON-only rule, and the statement that these signals never gate and never appear in a diff.
+- [x] 6.3 Update the README: the two new patterns with their words and thresholds, the `packages change together` rename, the three verdict sentences and when each is absent, the new JSON tables and verdict members, the weak-pairs-are-JSON-only rule, and the statement that these signals never gate. This early task was later amended by 7.1: trusted reach, core, and leakage movement appears in diffs while amplification stays codebase-only.
 - [x] 6.4 Update `ARCHITECTURE.md` for the change graph, the join at report finish, the closures and their bounds, and correct its stale claim that weak coupling is available through `--all`.
 - [x] 6.5 Note the stale performance `report_digest` values per precedent, confirm the committed ratchet baseline moves by exactly the one deliberate row with `just gate`, pass `openspec validate --all --strict` and the complete check, and tick every task that is done. Task 3.7 stays unticked and carries its reason: its baseline record is written by the next release run. The change is **not** archived: the wave is reviewed as a whole first.
+
+## 7. Review improvements
+
+- [x] 7.1 Amend proposal, design, specifications, product documentation, and acceptance examples so human metrics require a named subject, amplification stays machine-only, and reach, core, and leakage enter diff architecture comparisons; pass strict validation before code changes.
+- [x] 7.2 Discover package-root TypeScript or JavaScript config during the existing walk, resolve aliases per source package on both diff sides, support data-only JSONC and safe relative inheritance, and disclose unusable config.
+- [x] 7.3 Correct exact Ruby call extraction, parsed JavaScript and TypeScript export sources, authored runtime-extension substitution, and repository-relative query or hash suffixes with language and project fixtures.
+- [x] 7.4 Add graph-evidence status and suppress human reach, core, and leakage claims when their required evidence is incomplete while preserving machine diagnostics and raw retained pairs.
+- [x] 7.5 Retain stable reach and core subjects, attach visible values only to named package, file, and cycle rows, keep amplification machine-only, and make the codebase `next:` follow the top visible action.
+- [x] 7.6 Add reach, core, and leakage diff comparison tables, selection counts, JSON rows, concise architecture output, comparison-ref navigation, and before/after evidence rules.
+- [x] 7.7 Add pure, generated-repository, snapshot, serial/parallel, width, no-color, work-counter, API, and dependency-direction proof for the review behavior.
+- [x] 7.8 Re-run release root and diff reports against both private Fluyt checkouts at 90 and 365 days, record the resulting named rows and zero-result cases, and pass the complete gate. Task 3.7 remains deferred to the next release baseline run.
+
+## 8. Diff footer simplification
+
+- [x] 8.1 Replace `next:` in every non-empty diff terminal view with `inspect directories and files for more details`, preserve codebase and gate navigation, update reviewed output, and pass the complete check.
+
+## 9. Diff graph evidence correction
+
+- [x] 9.1 Retain current and base graph evidence separately in diff reports, count candidate reach, core, and leakage comparisons before evidence filtering, disclose per-family and per-side suppression in JSON and terminal output, and prove withheld movement never reaches the verdict.
+- [x] 9.2 Build each diff graph from its own package and trust facts, compare reach subjects with themselves, compare cycle components through a shared file anchor, and prove disjoint maxima never become one movement row without adding a graph pass.
+
+### 7.8 Review calibration
+
+The release binary ran at the repository root and against `master` on
+`feat/remove-dag` in the primary Fluyt checkout and
+`feat/copy-paste-semantics` in the second checkout, with both 90-day and
+365-day history windows.
+
+- The root reports name useful file subjects. A drill into `TaskEdit.vue`, for
+  example, now says `depends on many files` and `imports 21 files`; it no longer
+  claims that dependants exist when only outbound evidence fired.
+- Rust module fallback order removed 321 false ambiguous imports. The two
+  checkouts now report zero ambiguous imports and 93 or 85 unresolved imports.
+- Graph evidence remains incomplete in four of sixteen packages, so four or
+  five root architecture facts are hidden rather than presented as certain.
+- Both branch diffs have zero material reach, core, and leakage comparison rows
+  at 90 and 365 days. The empty result is retained in JSON and adds no terminal
+  section. Source findings and history still provide the next action.
+- The complete check, strict OpenSpec validation, work-count evidence, and debt
+  gate pass. Task 3.7 remains deferred to the next release baseline run.
 
 ### 6.1 Calibration record
 
@@ -251,8 +291,8 @@ is no longer produced at all, because the file is an entry file.
   and re-records no release evidence.
   `scripts/performance/check-baselines.py` validates committed records only, so
   `just performance-tests` stays green.
-- **The ratchet baseline moves by exactly one deliberate row.** `just gate`
-  reported `0 regressions · 1 improvement` — `crates/output/src/json.rs ·
-  cyclomatic · watch 1 → 0`, earned by the evidence-serialization split in slice
-  5 — and that improvement is ratcheted in with `gate --update` so the slack
-  closes. No other row moved.
+- **The ratchet baseline moves by exactly one deliberate row.** The baseline
+  lowers `crates/project/src/project.rs · nesting · watch 4 → 3`, earned by the
+  architecture-composition cleanup. The final `just gate` reports zero
+  regressions and three further improvements, which remain visible rather than
+  being folded into this change's baseline. No other baseline row moved.

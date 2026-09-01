@@ -539,10 +539,13 @@ pub(super) fn ruby(node: Node<'_>, source: &[u8]) -> Option<DependencySyntax> {
     if node.kind() != "call" {
         return None;
     }
-    let text = node.utf8_text(source).ok()?.trim();
-    let (kind, relative) = if text.starts_with("require_relative") {
+    if node.child_by_field_name("receiver").is_some() {
+        return None;
+    }
+    let method = node.child_by_field_name("method")?.utf8_text(source).ok()?;
+    let (kind, relative) = if method == "require_relative" {
         (DependencyKind::Require, true)
-    } else if text.starts_with("require") {
+    } else if method == "require" {
         (DependencyKind::Require, false)
     } else {
         return None;

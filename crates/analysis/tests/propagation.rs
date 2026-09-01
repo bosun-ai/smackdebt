@@ -68,7 +68,7 @@ fn packaged_report(
         Vec::new(),
     ));
     let closures = close_over_packages(names.len(), &members, &edges);
-    builder.set_propagation(closures.closures().to_vec(), Vec::new(), core);
+    builder.set_propagation(closures.closures().to_vec(), Vec::new(), core, Vec::new());
     builder.finish()
 }
 

@@ -80,6 +80,9 @@ architecture_index!(StableDependencyFindingId);
 architecture_index!(PackageEdgeId);
 architecture_index!(ArchitectureFindingId);
 architecture_index!(ArchitectureComparisonId);
+architecture_index!(PropagationComparisonId);
+architecture_index!(CoreComparisonId);
+architecture_index!(ChangeLeakageComparisonId);
 
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct DependencyEdge {
@@ -534,6 +537,156 @@ impl ArchitectureComparison {
     }
 }
 
+#[derive(Clone, Copy, Debug, Eq, Hash, PartialEq)]
+pub enum PropagationSubject {
+    Package { source: PackageId },
+    File { package: PackageId, source: FileId },
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub struct PropagationComparison {
+    id: PropagationComparisonId,
+    subject: PropagationSubject,
+    direction: ComparisonDirection,
+    before_reached: u32,
+    before_total: u32,
+    after_reached: u32,
+    after_total: u32,
+}
+
+impl PropagationComparison {
+    pub const fn new(
+        id: PropagationComparisonId,
+        subject: PropagationSubject,
+        direction: ComparisonDirection,
+        before: (u32, u32),
+        after: (u32, u32),
+    ) -> Self {
+        Self {
+            id,
+            subject,
+            direction,
+            before_reached: before.0,
+            before_total: before.1,
+            after_reached: after.0,
+            after_total: after.1,
+        }
+    }
+    pub const fn id(self) -> PropagationComparisonId {
+        self.id
+    }
+    pub const fn subject(self) -> PropagationSubject {
+        self.subject
+    }
+    pub const fn direction(self) -> ComparisonDirection {
+        self.direction
+    }
+    pub const fn before(self) -> (u32, u32) {
+        (self.before_reached, self.before_total)
+    }
+    pub const fn after(self) -> (u32, u32) {
+        (self.after_reached, self.after_total)
+    }
+}
+
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct CoreComparison {
+    id: CoreComparisonId,
+    anchor: FileId,
+    direction: ComparisonDirection,
+    before_core: u32,
+    before_files: u32,
+    after_core: u32,
+    after_files: u32,
+    before_members: Vec<FileId>,
+    after_members: Vec<FileId>,
+}
+
+impl CoreComparison {
+    pub fn new(
+        id: CoreComparisonId,
+        anchor: FileId,
+        direction: ComparisonDirection,
+        before: (u32, u32, Vec<FileId>),
+        after: (u32, u32, Vec<FileId>),
+    ) -> Self {
+        Self {
+            id,
+            anchor,
+            direction,
+            before_core: before.0,
+            before_files: before.1,
+            before_members: before.2,
+            after_core: after.0,
+            after_files: after.1,
+            after_members: after.2,
+        }
+    }
+    pub const fn id(&self) -> CoreComparisonId {
+        self.id
+    }
+    pub const fn anchor(&self) -> FileId {
+        self.anchor
+    }
+    pub const fn direction(&self) -> ComparisonDirection {
+        self.direction
+    }
+    pub const fn before(&self) -> (u32, u32) {
+        (self.before_core, self.before_files)
+    }
+    pub const fn after(&self) -> (u32, u32) {
+        (self.after_core, self.after_files)
+    }
+    pub fn before_members(&self) -> &[FileId] {
+        &self.before_members
+    }
+    pub fn after_members(&self) -> &[FileId] {
+        &self.after_members
+    }
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub struct ChangeLeakageComparison {
+    id: ChangeLeakageComparisonId,
+    kind: crate::ChangeLeakageKind,
+    left: FileId,
+    right: FileId,
+    direction: ComparisonDirection,
+}
+
+impl ChangeLeakageComparison {
+    pub const fn new(
+        id: ChangeLeakageComparisonId,
+        kind: crate::ChangeLeakageKind,
+        left: FileId,
+        right: FileId,
+        direction: ComparisonDirection,
+    ) -> Self {
+        Self {
+            id,
+            kind,
+            left,
+            right,
+            direction,
+        }
+    }
+    pub const fn id(self) -> ChangeLeakageComparisonId {
+        self.id
+    }
+    pub const fn kind(self) -> crate::ChangeLeakageKind {
+        self.kind
+    }
+    pub const fn left(self) -> FileId {
+        self.left
+    }
+    pub const fn right(self) -> FileId {
+        self.right
+    }
+    pub const fn direction(self) -> ComparisonDirection {
+        self.direction
+    }
+}
+
 #[derive(Clone, Copy, Debug, Default, Eq, PartialEq)]
 pub struct DependencyCoverage {
     resolved_internal_uses: u32,
@@ -543,6 +696,184 @@ pub struct DependencyCoverage {
     unresolved_package_uses: u32,
     module_ownership_relations: u32,
     context_relations: u32,
+}
+
+/// Whether dependency-derived human claims have enough source evidence.
+#[derive(Clone, Debug, Default, Eq, PartialEq)]
+pub struct GraphEvidence {
+    incomplete_packages: Vec<PackageId>,
+    parse_failures: u32,
+    unresolved_internal: u32,
+    ambiguous_internal: u32,
+    configuration_failures: Vec<GraphConfigurationFailure>,
+    suppressed_reach: u32,
+    suppressed_core: u32,
+    suppressed_leakage: u32,
+}
+
+/// Candidate diff comparisons withheld because one or both graph sides are incomplete.
+#[derive(Clone, Copy, Debug, Default, Eq, PartialEq)]
+pub struct ComparisonSuppression {
+    total: u32,
+    current: u32,
+    base: u32,
+}
+
+impl ComparisonSuppression {
+    pub const fn total(self) -> u32 {
+        self.total
+    }
+
+    pub const fn current(self) -> u32 {
+        self.current
+    }
+
+    pub const fn base(self) -> u32 {
+        self.base
+    }
+
+    pub fn record(&mut self, current: bool, base: bool) {
+        self.total = self.total.saturating_add(1);
+        self.current = self.current.saturating_add(u32::from(current));
+        self.base = self.base.saturating_add(u32::from(base));
+    }
+}
+
+/// The two graph inputs to a diff and the comparisons their evidence withheld.
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct DiffGraphEvidence {
+    current: GraphEvidence,
+    base: GraphEvidence,
+    propagation: ComparisonSuppression,
+    core: ComparisonSuppression,
+    leakage: ComparisonSuppression,
+}
+
+impl DiffGraphEvidence {
+    pub const fn new(
+        current: GraphEvidence,
+        base: GraphEvidence,
+        propagation: ComparisonSuppression,
+        core: ComparisonSuppression,
+        leakage: ComparisonSuppression,
+    ) -> Self {
+        Self {
+            current,
+            base,
+            propagation,
+            core,
+            leakage,
+        }
+    }
+
+    pub const fn current(&self) -> &GraphEvidence {
+        &self.current
+    }
+
+    pub const fn base(&self) -> &GraphEvidence {
+        &self.base
+    }
+
+    pub const fn propagation(&self) -> ComparisonSuppression {
+        self.propagation
+    }
+
+    pub const fn core(&self) -> ComparisonSuppression {
+        self.core
+    }
+
+    pub const fn leakage(&self) -> ComparisonSuppression {
+        self.leakage
+    }
+
+    pub const fn suppressed_total(&self) -> u32 {
+        self.propagation.total + self.core.total + self.leakage.total
+    }
+}
+
+impl GraphEvidence {
+    pub fn new(
+        mut incomplete_packages: Vec<PackageId>,
+        parse_failures: u32,
+        unresolved_internal: u32,
+        ambiguous_internal: u32,
+        configuration_failures: Vec<GraphConfigurationFailure>,
+    ) -> Self {
+        incomplete_packages.sort_unstable();
+        incomplete_packages.dedup();
+        Self {
+            incomplete_packages,
+            parse_failures,
+            unresolved_internal,
+            ambiguous_internal,
+            configuration_failures,
+            suppressed_reach: 0,
+            suppressed_core: 0,
+            suppressed_leakage: 0,
+        }
+    }
+
+    pub fn with_suppressed(mut self, reach: u32, core: u32, leakage: u32) -> Self {
+        self.suppressed_reach = reach;
+        self.suppressed_core = core;
+        self.suppressed_leakage = leakage;
+        self
+    }
+
+    pub fn is_complete(&self) -> bool {
+        self.incomplete_packages.is_empty()
+    }
+
+    pub fn package_is_complete(&self, package: PackageId) -> bool {
+        self.incomplete_packages.binary_search(&package).is_err()
+    }
+
+    pub fn incomplete_packages(&self) -> &[PackageId] {
+        &self.incomplete_packages
+    }
+    pub const fn parse_failures(&self) -> u32 {
+        self.parse_failures
+    }
+    pub const fn unresolved_internal(&self) -> u32 {
+        self.unresolved_internal
+    }
+    pub const fn ambiguous_internal(&self) -> u32 {
+        self.ambiguous_internal
+    }
+    pub fn configuration_failures(&self) -> &[GraphConfigurationFailure] {
+        &self.configuration_failures
+    }
+    pub const fn suppressed_reach(&self) -> u32 {
+        self.suppressed_reach
+    }
+    pub const fn suppressed_core(&self) -> u32 {
+        self.suppressed_core
+    }
+    pub const fn suppressed_leakage(&self) -> u32 {
+        self.suppressed_leakage
+    }
+}
+
+/// One package configuration that could not safely provide resolution data.
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct GraphConfigurationFailure {
+    package: PackageId,
+    reason: String,
+}
+
+impl GraphConfigurationFailure {
+    pub fn new(package: PackageId, reason: impl Into<String>) -> Self {
+        Self {
+            package,
+            reason: reason.into(),
+        }
+    }
+    pub const fn package(&self) -> PackageId {
+        self.package
+    }
+    pub fn reason(&self) -> &str {
+        &self.reason
+    }
 }
 
 impl DependencyCoverage {

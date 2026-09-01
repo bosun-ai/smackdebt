@@ -6,6 +6,7 @@
   "required": [
     "schema_version",
     "mode",
+    "comparison_ref",
     "verdict",
     "summary",
     "root",
@@ -20,6 +21,7 @@
     "health",
     "activity",
     "dependency_coverage",
+    "graph_evidence",
     "dependency_edges",
     "package_edges",
     "external_dependencies",
@@ -27,6 +29,9 @@
     "package_graph",
     "architecture_findings",
     "architecture_comparisons",
+    "propagation_comparisons",
+    "core_comparisons",
+    "change_leakage_comparisons",
     "history_coverage",
     "file_history",
     "package_history",
@@ -43,6 +48,7 @@
     "change_leakage_findings",
     "package_closures",
     "file_reach",
+    "core_component",
     "problems"
   ],
   "properties": {
@@ -53,6 +59,12 @@
       "enum": [
         "codebase",
         "diff"
+      ]
+    },
+    "comparison_ref": {
+      "type": [
+        "string",
+        "null"
       ]
     },
     "verdict": {
@@ -124,6 +136,12 @@
     "dependency_coverage": {
       "$ref": "#/$defs/dependency_coverage"
     },
+    "graph_evidence": {
+      "$ref": "#/$defs/graph_evidence"
+    },
+    "diff_graph_evidence": {
+      "$ref": "#/$defs/diff_graph_evidence"
+    },
     "dependency_edges": {
       "type": "array",
       "items": {
@@ -164,6 +182,24 @@
       "type": "array",
       "items": {
         "$ref": "#/$defs/architecture_comparison"
+      }
+    },
+    "propagation_comparisons": {
+      "type": "array",
+      "items": {
+        "$ref": "#/$defs/propagation_comparison"
+      }
+    },
+    "core_comparisons": {
+      "type": "array",
+      "items": {
+        "$ref": "#/$defs/core_comparison"
+      }
+    },
+    "change_leakage_comparisons": {
+      "type": "array",
+      "items": {
+        "$ref": "#/$defs/change_leakage_comparison"
       }
     },
     "history_coverage": {
@@ -260,6 +296,16 @@
         "$ref": "#/$defs/file_reach"
       }
     },
+    "core_component": {
+      "anyOf": [
+        {
+          "$ref": "#/$defs/core_component"
+        },
+        {
+          "type": "null"
+        }
+      ]
+    },
     "problems": {
       "type": "array",
       "items": {
@@ -267,6 +313,15 @@
       }
     }
   },
+  "allOf": [
+    {
+      "if": {
+        "properties": { "mode": { "const": "diff" } },
+        "required": ["mode"]
+      },
+      "then": { "required": ["diff_graph_evidence"] }
+    }
+  ],
   "additionalProperties": false,
   "$defs": {
     "index": {
@@ -476,6 +531,9 @@
         "comparisons",
         "architecture_findings",
         "architecture_comparisons",
+        "propagation_comparisons",
+        "core_comparisons",
+        "change_leakage_comparisons",
         "evolutionary_findings",
         "evolutionary_comparisons",
         "coverage",
@@ -529,6 +587,27 @@
           "uniqueItems": true
         },
         "architecture_comparisons": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/index"
+          },
+          "uniqueItems": true
+        },
+        "propagation_comparisons": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/index"
+          },
+          "uniqueItems": true
+        },
+        "core_comparisons": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/index"
+          },
+          "uniqueItems": true
+        },
+        "change_leakage_comparisons": {
           "type": "array",
           "items": {
             "$ref": "#/$defs/index"
@@ -987,6 +1066,78 @@
       },
       "additionalProperties": false
     },
+    "graph_evidence": {
+      "type": "object",
+      "required": [
+        "status",
+        "incomplete_packages",
+        "parse_failures",
+        "unresolved_internal",
+        "ambiguous_internal",
+        "configuration_failures",
+        "suppressed_reach",
+        "suppressed_core",
+        "suppressed_leakage"
+      ],
+      "properties": {
+        "status": {
+          "enum": ["complete", "incomplete"]
+        },
+        "incomplete_packages": {
+          "type": "array",
+          "items": { "$ref": "#/$defs/index" },
+          "uniqueItems": true
+        },
+        "parse_failures": { "type": "integer", "minimum": 0 },
+        "unresolved_internal": { "type": "integer", "minimum": 0 },
+        "ambiguous_internal": { "type": "integer", "minimum": 0 },
+        "configuration_failures": {
+          "type": "array",
+          "items": { "$ref": "#/$defs/graph_configuration_failure" }
+        },
+        "suppressed_reach": { "type": "integer", "minimum": 0 },
+        "suppressed_core": { "type": "integer", "minimum": 0 },
+        "suppressed_leakage": { "type": "integer", "minimum": 0 }
+      },
+      "additionalProperties": false
+    },
+    "diff_graph_evidence": {
+      "type": "object",
+      "required": [
+        "current",
+        "base",
+        "suppressed_propagation",
+        "suppressed_core",
+        "suppressed_leakage"
+      ],
+      "properties": {
+        "current": { "$ref": "#/$defs/graph_evidence" },
+        "base": { "$ref": "#/$defs/graph_evidence" },
+        "suppressed_propagation": { "$ref": "#/$defs/comparison_suppression" },
+        "suppressed_core": { "$ref": "#/$defs/comparison_suppression" },
+        "suppressed_leakage": { "$ref": "#/$defs/comparison_suppression" }
+      },
+      "additionalProperties": false
+    },
+    "comparison_suppression": {
+      "type": "object",
+      "required": ["total", "current", "base"],
+      "properties": {
+        "total": { "type": "integer", "minimum": 0 },
+        "current": { "type": "integer", "minimum": 0 },
+        "base": { "type": "integer", "minimum": 0 }
+      },
+      "additionalProperties": false
+    },
+    "graph_configuration_failure": {
+      "type": "object",
+      "required": ["package", "reason"],
+      "properties": {
+        "package": { "$ref": "#/$defs/index" },
+        "reason": { "type": "string", "minLength": 1 }
+      },
+      "additionalProperties": false
+    },
     "dependency_edge": {
       "type": "object",
       "required": [
@@ -1430,6 +1581,60 @@
           ],
           "minimum": 0
         }
+      },
+      "additionalProperties": false
+    },
+    "propagation_comparison": {
+      "type": "object",
+      "required": [
+        "id", "direction", "subject", "source", "package",
+        "before_reached", "before_total", "after_reached", "after_total"
+      ],
+      "properties": {
+        "id": { "$ref": "#/$defs/index" },
+        "direction": { "enum": ["worse", "better", "changed"] },
+        "subject": { "enum": ["package", "file"] },
+        "source": { "$ref": "#/$defs/index" },
+        "package": { "$ref": "#/$defs/nullable_index" },
+        "before_reached": { "type": "integer", "minimum": 1 },
+        "before_total": { "type": "integer", "minimum": 1 },
+        "after_reached": { "type": "integer", "minimum": 1 },
+        "after_total": { "type": "integer", "minimum": 1 }
+      },
+      "additionalProperties": false
+    },
+    "core_comparison": {
+      "type": "object",
+      "required": [
+        "id", "direction", "anchor", "before_core", "before_files",
+        "after_core", "after_files", "before_members", "after_members"
+      ],
+      "properties": {
+        "id": { "$ref": "#/$defs/index" },
+        "direction": { "enum": ["worse", "better", "changed"] },
+        "anchor": { "$ref": "#/$defs/index" },
+        "before_core": { "type": "integer", "minimum": 1 },
+        "before_files": { "type": "integer", "minimum": 1 },
+        "after_core": { "type": "integer", "minimum": 1 },
+        "after_files": { "type": "integer", "minimum": 1 },
+        "before_members": {
+          "type": "array", "items": { "$ref": "#/$defs/index" }, "uniqueItems": true
+        },
+        "after_members": {
+          "type": "array", "items": { "$ref": "#/$defs/index" }, "uniqueItems": true
+        }
+      },
+      "additionalProperties": false
+    },
+    "change_leakage_comparison": {
+      "type": "object",
+      "required": ["id", "kind", "direction", "left", "right"],
+      "properties": {
+        "id": { "$ref": "#/$defs/index" },
+        "kind": { "enum": ["leaky_interface", "hidden_coupling"] },
+        "direction": { "enum": ["worse", "better", "changed"] },
+        "left": { "$ref": "#/$defs/index" },
+        "right": { "$ref": "#/$defs/index" }
       },
       "additionalProperties": false
     },
@@ -2142,11 +2347,15 @@
       "type": "object",
       "required": [
         "package",
+        "source",
         "files",
         "reach"
       ],
       "properties": {
         "package": {
+          "$ref": "#/$defs/index"
+        },
+        "source": {
           "$ref": "#/$defs/index"
         },
         "files": {
@@ -2156,6 +2365,20 @@
         "reach": {
           "type": "integer",
           "minimum": 1
+        }
+      },
+      "additionalProperties": false
+    },
+    "core_component": {
+      "type": "object",
+      "required": ["anchor", "members"],
+      "properties": {
+        "anchor": { "$ref": "#/$defs/index" },
+        "members": {
+          "type": "array",
+          "items": { "$ref": "#/$defs/index" },
+          "minItems": 1,
+          "uniqueItems": true
         }
       },
       "additionalProperties": false

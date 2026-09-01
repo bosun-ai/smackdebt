@@ -113,11 +113,24 @@ members, every value an integer or a string:
 Each `package_graph` row SHALL additionally expose `reach_in`, the number of
 packages that transitively depend on that package counting itself.
 
-The `verdict` head SHALL carry `reach`, `core_size`, and `amplification` beside
+The `verdict` object SHALL carry `reach`, `core_size`, and `amplification` beside
 `tier`, `sentence`, `qualifier`, and `share`, each carrying its integer operands
-and the analysis-owned sentence, and each omitted entirely when its fact is
-absent, the way the qualifier and the share are omitted. History coverage SHALL
-expose the bulk-commit count and the declined-pair count as integers.
+and omitted entirely when its fact is absent. Reach SHALL carry its source
+package or file, and core size SHALL carry its anchor and members. History
+coverage SHALL expose the bulk-commit count and the declined-pair count as
+integers.
+
+The report SHALL additionally carry graph-evidence status with reason counts,
+the selected comparison ref in diff mode, and separate propagation, core, and
+change-leakage comparison tables. A diff SHALL also carry current and base graph
+evidence separately. For each of the three comparison families it SHALL count
+candidate comparisons before evidence filtering, then retain the total withheld
+count and the counts that depended on incomplete current and base evidence. The
+side counts may overlap when both sides withheld the same candidate. Comparison
+rows SHALL retain before and after integer operands, direction, and the package,
+file, cycle, or pair that a human row names. Suppressed candidates SHALL remain
+absent from finding and comparison tables while the diff graph evidence retains
+why they were suppressed.
 
 The diagnostics table's kind vocabulary SHALL include `propagation_skipped`,
 carrying the repository-relative path of a package whose file closure exceeded
@@ -138,7 +151,15 @@ the serializer, and every index SHALL resolve inside the table it names.
 
 #### Scenario: A verdict states reach
 - **WHEN** a root report of a repository with a material reach is serialized
-- **THEN** `verdict.reach` carries both integer counts and the same sentence bytes the terminal prints
+- **THEN** `verdict.reach` carries both integer counts and the source package while the terminal verdict head states neither
+
+#### Scenario: A diff changes propagation
+- **WHEN** a branch changes a material reach value and both graph sides have sufficient evidence
+- **THEN** one propagation comparison carries the source identity, direction, and exact before and after operands
+
+#### Scenario: A diff candidate depends on incomplete graph evidence
+- **WHEN** a material propagation, core, or change-leakage comparison candidate depends on incomplete current evidence, base evidence, or both
+- **THEN** `diff_graph_evidence` identifies each graph side, counts the candidate in its family before filtering, identifies every incomplete side, and the candidate is absent from comparison tables and verdict counts
 
 #### Scenario: A fact is absent
 - **WHEN** a scope has no core size, no reach, or no amplification

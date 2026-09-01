@@ -10,12 +10,14 @@ use std::io;
 use std::path::{Component, Path, PathBuf};
 use std::sync::{Arc, Mutex};
 
+use ignore::gitignore::GitignoreBuilder;
+
 pub use smackdebt_analysis::PackageId;
 use smackdebt_analysis::SourceRole;
 
 #[cfg(test)]
 use crate::glob::glob_matches;
-use crate::walk::{config_excludes, error_path, source_walk};
+use crate::walk::{config_excludes, error_path, is_dependency_dir, source_walk};
 
 /// A path relative to the inventory root.
 #[derive(Clone, Debug, Eq, Ord, PartialEq, PartialOrd, Hash)]
@@ -128,6 +130,203 @@ impl ManifestKind {
     }
 }
 
+/// The source, package, and configuration facts selected from a tree snapshot.
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct SnapshotInventory {
+    source_paths: Vec<PathBuf>,
+    packages: Vec<(PathBuf, Option<String>)>,
+    resolution_configs: Vec<PathBuf>,
+}
+
+impl SnapshotInventory {
+    pub fn source_paths(&self) -> &[PathBuf] {
+        &self.source_paths
+    }
+
+    pub fn packages(&self) -> &[(PathBuf, Option<String>)] {
+        &self.packages
+    }
+
+    pub fn resolution_configs(&self) -> &[PathBuf] {
+        &self.resolution_configs
+    }
+}
+
+/// Applies discovery's source, manifest, package, and ignore policy to tree paths.
+pub fn discover_snapshot(
+    root: &Path,
+    paths: &[PathBuf],
+    mut read_metadata: impl FnMut(&Path) -> io::Result<Vec<u8>>,
+) -> io::Result<SnapshotInventory> {
+    let global = GitignoreBuilder::new(root).build_global().0;
+    let mut exclude_builder = GitignoreBuilder::new(root);
+    let _ = exclude_builder.add(root.join(".git/info/exclude"));
+    let local_excludes = exclude_builder
+        .build()
+        .unwrap_or_else(|_| ignore::gitignore::Gitignore::empty());
+    let kept = snapshot_kept_paths(root, paths, &mut read_metadata, &global, &local_excludes)?;
+    let mut package_values: BTreeMap<PathBuf, Option<String>> = BTreeMap::new();
+    let mut source_paths = Vec::new();
+    let mut resolution_configs = Vec::new();
+    for path in paths.iter().filter(|path| kept.contains(*path)) {
+        if let Some(manifest) = ManifestKind::for_file(path) {
+            let root = path.parent().unwrap_or(Path::new("")).to_path_buf();
+            let name = package_values.entry(root).or_default();
+            if name.is_none() && manifest.declares_a_name() {
+                let source = read_snapshot_text(path, read_metadata(path)?)?;
+                *name = manifest.declared_name(path, &source);
+            }
+        }
+        if resolution_config_priority(path).is_some() {
+            resolution_configs.push(path.clone());
+        }
+        if matches!(file_kind(path), FileKind::Source) {
+            source_paths.push(path.clone());
+        }
+    }
+    if package_values.is_empty() {
+        package_values.insert(PathBuf::new(), None);
+    }
+    Ok(SnapshotInventory {
+        source_paths,
+        packages: package_values.into_iter().collect(),
+        resolution_configs,
+    })
+}
+
+fn snapshot_kept_paths(
+    root: &Path,
+    paths: &[PathBuf],
+    read_metadata: &mut impl FnMut(&Path) -> io::Result<Vec<u8>>,
+    global: &ignore::gitignore::Gitignore,
+    local_excludes: &ignore::gitignore::Gitignore,
+) -> io::Result<std::collections::BTreeSet<PathBuf>> {
+    let mut directories = std::collections::BTreeSet::new();
+    for path in paths {
+        let mut parent = path.parent();
+        while let Some(directory) = parent {
+            directories.insert(directory.to_path_buf());
+            parent = directory.parent();
+        }
+    }
+    let mut directories = directories.into_iter().collect::<Vec<_>>();
+    directories.sort_by(|left, right| {
+        left.components()
+            .count()
+            .cmp(&right.components().count())
+            .then_with(|| left.cmp(right))
+    });
+    let ignore_paths = paths
+        .iter()
+        .filter(|path| path.file_name().is_some_and(|name| name == ".gitignore"))
+        .cloned()
+        .collect::<std::collections::BTreeSet<_>>();
+    let mut ignore_policy = SnapshotIgnorePolicy::new(root, global, local_excludes);
+    read_reachable_ignore(
+        Path::new(""),
+        &ignore_paths,
+        read_metadata,
+        &mut ignore_policy,
+    )?;
+    let mut kept_directories = std::collections::BTreeSet::from([PathBuf::new()]);
+    for directory in directories
+        .into_iter()
+        .filter(|path| !path.as_os_str().is_empty())
+    {
+        let parent = directory.parent().unwrap_or(Path::new(""));
+        let dependency = directory.file_name().is_some_and(is_dependency_dir);
+        if kept_directories.contains(parent)
+            && !dependency
+            && !ignore_policy.is_ignored(&directory, true)
+        {
+            read_reachable_ignore(&directory, &ignore_paths, read_metadata, &mut ignore_policy)?;
+            kept_directories.insert(directory);
+        }
+    }
+    Ok(paths
+        .iter()
+        .filter(|path| {
+            kept_directories.contains(path.parent().unwrap_or(Path::new("")))
+                && !ignore_policy.is_ignored(path, false)
+        })
+        .cloned()
+        .collect())
+}
+
+fn read_reachable_ignore(
+    directory: &Path,
+    ignore_paths: &std::collections::BTreeSet<PathBuf>,
+    read_metadata: &mut impl FnMut(&Path) -> io::Result<Vec<u8>>,
+    ignore_policy: &mut SnapshotIgnorePolicy<'_>,
+) -> io::Result<()> {
+    let path = directory.join(".gitignore");
+    if !ignore_paths.contains(&path) {
+        return Ok(());
+    }
+    let bytes = read_metadata(&path)?;
+    let source = read_snapshot_text(&path, bytes)?;
+    let mut builder = GitignoreBuilder::new(directory);
+    for line in source.lines() {
+        let _ = builder.add_line(Some(path.clone()), line);
+    }
+    ignore_policy.by_directory.insert(
+        directory.to_path_buf(),
+        builder
+            .build()
+            .unwrap_or_else(|_| ignore::gitignore::Gitignore::empty()),
+    );
+    Ok(())
+}
+
+fn read_snapshot_text(path: &Path, bytes: Vec<u8>) -> io::Result<String> {
+    String::from_utf8(bytes).map_err(|error| {
+        io::Error::new(
+            io::ErrorKind::InvalidData,
+            format!("snapshot metadata {} is not UTF-8: {error}", path.display()),
+        )
+    })
+}
+
+struct SnapshotIgnorePolicy<'a> {
+    root: &'a Path,
+    global: &'a ignore::gitignore::Gitignore,
+    local_excludes: &'a ignore::gitignore::Gitignore,
+    by_directory: BTreeMap<PathBuf, ignore::gitignore::Gitignore>,
+}
+
+impl<'a> SnapshotIgnorePolicy<'a> {
+    fn new(
+        root: &'a Path,
+        global: &'a ignore::gitignore::Gitignore,
+        local_excludes: &'a ignore::gitignore::Gitignore,
+    ) -> Self {
+        Self {
+            root,
+            global,
+            local_excludes,
+            by_directory: BTreeMap::new(),
+        }
+    }
+
+    fn is_ignored(&self, path: &Path, is_directory: bool) -> bool {
+        let absolute = self.root.join(path);
+        let mut matched = self.global.matched(&absolute, is_directory);
+        let local = self.local_excludes.matched(&absolute, is_directory);
+        if !local.is_none() {
+            matched = local;
+        }
+        for (directory, matcher) in &self.by_directory {
+            if path.starts_with(directory) {
+                let candidate = matcher.matched(path, is_directory);
+                if !candidate.is_none() {
+                    matched = candidate;
+                }
+            }
+        }
+        matched.is_ignore()
+    }
+}
+
 /// Reads `spec.name = "value"` from a gemspec without executing Ruby.
 fn gemspec_name(source: &str) -> Option<String> {
     source.lines().find_map(|line| {
@@ -197,6 +396,7 @@ pub struct Package {
     root: RelativePath,
     manifests: Vec<ManifestKind>,
     manifest_name: Option<String>,
+    resolution_config: Option<RelativePath>,
 }
 
 impl Package {
@@ -216,6 +416,11 @@ impl Package {
     /// package root.  A manifest kind without a readable name leaves it absent.
     pub fn manifest_name(&self) -> Option<&str> {
         self.manifest_name.as_deref()
+    }
+
+    /// Returns the package-root TypeScript or JavaScript resolution config.
+    pub fn resolution_config(&self) -> Option<&RelativePath> {
+        self.resolution_config.as_ref()
     }
 
     /// Returns all co-located recognized manifests.
@@ -409,6 +614,7 @@ struct Walker {
     files: Vec<RawFile>,
     manifest_dirs: BTreeMap<PathBuf, Vec<ManifestKind>>,
     manifest_names: BTreeMap<PathBuf, Option<String>>,
+    resolution_configs: BTreeMap<PathBuf, RelativePath>,
     diagnostics: Vec<InventoryDiagnostic>,
     stats: InventoryStats,
 }
@@ -426,6 +632,7 @@ impl Walker {
             files: Vec::new(),
             manifest_dirs: BTreeMap::new(),
             manifest_names: BTreeMap::new(),
+            resolution_configs: BTreeMap::new(),
             diagnostics: Vec::new(),
             stats: InventoryStats::default(),
         }
@@ -464,6 +671,7 @@ impl Walker {
         }
 
         self.stats.files_visited += 1;
+        self.record_resolution_config(&relative_path, &relative);
         let kind = ManifestKind::for_file(&relative_path)
             .map(FileKind::Manifest)
             .unwrap_or_else(|| file_kind(&relative_path));
@@ -488,6 +696,21 @@ impl Walker {
             kind,
             size_bytes: entry.metadata().map_or(0, |metadata| metadata.len()),
         });
+    }
+
+    fn record_resolution_config(&mut self, path: &Path, relative: &RelativePath) {
+        let Some(priority) = resolution_config_priority(path) else {
+            return;
+        };
+        let parent = path.parent().unwrap_or_else(|| Path::new(""));
+        let current = self
+            .resolution_configs
+            .get(parent)
+            .and_then(|value| resolution_config_priority(value.as_path()));
+        if current.is_none_or(|value| priority < value) {
+            self.resolution_configs
+                .insert(parent.to_path_buf(), relative.clone());
+        }
     }
 
     /// Records one walk error, keeping unreadable directories visible.
@@ -549,6 +772,7 @@ impl Walker {
                 root: RelativePath::new(path.clone()).expect("package root is relative"),
                 manifests: self.manifest_dirs.get(path).cloned().unwrap_or_default(),
                 manifest_name: self.manifest_names.get(path).cloned().flatten(),
+                resolution_config: nearest_resolution_config(path, &self.resolution_configs),
             })
             .collect();
 
@@ -578,6 +802,28 @@ impl Walker {
             stats: self.stats,
         })
     }
+}
+
+fn resolution_config_priority(path: &Path) -> Option<u8> {
+    match path.file_name()?.to_str()? {
+        "tsconfig.json" => Some(0),
+        "jsconfig.json" => Some(1),
+        _ => None,
+    }
+}
+
+fn nearest_resolution_config(
+    package_root: &Path,
+    configs: &BTreeMap<PathBuf, RelativePath>,
+) -> Option<RelativePath> {
+    let mut directory = Some(package_root);
+    while let Some(path) = directory {
+        if let Some(config) = configs.get(path) {
+            return Some(config.clone());
+        }
+        directory = path.parent();
+    }
+    None
 }
 
 fn file_kind(path: &Path) -> FileKind {
@@ -643,6 +889,24 @@ fn nearest_package(path: &Path, packages: &BTreeMap<PathBuf, PackageId>) -> Opti
 mod tests {
     use super::*;
     use std::fs;
+
+    #[test]
+    fn package_keeps_its_preferred_resolution_config_from_the_same_walk() {
+        let directory = tempfile::tempdir().unwrap();
+        fs::write(directory.path().join("package.json"), "{\"name\":\"x\"}").unwrap();
+        fs::write(directory.path().join("jsconfig.json"), "{}").unwrap();
+        fs::write(directory.path().join("tsconfig.json"), "{}").unwrap();
+        fs::write(directory.path().join("index.ts"), "export {};").unwrap();
+
+        let inventory = Inventory::discover_sources(directory.path(), Vec::new()).unwrap();
+        assert_eq!(
+            inventory.packages()[0]
+                .resolution_config()
+                .map(RelativePath::as_path),
+            Some(Path::new("tsconfig.json"))
+        );
+        assert_eq!(inventory.stats().files_visited, 4);
+    }
 
     #[test]
     fn co_located_manifests_form_one_package() {
@@ -818,6 +1082,130 @@ mod tests {
         fs::write(directory.path().join("nested/kept.rs"), "").unwrap();
         let inventory = Inventory::discover(directory.path()).unwrap();
         assert_eq!(source_paths(&inventory), ["nested/kept.rs"]);
+    }
+
+    #[test]
+    fn snapshot_inventory_applies_nested_negation_from_its_own_directory() {
+        let paths = vec![
+            PathBuf::from(".gitignore"),
+            PathBuf::from("nested/.gitignore"),
+            PathBuf::from("nested/drop.rs"),
+            PathBuf::from("nested/kept.rs"),
+            PathBuf::from("other/kept.rs"),
+        ];
+        let contents = BTreeMap::from([
+            (PathBuf::from(".gitignore"), b"*.rs\n".to_vec()),
+            (PathBuf::from("nested/.gitignore"), b"!kept.rs\n".to_vec()),
+        ]);
+        let root = tempfile::tempdir().unwrap();
+        let inventory = discover_snapshot(root.path(), &paths, |path| {
+            contents
+                .get(path)
+                .cloned()
+                .ok_or_else(|| io::Error::new(io::ErrorKind::NotFound, path.display().to_string()))
+        })
+        .unwrap();
+        assert_eq!(inventory.source_paths(), [PathBuf::from("nested/kept.rs")]);
+    }
+
+    #[test]
+    fn snapshot_inventory_does_not_read_ignore_files_below_an_ignored_directory() {
+        let paths = vec![
+            PathBuf::from(".gitignore"),
+            PathBuf::from("hidden/.gitignore"),
+            PathBuf::from("hidden/file.rs"),
+            PathBuf::from("visible.rs"),
+        ];
+        let contents = BTreeMap::from([
+            (PathBuf::from(".gitignore"), b"hidden/\n".to_vec()),
+            (PathBuf::from("hidden/.gitignore"), b"!file.rs\n".to_vec()),
+        ]);
+        let root = tempfile::tempdir().unwrap();
+        let mut reads = Vec::new();
+        let inventory = discover_snapshot(root.path(), &paths, |path| {
+            reads.push(path.to_path_buf());
+            contents
+                .get(path)
+                .cloned()
+                .ok_or_else(|| io::Error::new(io::ErrorKind::NotFound, path.display().to_string()))
+        })
+        .unwrap();
+        assert_eq!(inventory.source_paths(), [PathBuf::from("visible.rs")]);
+        assert_eq!(reads, [PathBuf::from(".gitignore")]);
+    }
+
+    #[test]
+    fn snapshot_inventory_fails_when_reachable_metadata_cannot_be_read() {
+        let paths = vec![PathBuf::from("package.json")];
+        let root = tempfile::tempdir().unwrap();
+        let error = discover_snapshot(root.path(), &paths, |path| {
+            Err(io::Error::new(
+                io::ErrorKind::NotFound,
+                path.display().to_string(),
+            ))
+        })
+        .unwrap_err();
+        assert_eq!(error.kind(), io::ErrorKind::NotFound);
+    }
+
+    #[test]
+    fn snapshot_inventory_fails_when_reachable_ignore_text_is_corrupt() {
+        let paths = vec![PathBuf::from(".gitignore"), PathBuf::from("main.rs")];
+        let root = tempfile::tempdir().unwrap();
+        let error = discover_snapshot(root.path(), &paths, |_| Ok(vec![0xff])).unwrap_err();
+        assert_eq!(error.kind(), io::ErrorKind::InvalidData);
+        assert!(error.to_string().contains(".gitignore"));
+    }
+
+    #[test]
+    fn snapshot_inventory_matches_filesystem_source_manifest_and_ignore_policy() {
+        let root = tempfile::tempdir().unwrap();
+        fs::create_dir_all(root.path().join(".git/info")).unwrap();
+        fs::create_dir_all(root.path().join("nested")).unwrap();
+        fs::create_dir_all(root.path().join("node_modules")).unwrap();
+        fs::create_dir_all(root.path().join("pkg")).unwrap();
+        fs::write(root.path().join(".gitignore"), "*.rs\n").unwrap();
+        fs::write(root.path().join("nested/.gitignore"), "!kept.rs\n").unwrap();
+        fs::write(root.path().join(".git/info/exclude"), "excluded.ts\n").unwrap();
+        fs::write(root.path().join("nested/kept.rs"), "").unwrap();
+        fs::write(root.path().join("nested/drop.rs"), "").unwrap();
+        fs::write(root.path().join("included.ts"), "").unwrap();
+        fs::write(root.path().join("excluded.ts"), "").unwrap();
+        fs::write(root.path().join("node_modules/no.ts"), "").unwrap();
+        fs::write(
+            root.path().join("pkg/widget.gemspec"),
+            "Gem::Specification.new { |spec| spec.name = 'widget' }\n",
+        )
+        .unwrap();
+        fs::write(root.path().join("pkg/tsconfig.json"), "{}\n").unwrap();
+        let paths = vec![
+            PathBuf::from(".gitignore"),
+            PathBuf::from("excluded.ts"),
+            PathBuf::from("included.ts"),
+            PathBuf::from("nested/.gitignore"),
+            PathBuf::from("nested/drop.rs"),
+            PathBuf::from("nested/kept.rs"),
+            PathBuf::from("node_modules/no.ts"),
+            PathBuf::from("pkg/tsconfig.json"),
+            PathBuf::from("pkg/widget.gemspec"),
+        ];
+        let snapshot =
+            discover_snapshot(root.path(), &paths, |path| fs::read(root.path().join(path)))
+                .unwrap();
+        let filesystem = Inventory::discover_sources(root.path(), Vec::new()).unwrap();
+        let filesystem_sources = filesystem
+            .source_files()
+            .map(|file| file.path().as_path().to_path_buf())
+            .collect::<Vec<_>>();
+        assert_eq!(snapshot.source_paths(), filesystem_sources);
+        assert_eq!(
+            snapshot.packages(),
+            [(PathBuf::from("pkg"), Some("widget".to_owned()))]
+        );
+        assert_eq!(
+            snapshot.resolution_configs(),
+            [PathBuf::from("pkg/tsconfig.json")]
+        );
     }
 
     #[test]

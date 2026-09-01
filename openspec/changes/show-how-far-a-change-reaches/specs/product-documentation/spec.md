@@ -124,7 +124,9 @@ SHALL name those files rather than implying that every conventional entry file
 is one.
 
 It SHALL state that these signals are derived from history and therefore never
-enter the ratchet gate, and that they never appear in a diff report.
+enter the ratchet gate. It SHALL explain that trusted reach, core-size, and
+change-leakage movement can appear in a diff report while change amplification
+remains codebase-only.
 
 #### Scenario: A user reads the verdict head
 - **WHEN** the user sees a sentence about how far a change reaches
@@ -141,3 +143,7 @@ enter the ratchet gate, and that they never appear in a diff report.
 #### Scenario: A user asks why the gate ignores these signals
 - **WHEN** the user reads the gate documentation beside the new signals
 - **THEN** the README explains that history-derived signals move with wall-clock time and are excluded by rule
+
+#### Scenario: A user reads a diff report
+- **WHEN** reach, core size, or change leakage changed between two trusted graph sides
+- **THEN** the README explains that the movement can appear in the architecture comparison family and that change amplification has no diff comparison

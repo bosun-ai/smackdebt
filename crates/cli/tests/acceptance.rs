@@ -1285,6 +1285,66 @@ fn static_architecture_diff_snapshot_uses_unchanged_return_edges() {
 }
 
 #[test]
+fn diff_discloses_current_graph_suppression_without_reporting_reach_movement() {
+    let project = tempfile::tempdir().unwrap();
+    fs::write(project.path().join("package.json"), "{}\n").unwrap();
+    for index in 0..20 {
+        fs::write(
+            project.path().join(format!("f{index}.ts")),
+            format!("export const f{index} = {index};\n"),
+        )
+        .unwrap();
+    }
+    git(project.path(), ["init", "-b", "main"]);
+    git(project.path(), ["config", "user.name", "Smackdebt Test"]);
+    git(
+        project.path(),
+        ["config", "user.email", "smackdebt@example.invalid"],
+    );
+    git(project.path(), ["add", "."]);
+    git(project.path(), ["commit", "-m", "test: complete base"]);
+    fs::write(
+        project.path().join("f1.ts"),
+        "import { f0 } from './f0.js';\nimport missing from './missing.js';\nexport const f1 = f0 + missing;\n",
+    )
+    .unwrap();
+
+    let json = run_in(project.path(), ["diff", "main", "--json", "--jobs", "1"]);
+    let terminal = String::from_utf8(run_in(
+        project.path(),
+        ["diff", "main", "--jobs", "1", "--color", "never"],
+    ))
+    .unwrap();
+    let report: serde_json::Value = serde_json::from_slice(&json).unwrap();
+    validate_schema(&report);
+
+    assert_eq!(
+        report["diff_graph_evidence"]["current"]["status"],
+        "incomplete"
+    );
+    assert_eq!(report["diff_graph_evidence"]["base"]["status"], "complete");
+    assert_eq!(
+        report["diff_graph_evidence"]["suppressed_propagation"],
+        serde_json::json!({"total": 1, "current": 1, "base": 0})
+    );
+    assert!(
+        report["propagation_comparisons"]
+            .as_array()
+            .unwrap()
+            .is_empty()
+    );
+    assert_eq!(report["summary"]["debt_diff"]["total"], 0);
+    assert!(terminal.contains("No debt changed."), "{terminal}");
+    assert!(
+        terminal.contains(
+            "1 architecture comparison hidden because dependency data is incomplete after the change."
+        ),
+        "{terminal}"
+    );
+    assert!(!terminal.contains("change reach"), "{terminal}");
+}
+
+#[test]
 fn static_architecture_removed_cycle_snapshot_is_reviewed() {
     let project = static_architecture_fixture();
     git(project.path(), ["init", "-b", "main"]);
@@ -1763,11 +1823,15 @@ fn diff_uses_history_as_context_and_can_explain_coupling() {
     ))
     .unwrap();
     assert!(
-        default_terminal.contains("You made it better."),
+        default_terminal.contains("Better here, worse there."),
         "{default_terminal}"
     );
     assert!(
-        default_terminal.contains("worse 0 · better 1 (evolutionary) · changed 0"),
+        default_terminal.contains("worse 1 (architecture) · better 1 (evolutionary) · changed 0"),
+        "{default_terminal}"
+    );
+    assert!(
+        default_terminal.contains("worse change reaches more code · a · 1 of 3 → 2 of 3"),
         "{default_terminal}"
     );
     assert!(default_terminal.contains("a ↔ b no longer change together without a code dependency"));

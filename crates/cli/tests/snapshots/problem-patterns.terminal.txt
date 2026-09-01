@@ -1,6 +1,5 @@
 smackdebt · repository root
   Worn in the usual places.
-  A change in one package can reach 2 of 3 packages.
 4 high · 2 watch · 6 checked
 worst: hot/hot.js — hot AND complex
 
@@ -26,7 +25,6 @@ PROBLEMS
   watch everything depends on this · hub/hub.js
         hub/hub.js:1 · function · cyclomatic 2
         10 files import this
-        a change here reaches 10 files
   watch one author · hot
         one contributor made 11 of 11 commits
   watch god/long.js · file
@@ -35,10 +33,11 @@ PROBLEMS
         cyclomatic 2
 
 WARNINGS
+  warning 1 architecture fact hidden because dependency data is incomplete.
   warning 2 source files use unsupported languages.
   warning 1 source file could not be fully parsed.
   god/recovered.js: parser recovered from syntax errors
   hub/first.go: uses an unsupported language
   hub/second.go: uses an unsupported language
 
-  next: smackdebt god
+  next: smackdebt god/god.js

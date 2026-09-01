@@ -1,14 +1,14 @@
 smackdebt diff · repository root
   Better here, worse there.
-worse 3 (source, architecture) · better 3 (source, architecture, evolutionary) · changed 1 (source)
+worse 4 (source, architecture) · better 4 (source, architecture, evolutionary) · changed 1 (source)
 worst: c/main.js — package dependency cycle
 
 AREAS
+  c · worse 2 · changed 1
   b · worse 1 · better 1
-  c · worse 1 · changed 1
   d · worse 1
   e · worse 1
-  a · better 2
+  a · better 3
 
 FINDINGS
   worse b · function
@@ -26,6 +26,7 @@ ARCHITECTURE
         c
         → d
         → c
+  worse change reaches more code · c · 1 of 9 → 3 of 9
   better package dependency cycle removed
         a
         → b
@@ -33,3 +34,5 @@ ARCHITECTURE
 
 HISTORY
   better h ↔ i no longer change together without a code dependency
+
+  inspect directories and files for more details

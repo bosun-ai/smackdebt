@@ -39,9 +39,12 @@ mod verdict;
 pub use architecture::{
     ArchitectureComparison, ArchitectureComparisonId, ArchitectureComparisonKind,
     ArchitectureFinding, ArchitectureFindingId, ArchitectureFindingKind, ArchitectureGraph,
-    ArchitectureReportFacts, DependencyCoverage, DependencyEdge, DependencyEdgeId,
-    ExternalDependency, Instability, PackageEdge, PackageEdgeId, PackageGraphMeasurement,
-    ResolutionDiagnostic, ResolutionIssueKind, StableDependencyEvidence, StableDependencyFinding,
+    ArchitectureReportFacts, ChangeLeakageComparison, ChangeLeakageComparisonId,
+    ComparisonSuppression, CoreComparison, CoreComparisonId, DependencyCoverage, DependencyEdge,
+    DependencyEdgeId, DiffGraphEvidence, ExternalDependency, GraphConfigurationFailure,
+    GraphEvidence, Instability, PackageEdge, PackageEdgeId, PackageGraphMeasurement,
+    PropagationComparison, PropagationComparisonId, PropagationSubject, ResolutionDiagnostic,
+    ResolutionIssueKind, StableDependencyEvidence, StableDependencyFinding,
     StableDependencyFindingId,
 };
 pub use architecture_comparison::{PackageCycle, compare_architecture};
@@ -94,8 +97,8 @@ pub use problem::{
 };
 pub use propagation::{
     CLOSURE_NODE_LIMIT, CORE_SIZE_FILES, CORE_SIZE_PERCENT, PACKAGE_REACH_FILES, PackageClosure,
-    PackageClosures, ROOT_REACH_PACKAGES, ROOT_REACH_REACHED, close_over_packages,
-    enters_file_graph, graph_file_count,
+    PackageClosures, PackageFileReach, ROOT_REACH_PACKAGES, ROOT_REACH_REACHED,
+    close_over_packages, enters_file_graph, graph_file_count,
 };
 pub use reachability::{largest_component_size, reach_in_counts};
 pub use scope_amplification::{DirectoryAmplification, scope_amplification};

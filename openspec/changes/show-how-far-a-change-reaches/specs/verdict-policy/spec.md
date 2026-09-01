@@ -1,18 +1,13 @@
 ## ADDED Requirements
 
-### Requirement: A verdict states how far a change propagates
-Analysis SHALL carry two propagation facts on a completed verdict, each with a
-frozen sentence analysis owns so every consumer prints identical bytes, and no
-renderer SHALL compose, recompute, or reword one:
+### Requirement: A report retains how far a change propagates
+Analysis SHALL carry two propagation facts on a completed report, each with its
+integer operands and stable source identity:
 
-- **Propagation reach.** At the repository root the sentence SHALL be
-  `A change in one package can reach 9 of 14 packages.` with the reached and
-  total package counts substituted. At a package scope the sentence SHALL be
-  `A change here can reach 34 of 98 files in this package.` with the reached and
-  total file counts substituted. The fact SHALL retain both integers.
-- **Core size.** At the repository root the sentence SHALL be
-  `34 of 210 files sit in one dependency cycle.` with the core and graph file
-  counts substituted. The fact SHALL retain both integers.
+- **Propagation reach.** Repository reach SHALL retain the source package;
+  package reach SHALL retain the source file. Both retain reached and total.
+- **Core size.** Repository core size SHALL retain core and graph file counts,
+  a stable anchor, and the component members.
 
 Both file counts are the files the dependency graph is built over — the scope's
 primary, parsed files — because a fraction whose halves come from two
@@ -26,7 +21,9 @@ rule rather than a contradiction.
 
 Each fact SHALL be present only where its scope and its materiality rule allow
 it: reach at the repository root and at a package scope, core size at the
-repository root only, and neither at a directory or file scope. Where the
+repository root only, and neither at a directory or file scope. A human view
+SHALL state reach only beside its named package or file and core only beside its
+named cycle; the verdict head SHALL state none of them. Where the
 `architecture-analysis` materiality rule that owns the underlying number does not
 hold, the fact SHALL be absent rather than stated as a zero, a one-of-one, or a
 hedge. The numbers SHALL be written as plain digits without grouping, as the
@@ -55,9 +52,9 @@ unsupported-coverage qualifier and the repository-share fact never do. Producing
 them SHALL read only the completed report and perform no filesystem, Git,
 parser, or analysis work.
 
-#### Scenario: A root verdict carries both facts
+#### Scenario: A root report carries both facts
 - **WHEN** the repository root of a layered repository with a large core is selected
-- **THEN** the verdict carries `A change in one package can reach 9 of 14 packages.` and `34 of 210 files sit in one dependency cycle.` with their integer operands
+- **THEN** the report carries both integer facts and their source identities while the verdict head states neither
 
 #### Scenario: A package verdict carries reach
 - **WHEN** a package holding 98 files is selected and one of its files is depended on by 33 others
@@ -87,7 +84,7 @@ parser, or analysis work.
 - **WHEN** the same report is rendered for a human and serialized for a machine
 - **THEN** both carry the analysis-owned sentence bytes and the same integer operands
 
-### Requirement: A verdict states what a typical change costs
+### Requirement: A report retains what a typical change costs
 Analysis SHALL carry a change-amplification fact on the verdict of a repository,
 package, or directory scope, with the frozen sentence
 `A typical change here touches 4 files.` and its median substituted, retaining
@@ -98,9 +95,9 @@ rule `change-leakage` owns does not hold, so a scope with too little history or
 a median below the floor states nothing rather than stating noise. This
 specification SHALL NOT restate that rule.
 
-The fact SHALL be stated only: it SHALL NOT change the selected tier, the counts
-behind it, the worst offender, or any rating, and it SHALL be owned by analysis
-so every consumer prints identical bytes.
+The fact SHALL remain machine-only: it SHALL NOT change the selected tier, the
+counts behind it, the worst offender, or any rating, and no terminal detail
+level SHALL state it until another accepted change gives it a narrower subject.
 
 #### Scenario: A directory has a typical change size
 - **WHEN** a directory was touched by 40 commits whose nearest-rank median file count is 4

@@ -6,22 +6,35 @@ The block SHALL show the selected scope, the analysis-owned tier sentence, the
 counts behind it with every count labeled by its word, and the worst offender
 with its resolved repository-relative path and its reason when one exists. When
 the completed verdict carries a repository-share fact, the block SHALL print its
-analysis-owned bytes verbatim. When the completed verdict carries a
-propagation-reach, a core-size, or a change-amplification fact, the block SHALL
-print each one's analysis-owned bytes verbatim on its own line, after the share
-line and in that order, and SHALL print nothing where a fact is absent. The
-renderer SHALL NOT compose a sentence, derive a tier, or compute a count.
+analysis-owned bytes verbatim. The verdict block SHALL NOT print propagation
+reach, core size, or change amplification. The renderer SHALL NOT compose a
+sentence, derive a tier, or compute a count.
 
 For diff output the verdict block SHALL label every count with its word, SHALL
 name the comparison family that moved, and SHALL print a zero count rather than
-omitting it. When a diff moves no debt, output SHALL be the verdict line only,
-with no area, finding, architecture, history, problem, or warning section
-following it. Diff output SHALL carry none of the three propagation facts, which
-are codebase facts about a tree rather than about a change.
+omitting it. When a diff moves no debt and withholds no comparison because of
+incomplete graph evidence, output SHALL be the verdict line only, with no area,
+finding, architecture, history, problem, or warning section following it. When
+one or more comparison candidates are withheld, one concise warning SHALL state
+their combined count and whether dependency evidence was incomplete before the
+change, after the change, or on both sides. Diff output SHALL carry named reach,
+core, and leakage comparisons in the architecture family. It SHALL carry no
+amplification comparison.
 
 `AREAS` SHALL appear only when several debt-bearing child areas exist, with at
-most five rows and word-labeled counts. The discover line SHALL be
-`next: smackdebt <path>`.
+most five rows and word-labeled counts. A codebase discover line SHALL point
+first to the highest-ranked visible problem, then to a named metric subject,
+then to the first debt area, using `next: smackdebt <path>`. A non-empty diff
+SHALL end with `inspect directories and files for more details` instead of a
+generated command.
+
+#### Scenario: A diff ends after its evidence
+- **WHEN** a diff terminal report contains changed evidence
+- **THEN** its final line reads `inspect directories and files for more details` and contains no `next:` command
+
+#### Scenario: Unsafe architecture movement is withheld
+- **WHEN** a diff has no safe debt movement and one architecture comparison candidate depends on incomplete current graph evidence
+- **THEN** the verdict states no debt change, no architecture movement row appears, and one warning says the comparison was hidden because dependency data is incomplete after the change
 
 Codebase output SHALL render one `PROBLEMS` section in place of `FINDINGS`,
 `ARCHITECTURE`, and `HISTORY`. This REVERSES the previously accepted rule that
@@ -35,7 +48,9 @@ least one card that the current detail level shows.
 
 Each problem row SHALL state its rating word, then its pattern name, then its
 anchor. Pattern names SHALL be exactly `does too much` for `god_file`,
-`everything depends on this` for `hub`, `circular dependency` for `tangle`,
+`everything depends on this` for an inbound `hub`, `depends on many files` for
+an outbound-only `hub`, `change spreads far` for a reach-only `hub`,
+`circular dependency` for `tangle`,
 `hot and complex` for `hot_mess`, `packages change together` for `shotgun_pair`,
 `one author` for `bus_risk`, `depends on less stable code` for
 `unstable_dependency`, `importers follow its changes` for `leaky_interface`, and
@@ -121,7 +136,9 @@ followed by `file`, and for a container is the container name followed by
 Diff output SHALL keep `FINDINGS`, `ARCHITECTURE`, and `HISTORY` this round.
 `FINDINGS` SHALL show ranked comparison rows with `path:line` and their
 measurements. `ARCHITECTURE` SHALL appear only when an architecture comparison
-exists and SHALL show cycle witnesses rather than edge totals. `HISTORY` SHALL
+exists and SHALL show cycle witnesses or named reach, core, and leakage
+movement. It SHALL show at most three rows by default and all rows under
+`--all`. `HISTORY` SHALL
 appear only when an actionable history finding exists, SHALL show at most three,
 SHALL show one row per package pair, and SHALL show knowledge-concentration rows
 as counts without identity.
@@ -130,9 +147,9 @@ as counts without identity.
 - **WHEN** default codebase output is written
 - **THEN** it opens with the scope, the tier sentence, word-labeled counts, and the worst offender with its path and reason, and its debt detail is one `PROBLEMS` section
 
-#### Scenario: A root verdict states how far a change reaches
+#### Scenario: A root report has architecture facts
 - **WHEN** a root report whose verdict carries reach, core size, and amplification is written
-- **THEN** the block prints the three analysis-owned sentences verbatim, one per line, in that order, stacked under the tier sentence where the share line would be and above the counts, and with no share line
+- **THEN** the verdict block prints none of those facts and visible reach or core appears only beside a named package, file, or cycle
 
 #### Scenario: One file carries three High findings
 - **WHEN** default codebase output is written for a scope containing that file
@@ -157,6 +174,10 @@ as counts without identity.
 #### Scenario: A hub states its reach
 - **WHEN** a `hub` card's file carries an exact reach of 41
 - **THEN** one evidence line reads `a change here reaches 41 files`
+
+#### Scenario: An outbound hub names the direction it proves
+- **WHEN** a `hub` card carries fan-out evidence and no fan-in evidence
+- **THEN** its head states `depends on many files`
 
 #### Scenario: A problem is in a hot file
 - **WHEN** a displayed card's file is a hotspot with 14 commits

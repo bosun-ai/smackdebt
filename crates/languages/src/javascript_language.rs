@@ -75,13 +75,9 @@ fn javascript_dependency(node: Node<'_>, source: &[u8]) -> Option<DependencySynt
             &[".js", ".jsx", ".ts", ".tsx"],
             false,
         ),
-        "export_statement"
-            if node
-                .utf8_text(source)
-                .is_ok_and(|text| text.contains(" from ")) =>
-        {
+        "export_statement" if node.child_by_field_name("source").is_some() => {
             crate::dependency::quoted(
-                node,
+                node.child_by_field_name("source")?,
                 source,
                 DependencyKind::Import,
                 &[".js", ".jsx", ".ts", ".tsx"],
@@ -89,8 +85,9 @@ fn javascript_dependency(node: Node<'_>, source: &[u8]) -> Option<DependencySynt
             )
         }
         "call_expression" => {
-            let text = node.utf8_text(source).ok()?.trim();
-            if text.starts_with("require(") || text.starts_with("import(") {
+            let function = node.child_by_field_name("function")?;
+            let name = function.utf8_text(source).ok()?;
+            if matches!(name, "require" | "import") {
                 crate::dependency::quoted(
                     node,
                     source,

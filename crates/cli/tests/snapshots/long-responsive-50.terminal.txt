@@ -1,7 +1,5 @@
 smackdebt · repository root
   Worn in the usual places.
-  A change in one package can reach 2 of 3
-        packages.
 0 high · 1 watch · 2 checked
 worst: very-long-source-package-name/
         very-long-source-directory-name/
@@ -43,4 +41,5 @@ WARNINGS
         require(dynamicModuleName)
         could not be matched · test
 
-  next: smackdebt very-long-source-package-name
+  next: smackdebt very-long-source-package-name/
+        very-long-source-directory-name/choice.js

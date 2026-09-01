@@ -60,6 +60,7 @@ pub fn smackdebt_git::HistoryStreamSummary::revision(&self) -> core::option::Opt
 pub struct smackdebt_git::ObjectReader
 impl smackdebt_git::ObjectReader
 pub fn smackdebt_git::ObjectReader::read_path(&mut self, &str, &std::path::Path) -> core::result::Result<alloc::vec::Vec<u8>, smackdebt_git::GitError>
+pub fn smackdebt_git::ObjectReader::tree_files(&mut self, &str) -> core::result::Result<alloc::vec::Vec<std::path::PathBuf>, smackdebt_git::GitError>
 impl core::fmt::Debug for smackdebt_git::ObjectReader
 pub fn smackdebt_git::ObjectReader::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
 impl core::ops::drop::Drop for smackdebt_git::ObjectReader

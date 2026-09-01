@@ -51,6 +51,10 @@ version is current, so retiring one version never retires the relation tables.
 - **WHEN** a card states a change-leakage finding about two files
 - **THEN** both repository-relative paths appear as that finding's subject and no reference count, resolution outcome, or relation kind appears beside them
 
+#### Scenario: A Rust path uses its nearest matching module
+- **WHEN** a Rust use path can match both its leaf module and one or more parent-module fallbacks
+- **THEN** the first matching path level wins and broader fallbacks do not make the relation ambiguous
+
 #### Scenario: A machine consumer reads relations
 - **WHEN** the current machine report is parsed
 - **THEN** every dependency edge, package edge, external dependency, resolution diagnostic, and package-graph row remains present
@@ -157,3 +161,75 @@ named integer constants.
 #### Scenario: Components are retained rather than recomputed
 - **WHEN** live work counters are compared before and after core size is derived
 - **THEN** no additional algorithm pass, read, or Git process is recorded
+
+### Requirement: Human graph claims require sufficient evidence
+Project analysis SHALL resolve TypeScript and JavaScript aliases from the
+source file's package-root `tsconfig.json` or `jsconfig.json`, with TypeScript
+configuration preferred when both exist. Alias targets SHALL be relative to the
+config directory. Data-only JSONC and relative inheritance inside the repository
+SHALL be supported without executing configuration or loading dependency code.
+
+A package's graph evidence SHALL be incomplete when a primary file could not be
+parsed, an internal reference could not be resolved uniquely, or applicable
+configuration could not be read safely. Repository evidence SHALL be complete
+only when every package is complete. Root reach, core size, and hidden-coupling
+absence SHALL require complete repository evidence. Package and file reach SHALL
+require complete evidence for that package. One-way leakage SHALL require both
+endpoint packages to be complete.
+
+#### Scenario: Two packages use the same alias
+- **WHEN** two packages each map `@/*` to their own `src/*`
+- **THEN** each source resolves only through its own package configuration
+
+#### Scenario: An internal import is unresolved
+- **WHEN** a primary source contains an internal import that cannot be matched
+- **THEN** the affected evidence is incomplete, the human graph claim is absent, and the machine diagnostic retains the file and target
+
+### Requirement: A diff compares trusted graph movement
+Diff analysis SHALL compare repository package reach, selected package file
+reach, core size, and change-leakage findings from the current and base graphs
+it already builds. Each graph side SHALL derive file presence, package
+ownership, source role, and trust from that side's tree. A larger share SHALL be
+worse, a smaller share SHALL
+be better, and equal shares with changed integer operands or core members SHALL
+be changed. Share direction SHALL use integer cross multiplication. A source
+tie change with identical reach SHALL create no comparison.
+
+Every comparison SHALL name a stable package, file, cycle anchor, or file pair.
+Reach SHALL compare a named package or file with itself on both sides, using the
+union of the material subjects selected by either side. A core comparison SHALL
+use one file present in both sides as its anchor and compare the components that
+contain that file. Disjoint largest components SHALL produce separate old and
+new movements when their anchors exist on both sides; they SHALL NOT be joined
+into one changed row. These comparisons SHALL reuse the reach and component data
+from the existing graph builds without another graph pass.
+No comparison SHALL be created when either side lacks the evidence its claim
+needs. Unknown evidence SHALL never be reported as improvement.
+
+#### Scenario: A branch increases file reach
+- **WHEN** package reach changes from 12 of 26 files to 16 of 26 files with sufficient evidence on both sides
+- **THEN** one worse propagation comparison names the source file and carries both fractions
+
+#### Scenario: One graph side is incomplete
+- **WHEN** a candidate movement has insufficient graph evidence before or after
+- **THEN** no better, worse, or changed comparison is created and diagnostics disclose the suppression
+
+#### Scenario: Package ownership changes in the worktree
+- **WHEN** a nested package manifest exists only in the current tree
+- **THEN** base graph failures belong to the package that owned the file in the base tree
+
+#### Scenario: A modified tracked source is ignored on one side
+- **WHEN** Git reports a source change but that path is excluded from one side's inventory
+- **THEN** that source is absent from that side's analysis and graph evidence
+
+#### Scenario: Base inventory metadata cannot be trusted
+- **WHEN** a reachable base ignore file or name-bearing manifest cannot be read as valid text
+- **THEN** diff analysis fails and does not infer file presence or package identity
+
+#### Scenario: Different packages have the largest reach
+- **WHEN** package A has the largest reach before and package B has the largest reach after
+- **THEN** each comparison keeps one package identity and no row assigns package B's value to package A
+
+#### Scenario: The largest dependency cycle changes membership
+- **WHEN** the largest base cycle and largest current cycle have no files in common
+- **THEN** they are compared as separate stable-anchor movements and no row joins the old cycle to the new cycle

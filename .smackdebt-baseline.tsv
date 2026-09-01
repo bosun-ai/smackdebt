@@ -72,7 +72,7 @@ crates/project/src/project.rs	cyclomatic	2	5
 crates/project/src/project.rs	file_cycle	0	1
 crates/project/src/project.rs	file_size	1	0
 crates/project/src/project.rs	logical_lines	1	1
-crates/project/src/project.rs	nesting	0	4
+crates/project/src/project.rs	nesting	0	3
 crates/project/src/project.rs	parameters	0	13
 crates/project/src/requests.rs	parameters	0	2
 scripts/check-api-snapshots.py	cognitive	0	1

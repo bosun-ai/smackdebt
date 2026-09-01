@@ -16,6 +16,7 @@ use crate::report::{
     FileActivity, FileId, FileRecord, Finding, FindingId, FindingRank, PackageId, PackageRecord,
 };
 use crate::size::{SizeFinding, SizeFindingId};
+use crate::{GraphEvidence, PackageClosure};
 use std::cmp::Reverse;
 use std::collections::{BTreeMap, BTreeSet};
 
@@ -401,6 +402,8 @@ pub struct ProblemInput<'a> {
     knowledge_concentration_findings: &'a [KnowledgeConcentrationFinding],
     hotspots: &'a [Hotspot],
     file_reach: &'a [FileReach],
+    package_closures: &'a [PackageClosure],
+    graph_evidence: Option<&'a GraphEvidence>,
     change_leakage_findings: &'a [ChangeLeakageFinding],
     file_change_coupling: &'a [FileChangeCoupling],
     policy: ProblemPolicy,
@@ -420,6 +423,8 @@ impl<'a> ProblemInput<'a> {
             knowledge_concentration_findings: &[],
             hotspots: &[],
             file_reach: &[],
+            package_closures: &[],
+            graph_evidence: None,
             change_leakage_findings: &[],
             file_change_coupling: &[],
             policy: ProblemPolicy::new(
@@ -492,6 +497,17 @@ impl<'a> ProblemInput<'a> {
         self
     }
 
+    #[must_use]
+    pub const fn with_propagation(
+        mut self,
+        package_closures: &'a [PackageClosure],
+        graph_evidence: &'a GraphEvidence,
+    ) -> Self {
+        self.package_closures = package_closures;
+        self.graph_evidence = Some(graph_evidence);
+        self
+    }
+
     /// Adds the change-leakage findings beside the retained pairs they were
     /// decided from, which a card reads to name the two files of a pair.
     #[must_use]
@@ -520,10 +536,23 @@ impl<'a> ProblemInput<'a> {
     /// product leaves an immaterial fact absent rather than printing it, so
     /// the row exists in the table and the evidence line does not.
     fn exact_reach(&self, file: FileId) -> Option<u32> {
+        let package = self.files.get(file.index())?.package()?;
+        if self
+            .graph_evidence
+            .is_some_and(|evidence| !evidence.package_is_complete(package))
+        {
+            return None;
+        }
         self.file_reach
             .binary_search_by_key(&file, |reach| reach.file())
             .ok()
             .map(|position| self.file_reach[position].reach())
+            .or_else(|| {
+                self.package_closures
+                    .iter()
+                    .find(|closure| closure.source() == file)
+                    .map(|closure| closure.reach().saturating_sub(1))
+            })
             .filter(|&reach| reach > 0)
     }
 
@@ -845,7 +874,9 @@ impl<'a, 'b> FilePass<'a, 'b> {
             let fan_out = self.facts.fan_out(index);
             let inbound = stands_out(fan_in, median_in, policy);
             let outbound = stands_out(fan_out, median_out, policy);
-            if !inbound && !outbound {
+            let reach = self.input.exact_reach(FileId::from_index(index));
+            let spreads = reach.is_some_and(|reach| reach >= policy.hub_degree());
+            if !inbound && !outbound && !spreads {
                 continue;
             }
             let mut evidence = Vec::new();
@@ -857,7 +888,7 @@ impl<'a, 'b> FilePass<'a, 'b> {
             }
             // How far the change spreads is why the degree matters, so it
             // follows the degree that made the pattern fire.
-            if let Some(reach) = self.input.exact_reach(FileId::from_index(index)) {
+            if let Some(reach) = reach {
                 evidence.push(ProblemEvidence::ReachIn(reach));
             }
             let rating = self.claimed_rating(index);
@@ -1688,10 +1719,15 @@ mod tests {
             ],
             "reach follows the degree and precedes every claimed finding"
         );
-        // A file outside the candidate set states no reach at all.
+        // A second file with material reach now earns its own named hub card;
+        // the original degree hub keeps its degree evidence.
         let mut bare = imported_file(8);
         bare.reach(1, 41);
-        assert_eq!(bare.cluster()[0].evidence(), [ProblemEvidence::FanIn(8)]);
+        assert!(
+            bare.cluster()
+                .iter()
+                .any(|card| card.evidence() == [ProblemEvidence::FanIn(8)])
+        );
         // A candidate nothing depends on reaches nothing, and "0 files" states
         // nothing: the table keeps the row and the card states no line.
         let mut nothing = imported_file(8);

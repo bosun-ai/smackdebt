@@ -5,3 +5,5 @@ worse 0 · better 1 (evolutionary) · changed 0
 HISTORY
   a ↔ b changed together in 3 of 6 commits · 50% · code dependency exists
   better a ↔ b no longer change together without a code dependency
+
+  inspect directories and files for more details

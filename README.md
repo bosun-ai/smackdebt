@@ -32,8 +32,6 @@ $ smackdebt
 
 smackdebt · repository root
   Worn in the usual places.
-  A change in one package can reach 6 of 12 packages.
-  9 of 86 files sit in one dependency cycle.
 20 high · 63 watch · 3,305 checked
 worst: crates/project/src/project.rs — hot AND complex
 
@@ -80,11 +78,10 @@ WARNINGS
 ```
 
 The report opens with a verdict block: the selected scope, the sentence for its
-tier, the sentences describing how far a change here travels, the counts behind
-that verdict with every count labeled by its word, and the single worst thing
-with its repository-relative path and the reason it is worst.
-[Read how far a change reaches](#read-how-far-a-change-reaches) explains those
-sentences and when each is absent.
+tier, the counts behind that verdict with every count labeled by its word, and
+the single worst thing with its repository-relative path and the reason it is
+worst. Architecture evidence appears only beside the package, file, cycle, or
+package pair it describes.
 
 The codebase tiers are fixed. Their identifiers are the stable vocabulary for an
 integration; their sentences are what a person reads:
@@ -123,8 +120,6 @@ $ smackdebt crates/analysis
 smackdebt · crates/analysis
   Worn in the usual places.
   4 of the repository's 20 high live here.
-  A change here can reach 17 of 36 files in this package.
-  A typical change here touches 4 files.
 4 high · 17 watch · 1,405 checked
 worst: crates/analysis/src/evolution.rs — hot AND complex
 
@@ -231,12 +226,12 @@ the families that moved are named beside the count. Each changed finding shows
 without a source name of its own is written as its file and its kind, such as
 `GraphEditor.vue · closure`, so no generated internal identity reaches a reader.
 
-A diff report keeps `FINDINGS`, `ARCHITECTURE`, and `HISTORY` this release, and
-`ARCHITECTURE` appears when a cycle is introduced or removed. Codebase and diff
-output therefore speak different vocabularies for one cycle: a codebase report
-names problems, a diff report still reports movement family by family. The two
-will converge in a later release; until then, read `PROBLEMS` as "what is wrong
-here" and the diff sections as "what your change moved".
+A diff report keeps `FINDINGS`, `ARCHITECTURE`, and `HISTORY`.
+`ARCHITECTURE` names changes in dependency cycles, change reach, and
+history-to-code links. Each row names the affected path or pair, shows exact
+before and after evidence, and contributes to the diff answer. It ends with
+`inspect directories and files for more details`, since changed rows already
+name the paths to inspect.
 
 The diff tiers are fixed in the same way:
 
@@ -346,7 +341,7 @@ them are what a person reads:
 | Pattern | The terminal prints | What it needs |
 | --- | --- | --- |
 | `god_file` | `does too much` | a file that both concentrates rated debt — three High findings, or one High finding among at least six units rated Watch or High — and is broad, meaning it carries a size finding or imports at least ten files |
-| `hub` | `everything depends on this` | a file whose imports in or out reach eight and, when its package's median is not zero, reach four times that median |
+| `hub` | `everything depends on this`, `depends on many files`, or `change spreads far` | a file whose imports in or out reach eight and, when its package's median is not zero, reach four times that median; the words state which direction fired |
 | `tangle` | `circular dependency` | one rated dependency cycle: High across packages, Watch inside one package |
 | `hot_mess` | `hot and complex` | a file that carries High debt and is a hotspot in the selected window, five touches by default |
 | `shotgun_pair` | `packages change together` | two packages that keep changing together with no code dependency explaining it |
@@ -656,27 +651,22 @@ unsupported aliases can therefore remain unresolved.
 
 ## Read how far a change reaches
 
-Beyond its tier, a codebase verdict may carry sentences about travel: how far a
-change spreads, how much of the codebase is tangled together, and how many files
-a change here usually touches.
+Architecture evidence stays next to a named subject: an area row, a problem
+card, or an architecture diff row. The verdict does not state a repository-wide
+number without saying where to act.
 
 | Sentence | Where it appears | What the numbers count |
 | --- | --- | --- |
-| `A change in one package can reach 6 of 12 packages.` | repository root | the most packages that transitively depend on any one package, counting that package, out of every package |
-| `A change here can reach 17 of 36 files in this package.` | package scope | the most files inside the package that transitively depend on any one of its files, counting that file |
-| `9 of 86 files sit in one dependency cycle.` | repository root | the largest set of files that all depend on each other, out of the files the dependency graph is built over |
-| `A typical change here touches 4 files.` | repository, package, and directory scopes | the middle commit's file count, over the commits in the history window that touched this scope |
+| `a change here can reach 5 of 12 packages` | the named package area | packages that transitively depend on this package, counting this package |
+| `a change here can reach 17 of 36 files` | the named file or package problem | files inside the package that transitively depend on the named source, counting that source |
+| `9 of 86 files are in this cycle` | the named cycle problem | members of that cycle out of the files the dependency graph is built over |
 
-Each is a stated fact. None changes the tier, the counts, the worst offender, or
-any rating: they describe the shape a reader is already looking at. Each is
-absent — never hedged, never zero — when the repository is too small, the
-history too thin, or the number too weak to mean anything: package reach needs
-at least 3 packages and a reach of at least 2, a package's file reach needs at
-least 20 files, a core needs at least 5 files and 2% of the graph, and the
-typical-change sentence needs complete history, at least 10 commits, and a
-middle commit touching at least 3 files. A repository whose commits are mostly
-one file each therefore states no typical-change sentence at its root while a
-package inside it, where changes really do arrive in fours, states one.
+These facts do not change a codebase tier or rating. Each is absent when the
+graph is incomplete, the repository is too small, or the number is too weak to
+mean anything: package reach needs at least 3 packages and a reach of at least
+2, a package's file reach needs at least 20 files, and a core needs at least 5
+files and 2% of the graph. Typical change size remains available in JSON for
+tools that need history context, but it is not shown as a terminal action.
 
 Both file counts count the same population: the scope's primary, parsed files —
 the files the dependency graph is built over, which is what every other
@@ -723,8 +713,11 @@ directory's own component or an application bootstrap rather than a barrel — a
 hold behavior, so importers following them is still worth reporting.
 
 These signals come from history, so they never enter the ratchet gate, which
-only counts signals that do not move with wall-clock time, and they never appear
-in a diff report, which compares two trees rather than a window of commits.
+only counts signals that do not move with wall-clock time. A diff can report
+trusted movement in reach, core size, and change leakage because it compares
+the current and base graphs. Each reach row compares one named package or file
+with itself, and each core row compares the dependency components containing
+one file present on both sides. Change amplification remains codebase-only.
 
 ## Read the history evidence
 
@@ -927,10 +920,10 @@ High debt, the way the unsupported-coverage qualifier is:
 }
 ```
 
-`verdict.reach`, `verdict.core_size`, and `verdict.amplification` follow the
-same shape: the exact sentence the terminal prints and the integers behind it —
-`reached` and `total`, `core` and `files`, `median` and `commits`. Each member
-is absent exactly where its sentence is absent, so a consumer reads presence
+`verdict.reach`, `verdict.core_size`, and `verdict.amplification` keep the
+aggregate values for machine consumers: `reached` and `total`, `core` and
+`files`, `median` and `commits`. They are not terminal verdict lines. Each
+member is absent when its evidence is too weak, so a consumer reads presence
 rather than a zero:
 
 ```json
@@ -989,16 +982,36 @@ coupling operands, and contributor concentration without contributor identity.
 Hotspots, size findings, orphan files, stable-dependency findings, and
 knowledge-concentration findings each own a table and state their own `kind`.
 
+The `graph_evidence` object says whether architecture claims are safe to show.
+It records affected packages, parse and resolution failures, invalid resolution
+configuration, and the number of reach, core, or leakage facts withheld from
+human output. Weak graphs stay inspectable in JSON without creating confident
+terminal claims.
+
 Four tables carry the change-reach facts. `file_change_coupling` holds every
 retained file pair with the lower file index first, its shared and union commit
 counts, and the directory distance between the two files.
 `change_leakage_findings` holds the pairs a rule named, each with its `kind`,
 the `coupling` row it was decided from, and, for `leaky_interface`, the
 `interface` file. `package_closures` holds one row per package whose file reach
-is material, with the `files` the package's dependency graph is built over and
-the largest `reach` inside it; a package below the file floor or above the
-closure limit has no row, so a consumer joins by package rather than by
-position. `file_reach` holds the exact reach of the bounded candidate set only.
+is material, with the `source` file that has the largest reach, the `files` the
+package's dependency graph is built over, and that exact `reach`; a package
+below the file floor or above the closure limit has no row, so a consumer joins
+by package rather than by position. `file_reach` holds exact reach for the
+selected candidate files. `core_component` names every member of a material
+dependency core.
+
+Diff JSON adds `propagation_comparisons`, `core_comparisons`, and
+`change_leakage_comparisons`. Each row carries a direction, a named file or
+pair, and exact before and after evidence where it applies. `comparison_ref`
+keeps the ref used to build the comparison. Scope rows contain the matching
+comparison IDs for direct navigation.
+
+Diff JSON also carries `diff_graph_evidence`, with separate `current` and
+`base` graph status. Its propagation, core, and leakage suppression rows count
+candidate comparisons withheld before filtering, including how many depended
+on incomplete current evidence, base evidence, or both. Withheld movement never
+enters a comparison table or the diff verdict.
 
 A retained pair that produced no finding reaches no human view at all, `--all`
 included: the weaker pairs are JSON-only by design, and `file_change_coupling`

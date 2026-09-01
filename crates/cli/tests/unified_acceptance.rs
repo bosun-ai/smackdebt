@@ -487,9 +487,8 @@ fn a_diff_over_test_explained_coupling_reports_no_evolutionary_change() {
     assert!(!text.contains("no code dependency"), "{text}");
 }
 
-/// The layered fixture answers both reach sentences with hand-calculated
-/// operands, and the machine report carries the same integers from the same
-/// invocation.
+/// The layered fixture publishes hand-calculated reach operands while the
+/// terminal avoids an aggregate without a named place.
 ///
 /// `a` -> `b` -> `c` -> `d` makes `d` reachable from three other packages, so
 /// its reach is four of the six packages. `wide` chains twenty modules under a
@@ -558,17 +557,14 @@ fn a_layered_repository_states_its_package_reach_and_its_file_reach() {
     let root = Invocation::new([] as [&str; 0]).run(repository.path());
     root.success();
     let text = String::from_utf8(root.stdout).unwrap();
-    assert!(
-        text.contains("  A change in one package can reach 4 of 6 packages.\n"),
-        "{text}"
-    );
+    assert!(!text.contains("A change in one package"), "{text}");
     assert!(!text.contains("sit in one dependency cycle"), "{text}");
 
     let package = Invocation::new(["crates/wide"]).run(repository.path());
     package.success();
     let package_text = String::from_utf8(package.stdout).unwrap();
     assert!(
-        package_text.contains("  A change here can reach 20 of 21 files in this package.\n"),
+        !package_text.contains("A change here can reach"),
         "{package_text}"
     );
     let scoped = Invocation::new(["crates/wide", "--json"]).run(repository.path());
@@ -597,15 +593,14 @@ fn a_layered_repository_states_its_package_reach_and_its_file_reach() {
         assert!(!rendered_text.contains("can reach"), "{rendered_text}");
     }
 
-    // Both sentences survive the narrowest supported width: they stack rather
-    // than clip, and every operand stays on the page.
+    // Narrow output follows the same rule.
     let narrow = Invocation::new([] as [&str; 0])
         .columns(50)
         .run(repository.path());
     narrow.success();
     let narrow_text = String::from_utf8(narrow.stdout).unwrap();
     assert!(
-        narrow_text.contains("  A change in one package can reach 4 of 6\n        packages.\n"),
+        !narrow_text.contains("A change in one package"),
         "{narrow_text}"
     );
     let narrow_package = Invocation::new(["crates/wide"])
@@ -614,8 +609,7 @@ fn a_layered_repository_states_its_package_reach_and_its_file_reach() {
     narrow_package.success();
     let narrow_package_text = String::from_utf8(narrow_package.stdout).unwrap();
     assert!(
-        narrow_package_text
-            .contains("  A change here can reach 20 of 21 files in this\n        package.\n"),
+        !narrow_package_text.contains("A change here can reach"),
         "{narrow_package_text}"
     );
 }
@@ -653,7 +647,7 @@ fn a_single_package_repository_states_its_own_file_reach_or_nothing() {
     wide_terminal.success();
     let wide_text = String::from_utf8(wide_terminal.stdout).unwrap();
     assert!(
-        wide_text.contains("  A change here can reach 6 of 20 files in this package.\n"),
+        !wide_text.contains("A change here can reach"),
         "{wide_text}"
     );
 }
@@ -690,10 +684,8 @@ fn a_core_is_stated_only_when_the_largest_cycle_clears_both_floors() {
     let terminal = Invocation::new([] as [&str; 0]).run(repository.path());
     terminal.success();
     let text = String::from_utf8(terminal.stdout).unwrap();
-    assert!(
-        text.contains("  6 of 20 files sit in one dependency cycle.\n"),
-        "{text}"
-    );
+    assert!(!text.contains("sit in one dependency cycle"), "{text}");
+    assert!(text.contains("6 of 20 files are in this cycle"), "{text}");
     assert!(
         text.contains("        a change here reaches 5 files"),
         "{text}"
@@ -704,8 +696,8 @@ fn a_core_is_stated_only_when_the_largest_cycle_clears_both_floors() {
     narrow.success();
     let narrow_text = String::from_utf8(narrow.stdout).unwrap();
     assert!(
-        narrow_text.contains("  6 of 20 files sit in one dependency cycle.\n"),
-        "the core sentence fits fifty columns whole: {narrow_text}"
+        narrow_text.contains("6 of 20 files are in this cycle"),
+        "the named cycle evidence fits fifty columns: {narrow_text}"
     );
 
     // The same twenty files without the cycle state no core and a reach of one
@@ -886,8 +878,8 @@ fn a_sweeping_commit_is_counted_everywhere_but_in_the_file_pair_table() {
     }
 }
 
-/// A scope states what a typical change there touches, at the three scopes
-/// that can answer and at none of the others.
+/// JSON retains typical change size while terminal output avoids presenting it
+/// as an action.
 ///
 /// The fixture's root sees ten commits of two files, five of three, and twelve
 /// of four, whose nearest-rank median is 3, while `core` and `core/src` see the
@@ -942,31 +934,23 @@ fn a_scope_states_how_many_files_a_typical_change_there_touches() {
         "a typical change of two files is what a directory is for"
     );
 
-    // The terminal prints the analysis-owned bytes verbatim, and it fits fifty
-    // columns whole.
+    // Human output omits the aggregate at every scope and width.
     let rendered = |arguments: Vec<&str>| {
         let run = Invocation::new(arguments).run(repository.path());
         run.success();
         String::from_utf8(run.stdout).unwrap()
     };
     let root = rendered(vec!["--history", "36500d"]);
-    assert!(
-        root.contains("  A typical change here touches 3 files.\n"),
-        "{root}"
-    );
+    assert!(!root.contains("A typical change here"), "{root}");
     let directory = rendered(vec!["core/src", "--history", "36500d"]);
-    assert!(
-        directory.contains("  A typical change here touches 4 files.\n"),
-        "{directory}"
-    );
-    // The sentence survives the narrowest supported width whole.
+    assert!(!directory.contains("A typical change here"), "{directory}");
     let narrow = Invocation::new(["core/src", "--history", "36500d"])
         .columns(50)
         .run(repository.path());
     narrow.success();
     let narrow_text = String::from_utf8(narrow.stdout).unwrap();
     assert!(
-        narrow_text.contains("  A typical change here touches 4 files.\n"),
+        !narrow_text.contains("A typical change here"),
         "{narrow_text}"
     );
     let file = rendered(vec!["core/src/unit0.js", "--history", "36500d"]);
@@ -1531,6 +1515,12 @@ fn worktree_diff_reports_the_declared_mixed_change_outcomes_once() {
     let terminal =
         Invocation::new(["diff", "main", "--all", "--history", "36500d"]).run(repository.path());
     terminal.success();
+    let terminal_text = String::from_utf8_lossy(&terminal.stdout);
+    assert!(
+        terminal_text.ends_with("  inspect directories and files for more details\n"),
+        "{terminal_text}"
+    );
+    assert!(!terminal_text.contains("next:"), "{terminal_text}");
     let parallel_terminal = Invocation::new(["diff", "main", "--all", "--history", "36500d"])
         .automatic_workers()
         .run(repository.path());
@@ -1890,12 +1880,7 @@ fn every_default_codebase_view_spends_at_most_the_screen_budget() {
     assert!(steps.len() >= heads.len() * 2, "{cyclic}");
     assert!(!cyclic.contains('\u{2026}'), "{cyclic}");
 
-    // The view the discover line proposes fits the budget too, which is what
-    // makes drilling in a step rather than a flood. The scope it proposes has
-    // to be one the ladder applies to: a file scope shows complete evidence
-    // without the ladder, so a hint landing on a file would pass this
-    // assertion without ever exercising the budget. This repository's worst
-    // area is a directory holding more cards than the last rung.
+    // The next command opens the first visible problem exactly.
     let drill = wide_directory_repository();
     let root = Invocation::new(Vec::<&str>::new()).run(drill.path());
     root.success();
@@ -1905,12 +1890,15 @@ fn every_default_codebase_view_spends_at_most_the_screen_budget() {
         .find_map(|line| line.trim().strip_prefix("next: smackdebt "))
         .unwrap_or_else(|| panic!("{root}"))
         .to_owned();
-    assert!(drill.path().join(&hint).is_dir(), "{hint}: {root}");
+    assert!(drill.path().join(&hint).is_file(), "{hint}: {root}");
+    assert!(
+        problem_heads(&root).iter().any(|line| line.contains(&hint)),
+        "{hint}: {root}"
+    );
     let target = Invocation::new([hint.as_str()]).run(drill.path());
     target.success();
     let target = String::from_utf8(target.stdout).unwrap();
-    assert!(problem_heads(&target).len() > 6, "{hint}: {target}");
-    assert!(slots(&target) <= SCREEN_BUDGET, "{hint}: {target}");
+    assert!(!problem_heads(&target).is_empty(), "{hint}: {target}");
 
     // One invocation states the same cards and the same evidence at every
     // width, because the budget counts slots rather than rendered lines.
@@ -2419,7 +2407,7 @@ fn readme_console_examples_use_the_simple_terminal_vocabulary() {
         "HISTORY",
         // Every frozen pattern id beside the words the terminal prints for it.
         "| `god_file` | `does too much` |",
-        "| `hub` | `everything depends on this` |",
+        "| `hub` | `everything depends on this`, `depends on many files`, or `change spreads far` |",
         "| `tangle` | `circular dependency` |",
         "| `hot_mess` | `hot and complex` |",
         "| `shotgun_pair` | `packages change together` |",
@@ -2541,12 +2529,12 @@ fn composition_work_counts_are_visible_without_changing_report_bytes() {
         (
             "worktree diff terminal",
             vec!["diff", "main", "--all", "--history", "36500d"],
-            [1, 29, 8, 24, 7, 15, 28],
+            [1, 29, 8, 26, 7, 15, 28],
         ),
         (
             "worktree diff JSON",
             vec!["diff", "main", "--json", "--history", "36500d"],
-            [1, 29, 8, 24, 7, 15, 28],
+            [1, 29, 8, 26, 7, 15, 28],
         ),
         (
             "package terminal",
@@ -2579,7 +2567,7 @@ fn composition_work_counts_are_visible_without_changing_report_bytes() {
             vec!["diff", "main~1", "--json", "--history", "36500d"],
         ),
     ] {
-        assert_evidence_flow(name, arguments, reference.path(), [1, 29, 8, 24, 7, 15, 28]);
+        assert_evidence_flow(name, arguments, reference.path(), [1, 29, 8, 26, 7, 15, 28]);
     }
 
     let languages = GeneratedRepository::new("main");
@@ -3150,6 +3138,28 @@ fn assert_debt_diff_selection(report: &Value) {
             "architecture comparison {id} selected twice"
         );
         count(&comparison["direction"], &mut counts);
+    }
+    for (scope_key, table_key, identity) in [
+        (
+            "propagation_comparisons",
+            "propagation_comparisons",
+            "propagation",
+        ),
+        ("core_comparisons", "core_comparisons", "core"),
+        (
+            "change_leakage_comparisons",
+            "change_leakage_comparisons",
+            "change_leakage",
+        ),
+    ] {
+        for id in scope[scope_key].as_array().unwrap() {
+            let id = id.as_u64().unwrap() as usize;
+            assert!(
+                selected.insert((identity, id)),
+                "{identity} comparison {id} selected twice"
+            );
+            count(&report[table_key][id]["direction"], &mut counts);
+        }
     }
     for id in scope["evolutionary_comparisons"].as_array().unwrap() {
         let id = id.as_u64().unwrap() as usize;

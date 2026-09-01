@@ -42,5 +42,4 @@ WARNINGS
         could not be matched · test
 
   next: smackdebt very-long-source-package-name/
-        very-long-source-directory-name/
-        very-long-source-file-name.js
+        very-long-source-directory-name/choice.js

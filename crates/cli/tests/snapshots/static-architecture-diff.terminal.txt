@@ -14,5 +14,8 @@ ARCHITECTURE
         → app
 
 WARNINGS
+  warning 1 architecture comparison hidden because dependency data is incomplete on both sides.
   warning 2 imports could not be followed
         1 named nothing in the repository · 1 matched more than one file
+
+  inspect directories and files for more details

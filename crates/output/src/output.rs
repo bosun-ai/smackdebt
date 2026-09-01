@@ -13,9 +13,10 @@ use smackdebt_analysis::{
     DependencyEdgeId, Diagnostic, DiagnosticKind, DiffTier, EvolutionaryFindingId,
     FileChangeCoupling, FileId, FileRecord, Finding, FindingId, Instability,
     KnowledgeConcentrationFindingId, Language, Measurements, PackageId, ProblemAnchor, ProblemCard,
-    ProblemEvidence, ProblemPattern, ProblemVisibility, Rating, Report, ReportMode,
-    ResolutionIssueKind, Scope, ScopeId, ScopeKind, Signal, SizeFinding, SizeFindingId, SourceRole,
-    SourceTrust, StableDependencyFindingId, UnitKind, Verdict, instability, qualifies_for_finding,
+    ProblemEvidence, ProblemPattern, ProblemVisibility, PropagationReach, Rating, Report,
+    ReportMode, ResolutionIssueKind, Scope, ScopeId, ScopeKind, Signal, SizeFinding, SizeFindingId,
+    SourceRole, SourceTrust, StableDependencyFindingId, UnitKind, Verdict, instability,
+    qualifies_for_finding,
 };
 use unicode_width::{UnicodeWidthChar, UnicodeWidthStr};
 
@@ -379,9 +380,6 @@ impl Presentation {
         // History context still belongs to a path view, which is the view it
         // exists to explain.
         let detail = all || selected.kind() != ScopeKind::Repository;
-        let verdict_only = report.mode() == ReportMode::Diff
-            && verdict.diff_tier() == Some(DiffTier::NoDebtChange);
-
         let areas = area_rows(report, displayed);
         let codebase = report.mode() == ReportMode::Codebase;
         // Codebase debt is one ranked section of named problems; a diff keeps
@@ -400,15 +398,23 @@ impl Presentation {
         } else {
             (
                 diff_finding_rows(report, displayed, all, top, selection),
-                diff_architecture_rows(report, verdict.selection()),
+                diff_architecture_rows(report, verdict.selection(), all),
                 history_rows(report, selected, detail, verdict.selection()),
             )
         };
         let (warnings, warning_detail) = warning_rows(report, selected, file_detail);
-        let next = (report.mode() == ReportMode::Codebase)
-            .then(|| drill_path_from_visible(report, selected, areas.first()))
-            .flatten()
-            .map(|path| format!("smackdebt {}", path.to_string_lossy()));
+        let withheld_graph_comparison = report
+            .diff_graph_evidence()
+            .is_some_and(|evidence| evidence.suppressed_total() > 0);
+        let verdict_only = report.mode() == ReportMode::Diff
+            && verdict.diff_tier() == Some(DiffTier::NoDebtChange)
+            && !withheld_graph_comparison;
+        let next = match report.mode() {
+            ReportMode::Codebase => first_problem_path(report, displayed, selected, all)
+                .or_else(|| drill_path_from_visible(report, selected, areas.first()))
+                .map(|path| format!("smackdebt {}", path.to_string_lossy())),
+            ReportMode::Diff => None,
+        };
 
         let mut area_section = Section::new("AREAS");
         if areas.len() >= 2 {
@@ -490,7 +496,31 @@ fn area_row(report: &Report, area: &Scope) -> Row {
             }
         }
     }
+    if let Some(reach) = area_package_reach(report, area) {
+        facts.push(reach);
+    }
     Row::new(None, terminal_path(area.name())).with_facts(facts)
+}
+
+fn area_package_reach(report: &Report, area: &Scope) -> Option<String> {
+    if report.mode() != ReportMode::Codebase || !report.graph_evidence().is_complete() {
+        return None;
+    }
+    let package = report
+        .packages()
+        .iter()
+        .find(|package| package.scope() == area.id())?;
+    let measurement = report
+        .package_graph()
+        .iter()
+        .max_by_key(|measurement| measurement.reach_in())?;
+    (measurement.package() == package.id()).then_some(())?;
+    PropagationReach::packages(measurement.reach_in(), report.packages().len() as u32)?;
+    Some(format!(
+        "a change here can reach {} of {} packages",
+        measurement.reach_in(),
+        report.packages().len()
+    ))
 }
 
 /// How many ranked findings or comparisons the default view shows; a
@@ -597,6 +627,24 @@ fn problem_rows(
     section
 }
 
+fn first_problem_path(
+    report: &Report,
+    displayed: &Scope,
+    selected: &Scope,
+    all: bool,
+) -> Option<PathBuf> {
+    let card = report.problems().iter().find(|card| {
+        card_belongs_to_scope(report, card, displayed) && shows_card(report, card, selected, all)
+    })?;
+    let path = match card.anchor() {
+        ProblemAnchor::File(file) => report.files().get(file.index())?.path(),
+        ProblemAnchor::Files(files) => report.files().get(files.first()?.index())?.path(),
+        ProblemAnchor::Package(package) => package_name(report, package.index())?,
+        ProblemAnchor::PackagePair(left, _) => package_name(report, left.index())?,
+    };
+    Some(PathBuf::from(path))
+}
+
 /// Whether the current detail level shows this card.
 ///
 /// A `detail` card is removed from a view rather than moved inside it, so the
@@ -695,10 +743,10 @@ const fn anchored_file(card: &ProblemCard) -> Option<FileId> {
 /// a set of files, a package, or a package pair — and neither half carries a
 /// wildcard, so a pattern added to the frozen list is a compile error in both
 /// rather than a card that quietly loses its name.
-const fn pattern_name(pattern: ProblemPattern) -> Option<&'static str> {
-    match pattern {
+fn pattern_name(card: &ProblemCard) -> Option<&'static str> {
+    match card.pattern() {
         ProblemPattern::GodFile => Some("does too much"),
-        ProblemPattern::Hub => Some("everything depends on this"),
+        ProblemPattern::Hub => Some(hub_name(card)),
         ProblemPattern::HotMess => Some("hot and complex"),
         ProblemPattern::LeakyInterface => Some("importers follow its changes"),
         ProblemPattern::Measured => None,
@@ -706,7 +754,25 @@ const fn pattern_name(pattern: ProblemPattern) -> Option<&'static str> {
         | ProblemPattern::ShotgunPair
         | ProblemPattern::BusRisk
         | ProblemPattern::UnstableDependency
-        | ProblemPattern::HiddenCoupling => set_pattern_name(pattern),
+        | ProblemPattern::HiddenCoupling => set_pattern_name(card.pattern()),
+    }
+}
+
+fn hub_name(card: &ProblemCard) -> &'static str {
+    if card
+        .evidence()
+        .iter()
+        .any(|evidence| matches!(evidence, ProblemEvidence::FanIn(_)))
+    {
+        "everything depends on this"
+    } else if card
+        .evidence()
+        .iter()
+        .any(|evidence| matches!(evidence, ProblemEvidence::FanOut(_)))
+    {
+        "depends on many files"
+    } else {
+        "change spreads far"
     }
 }
 
@@ -731,7 +797,7 @@ const fn set_pattern_name(pattern: ProblemPattern) -> Option<&'static str> {
 
 fn problem_head(report: &Report, card: &ProblemCard) -> String {
     let anchor = anchor_label(report, card);
-    match pattern_name(card.pattern()) {
+    match pattern_name(card) {
         Some(name) => format!("{name} · {anchor}"),
         None => measured_head(report, card, &anchor),
     }
@@ -879,19 +945,10 @@ fn stated_verdict_facts(verdict: &Verdict) -> Vec<String> {
         facts.push(format!("{} {}", qualifier.sentence(), qualifier.fact()));
     }
     // A sub-scope answers about itself; the share states what fraction of the
-    // whole that is, the two propagation facts state how far a change to this
-    // tree travels, and the amplification states what one costs.
+    // whole that is. Architecture and history facts need a named row rather
+    // than an anonymous verdict line.
     if let Some(share) = verdict.share() {
         facts.push(share.sentence());
-    }
-    if let Some(reach) = verdict.reach() {
-        facts.push(reach.sentence());
-    }
-    if let Some(core) = verdict.core_size() {
-        facts.push(core.sentence());
-    }
-    if let Some(amplification) = verdict.amplification() {
-        facts.push(amplification.sentence());
     }
     facts
 }
@@ -919,10 +976,27 @@ fn evidence_lines(
         ProblemEvidence::Coupling(id) => vec![coupling_evidence(report, id)],
         ProblemEvidence::Knowledge(id) => vec![knowledge_evidence(report, id)],
         ProblemEvidence::ChangeLeakage(id) => vec![leakage_evidence(report, id, anchored)],
+        ProblemEvidence::Members(value) => vec![member_evidence(report, value)],
         // The rest are integers the report already measured, so they need no
         // finding table to be stated.
         measured => counted_evidence(measured).into_iter().collect(),
     }
+}
+
+fn member_evidence(report: &Report, members: u32) -> String {
+    let core = report
+        .core_size()
+        .filter(|core| report.graph_evidence().is_complete() && core.core() == members);
+    core.map_or_else(
+        || format!("{} in the cycle", counted_files(members)),
+        |core| {
+            format!(
+                "{} of {} are in this cycle",
+                members,
+                counted_files(core.files())
+            )
+        },
+    )
 }
 
 /// One integer fact, stated in the words its kind owns.
@@ -1298,33 +1372,159 @@ const fn changed_summary(kind: ComparisonKind) -> &'static str {
 /// that counts as debt.
 ///
 /// Every other edge change is a graph fact the machine report keeps.
-fn diff_architecture_rows(report: &Report, selection: &DebtDiffSelection) -> Section {
+fn diff_architecture_rows(report: &Report, selection: &DebtDiffSelection, all: bool) -> Section {
     let mut section = Section::new("ARCHITECTURE");
-    for id in selection.architecture() {
-        let comparison = &report.architecture_comparisons()[id.index()];
-        let head = if comparison.kind() == ArchitectureComparisonKind::CycleIntroduced {
-            "package dependency cycle introduced"
-        } else {
-            "package dependency cycle removed"
-        };
-        let witness = comparison
-            .witness()
-            .iter()
-            .enumerate()
-            .map(|(index, package)| {
-                let name = package_name(report, package.index()).unwrap_or("?");
-                if index == 0 {
-                    name.to_owned()
-                } else {
-                    format!("→ {name}")
-                }
-            })
-            .collect();
-        section.rows.push(
-            Row::new(Some(Word::direction(comparison.direction())), head).with_stacked(witness),
-        );
+    let mut rows: Vec<_> = selection
+        .architecture()
+        .iter()
+        .map(|id| cycle_comparison_row(report, id.index()))
+        .chain(
+            selection
+                .core()
+                .iter()
+                .map(|id| core_comparison_row(report, id.index())),
+        )
+        .chain(
+            selection
+                .propagation()
+                .iter()
+                .map(|id| propagation_comparison_row(report, id.index())),
+        )
+        .chain(
+            selection
+                .leakage()
+                .iter()
+                .map(|id| leakage_comparison_row(report, id.index())),
+        )
+        .collect();
+    rows.sort_by(|left, right| (&left.0, &left.1, &left.2).cmp(&(&right.0, &right.1, &right.2)));
+    section.rows = rows.into_iter().map(|row| row.3).collect();
+    if !all {
+        section.rows.truncate(3);
     }
     section
+}
+
+fn cycle_comparison_row(report: &Report, index: usize) -> (u8, u8, String, Row) {
+    let comparison = &report.architecture_comparisons()[index];
+    let head = if comparison.kind() == ArchitectureComparisonKind::CycleIntroduced {
+        "package dependency cycle introduced"
+    } else {
+        "package dependency cycle removed"
+    };
+    let witness = comparison
+        .witness()
+        .iter()
+        .enumerate()
+        .map(|(index, package)| {
+            let name = package_name(report, package.index()).unwrap_or("?");
+            if index == 0 {
+                name.to_owned()
+            } else {
+                format!("→ {name}")
+            }
+        })
+        .collect();
+    (
+        direction_rank(comparison.direction()),
+        0,
+        head.to_owned(),
+        Row::new(Some(Word::direction(comparison.direction())), head).with_stacked(witness),
+    )
+}
+
+fn core_comparison_row(report: &Report, index: usize) -> (u8, u8, String, Row) {
+    let comparison = &report.core_comparisons()[index];
+    let path = report.files()[comparison.anchor().index()].path();
+    let head = match comparison.direction() {
+        ComparisonDirection::Worse => "dependency cycle grew",
+        ComparisonDirection::Better => "dependency cycle shrank",
+        ComparisonDirection::Changed => "dependency cycle changed",
+    };
+    let before = comparison.before();
+    let after = comparison.after();
+    (
+        direction_rank(comparison.direction()),
+        1,
+        path.to_owned(),
+        Row::new(
+            Some(Word::direction(comparison.direction())),
+            format!("{head} · {path}"),
+        )
+        .with_fact(format!(
+            "{} of {} → {} of {} files",
+            before.0, before.1, after.0, after.1
+        )),
+    )
+}
+
+fn propagation_comparison_row(report: &Report, index: usize) -> (u8, u8, String, Row) {
+    let comparison = report.propagation_comparisons()[index];
+    let path = match comparison.subject() {
+        smackdebt_analysis::PropagationSubject::Package { source } => {
+            package_name(report, source.index()).unwrap_or("?")
+        }
+        smackdebt_analysis::PropagationSubject::File { source, .. } => {
+            report.files()[source.index()].path()
+        }
+    };
+    let head = match comparison.direction() {
+        ComparisonDirection::Worse => "change reaches more code",
+        ComparisonDirection::Better => "change reaches less code",
+        ComparisonDirection::Changed => "change reach changed",
+    };
+    let before = comparison.before();
+    let after = comparison.after();
+    (
+        direction_rank(comparison.direction()),
+        2,
+        path.to_owned(),
+        Row::new(
+            Some(Word::direction(comparison.direction())),
+            format!("{head} · {path}"),
+        )
+        .with_fact(format!(
+            "{} of {} → {} of {}",
+            before.0, before.1, after.0, after.1
+        )),
+    )
+}
+
+fn leakage_comparison_row(report: &Report, index: usize) -> (u8, u8, String, Row) {
+    let comparison = report.change_leakage_comparisons()[index];
+    let left = report.files()[comparison.left().index()].path();
+    let right = report.files()[comparison.right().index()].path();
+    let head = leakage_comparison_name(comparison.kind(), comparison.direction());
+    (
+        direction_rank(comparison.direction()),
+        3,
+        format!("{left} ↔ {right}"),
+        Row::new(
+            Some(Word::direction(comparison.direction())),
+            format!("{head} · {left} ↔ {right}"),
+        ),
+    )
+}
+
+const fn leakage_comparison_name(
+    kind: smackdebt_analysis::ChangeLeakageKind,
+    direction: ComparisonDirection,
+) -> &'static str {
+    match (kind, direction) {
+        (smackdebt_analysis::ChangeLeakageKind::HiddenCoupling, ComparisonDirection::Worse) => {
+            "co-change lost its code link"
+        }
+        (smackdebt_analysis::ChangeLeakageKind::HiddenCoupling, ComparisonDirection::Better) => {
+            "co-change gained a code link"
+        }
+        (smackdebt_analysis::ChangeLeakageKind::LeakyInterface, ComparisonDirection::Worse) => {
+            "importers now follow this change"
+        }
+        (smackdebt_analysis::ChangeLeakageKind::LeakyInterface, ComparisonDirection::Better) => {
+            "importers stopped following this change"
+        }
+        (_, ComparisonDirection::Changed) => "change relationship changed",
+    }
 }
 
 /// The closed witness of one cycle, one step per line so it is never
@@ -1529,6 +1729,36 @@ fn warning_rows(report: &Report, selected: &Scope, file_detail: bool) -> (Sectio
     let mut section = Section::new("WARNINGS");
     let mut warnings: Vec<Row> = Vec::new();
     let warning = |text: String| Row::new(Some(Word::Warning), text);
+    warnings.extend(history_warnings(report));
+    warnings.extend(graph_evidence_warning(report).map(warning));
+    warnings.extend(resolution_warning(report, selected));
+    warnings.extend(diagnostic_warnings(report, selected));
+    section.rows = warnings;
+    if file_detail {
+        // An import that could not be followed is file detail; at every other
+        // scope the grouped sentence above is its whole terminal presence.
+        section.rows.extend(unmatched_import_rows(report, selected));
+    }
+    let mut warning_detail = Vec::new();
+    if file_detail {
+        for diagnostic in report
+            .diagnostics()
+            .iter()
+            .filter(|diagnostic| diagnostic_belongs_to_scope(report, diagnostic, selected))
+            .filter(|diagnostic| !diagnostic.message().starts_with("Git history"))
+        {
+            if let Some(file) = diagnostic.file() {
+                let path = report.files()[file.index()].path();
+                warning_detail.push(format!("{path}: {}", diagnostic_detail(path, diagnostic)));
+            }
+        }
+    }
+    (section, warning_detail)
+}
+
+fn history_warnings(report: &Report) -> Vec<Row> {
+    let mut warnings = Vec::new();
+    let warning = |text: String| Row::new(Some(Word::Warning), text);
     let history = report.history_coverage();
     match history.availability() {
         smackdebt_analysis::HistoryAvailability::Incomplete => {
@@ -1556,41 +1786,17 @@ fn warning_rows(report: &Report, selected: &Scope, file_detail: bool) -> (Sectio
             "Some renamed files could not be matched.".to_owned(),
         ));
     }
-    let mut unresolved = 0usize;
-    let mut ambiguous = 0usize;
-    for diagnostic in report
-        .resolution_diagnostics()
-        .iter()
-        .filter(|diagnostic| file_belongs_to_scope(report, diagnostic.file(), selected))
-    {
-        match diagnostic.kind() {
-            smackdebt_analysis::ResolutionIssueKind::Unresolved => unresolved += 1,
-            smackdebt_analysis::ResolutionIssueKind::Ambiguous => ambiguous += 1,
-        }
-    }
-    if unresolved + ambiguous > 0 {
-        // The total alone hides whether names were missing or duplicated, so
-        // each cause states its own count — and only when it happened.
-        let mut row = Row::new(
-            Some(Word::Warning),
-            format!(
-                "{} could not be followed",
-                Counted::new(unresolved + ambiguous, "import", "imports")
-            ),
-        );
-        if unresolved > 0 {
-            row = row.with_fact(format!("{unresolved} named nothing in the repository"));
-        }
-        if ambiguous > 0 {
-            row = row.with_fact(format!("{ambiguous} matched more than one file"));
-        }
-        warnings.push(row);
-    }
-    let relevant = |diagnostic: &Diagnostic| {
-        diagnostic
-            .file()
-            .is_none_or(|file| file_belongs_to_scope(report, file, selected))
-    };
+    warnings
+}
+
+fn diagnostic_belongs_to_scope(report: &Report, diagnostic: &Diagnostic, selected: &Scope) -> bool {
+    diagnostic
+        .file()
+        .is_none_or(|file| file_belongs_to_scope(report, file, selected))
+}
+
+fn diagnostic_warnings(report: &Report, selected: &Scope) -> Vec<Row> {
+    let mut warnings = Vec::new();
     for kind in [
         DiagnosticKind::NestedRepository,
         DiagnosticKind::UnsupportedLanguage,
@@ -1604,34 +1810,96 @@ fn warning_rows(report: &Report, selected: &Scope, file_detail: bool) -> (Sectio
         let count = report
             .diagnostics()
             .iter()
-            .filter(|diagnostic| relevant(diagnostic) && diagnostic.kind() == kind)
+            .filter(|diagnostic| {
+                diagnostic_belongs_to_scope(report, diagnostic, selected)
+                    && diagnostic.kind() == kind
+            })
             .filter(|diagnostic| !diagnostic.message().starts_with("Git history"))
             .count();
         if count > 0 {
-            warnings.push(warning(diagnostic_summary(kind, count)));
+            warnings.push(Row::new(
+                Some(Word::Warning),
+                diagnostic_summary(kind, count),
+            ));
         }
     }
-    section.rows = warnings;
-    if file_detail {
-        // An import that could not be followed is file detail; at every other
-        // scope the grouped sentence above is its whole terminal presence.
-        section.rows.extend(unmatched_import_rows(report, selected));
-    }
-    let mut warning_detail = Vec::new();
-    if file_detail {
-        for diagnostic in report
-            .diagnostics()
-            .iter()
-            .filter(|diagnostic| relevant(diagnostic))
-            .filter(|diagnostic| !diagnostic.message().starts_with("Git history"))
-        {
-            if let Some(file) = diagnostic.file() {
-                let path = report.files()[file.index()].path();
-                warning_detail.push(format!("{path}: {}", diagnostic_detail(path, diagnostic)));
-            }
+    warnings
+}
+
+fn resolution_warning(report: &Report, selected: &Scope) -> Option<Row> {
+    let mut unresolved = 0usize;
+    let mut ambiguous = 0usize;
+    for diagnostic in report
+        .resolution_diagnostics()
+        .iter()
+        .filter(|diagnostic| file_belongs_to_scope(report, diagnostic.file(), selected))
+    {
+        match diagnostic.kind() {
+            smackdebt_analysis::ResolutionIssueKind::Unresolved => unresolved += 1,
+            smackdebt_analysis::ResolutionIssueKind::Ambiguous => ambiguous += 1,
         }
     }
-    (section, warning_detail)
+    let total = unresolved + ambiguous;
+    if total == 0 {
+        return None;
+    }
+    // The total alone hides whether names were missing or duplicated, so each
+    // cause states its own count when it happened.
+    let mut row = Row::new(
+        Some(Word::Warning),
+        format!(
+            "{} could not be followed",
+            Counted::new(total, "import", "imports")
+        ),
+    );
+    if unresolved > 0 {
+        row = row.with_fact(format!("{unresolved} named nothing in the repository"));
+    }
+    if ambiguous > 0 {
+        row = row.with_fact(format!("{ambiguous} matched more than one file"));
+    }
+    Some(row)
+}
+
+fn graph_evidence_warning(report: &Report) -> Option<String> {
+    report.diff_graph_evidence().map_or_else(
+        || codebase_graph_evidence_warning(report.graph_evidence()),
+        diff_graph_evidence_warning,
+    )
+}
+
+fn codebase_graph_evidence_warning(evidence: &smackdebt_analysis::GraphEvidence) -> Option<String> {
+    let hidden =
+        evidence.suppressed_reach() + evidence.suppressed_core() + evidence.suppressed_leakage();
+    (hidden > 0).then(|| {
+        format!(
+            "{} hidden because dependency data is incomplete.",
+            Counted::new(hidden as usize, "architecture fact", "architecture facts")
+        )
+    })
+}
+
+fn diff_graph_evidence_warning(evidence: &smackdebt_analysis::DiffGraphEvidence) -> Option<String> {
+    let hidden = evidence.suppressed_total();
+    let current =
+        evidence.propagation().current() + evidence.core().current() + evidence.leakage().current();
+    let base = evidence.propagation().base() + evidence.core().base() + evidence.leakage().base();
+    let side = match (current > 0, base > 0) {
+        (true, true) => " on both sides",
+        (true, false) => " after the change",
+        (false, true) => " before the change",
+        (false, false) => "",
+    };
+    (hidden > 0).then(|| {
+        format!(
+            "{} hidden because dependency data is incomplete{side}.",
+            Counted::new(
+                hidden as usize,
+                "architecture comparison",
+                "architecture comparisons"
+            )
+        )
+    })
 }
 
 /// What one file diagnostic says, with the file's own path removed when the
@@ -1691,6 +1959,9 @@ impl<'a, W: Write> Renderer<'a, W> {
         if let Some(next) = &view.next {
             writeln!(self.writer)?;
             self.write_head(Some(Word::Next), next)?;
+        } else if view.mode == ReportMode::Diff {
+            writeln!(self.writer)?;
+            self.write_indented(2, "inspect directories and files for more details")?;
         }
         Ok(())
     }
@@ -3638,11 +3909,10 @@ mod tests {
         assert_eq!(value["mode"], "codebase");
     }
 
-    /// The propagation facts are analysis-owned bytes the renderer only
-    /// places: after the share line, reach before core, and nothing where a
-    /// fact is absent.
+    /// Architecture facts stay out of the anonymous verdict head even when
+    /// the completed report retains material values.
     #[test]
-    fn a_verdict_states_its_reach_and_then_its_core_after_the_share() {
+    fn a_verdict_head_hides_reach_and_core_without_a_named_subject() {
         let mut builder = ReportBuilder::new(ReportMode::Codebase);
         let root = ScopeId::from_index(0);
         let mut root_scope = Scope::new(root, ScopeKind::Repository, ".", None);
@@ -3687,19 +3957,15 @@ mod tests {
             Vec::new(),
             Vec::new(),
             smackdebt_analysis::CoreSize::from_counts(34, 210),
+            Vec::new(),
         );
         let report = builder.finish();
         let mut bytes = Vec::new();
         write_terminal(&mut bytes, &report, Some(root), TerminalOptions::default()).unwrap();
         let terminal = String::from_utf8(bytes).unwrap();
+        assert!(!terminal.contains("can reach"), "{terminal}");
         assert!(
-            terminal.starts_with(concat!(
-                "smackdebt \u{b7} repository root\n",
-                "  Nothing was checked.\n",
-                "  A change in one package can reach 3 of 3 packages.\n",
-                "  34 of 210 files sit in one dependency cycle.\n",
-                "0 high \u{b7} 0 watch \u{b7} 0 checked\n",
-            )),
+            !terminal.contains("sit in one dependency cycle"),
             "{terminal}"
         );
         // A package scope of this report states neither fact, because no

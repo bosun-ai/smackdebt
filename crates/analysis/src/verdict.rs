@@ -1,5 +1,7 @@
 use crate::architecture::{
     ArchitectureComparison, ArchitectureComparisonId, ArchitectureComparisonKind,
+    ChangeLeakageComparison, ChangeLeakageComparisonId, CoreComparison, CoreComparisonId,
+    PropagationComparison, PropagationComparisonId,
 };
 use crate::change_amplification::{AMPLIFICATION_MIN_COMMITS, AMPLIFICATION_MIN_MEDIAN};
 use crate::comparison::{Comparison, ComparisonKind};
@@ -617,6 +619,9 @@ impl DebtDiffFacts {
 pub struct DebtDiffSelection {
     source: Vec<ComparisonId>,
     architecture: Vec<ArchitectureComparisonId>,
+    propagation: Vec<PropagationComparisonId>,
+    core: Vec<CoreComparisonId>,
+    leakage: Vec<ChangeLeakageComparisonId>,
     evolutionary: Vec<EvolutionaryComparisonId>,
     facts: DebtDiffFacts,
 }
@@ -650,6 +655,27 @@ impl DebtDiffSelection {
             .add_direction(comparison.direction());
     }
 
+    pub fn select_propagation(&mut self, comparison: PropagationComparison) {
+        self.propagation.push(comparison.id());
+        self.facts
+            .architecture
+            .add_direction(comparison.direction());
+    }
+
+    pub fn select_core(&mut self, comparison: &CoreComparison) {
+        self.core.push(comparison.id());
+        self.facts
+            .architecture
+            .add_direction(comparison.direction());
+    }
+
+    pub fn select_change_leakage(&mut self, comparison: ChangeLeakageComparison) {
+        self.leakage.push(comparison.id());
+        self.facts
+            .architecture
+            .add_direction(comparison.direction());
+    }
+
     /// Selects one evolutionary comparison, each of which introduced or
     /// removed a finding.
     pub fn select_evolutionary(&mut self, comparison: EvolutionaryComparison) {
@@ -665,6 +691,15 @@ impl DebtDiffSelection {
     pub fn architecture(&self) -> &[ArchitectureComparisonId] {
         &self.architecture
     }
+    pub fn propagation(&self) -> &[PropagationComparisonId] {
+        &self.propagation
+    }
+    pub fn core(&self) -> &[CoreComparisonId] {
+        &self.core
+    }
+    pub fn leakage(&self) -> &[ChangeLeakageComparisonId] {
+        &self.leakage
+    }
     pub fn evolutionary(&self) -> &[EvolutionaryComparisonId] {
         &self.evolutionary
     }
@@ -676,7 +711,12 @@ impl DebtDiffSelection {
         DiffTier::reconcile(self.facts)
     }
     pub fn is_empty(&self) -> bool {
-        self.source.is_empty() && self.architecture.is_empty() && self.evolutionary.is_empty()
+        self.source.is_empty()
+            && self.architecture.is_empty()
+            && self.propagation.is_empty()
+            && self.core.is_empty()
+            && self.leakage.is_empty()
+            && self.evolutionary.is_empty()
     }
 
     /// Whether one scope's selection holds the same identity twice.
@@ -685,7 +725,12 @@ impl DebtDiffSelection {
     /// reject it. The audit sorts copies of the identity lists and never runs
     /// while a report is built.
     pub fn has_duplicate_identity(&self) -> bool {
-        repeats(&self.source) || repeats(&self.architecture) || repeats(&self.evolutionary)
+        repeats(&self.source)
+            || repeats(&self.architecture)
+            || repeats(&self.propagation)
+            || repeats(&self.core)
+            || repeats(&self.leakage)
+            || repeats(&self.evolutionary)
     }
 }
 

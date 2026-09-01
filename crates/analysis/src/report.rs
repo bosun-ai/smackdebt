@@ -14,8 +14,10 @@ use crate::verdict::{
 };
 use crate::{
     ArchitectureComparison, ArchitectureComparisonId, ArchitectureFinding, ArchitectureFindingId,
-    ArchitectureFindingKind, ArchitectureReportFacts, DependencyCoverage, DependencyEdge,
-    ExternalDependency, PackageEdge, PackageGraphMeasurement, ResolutionDiagnostic,
+    ArchitectureFindingKind, ArchitectureReportFacts, ChangeLeakageComparison,
+    ChangeLeakageComparisonId, CoreComparison, CoreComparisonId, DependencyCoverage,
+    DependencyEdge, DiffGraphEvidence, ExternalDependency, GraphEvidence, PackageEdge,
+    PackageGraphMeasurement, PropagationComparison, PropagationComparisonId, ResolutionDiagnostic,
     StableDependencyFinding,
 };
 use crate::{
@@ -406,6 +408,9 @@ pub struct Scope {
     comparisons: Vec<ComparisonId>,
     architecture_findings: Vec<ArchitectureFindingId>,
     architecture_comparisons: Vec<ArchitectureComparisonId>,
+    propagation_comparisons: Vec<PropagationComparisonId>,
+    core_comparisons: Vec<CoreComparisonId>,
+    change_leakage_comparisons: Vec<ChangeLeakageComparisonId>,
     evolutionary_findings: Vec<EvolutionaryFindingId>,
     evolutionary_comparisons: Vec<EvolutionaryComparisonId>,
     coverage: Coverage,
@@ -432,6 +437,9 @@ impl Scope {
             comparisons: Vec::new(),
             architecture_findings: Vec::new(),
             architecture_comparisons: Vec::new(),
+            propagation_comparisons: Vec::new(),
+            core_comparisons: Vec::new(),
+            change_leakage_comparisons: Vec::new(),
             evolutionary_findings: Vec::new(),
             evolutionary_comparisons: Vec::new(),
             coverage: Coverage::default(),
@@ -470,6 +478,15 @@ impl Scope {
     }
     pub fn architecture_comparisons(&self) -> &[ArchitectureComparisonId] {
         &self.architecture_comparisons
+    }
+    pub fn propagation_comparisons(&self) -> &[PropagationComparisonId] {
+        &self.propagation_comparisons
+    }
+    pub fn core_comparisons(&self) -> &[CoreComparisonId] {
+        &self.core_comparisons
+    }
+    pub fn change_leakage_comparisons(&self) -> &[ChangeLeakageComparisonId] {
+        &self.change_leakage_comparisons
     }
     pub fn evolutionary_findings(&self) -> &[EvolutionaryFindingId] {
         &self.evolutionary_findings
@@ -518,6 +535,21 @@ impl Scope {
     pub fn add_architecture_comparison(&mut self, comparison: ArchitectureComparisonId) {
         if !self.architecture_comparisons.contains(&comparison) {
             self.architecture_comparisons.push(comparison);
+        }
+    }
+    pub fn add_propagation_comparison(&mut self, comparison: PropagationComparisonId) {
+        if !self.propagation_comparisons.contains(&comparison) {
+            self.propagation_comparisons.push(comparison);
+        }
+    }
+    pub fn add_core_comparison(&mut self, comparison: CoreComparisonId) {
+        if !self.core_comparisons.contains(&comparison) {
+            self.core_comparisons.push(comparison);
+        }
+    }
+    pub fn add_change_leakage_comparison(&mut self, comparison: ChangeLeakageComparisonId) {
+        if !self.change_leakage_comparisons.contains(&comparison) {
+            self.change_leakage_comparisons.push(comparison);
         }
     }
     pub fn add_evolutionary_finding(&mut self, finding: EvolutionaryFindingId) {
@@ -782,9 +814,15 @@ pub struct Report {
     package_edges: Vec<PackageEdge>,
     external_dependencies: Vec<ExternalDependency>,
     resolution_diagnostics: Vec<ResolutionDiagnostic>,
+    graph_evidence: GraphEvidence,
+    diff_graph_evidence: Option<DiffGraphEvidence>,
     package_graph: Vec<PackageGraphMeasurement>,
     architecture_findings: Vec<ArchitectureFinding>,
     architecture_comparisons: Vec<ArchitectureComparison>,
+    propagation_comparisons: Vec<PropagationComparison>,
+    core_comparisons: Vec<CoreComparison>,
+    change_leakage_comparisons: Vec<ChangeLeakageComparison>,
+    comparison_ref: Option<String>,
     history_coverage: HistoryCoverage,
     file_history: Vec<FileHistory>,
     package_history: Vec<PackageHistory>,
@@ -825,6 +863,7 @@ pub struct Report {
     file_reach: Vec<FileReach>,
     /// The largest file dependency cycle, when it is material.
     core_size: Option<CoreSize>,
+    core_members: Vec<FileId>,
     /// What a typical change to each scope touches, by scope position, joined
     /// once while the report is composed. A scope whose kind states no
     /// amplification, and one whose directory holds no material fact, has
@@ -904,6 +943,29 @@ impl ReportBuilder {
         self.report.architecture_comparisons = facts.comparisons;
     }
 
+    pub fn set_graph_evidence(&mut self, evidence: GraphEvidence) {
+        self.report.graph_evidence = evidence;
+    }
+
+    pub fn set_diff_graph_evidence(&mut self, evidence: DiffGraphEvidence) {
+        self.report.diff_graph_evidence = Some(evidence);
+    }
+
+    pub fn set_impact_comparisons(
+        &mut self,
+        propagation: Vec<PropagationComparison>,
+        core: Vec<CoreComparison>,
+        leakage: Vec<ChangeLeakageComparison>,
+    ) {
+        self.report.propagation_comparisons = propagation;
+        self.report.core_comparisons = core;
+        self.report.change_leakage_comparisons = leakage;
+    }
+
+    pub fn set_comparison_ref(&mut self, reference: impl Into<String>) {
+        self.report.comparison_ref = Some(reference.into());
+    }
+
     /// Sets the propagation facts the architecture build closed over.
     ///
     /// Every value is computed once, when the report is built, so rendering a
@@ -913,10 +975,12 @@ impl ReportBuilder {
         closures: Vec<PackageClosure>,
         file_reach: Vec<FileReach>,
         core_size: Option<CoreSize>,
+        core_members: Vec<FileId>,
     ) {
         self.report.package_closures = closures;
         self.report.file_reach = file_reach;
         self.report.core_size = core_size;
+        self.report.core_members = core_members;
     }
 
     /// Sets what the change-leakage join decided about the retained pairs.
@@ -988,6 +1052,26 @@ impl ReportBuilder {
         comparison: ArchitectureComparisonId,
     ) {
         self.report.scopes[scope.index()].add_architecture_comparison(comparison);
+    }
+
+    pub fn link_propagation_comparison(
+        &mut self,
+        scope: ScopeId,
+        comparison: PropagationComparisonId,
+    ) {
+        self.report.scopes[scope.index()].add_propagation_comparison(comparison);
+    }
+
+    pub fn link_core_comparison(&mut self, scope: ScopeId, comparison: CoreComparisonId) {
+        self.report.scopes[scope.index()].add_core_comparison(comparison);
+    }
+
+    pub fn link_change_leakage_comparison(
+        &mut self,
+        scope: ScopeId,
+        comparison: ChangeLeakageComparisonId,
+    ) {
+        self.report.scopes[scope.index()].add_change_leakage_comparison(comparison);
     }
 
     pub fn link_evolutionary_finding(&mut self, scope: ScopeId, finding: EvolutionaryFindingId) {
@@ -1131,9 +1215,15 @@ impl Report {
             package_edges: Vec::new(),
             external_dependencies: Vec::new(),
             resolution_diagnostics: Vec::new(),
+            graph_evidence: GraphEvidence::default(),
+            diff_graph_evidence: None,
             package_graph: Vec::new(),
             architecture_findings: Vec::new(),
             architecture_comparisons: Vec::new(),
+            propagation_comparisons: Vec::new(),
+            core_comparisons: Vec::new(),
+            change_leakage_comparisons: Vec::new(),
+            comparison_ref: None,
             history_coverage: HistoryCoverage::default(),
             file_history: Vec::new(),
             package_history: Vec::new(),
@@ -1154,6 +1244,7 @@ impl Report {
             package_closures: Vec::new(),
             file_reach: Vec::new(),
             core_size: None,
+            core_members: Vec::new(),
             scope_amplification: Vec::new(),
             verdict: None,
         }
@@ -1207,6 +1298,12 @@ impl Report {
     pub fn resolution_diagnostics(&self) -> &[ResolutionDiagnostic] {
         &self.resolution_diagnostics
     }
+    pub const fn graph_evidence(&self) -> &GraphEvidence {
+        &self.graph_evidence
+    }
+    pub const fn diff_graph_evidence(&self) -> Option<&DiffGraphEvidence> {
+        self.diff_graph_evidence.as_ref()
+    }
     pub fn package_graph(&self) -> &[PackageGraphMeasurement] {
         &self.package_graph
     }
@@ -1215,6 +1312,18 @@ impl Report {
     }
     pub fn architecture_comparisons(&self) -> &[ArchitectureComparison] {
         &self.architecture_comparisons
+    }
+    pub fn propagation_comparisons(&self) -> &[PropagationComparison] {
+        &self.propagation_comparisons
+    }
+    pub fn core_comparisons(&self) -> &[CoreComparison] {
+        &self.core_comparisons
+    }
+    pub fn change_leakage_comparisons(&self) -> &[ChangeLeakageComparison] {
+        &self.change_leakage_comparisons
+    }
+    pub fn comparison_ref(&self) -> Option<&str> {
+        self.comparison_ref.as_deref()
     }
     pub const fn history_coverage(&self) -> &HistoryCoverage {
         &self.history_coverage
@@ -1285,6 +1394,9 @@ impl Report {
     /// The largest file dependency cycle, when it is material.
     pub const fn core_size(&self) -> Option<CoreSize> {
         self.core_size
+    }
+    pub fn core_members(&self) -> &[FileId] {
+        &self.core_members
     }
     pub fn stable_dependency_findings(&self) -> &[StableDependencyFinding] {
         &self.stable_dependency_findings
@@ -1494,6 +1606,15 @@ impl Report {
         for &id in scope.architecture_comparisons() {
             selection.select_architecture(&self.architecture_comparisons[id.index()]);
         }
+        for &id in scope.propagation_comparisons() {
+            selection.select_propagation(self.propagation_comparisons[id.index()]);
+        }
+        for &id in scope.core_comparisons() {
+            selection.select_core(&self.core_comparisons[id.index()]);
+        }
+        for &id in scope.change_leakage_comparisons() {
+            selection.select_change_leakage(self.change_leakage_comparisons[id.index()]);
+        }
         for &id in scope.evolutionary_comparisons() {
             selection.select_evolutionary(self.evolutionary_comparisons[id.index()]);
         }
@@ -1671,6 +1792,7 @@ impl Report {
             )
             .with_hotspots(&self.hotspots)
             .with_file_reach(&self.file_reach)
+            .with_propagation(&self.package_closures, &self.graph_evidence)
             .with_change_leakage(&self.change_leakage_findings, &self.file_change_coupling)
     }
 
@@ -1763,6 +1885,18 @@ fn aggregate_scope(scopes: &mut [Scope], files: &[FileRecord], scope_id: ScopeId
         let comparison_ids = scopes[child_id.index()].architecture_comparisons.clone();
         for comparison_id in comparison_ids {
             scopes[index].add_architecture_comparison(comparison_id);
+        }
+        let comparison_ids = scopes[child_id.index()].propagation_comparisons.clone();
+        for comparison_id in comparison_ids {
+            scopes[index].add_propagation_comparison(comparison_id);
+        }
+        let comparison_ids = scopes[child_id.index()].core_comparisons.clone();
+        for comparison_id in comparison_ids {
+            scopes[index].add_core_comparison(comparison_id);
+        }
+        let comparison_ids = scopes[child_id.index()].change_leakage_comparisons.clone();
+        for comparison_id in comparison_ids {
+            scopes[index].add_change_leakage_comparison(comparison_id);
         }
         let finding_ids = scopes[child_id.index()].evolutionary_findings.clone();
         for finding_id in finding_ids {

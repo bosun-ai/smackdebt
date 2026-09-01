@@ -16,19 +16,21 @@ use smackdebt_analysis::{
     Coverage, DependencyCoverage, DependencyEdge, DependencyEdgeId, DependencySyntax,
     DependencySyntaxState, Diagnostic, DiagnosticId, DiagnosticKind, DirectoryTree,
     EvolutionAccumulator, ExternalDependency, FileActivity, FileAnalysis, FileDebt, FileId,
-    FileReach, FileRecord, Finding, FindingId, HealthAssessment, HealthCounts, HealthPolicy,
-    HistoryAvailability, HistoryChangeFact, HistoryCommitFact, HistoryCoverage, HistoryWindow,
-    HotspotPolicy, Language, ModuleDeclaration, OrphanCandidate, OrphanFile, PackageClosure,
-    PackageContainment, PackageEdge, PackageEdgeId, PackageGraphMeasurement, PackageId,
-    PackageRecord, ParseStatus, Rating, Report, ReportBuilder as AnalysisReportBuilder, ReportMode,
-    ResolutionDiagnostic, ResolutionIssueKind, Scope, ScopeId, ScopeKind, SizeFinding, SizePolicy,
-    SourceCoverageOutcome, SourceRole, SourceTrust, StableDependencyFinding, change_leakage,
-    close_over_packages, compare_architecture, compare_units, cycle_witness, dependency_degree,
-    enters_connection_graph, enters_file_graph, file_reaches, graph_file_count,
-    largest_component_size, orphan_files, reach_in_counts, stable_dependency_findings,
-    strongly_connected_components, test_declared_files,
+    FileReach, FileRecord, Finding, FindingId, GraphConfigurationFailure, GraphEvidence,
+    HealthAssessment, HealthCounts, HealthPolicy, HistoryAvailability, HistoryChangeFact,
+    HistoryCommitFact, HistoryCoverage, HistoryWindow, HotspotPolicy, Language, ModuleDeclaration,
+    OrphanCandidate, OrphanFile, PackageClosure, PackageContainment, PackageEdge, PackageEdgeId,
+    PackageFileReach, PackageGraphMeasurement, PackageId, PackageRecord, ParseStatus, Rating,
+    Report, ReportBuilder as AnalysisReportBuilder, ReportMode, ResolutionDiagnostic,
+    ResolutionIssueKind, Scope, ScopeId, ScopeKind, SizeFinding, SizePolicy, SourceCoverageOutcome,
+    SourceRole, SourceTrust, StableDependencyFinding, change_leakage, close_over_packages,
+    compare_architecture, compare_units, cycle_witness, dependency_degree, enters_connection_graph,
+    enters_file_graph, file_reaches, graph_file_count, orphan_files, reach_in_counts,
+    stable_dependency_findings, strongly_connected_components, test_declared_files,
 };
-use smackdebt_discovery::{DiscoveredFile, Inventory, generic_source_roles, glob_matches};
+use smackdebt_discovery::{
+    DiscoveredFile, Inventory, discover_snapshot, generic_source_roles, glob_matches,
+};
 use smackdebt_git::{Change, ContributorIdentity, GitRepository};
 use smackdebt_languages::{AnalysisError as LanguageError, Analyzer};
 
@@ -52,7 +54,7 @@ pub(super) fn analyze_codebase(request: &CodebaseRequest) -> Result<ProjectRepor
         )?;
     #[cfg(feature = "evidence-stats")]
     crate::evidence::record_inventory(inventory.visited_entries());
-    let aliases = load_resolution_aliases(&selection.inventory_root);
+    let aliases = load_resolution_aliases(&selection.inventory_root, &inventory);
     let candidates: Vec<&DiscoveredFile> = inventory.source_files().collect();
     let work = AnalysisWork::default();
     let mut analyses = analyze_current_files(
@@ -184,7 +186,7 @@ pub(super) fn analyze_diff(request: &DiffRequest) -> Result<ProjectReport, Proje
             }
             other => ProjectError::Git(other),
         })?;
-    let mut changed = repository.changes_from(&base)?;
+    let changed = repository.changes_from(&base)?;
     let inventory =
         Inventory::discover_sources(repository.root(), Vec::new()).map_err(|source| {
             ProjectError::Inspect {
@@ -194,11 +196,62 @@ pub(super) fn analyze_diff(request: &DiffRequest) -> Result<ProjectReport, Proje
         })?;
     #[cfg(feature = "evidence-stats")]
     crate::evidence::record_inventory(inventory.visited_entries());
-    let aliases = load_resolution_aliases(repository.root());
+    let aliases = load_resolution_aliases(repository.root(), &inventory);
 
     let path_filter = (!request.automatic_scope)
         .then(|| diff_filter(repository.root(), &request.path))
         .flatten();
+    let work = AnalysisWork::default();
+    let width = request.width.threads().min(changed.len().max(1));
+    let mut batch = repository.object_reader(width * 2)?;
+    let base_tree_files = batch.tree_files(&base)?;
+    let mut base_metadata: BTreeMap<PathBuf, Result<Vec<u8>, String>> = BTreeMap::new();
+    let base_inventory = discover_snapshot(repository.root(), &base_tree_files, |path| {
+        if let Some(source) = base_metadata.get(path) {
+            return source.clone().map_err(std::io::Error::other);
+        }
+        let source = batch
+            .read_path(&base, path)
+            .map_err(|error| error.to_string());
+        base_metadata.insert(path.to_path_buf(), source.clone());
+        source.map_err(std::io::Error::other)
+    })
+    .map_err(|source| ProjectError::Inspect {
+        path: repository.root().to_path_buf(),
+        source,
+    })?;
+    let current_sources = inventory
+        .source_files()
+        .map(|file| file.path().as_path().to_path_buf())
+        .collect::<BTreeSet<_>>();
+    let base_sources = base_inventory
+        .source_paths()
+        .iter()
+        .cloned()
+        .collect::<BTreeSet<_>>();
+    let changed_paths = changed
+        .iter()
+        .flat_map(|change| {
+            [
+                change.current_path().to_path_buf(),
+                change.base_path().to_path_buf(),
+            ]
+        })
+        .collect::<BTreeSet<_>>();
+    let mut changed = changed
+        .into_iter()
+        .filter_map(|change| SelectedChange::from_git(change, &current_sources, &base_sources))
+        .collect::<Vec<_>>();
+    for path in current_sources.symmetric_difference(&base_sources) {
+        if !changed_paths.contains(path.as_path()) {
+            changed.push(SelectedChange::from_snapshot(
+                path.clone(),
+                current_sources.contains(path),
+                base_sources.contains(path),
+            ));
+        }
+    }
+    changed.sort_by(|left, right| left.current_path().cmp(right.current_path()));
     let all_changed = changed.clone();
     changed.retain(|entry| Analyzer::language(entry.current_path()) != Language::Unknown);
     let selected_paths: std::collections::BTreeSet<_> = changed
@@ -217,19 +270,53 @@ pub(super) fn analyze_diff(request: &DiffRequest) -> Result<ProjectReport, Proje
         .iter()
         .map(|package| package.root().as_path().to_path_buf())
         .collect();
-    let work = AnalysisWork::default();
     let width = request.width.threads().min(changed_count.max(1));
-    let mut batch = repository.object_reader(width * 2)?;
-    let before_aliases = load_base_resolution_aliases(&mut batch, &base);
-    let before_package_roots =
-        base_package_roots(&current_package_roots, &all_changed, &mut batch, &base);
+    let before_package_roots = base_inventory
+        .packages()
+        .iter()
+        .map(|(root, _)| root.clone())
+        .collect::<Vec<_>>();
+    let mut resolution_config_candidates: Vec<_> = inventory
+        .packages()
+        .iter()
+        .filter_map(|package| package.resolution_config())
+        .map(|path| path.as_path().to_path_buf())
+        .collect();
+    resolution_config_candidates.extend(base_inventory.resolution_configs().iter().cloned());
+    for change in &all_changed {
+        for path in [change.current_path(), change.base_path()] {
+            if matches!(
+                path.file_name().and_then(|name| name.to_str()),
+                Some("tsconfig.json" | "jsconfig.json")
+            ) {
+                resolution_config_candidates.push(path.to_path_buf());
+            }
+        }
+    }
+    resolution_config_candidates.sort();
+    resolution_config_candidates.dedup();
+    let before_aliases = load_base_resolution_aliases(
+        &mut batch,
+        &base,
+        &before_package_roots,
+        &resolution_config_candidates,
+    );
     let mut base_only_roots = before_package_roots.clone();
-    base_only_roots.extend(diff_package_roots(repository.root(), &all_changed));
     base_only_roots.retain(|root| !current_package_roots.contains(root));
     base_only_roots.sort();
     base_only_roots.dedup();
     let mut package_roots = current_package_roots.clone();
     package_roots.extend(base_only_roots.iter().cloned());
+    let before_manifest_names = package_roots
+        .iter()
+        .map(|root| {
+            base_inventory
+                .packages()
+                .iter()
+                .find(|(candidate, _)| candidate == root)
+                .and_then(|(_, name)| name.clone())
+        })
+        .collect::<Vec<_>>();
     let mut hierarchy = HierarchyBuilder::new(".".to_owned(), &package_roots);
     let package_records: Vec<_> = package_roots
         .iter()
@@ -305,15 +392,23 @@ pub(super) fn analyze_diff(request: &DiffRequest) -> Result<ProjectReport, Proje
         &request.role_rules,
         &work,
     )?;
+    let mut before_unchanged_roles = unchanged.iter().map(file_result_role).collect::<Vec<_>>();
     for side in [DiffSideSelector::Current, DiffSideSelector::Before] {
+        let side_aliases = match side {
+            DiffSideSelector::Current => &aliases,
+            DiffSideSelector::Before => &before_aliases,
+        };
         demote_test_declared_diff_roles(
             side,
             changed_count,
             &mut results,
             &unchanged_candidates,
             &mut unchanged,
-            &aliases,
-            &request.role_rules,
+            &mut before_unchanged_roles,
+            DiffRolePolicy {
+                aliases: side_aliases,
+                rules: &request.role_rules,
+            },
         );
     }
     let root = ScopeId::from_index(0);
@@ -332,6 +427,7 @@ pub(super) fn analyze_diff(request: &DiffRequest) -> Result<ProjectReport, Proje
     let mut indexes = DiffIndexes::default();
     let mut current_dependencies = Vec::new();
     let mut before_dependencies = Vec::new();
+    let mut before_files = Vec::with_capacity(selected_count);
     for result in results {
         let file_id = FileId::from_index(result.index);
         if let DiffSide::Analyzed { analysis, role, .. } = &result.current {
@@ -366,6 +462,22 @@ pub(super) fn analyze_diff(request: &DiffRequest) -> Result<ProjectReport, Proje
                 .position(|root| root == &package_root)
                 .unwrap_or(0),
         );
+        let before_package = result.change.base_exists().then(|| {
+            let root = nearest_package_root(result.change.base_path(), &before_package_roots);
+            PackageId::from_index(
+                package_roots
+                    .iter()
+                    .position(|candidate| candidate == &root)
+                    .unwrap_or(0),
+            )
+        });
+        before_files.push(diff_side_file_record(
+            file_id,
+            scope_id,
+            result.change.base_path(),
+            before_package,
+            &result.before,
+        ));
         add_diff_result(
             &mut builder,
             result,
@@ -393,7 +505,7 @@ pub(super) fn analyze_diff(request: &DiffRequest) -> Result<ProjectReport, Proje
             HealthCounts::default(),
         )
         .with_package(package);
-        match result {
+        match &result {
             FileResult::Analyzed(rated) => {
                 record = record.with_language(rated.analysis.language());
                 record =
@@ -407,23 +519,61 @@ pub(super) fn analyze_diff(request: &DiffRequest) -> Result<ProjectReport, Proje
                     language: rated.analysis.language(),
                 };
                 current_dependencies.push(dependencies.clone());
-                before_dependencies.push(dependencies);
+                before_dependencies.push(SourceDependencies {
+                    role: before_unchanged_roles[offset],
+                    ..dependencies
+                });
             }
             FileResult::Unsupported { language, role } => {
                 record = record
-                    .with_language(language)
-                    .with_source_state(role, ParseStatus::Failed);
+                    .with_language(*language)
+                    .with_source_state(*role, ParseStatus::Failed);
             }
             FileResult::Failed { role, language, .. } => {
                 record = record
-                    .with_language(language)
-                    .with_source_state(role, ParseStatus::Failed);
+                    .with_language(*language)
+                    .with_source_state(*role, ParseStatus::Failed);
             }
             FileResult::RoleConflict { .. } => unreachable!("role conflicts stop composition"),
         }
         builder.add_file(record);
+        let before_package_root =
+            nearest_package_root(file.path().as_path(), &before_package_roots);
+        let before_package = PackageId::from_index(
+            package_roots
+                .iter()
+                .position(|root| root == &before_package_root)
+                .unwrap_or(0),
+        );
+        let mut before_record = FileRecord::new(
+            file_id,
+            package_scope,
+            file.path().to_string(),
+            Coverage::default(),
+            HealthCounts::default(),
+        )
+        .with_package(before_package);
+        match &result {
+            FileResult::Analyzed(rated) => {
+                before_record = before_record
+                    .with_language(rated.analysis.language())
+                    .with_source_state(
+                        before_unchanged_roles[offset],
+                        rated.analysis.parse_status().clone(),
+                    );
+            }
+            FileResult::Unsupported { language, role }
+            | FileResult::Failed { language, role, .. } => {
+                before_record = before_record.with_language(*language).with_source_state(
+                    before_unchanged_roles.get(offset).copied().unwrap_or(*role),
+                    ParseStatus::Failed,
+                );
+            }
+            FileResult::RoleConflict { .. } => unreachable!("role conflicts stop composition"),
+        }
+        before_files.push(before_record);
     }
-    let manifest_names = manifest_names_for(&inventory, &package_roots);
+    let current_manifest_names = manifest_names_for(&inventory, &package_roots);
     let current_architecture = build_architecture(
         &work,
         builder.files(),
@@ -431,16 +581,16 @@ pub(super) fn analyze_diff(request: &DiffRequest) -> Result<ProjectReport, Proje
         &aliases,
         &current_package_roots,
         &package_roots,
-        &manifest_names,
+        &current_manifest_names,
     );
     let before_architecture = build_architecture(
         &work,
-        builder.files(),
+        &before_files,
         &before_dependencies,
         &before_aliases,
         &before_package_roots,
         &package_roots,
-        &manifest_names,
+        &before_manifest_names,
     );
     let before_edges: Vec<_> = before_architecture
         .package_edges
@@ -470,6 +620,7 @@ pub(super) fn analyze_diff(request: &DiffRequest) -> Result<ProjectReport, Proje
         &mut architecture_comparisons,
         &before_architecture.file_edges,
         &current_architecture.file_edges,
+        &before_files,
         builder.files(),
     );
     for comparison in &mut architecture_comparisons {
@@ -572,6 +723,44 @@ pub(super) fn analyze_diff(request: &DiffRequest) -> Result<ProjectReport, Proje
     );
     let evolutionary_findings = evolution.findings().to_vec();
     let evolutionary_comparisons = evolution.comparisons().to_vec();
+    let (current_leakage_candidates, current_leakage, suppressed_leakage) =
+        leakage_findings(&current_architecture, &evolution, builder.files());
+    let (before_leakage_candidates, _, _) =
+        leakage_findings(&before_architecture, &evolution, &before_files);
+    let (propagation_comparisons, propagation_suppression) = propagation_comparisons(
+        &current_architecture,
+        &before_architecture,
+        &current_package_roots,
+        &before_package_roots,
+        &package_roots,
+    );
+    let (core_comparisons, core_suppression) =
+        core_comparisons(&current_architecture, &before_architecture);
+    let leakage_comparison_evidence = LeakageComparisonEvidence {
+        pairs: evolution.file_coupling(),
+        current: &current_architecture,
+        base: &before_architecture,
+        current_files: builder.files(),
+        base_files: &before_files,
+    };
+    let (change_leakage_comparisons, leakage_suppression) = leakage_comparisons(
+        &current_leakage_candidates,
+        &before_leakage_candidates,
+        &leakage_comparison_evidence,
+    );
+    let current_graph_evidence =
+        current_architecture
+            .graph_evidence
+            .clone()
+            .with_suppressed(0, 0, suppressed_leakage);
+    let current_closures = current_architecture.package_closures.clone();
+    let current_file_reach = current_architecture.file_reach.clone();
+    let current_core_size = current_architecture.core_size;
+    let current_core_members = if current_architecture.core_size.is_some() {
+        current_architecture.core_members.clone()
+    } else {
+        Vec::new()
+    };
     builder.set_architecture(ArchitectureReportFacts::new(
         ArchitectureGraph::new(
             current_architecture.coverage,
@@ -584,6 +773,27 @@ pub(super) fn analyze_diff(request: &DiffRequest) -> Result<ProjectReport, Proje
         current_architecture.findings,
         architecture_comparisons,
     ));
+    builder.set_graph_evidence(current_graph_evidence);
+    builder.set_diff_graph_evidence(smackdebt_analysis::DiffGraphEvidence::new(
+        current_architecture.graph_evidence.clone(),
+        before_architecture.graph_evidence.clone(),
+        propagation_suppression,
+        core_suppression,
+        leakage_suppression,
+    ));
+    builder.set_propagation(
+        current_closures,
+        current_file_reach,
+        current_core_size,
+        current_core_members,
+    );
+    builder.set_change_leakage_findings(current_leakage);
+    builder.set_impact_comparisons(
+        propagation_comparisons.clone(),
+        core_comparisons.clone(),
+        change_leakage_comparisons.clone(),
+    );
+    builder.set_comparison_ref(reference.clone());
     builder.set_evolution(evolution);
     builder.set_explanation_pairs(current_explanation_pairs);
     if let Some(message) = history_diagnostic {
@@ -609,6 +819,44 @@ pub(super) fn analyze_diff(request: &DiffRequest) -> Result<ProjectReport, Proje
             package_records[pair.right().index()].scope(),
             comparison.id(),
         );
+    }
+    for comparison in &propagation_comparisons {
+        builder.link_propagation_comparison(root, comparison.id());
+        match comparison.subject() {
+            smackdebt_analysis::PropagationSubject::Package { source } => {
+                builder.link_propagation_comparison(
+                    package_records[source.index()].scope(),
+                    comparison.id(),
+                );
+            }
+            smackdebt_analysis::PropagationSubject::File { package, source } => {
+                builder.link_propagation_comparison(
+                    package_records[package.index()].scope(),
+                    comparison.id(),
+                );
+                if let Some(scope) = builder.files().get(source.index()).map(FileRecord::scope) {
+                    builder.link_propagation_comparison(scope, comparison.id());
+                }
+            }
+        }
+    }
+    for comparison in &core_comparisons {
+        builder.link_core_comparison(root, comparison.id());
+        if let Some(scope) = builder
+            .files()
+            .get(comparison.anchor().index())
+            .map(FileRecord::scope)
+        {
+            builder.link_core_comparison(scope, comparison.id());
+        }
+    }
+    for comparison in &change_leakage_comparisons {
+        builder.link_change_leakage_comparison(root, comparison.id());
+        for file in [comparison.left(), comparison.right()] {
+            if let Some(scope) = builder.files().get(file.index()).map(FileRecord::scope) {
+                builder.link_change_leakage_comparison(scope, comparison.id());
+            }
+        }
     }
     for id in architecture_comparison_ids {
         builder.link_architecture_comparison(root, id);
@@ -665,7 +913,8 @@ fn append_relation_comparisons(
     comparisons: &mut Vec<ArchitectureComparison>,
     before_edges: &[DependencyEdge],
     current_edges: &[DependencyEdge],
-    files: &[FileRecord],
+    before_files: &[FileRecord],
+    current_files: &[FileRecord],
 ) {
     type RelationKey = (
         PackageId,
@@ -702,8 +951,8 @@ fn append_relation_comparisons(
         }
         values
     }
-    let before = relations_by_evidence(before_edges, files);
-    let current = relations_by_evidence(current_edges, files);
+    let before = relations_by_evidence(before_edges, before_files);
+    let current = relations_by_evidence(current_edges, current_files);
     let keys: std::collections::BTreeSet<_> =
         before.keys().chain(current.keys()).copied().collect();
     for (source_package, target_package, relation, role, trust) in keys {
@@ -766,9 +1015,61 @@ impl InputSide {
     }
 }
 
+#[derive(Clone, Debug)]
+struct SelectedChange {
+    current_path: PathBuf,
+    base_path: PathBuf,
+    current_exists: bool,
+    base_exists: bool,
+}
+
+impl SelectedChange {
+    fn from_git(
+        change: Change,
+        current_sources: &BTreeSet<PathBuf>,
+        base_sources: &BTreeSet<PathBuf>,
+    ) -> Option<Self> {
+        let current_exists =
+            change.current_exists() && current_sources.contains(change.current_path());
+        let base_exists = change.base_exists() && base_sources.contains(change.base_path());
+        (current_exists || base_exists).then(|| Self {
+            current_path: change.current_path().to_path_buf(),
+            base_path: change.base_path().to_path_buf(),
+            current_exists,
+            base_exists,
+        })
+    }
+
+    fn from_snapshot(path: PathBuf, current_exists: bool, base_exists: bool) -> Self {
+        debug_assert!(current_exists || base_exists);
+        Self {
+            current_path: path.clone(),
+            base_path: path,
+            current_exists,
+            base_exists,
+        }
+    }
+
+    fn current_path(&self) -> &Path {
+        &self.current_path
+    }
+
+    fn base_path(&self) -> &Path {
+        &self.base_path
+    }
+
+    const fn current_exists(&self) -> bool {
+        self.current_exists
+    }
+
+    const fn base_exists(&self) -> bool {
+        self.base_exists
+    }
+}
+
 struct DiffInput {
     index: usize,
-    change: Change,
+    change: SelectedChange,
     current: InputSide,
     before: InputSide,
 }
@@ -798,7 +1099,7 @@ impl AnalysisWork {
 
 struct DiffResult {
     index: usize,
-    change: Change,
+    change: SelectedChange,
     current: DiffSide,
     before: DiffSide,
     comparisons: Vec<Comparison>,
@@ -835,7 +1136,7 @@ struct DiffAnalysisPolicy {
 }
 
 fn analyze_diff_inputs(
-    changes: Vec<Change>,
+    changes: Vec<SelectedChange>,
     root_path: PathBuf,
     base: String,
     mut batch: smackdebt_git::ObjectReader,
@@ -929,7 +1230,7 @@ fn diff_role_conflict(result: &DiffResult) -> Option<(PathBuf, String)> {
 
 fn read_diff_input(
     index: usize,
-    change: Change,
+    change: SelectedChange,
     root_path: &Path,
     base: &str,
     batch: &mut smackdebt_git::ObjectReader,
@@ -1162,6 +1463,35 @@ fn add_diff_result(
     report.link_file(scope_id, file_id);
     add_diff_diagnostic(report, file_id, &result.current, "current");
     add_diff_diagnostic(report, file_id, &result.before, "base");
+}
+
+fn diff_side_file_record(
+    file: FileId,
+    scope: ScopeId,
+    path: &Path,
+    package: Option<PackageId>,
+    side: &DiffSide,
+) -> FileRecord {
+    let mut record = FileRecord::new(
+        file,
+        scope,
+        path.to_string_lossy(),
+        Coverage::default(),
+        HealthCounts::default(),
+    );
+    if let Some(package) = package {
+        record = record.with_package(package);
+    }
+    match side {
+        DiffSide::Analyzed { analysis, role, .. } => record
+            .with_language(analysis.language())
+            .with_source_state(*role, analysis.parse_status().clone()),
+        DiffSide::Unsupported { language, role, .. } => record
+            .with_language(*language)
+            .with_source_state(*role, ParseStatus::Failed),
+        DiffSide::Failed { role, .. } => record.with_source_state(*role, ParseStatus::Failed),
+        DiffSide::Missing | DiffSide::RoleConflict { .. } => record,
+    }
 }
 
 #[derive(Default)]
@@ -1406,7 +1736,7 @@ fn role_results(results: Vec<FileResult>) -> Result<Vec<FileResult>, ProjectErro
 fn module_declarations<'a>(
     sources: impl Iterator<Item = (usize, &'a Path, &'a [DependencySyntax])>,
     index: &BTreeMap<PathBuf, FileId>,
-    aliases: &[ResolutionAlias],
+    aliases: &ResolutionRules,
 ) -> BTreeSet<ModuleDeclaration> {
     let mut declarations = BTreeSet::new();
     for (declarer, path, references) in sources {
@@ -1438,7 +1768,7 @@ fn module_declarations<'a>(
 fn test_declared_demotions<P: AsRef<Path>>(
     paths: &[P],
     references: &[&[DependencySyntax]],
-    aliases: &[ResolutionAlias],
+    aliases: &ResolutionRules,
     rules: &[SourceRoleRule],
 ) -> BTreeSet<usize> {
     debug_assert_eq!(paths.len(), references.len());
@@ -1891,6 +2221,14 @@ impl FileResult {
     }
 }
 
+fn file_result_role(result: &FileResult) -> SourceRole {
+    match result {
+        FileResult::Analyzed(rated) => rated.role,
+        FileResult::Unsupported { role, .. } | FileResult::Failed { role, .. } => *role,
+        FileResult::RoleConflict { .. } => unreachable!("role conflicts stop composition"),
+    }
+}
+
 /// Reclassifies every file the build compiles only when `test` is set.
 ///
 /// This runs before any role reaches the report builder, so findings, ratings,
@@ -1899,7 +2237,7 @@ impl FileResult {
 fn demote_test_declared_roles(
     paths: &[&Path],
     results: &mut [FileResult],
-    aliases: &[ResolutionAlias],
+    aliases: &ResolutionRules,
     rules: &[SourceRoleRule],
 ) {
     let demotions = {
@@ -1940,16 +2278,20 @@ impl DiffSide {
 
 /// Reclassifies test-declared files on one side of a diff.
 ///
-/// An unchanged file has one record for both sides, so only the current side
-/// may reclassify it; the before side reclassifies the changed files it reads.
+/// Changed and unchanged files retain a role for each tree independently.
+struct DiffRolePolicy<'a> {
+    aliases: &'a ResolutionRules,
+    rules: &'a [SourceRoleRule],
+}
+
 fn demote_test_declared_diff_roles(
     side: DiffSideSelector,
     changed_count: usize,
     results: &mut [DiffResult],
     unchanged_candidates: &[&DiscoveredFile],
     unchanged: &mut [FileResult],
-    aliases: &[ResolutionAlias],
-    rules: &[SourceRoleRule],
+    before_unchanged_roles: &mut [SourceRole],
+    policy: DiffRolePolicy<'_>,
 ) {
     debug_assert_eq!(results.len(), changed_count);
     debug_assert!(
@@ -1978,7 +2320,7 @@ fn demote_test_declared_diff_roles(
                         |(file, result)| (file.path().as_path().to_path_buf(), result.references()),
                     ))
                     .unzip();
-            test_declared_demotions(&paths, &references, aliases, rules)
+            test_declared_demotions(&paths, &references, policy.aliases, policy.rules)
         };
     for file in demotions {
         if file < changed_count {
@@ -1986,8 +2328,15 @@ fn demote_test_declared_diff_roles(
                 DiffSideSelector::Current => results[file].current.demote_to_test(),
                 DiffSideSelector::Before => results[file].before.demote_to_test(),
             }
-        } else if side == DiffSideSelector::Current {
-            unchanged[file - changed_count].demote_to_test();
+        } else {
+            let unchanged_index = file - changed_count;
+            match side {
+                DiffSideSelector::Current => unchanged[unchanged_index].demote_to_test(),
+                DiffSideSelector::Before => {
+                    before_unchanged_roles[unchanged_index] =
+                        before_unchanged_roles[unchanged_index].demoted_by_test_scope();
+                }
+            }
         }
     }
 }
@@ -2081,7 +2430,7 @@ struct CodebaseReportBuilder<'a> {
     activity: &'a HashMap<PathBuf, u32>,
     package_ids: Vec<PackageId>,
     dependencies: Vec<SourceDependencies>,
-    aliases: Vec<ResolutionAlias>,
+    aliases: ResolutionRules,
     package_roots: Vec<PathBuf>,
     manifest_names: Vec<Option<String>>,
     packages: Vec<PackageRecord>,
@@ -2104,7 +2453,7 @@ impl<'a> CodebaseReportBuilder<'a> {
         inventory: &Inventory,
         candidates: &[&DiscoveredFile],
         activity: &'a HashMap<PathBuf, u32>,
-        aliases: Vec<ResolutionAlias>,
+        aliases: ResolutionRules,
         evolution: EvolutionInput,
         policies: SignalPolicies,
     ) -> Self {
@@ -2368,7 +2717,40 @@ impl<'a> CodebaseReportBuilder<'a> {
         // graphs both exist: history streamed before the graph was built, so
         // pair accumulation was graph-blind and this is the first point at
         // which a pair can be asked what depends on what.
-        let change_leakage_findings = leakage_findings(&architecture, &evolution, &self.files);
+        let (_, change_leakage_findings, suppressed_leakage) =
+            leakage_findings(&architecture, &evolution, &self.files);
+        let suppressed_reach = architecture
+            .package_closures
+            .iter()
+            .filter(|closure| {
+                !architecture
+                    .graph_evidence
+                    .package_is_complete(closure.package())
+            })
+            .count() as u32
+            + u32::from(
+                !architecture.graph_evidence.is_complete()
+                    && architecture
+                        .measurements
+                        .iter()
+                        .map(|value| value.reach_in())
+                        .max()
+                        .and_then(|reach| {
+                            smackdebt_analysis::PropagationReach::packages(
+                                reach,
+                                architecture.measurements.len() as u32,
+                            )
+                        })
+                        .is_some(),
+            );
+        let suppressed_core = u32::from(
+            !architecture.graph_evidence.is_complete() && architecture.core_size.is_some(),
+        );
+        let graph_evidence = architecture.graph_evidence.clone().with_suppressed(
+            suppressed_reach,
+            suppressed_core,
+            suppressed_leakage,
+        );
         // The scope join runs once, here, where the one directory tree the
         // histograms were filed under is still in scope: a rendered scope then
         // reads a table position rather than a tree.
@@ -2409,10 +2791,16 @@ impl<'a> CodebaseReportBuilder<'a> {
             architecture.findings,
             Vec::new(),
         ));
+        builder.set_graph_evidence(graph_evidence);
         builder.set_propagation(
             architecture.package_closures,
             architecture.file_reach,
             architecture.core_size,
+            if architecture.core_size.is_some() {
+                architecture.core_members
+            } else {
+                Vec::new()
+            },
         );
         builder.set_scope_amplification(scope_amplification);
         builder.set_hotspots(self.policies.hotspots.hotspots(&self.file_debt));
@@ -2461,8 +2849,8 @@ fn leakage_findings(
     architecture: &ArchitectureBuild,
     evolution: &smackdebt_analysis::EvolutionaryReportFacts,
     files: &[FileRecord],
-) -> Vec<ChangeLeakageFinding> {
-    change_leakage(
+) -> (Vec<ChangeLeakageFinding>, Vec<ChangeLeakageFinding>, u32) {
+    let candidates = change_leakage(
         evolution.file_coupling(),
         &ChangeGraph::new(
             &architecture.cycle_pairs,
@@ -2470,11 +2858,388 @@ fn leakage_findings(
             &architecture.graph_packages,
             files,
         ),
-    )
+    );
+    let before = candidates.len();
+    let findings = candidates
+        .iter()
+        .copied()
+        .filter(|finding| {
+            leakage_evidence_is_complete(
+                architecture,
+                finding.kind(),
+                evolution.file_coupling()[finding.coupling().index()],
+                files,
+            )
+        })
+        .collect::<Vec<_>>();
+    let suppressed = before.saturating_sub(findings.len()) as u32;
+    (candidates, findings, suppressed)
+}
+
+fn leakage_evidence_is_complete(
+    architecture: &ArchitectureBuild,
+    kind: smackdebt_analysis::ChangeLeakageKind,
+    pair: smackdebt_analysis::FileChangeCoupling,
+    files: &[FileRecord],
+) -> bool {
+    match kind {
+        smackdebt_analysis::ChangeLeakageKind::HiddenCoupling => {
+            architecture.graph_evidence.is_complete()
+        }
+        smackdebt_analysis::ChangeLeakageKind::LeakyInterface => {
+            [pair.left(), pair.right()].into_iter().all(|file| {
+                files[file.index()]
+                    .package()
+                    .is_some_and(|package| architecture.graph_evidence.package_is_complete(package))
+            })
+        }
+    }
+}
+
+fn fraction_direction(
+    before: (u32, u32),
+    after: (u32, u32),
+) -> Option<smackdebt_analysis::ComparisonDirection> {
+    if before == after {
+        return None;
+    }
+    let before_cross = u64::from(before.0) * u64::from(after.1);
+    let after_cross = u64::from(after.0) * u64::from(before.1);
+    Some(match after_cross.cmp(&before_cross) {
+        std::cmp::Ordering::Greater => smackdebt_analysis::ComparisonDirection::Worse,
+        std::cmp::Ordering::Less => smackdebt_analysis::ComparisonDirection::Better,
+        std::cmp::Ordering::Equal => smackdebt_analysis::ComparisonDirection::Changed,
+    })
+}
+
+fn propagation_comparisons(
+    current: &ArchitectureBuild,
+    before: &ArchitectureBuild,
+    current_roots: &[PathBuf],
+    before_roots: &[PathBuf],
+    package_roots: &[PathBuf],
+) -> (
+    Vec<smackdebt_analysis::PropagationComparison>,
+    smackdebt_analysis::ComparisonSuppression,
+) {
+    let mut comparisons = Vec::new();
+    let mut suppression = smackdebt_analysis::ComparisonSuppression::default();
+    let mut package_subjects = [
+        package_reach_subject(current, current_roots.len() as u32),
+        package_reach_subject(before, before_roots.len() as u32),
+    ]
+    .into_iter()
+    .flatten()
+    .collect::<Vec<_>>();
+    package_subjects.sort_unstable();
+    package_subjects.dedup();
+    for package in package_subjects {
+        let root = &package_roots[package.index()];
+        if !current_roots.contains(root) || !before_roots.contains(root) {
+            continue;
+        }
+        let current_reach = current
+            .measurements
+            .iter()
+            .find(|measurement| measurement.package() == package)
+            .map(|measurement| measurement.reach_in());
+        let before_reach = before
+            .measurements
+            .iter()
+            .find(|measurement| measurement.package() == package)
+            .map(|measurement| measurement.reach_in());
+        let (Some(current_reach), Some(before_reach)) = (current_reach, before_reach) else {
+            continue;
+        };
+        let before_counts = (before_reach, before_roots.len() as u32);
+        let after_counts = (current_reach, current_roots.len() as u32);
+        let material =
+            smackdebt_analysis::PropagationReach::packages(before_counts.0, before_counts.1)
+                .is_some()
+                || smackdebt_analysis::PropagationReach::packages(after_counts.0, after_counts.1)
+                    .is_some();
+        let Some(direction) = material
+            .then(|| fraction_direction(before_counts, after_counts))
+            .flatten()
+        else {
+            continue;
+        };
+        let current_incomplete = !current.graph_evidence.is_complete();
+        let base_incomplete = !before.graph_evidence.is_complete();
+        if current_incomplete || base_incomplete {
+            suppression.record(current_incomplete, base_incomplete);
+        } else {
+            comparisons.push(smackdebt_analysis::PropagationComparison::new(
+                smackdebt_analysis::PropagationComparisonId::from_index(comparisons.len()),
+                smackdebt_analysis::PropagationSubject::Package { source: package },
+                direction,
+                before_counts,
+                after_counts,
+            ));
+        }
+    }
+
+    let mut file_subjects = current
+        .package_closures
+        .iter()
+        .chain(&before.package_closures)
+        .map(|closure| (closure.package(), closure.source()))
+        .collect::<Vec<_>>();
+    file_subjects.sort_unstable();
+    file_subjects.dedup();
+    for (package, source) in file_subjects {
+        append_file_reach_comparison(
+            FileReachComparisonInput {
+                current,
+                before,
+                package,
+                source,
+            },
+            &mut comparisons,
+            &mut suppression,
+        );
+    }
+    (comparisons, suppression)
+}
+
+fn package_reach_subject(architecture: &ArchitectureBuild, packages: u32) -> Option<PackageId> {
+    let winner = architecture.measurements.iter().max_by(|left, right| {
+        left.reach_in()
+            .cmp(&right.reach_in())
+            .then_with(|| right.package().cmp(&left.package()))
+    })?;
+    smackdebt_analysis::PropagationReach::packages(winner.reach_in(), packages)
+        .map(|_| winner.package())
+}
+
+struct FileReachComparisonInput<'a> {
+    current: &'a ArchitectureBuild,
+    before: &'a ArchitectureBuild,
+    package: PackageId,
+    source: FileId,
+}
+
+fn append_file_reach_comparison(
+    input: FileReachComparisonInput<'_>,
+    comparisons: &mut Vec<smackdebt_analysis::PropagationComparison>,
+    suppression: &mut smackdebt_analysis::ComparisonSuppression,
+) {
+    let value = |architecture: &ArchitectureBuild| {
+        architecture
+            .package_file_reach
+            .iter()
+            .find(|value| value.package() == input.package && value.source() == input.source)
+            .copied()
+    };
+    let (Some(current_value), Some(before_value)) = (value(input.current), value(input.before))
+    else {
+        return;
+    };
+    let before_counts = (before_value.reach(), before_value.files());
+    let after_counts = (current_value.reach(), current_value.files());
+    let Some(direction) = fraction_direction(before_counts, after_counts) else {
+        return;
+    };
+    let current_incomplete = !input
+        .current
+        .graph_evidence
+        .package_is_complete(input.package);
+    let base_incomplete = !input
+        .before
+        .graph_evidence
+        .package_is_complete(input.package);
+    if current_incomplete || base_incomplete {
+        suppression.record(current_incomplete, base_incomplete);
+        return;
+    }
+    comparisons.push(smackdebt_analysis::PropagationComparison::new(
+        smackdebt_analysis::PropagationComparisonId::from_index(comparisons.len()),
+        smackdebt_analysis::PropagationSubject::File {
+            package: input.package,
+            source: input.source,
+        },
+        direction,
+        before_counts,
+        after_counts,
+    ));
+}
+
+fn core_comparisons(
+    current: &ArchitectureBuild,
+    before: &ArchitectureBuild,
+) -> (
+    Vec<smackdebt_analysis::CoreComparison>,
+    smackdebt_analysis::ComparisonSuppression,
+) {
+    if current.core_size.is_none() && before.core_size.is_none() {
+        return (
+            Vec::new(),
+            smackdebt_analysis::ComparisonSuppression::default(),
+        );
+    }
+    let anchors = core_comparison_anchors(current, before);
+    let mut comparisons = Vec::new();
+    let mut suppression = smackdebt_analysis::ComparisonSuppression::default();
+    for anchor in anchors {
+        append_core_comparison(current, before, anchor, &mut comparisons, &mut suppression);
+    }
+    (comparisons, suppression)
+}
+
+fn core_comparison_anchors(current: &ArchitectureBuild, before: &ArchitectureBuild) -> Vec<FileId> {
+    let shared = current
+        .core_members
+        .iter()
+        .find(|file| before.core_members.contains(file))
+        .copied();
+    if let Some(anchor) = shared {
+        return vec![anchor];
+    }
+    let mut anchors = Vec::new();
+    if before.core_size.is_some()
+        && let Some(anchor) = before
+            .core_members
+            .iter()
+            .find(|file| graph_contains(current, **file))
+    {
+        anchors.push(*anchor);
+    }
+    if current.core_size.is_some()
+        && let Some(anchor) = current
+            .core_members
+            .iter()
+            .find(|file| graph_contains(before, **file))
+    {
+        anchors.push(*anchor);
+    }
+    anchors.sort_unstable();
+    anchors.dedup();
+    anchors
+}
+
+fn graph_contains(architecture: &ArchitectureBuild, file: FileId) -> bool {
+    architecture
+        .graph_packages
+        .get(file.index())
+        .is_some_and(Option::is_some)
+}
+
+fn component_containing(architecture: &ArchitectureBuild, anchor: FileId) -> Option<&[FileId]> {
+    architecture
+        .file_components
+        .iter()
+        .find(|component| component.contains(&anchor))
+        .map(Vec::as_slice)
+}
+
+fn append_core_comparison(
+    current: &ArchitectureBuild,
+    before: &ArchitectureBuild,
+    anchor: FileId,
+    comparisons: &mut Vec<smackdebt_analysis::CoreComparison>,
+    suppression: &mut smackdebt_analysis::ComparisonSuppression,
+) {
+    let (Some(current_members), Some(before_members)) = (
+        component_containing(current, anchor),
+        component_containing(before, anchor),
+    ) else {
+        return;
+    };
+    let before_counts = (before_members.len() as u32, before.file_graph_count);
+    let after_counts = (current_members.len() as u32, current.file_graph_count);
+    let material = CoreSize::from_counts(before_counts.0, before_counts.1).is_some()
+        || CoreSize::from_counts(after_counts.0, after_counts.1).is_some();
+    if !material || (before_counts == after_counts && before_members == current_members) {
+        return;
+    }
+    let current_incomplete = !current.graph_evidence.is_complete();
+    let base_incomplete = !before.graph_evidence.is_complete();
+    if current_incomplete || base_incomplete {
+        suppression.record(current_incomplete, base_incomplete);
+        return;
+    }
+    let direction = fraction_direction(before_counts, after_counts)
+        .unwrap_or(smackdebt_analysis::ComparisonDirection::Changed);
+    comparisons.push(smackdebt_analysis::CoreComparison::new(
+        smackdebt_analysis::CoreComparisonId::from_index(comparisons.len()),
+        anchor,
+        direction,
+        (before_counts.0, before_counts.1, before_members.to_vec()),
+        (after_counts.0, after_counts.1, current_members.to_vec()),
+    ));
+}
+
+fn leakage_comparisons(
+    current: &[ChangeLeakageFinding],
+    before: &[ChangeLeakageFinding],
+    evidence: &LeakageComparisonEvidence<'_>,
+) -> (
+    Vec<smackdebt_analysis::ChangeLeakageComparison>,
+    smackdebt_analysis::ComparisonSuppression,
+) {
+    type Key = (
+        smackdebt_analysis::ChangeLeakageKind,
+        smackdebt_analysis::FileChangeCouplingId,
+        Option<FileId>,
+    );
+    let current: BTreeSet<Key> = current
+        .iter()
+        .map(|finding| (finding.kind(), finding.coupling(), finding.interface()))
+        .collect();
+    let before: BTreeSet<Key> = before
+        .iter()
+        .map(|finding| (finding.kind(), finding.coupling(), finding.interface()))
+        .collect();
+    let mut comparisons = Vec::new();
+    let mut suppression = smackdebt_analysis::ComparisonSuppression::default();
+    for key in current.symmetric_difference(&before) {
+        let &(kind, coupling, _) = key;
+        let pair = evidence.pairs[coupling.index()];
+        let (current_incomplete, base_incomplete) = evidence.incomplete_sides(kind, pair);
+        if current_incomplete || base_incomplete {
+            suppression.record(current_incomplete, base_incomplete);
+            continue;
+        }
+        let direction = if current.contains(key) {
+            smackdebt_analysis::ComparisonDirection::Worse
+        } else {
+            smackdebt_analysis::ComparisonDirection::Better
+        };
+        comparisons.push(smackdebt_analysis::ChangeLeakageComparison::new(
+            smackdebt_analysis::ChangeLeakageComparisonId::from_index(comparisons.len()),
+            kind,
+            pair.left(),
+            pair.right(),
+            direction,
+        ));
+    }
+    (comparisons, suppression)
+}
+
+struct LeakageComparisonEvidence<'a> {
+    pairs: &'a [smackdebt_analysis::FileChangeCoupling],
+    current: &'a ArchitectureBuild,
+    base: &'a ArchitectureBuild,
+    current_files: &'a [FileRecord],
+    base_files: &'a [FileRecord],
+}
+
+impl LeakageComparisonEvidence<'_> {
+    fn incomplete_sides(
+        &self,
+        kind: smackdebt_analysis::ChangeLeakageKind,
+        pair: smackdebt_analysis::FileChangeCoupling,
+    ) -> (bool, bool) {
+        (
+            !leakage_evidence_is_complete(self.current, kind, pair, self.current_files),
+            !leakage_evidence_is_complete(self.base, kind, pair, self.base_files),
+        )
+    }
 }
 
 struct ArchitectureBuild {
     coverage: DependencyCoverage,
+    graph_evidence: GraphEvidence,
     orphans: Vec<OrphanFile>,
     stable_dependencies: Vec<StableDependencyFinding>,
     file_edges: Vec<DependencyEdge>,
@@ -2490,6 +3255,8 @@ struct ArchitectureBuild {
     explanation_pairs: BTreeSet<(PackageId, PackageId)>,
     /// How far a change reaches inside each package whose value is material.
     package_closures: Vec<PackageClosure>,
+    /// Each computed file value behind the selected package closure subjects.
+    package_file_reach: Vec<PackageFileReach>,
     /// The packages whose closure the node limit skipped, which the machine
     /// report discloses rather than leaving silently absent.
     skipped_closures: Vec<PackageId>,
@@ -2497,6 +3264,9 @@ struct ArchitectureBuild {
     file_reach: Vec<FileReach>,
     /// The largest file dependency cycle, when it is material.
     core_size: Option<CoreSize>,
+    core_members: Vec<FileId>,
+    file_components: Vec<Vec<FileId>>,
+    file_graph_count: u32,
     /// The imports that enter the file dependency cycle graph, which the
     /// leaky-interface rule reads.
     cycle_pairs: Vec<(usize, usize)>,
@@ -2618,6 +3388,7 @@ struct ReferenceTables {
     edge_values: BTreeMap<DependencyEdgeKey, DependencyEdgeValue>,
     external_values: BTreeMap<ExternalDependencyKey, DependencyEdgeValue>,
     diagnostic_values: BTreeMap<ResolutionDiagnosticKey, DependencyEdgeValue>,
+    internal_issue_files: BTreeSet<FileId>,
     manifest_package_values:
         BTreeMap<(PackageId, PackageId), (std::collections::BTreeSet<FileId>, u32)>,
     /// Manifest-name package pairs that explain change coupling without
@@ -2748,6 +3519,15 @@ impl ReferenceTables {
         let role = evidence_role(reference, dependencies);
         self.coverage
             .record(reference.relation(), role, dependencies.trust, resolution);
+        if dependencies.trust == SourceTrust::Trusted
+            && role == SourceRole::Primary
+            && matches!(
+                resolution,
+                RelationResolution::UnresolvedInternal | RelationResolution::AmbiguousInternal
+            )
+        {
+            self.internal_issue_files.insert(source);
+        }
         record_resolution_diagnostic(
             &mut self.diagnostic_values,
             source,
@@ -2891,6 +3671,28 @@ struct ResolutionAlias {
     replacement: String,
 }
 
+#[derive(Clone, Default)]
+struct ResolutionRules {
+    packages: Vec<PackageResolution>,
+}
+
+#[derive(Clone)]
+struct PackageResolution {
+    root: PathBuf,
+    aliases: Vec<ResolutionAlias>,
+    issue: Option<String>,
+}
+
+impl ResolutionRules {
+    fn aliases_for(&self, source: &Path) -> &[ResolutionAlias] {
+        self.packages
+            .iter()
+            .filter(|package| source.starts_with(&package.root))
+            .max_by_key(|package| package.root.components().count())
+            .map_or(&[], |package| package.aliases.as_slice())
+    }
+}
+
 impl ResolutionAlias {
     fn expand(&self, candidate: &str) -> Option<String> {
         let middle = candidate
@@ -2900,42 +3702,195 @@ impl ResolutionAlias {
     }
 }
 
-fn load_resolution_aliases(root: &Path) -> Vec<ResolutionAlias> {
-    for name in ["tsconfig.json", "jsconfig.json"] {
-        let Ok(source) = fs::read(root.join(name)) else {
-            continue;
-        };
-        let Some(aliases) = parse_resolution_aliases(&source) else {
-            continue;
-        };
-        return aliases;
-    }
-    Vec::new()
+fn load_resolution_aliases(root: &Path, inventory: &Inventory) -> ResolutionRules {
+    let packages = inventory
+        .packages()
+        .iter()
+        .map(|package| {
+            let package_root = package.root().as_path().to_path_buf();
+            let Some(config) = package.resolution_config() else {
+                return PackageResolution {
+                    root: package_root,
+                    aliases: Vec::new(),
+                    issue: None,
+                };
+            };
+            let config = config.as_path().to_path_buf();
+            let mut read =
+                |path: &Path| fs::read(root.join(path)).map_err(|error| error.to_string());
+            let (aliases, issue) = match load_resolution_chain(&config, &mut read) {
+                Ok(aliases) => (aliases, None),
+                Err(issue) => (Vec::new(), Some(issue)),
+            };
+            PackageResolution {
+                root: package_root,
+                aliases,
+                issue,
+            }
+        })
+        .collect();
+    ResolutionRules { packages }
 }
 
 fn load_base_resolution_aliases(
     reader: &mut smackdebt_git::ObjectReader,
     base: &str,
-) -> Vec<ResolutionAlias> {
-    for name in ["tsconfig.json", "jsconfig.json"] {
-        if let Ok(source) = reader.read_path(base, Path::new(name))
-            && let Some(aliases) = parse_resolution_aliases(&source)
-        {
-            return aliases;
-        }
+    package_roots: &[PathBuf],
+    config_candidates: &[PathBuf],
+) -> ResolutionRules {
+    let mut sources = BTreeMap::new();
+    for path in config_candidates {
+        sources.insert(
+            path.clone(),
+            reader
+                .read_path(base, path)
+                .map_err(|error| error.to_string()),
+        );
     }
-    Vec::new()
+    let mut packages = Vec::with_capacity(package_roots.len());
+    for root in package_roots {
+        let config = config_candidates
+            .iter()
+            .filter(|path| {
+                path.parent()
+                    .is_some_and(|directory| root.starts_with(directory))
+            })
+            .filter(|path| sources.get(*path).is_some_and(Result::is_ok))
+            .min_by_key(|path| {
+                root.components()
+                    .count()
+                    .saturating_sub(path.parent().map_or(0, |value| value.components().count()))
+            })
+            .cloned();
+        let Some(config) = config else {
+            packages.push(PackageResolution {
+                root: root.clone(),
+                aliases: Vec::new(),
+                issue: None,
+            });
+            continue;
+        };
+        let mut read = |path: &Path| match sources.get(path) {
+            Some(source) => source.clone(),
+            None => {
+                let source = reader
+                    .read_path(base, path)
+                    .map_err(|error| error.to_string());
+                sources.insert(path.to_path_buf(), source.clone());
+                source
+            }
+        };
+        let (aliases, issue) = match load_resolution_chain(&config, &mut read) {
+            Ok(aliases) => (aliases, None),
+            Err(issue) => (Vec::new(), Some(issue)),
+        };
+        packages.push(PackageResolution {
+            root: root.clone(),
+            aliases,
+            issue,
+        });
+    }
+    ResolutionRules { packages }
 }
 
-fn parse_resolution_aliases(source: &[u8]) -> Option<Vec<ResolutionAlias>> {
-    let value = serde_json::from_slice::<serde_json::Value>(source).ok()?;
+fn load_resolution_chain(
+    config: &Path,
+    read: &mut impl FnMut(&Path) -> Result<Vec<u8>, String>,
+) -> Result<Vec<ResolutionAlias>, String> {
+    fn visit(
+        config: &Path,
+        read: &mut impl FnMut(&Path) -> Result<Vec<u8>, String>,
+        stack: &mut BTreeSet<PathBuf>,
+        depth: usize,
+    ) -> Result<Vec<ResolutionAlias>, String> {
+        if depth >= 16 {
+            return Err(format!(
+                "configuration inheritance is too deep at {}",
+                config.display()
+            ));
+        }
+        let config = clean_relative(config).ok_or_else(|| {
+            format!(
+                "configuration path leaves the repository: {}",
+                config.display()
+            )
+        })?;
+        if !stack.insert(config.clone()) {
+            return Err(format!(
+                "configuration inheritance cycles at {}",
+                config.display()
+            ));
+        }
+        let source =
+            read(&config).map_err(|error| format!("cannot read {}: {error}", config.display()))?;
+        let text = std::str::from_utf8(&source)
+            .map_err(|_| format!("{} is not UTF-8", config.display()))?;
+        let value = json5::from_str::<serde_json::Value>(text)
+            .map_err(|error| format!("cannot parse {}: {error}", config.display()))?;
+        let parent = config.parent().unwrap_or(Path::new(""));
+        let mut aliases = Vec::new();
+        for inherited in inherited_configs(&value, parent)? {
+            aliases.extend(visit(&inherited, read, stack, depth + 1)?);
+        }
+        let local = parse_resolution_aliases(&value, parent)?;
+        for alias in &local {
+            aliases.retain(|inherited| {
+                inherited.prefix != alias.prefix || inherited.suffix != alias.suffix
+            });
+        }
+        aliases.extend(local);
+        aliases.sort_by(|left, right| {
+            (&left.prefix, &left.suffix, &left.replacement).cmp(&(
+                &right.prefix,
+                &right.suffix,
+                &right.replacement,
+            ))
+        });
+        stack.remove(&config);
+        Ok(aliases)
+    }
+
+    visit(config, read, &mut BTreeSet::new(), 0)
+}
+
+fn inherited_configs(value: &serde_json::Value, parent: &Path) -> Result<Vec<PathBuf>, String> {
+    let inherited: Vec<&str> = match &value["extends"] {
+        serde_json::Value::Null => Vec::new(),
+        serde_json::Value::String(value) => vec![value],
+        serde_json::Value::Array(values) => {
+            values.iter().filter_map(|value| value.as_str()).collect()
+        }
+        _ => return Err("configuration extends must be a path or path list".to_owned()),
+    };
+    inherited
+        .into_iter()
+        .map(|value| {
+            if !value.starts_with('.') {
+                return Err(format!(
+                    "configuration inheritance is not repository-relative: {value}"
+                ));
+            }
+            let mut path = parent.join(value);
+            if path.extension().is_none() {
+                path.set_extension("json");
+            }
+            clean_relative(&path)
+                .ok_or_else(|| format!("configuration inheritance leaves the repository: {value}"))
+        })
+        .collect()
+}
+
+fn parse_resolution_aliases(
+    value: &serde_json::Value,
+    config_parent: &Path,
+) -> Result<Vec<ResolutionAlias>, String> {
     let base = value["compilerOptions"]["baseUrl"]
         .as_str()
         .unwrap_or("")
         .trim_matches('/');
     let base = if base == "." { "" } else { base };
     let Some(paths) = value["compilerOptions"]["paths"].as_object() else {
-        return Some(Vec::new());
+        return Ok(Vec::new());
     };
     let mut aliases = Vec::new();
     for (pattern, replacements) in paths {
@@ -2947,14 +3902,20 @@ fn parse_resolution_aliases(source: &[u8]) -> Option<Vec<ResolutionAlias>> {
                 continue;
             };
             let replacement = if base.is_empty() {
-                replacement.to_owned()
+                config_parent.join(replacement)
             } else {
-                format!("{base}/{replacement}")
+                config_parent.join(base).join(replacement)
             };
+            let replacement = clean_relative(&replacement).ok_or_else(|| {
+                format!(
+                    "alias target leaves the repository: {}",
+                    replacement.display()
+                )
+            })?;
             aliases.push(ResolutionAlias {
                 prefix: prefix.to_owned(),
                 suffix: suffix.to_owned(),
-                replacement,
+                replacement: replacement.to_string_lossy().replace('\\', "/"),
             });
         }
     }
@@ -2965,14 +3926,14 @@ fn parse_resolution_aliases(source: &[u8]) -> Option<Vec<ResolutionAlias>> {
             &right.replacement,
         ))
     });
-    Some(aliases)
+    Ok(aliases)
 }
 
 fn build_architecture(
     work: &AnalysisWork,
     files: &[FileRecord],
     dependencies: &[SourceDependencies],
-    aliases: &[ResolutionAlias],
+    aliases: &ResolutionRules,
     side_package_roots: &[PathBuf],
     package_roots: &[PathBuf],
     manifest_names: &[Option<String>],
@@ -3078,9 +4039,47 @@ fn build_architecture(
         edge_values,
         external_values,
         diagnostic_values,
+        internal_issue_files,
         manifest_package_values,
         manifest_explanation_pairs,
     } = tables;
+
+    let coverage = coverage.finish();
+    let parse_failure_files: Vec<_> = files
+        .iter()
+        .filter(|file| {
+            file.package().is_some()
+                && file.role() == SourceRole::Primary
+                && file.trust() != SourceTrust::Trusted
+        })
+        .map(FileRecord::id)
+        .collect();
+    let mut incomplete_packages: Vec<_> = parse_failure_files
+        .iter()
+        .chain(internal_issue_files.iter())
+        .filter_map(|file| files[file.index()].package())
+        .collect();
+    let configuration_failures: Vec<_> = aliases
+        .packages
+        .iter()
+        .filter_map(|package| {
+            let issue = package.issue.as_ref()?;
+            let owner = package_of(
+                &package.root.join("resolution-config"),
+                side_package_roots,
+                package_roots,
+            );
+            incomplete_packages.push(owner);
+            Some(GraphConfigurationFailure::new(owner, issue.clone()))
+        })
+        .collect();
+    let graph_evidence = GraphEvidence::new(
+        incomplete_packages,
+        parse_failure_files.len() as u32,
+        coverage.unresolved_internal_uses(),
+        coverage.ambiguous_internal_uses(),
+        configuration_failures,
+    );
 
     let diagnostics = diagnostic_values
         .into_iter()
@@ -3300,10 +4299,24 @@ fn build_architecture(
     // The components the cycle findings are made of are also the core and the
     // reach candidates, so they are retained rather than recomputed.
     let file_components = strongly_connected_components(files.len(), &file_pairs);
+    let largest_component = file_components
+        .iter()
+        .max_by(|left, right| left.len().cmp(&right.len()).then_with(|| right.cmp(left)));
+    let file_graph_count = graph_file_count(files);
     let core_size = CoreSize::from_counts(
-        largest_component_size(&file_components),
-        graph_file_count(files),
+        largest_component.map_or(0, Vec::len) as u32,
+        file_graph_count,
     );
+    let core_members = largest_component
+        .into_iter()
+        .flatten()
+        .copied()
+        .map(FileId::from_index)
+        .collect();
+    let retained_file_components = file_components
+        .iter()
+        .map(|component| component.iter().copied().map(FileId::from_index).collect())
+        .collect();
     let closures = close_over_packages(package_count, &graph_packages, &file_pairs);
     let file_reach = file_reaches(files, &file_components, &file_pairs);
     for component in file_components
@@ -3345,7 +4358,8 @@ fn build_architecture(
     }
 
     ArchitectureBuild {
-        coverage: coverage.finish(),
+        coverage,
+        graph_evidence,
         orphans,
         stable_dependencies,
         file_edges,
@@ -3358,9 +4372,13 @@ fn build_architecture(
         cycles,
         explanation_pairs,
         package_closures: closures.closures().to_vec(),
+        package_file_reach: closures.file_reaches().to_vec(),
         skipped_closures: closures.skipped().to_vec(),
         file_reach,
         core_size,
+        core_members,
+        file_components: retained_file_components,
+        file_graph_count,
         cycle_pairs: file_pairs,
         connections,
         graph_packages,
@@ -3556,7 +4574,7 @@ fn resolve_candidates(
     source: &Path,
     candidates: &[String],
     index: &BTreeMap<PathBuf, FileId>,
-    aliases: &[ResolutionAlias],
+    aliases: &ResolutionRules,
 ) -> Vec<FileId> {
     let parent = source.parent().unwrap_or(Path::new(""));
     let rust = source
@@ -3568,13 +4586,8 @@ fn resolve_candidates(
     // for every other layout.
     let module_directory = rust.then(|| rust_module_directory(source)).flatten();
     let source_root = rust.then(|| rust_source_root(source)).flatten();
-    let mut matches = std::collections::BTreeSet::new();
-    for candidate in candidates {
-        if smackdebt_analysis::is_symbolic_candidate(candidate) {
-            continue;
-        }
-        let mut expanded = vec![candidate.clone()];
-        expanded.extend(aliases.iter().filter_map(|alias| alias.expand(candidate)));
+    let aliases = aliases.aliases_for(source);
+    let resolve = |expanded: &[String], matches: &mut BTreeSet<FileId>| {
         for candidate in expanded {
             let path = Path::new(&candidate);
             let relative = candidate.starts_with("./") || candidate.starts_with("../");
@@ -3603,11 +4616,82 @@ fn resolve_candidates(
                 }
             }
         }
+    };
+    if !rust {
+        let mut expanded = Vec::new();
+        for candidate in candidates
+            .iter()
+            .filter(|candidate| !smackdebt_analysis::is_symbolic_candidate(candidate))
+        {
+            let candidate = strip_path_suffix(candidate);
+            expanded.push(candidate.to_owned());
+            expanded.extend(aliases.iter().filter_map(|alias| alias.expand(candidate)));
+        }
+        let mut matches = BTreeSet::new();
+        resolve(&expanded, &mut matches);
+        if matches.is_empty() {
+            let source_spellings: Vec<_> = expanded
+                .iter()
+                .flat_map(|candidate| runtime_source_spellings(candidate))
+                .collect();
+            resolve(&source_spellings, &mut matches);
+        }
+        if matches.is_empty() {
+            matches.extend(resolve_symbolic_candidates(source, candidates, index));
+        }
+        return matches.into_iter().collect();
     }
-    if matches.is_empty() {
-        matches.extend(resolve_symbolic_candidates(source, candidates, index));
+    for candidate in candidates
+        .iter()
+        .filter(|candidate| !smackdebt_analysis::is_symbolic_candidate(candidate))
+    {
+        let candidate = strip_path_suffix(candidate);
+        let mut expanded = vec![candidate.to_owned()];
+        expanded.extend(aliases.iter().filter_map(|alias| alias.expand(candidate)));
+        let mut matches = BTreeSet::new();
+        resolve(&expanded, &mut matches);
+        if matches.is_empty() {
+            let source_spellings: Vec<_> = expanded
+                .iter()
+                .flat_map(|candidate| runtime_source_spellings(candidate))
+                .collect();
+            resolve(&source_spellings, &mut matches);
+        }
+        if !matches.is_empty() {
+            return matches.into_iter().collect();
+        }
     }
-    matches.into_iter().collect()
+    resolve_symbolic_candidates(source, candidates, index)
+        .into_iter()
+        .collect()
+}
+
+fn strip_path_suffix(candidate: &str) -> &str {
+    candidate
+        .find(['?', '#'])
+        .map_or(candidate, |index| &candidate[..index])
+}
+
+fn runtime_source_spellings(candidate: &str) -> Vec<String> {
+    let path = Path::new(candidate);
+    let Some(extension) = path.extension().and_then(|value| value.to_str()) else {
+        return Vec::new();
+    };
+    let replacements: &[&str] = match extension {
+        "js" => &["ts", "tsx"],
+        "jsx" => &["tsx"],
+        "mjs" => &["mts", "ts"],
+        "cjs" => &["cts", "ts"],
+        _ => return Vec::new(),
+    };
+    replacements
+        .iter()
+        .map(|extension| {
+            path.with_extension(extension)
+                .to_string_lossy()
+                .into_owned()
+        })
+        .collect()
 }
 
 /// Resolves candidates that name a file by role instead of by path.
@@ -3687,89 +4771,6 @@ fn diff_filter(root: &Path, selected: &Path) -> Option<PathBuf> {
     let absolute = absolute.canonicalize().unwrap_or(absolute);
     let root = root.canonicalize().unwrap_or_else(|_| root.to_path_buf());
     absolute.strip_prefix(root).ok().map(Path::to_path_buf)
-}
-
-const DIFF_MANIFEST_NAMES: &[&str] = &[
-    "Cargo.toml",
-    "package.json",
-    "pyproject.toml",
-    "setup.py",
-    "setup.cfg",
-    "pom.xml",
-    "settings.gradle",
-    "settings.gradle.kts",
-    "build.gradle",
-    "build.gradle.kts",
-    "CMakeLists.txt",
-    "Gemfile",
-    "gems.rb",
-];
-
-fn base_package_roots(
-    current: &[PathBuf],
-    changed: &[Change],
-    reader: &mut smackdebt_git::ObjectReader,
-    base: &str,
-) -> Vec<PathBuf> {
-    let mut roots: std::collections::BTreeSet<_> = current.iter().cloned().collect();
-    for change in changed {
-        let is_manifest = change
-            .base_path()
-            .file_name()
-            .and_then(|name| name.to_str())
-            .is_some_and(|name| DIFF_MANIFEST_NAMES.contains(&name));
-        if !is_manifest {
-            continue;
-        }
-        let root = change
-            .base_path()
-            .parent()
-            .unwrap_or(Path::new(""))
-            .to_path_buf();
-        let base_has_manifest = DIFF_MANIFEST_NAMES
-            .iter()
-            .any(|name| reader.read_path(base, &root.join(name)).is_ok());
-        if base_has_manifest {
-            roots.insert(root);
-        } else {
-            roots.remove(&root);
-        }
-    }
-    if roots.is_empty() {
-        roots.insert(PathBuf::new());
-    }
-    roots.into_iter().collect()
-}
-
-fn diff_package_roots(repository_root: &Path, changed: &[Change]) -> Vec<PathBuf> {
-    let mut roots = std::collections::BTreeSet::new();
-    for change in changed {
-        for path in [change.current_path(), change.base_path()] {
-            let mut directory = path.parent().unwrap_or(Path::new(""));
-            loop {
-                let absolute = repository_root.join(directory);
-                let changed_manifest = path
-                    .file_name()
-                    .and_then(|name| name.to_str())
-                    .is_some_and(|name| DIFF_MANIFEST_NAMES.contains(&name));
-                let working_tree_manifest = DIFF_MANIFEST_NAMES
-                    .iter()
-                    .any(|name| absolute.join(name).is_file());
-                if changed_manifest || working_tree_manifest {
-                    roots.insert(directory.to_path_buf());
-                    break;
-                }
-                if directory.as_os_str().is_empty() {
-                    break;
-                }
-                directory = directory.parent().unwrap_or(Path::new(""));
-            }
-        }
-    }
-    if roots.is_empty() {
-        roots.insert(PathBuf::new());
-    }
-    roots.into_iter().collect()
 }
 
 fn nearest_package_root(path: &Path, package_roots: &[PathBuf]) -> PathBuf {
@@ -4089,11 +5090,11 @@ mod tests {
             ),
             (
                 "src/lib.rs",
-                "mod deep;\nmod helper;\nmod report;\npub struct Item;\n",
+                "mod deep;\nmod helper;\nmod registries;\nmod report;\npub struct Item;\n",
             ),
             (
                 "src/report.rs",
-                "use crate::Item;\nmod tests {\n    use super::*;\n}\n",
+                "use crate::Item;\nuse crate::registries::traits::ToolExt;\nmod tests {\n    use super::*;\n}\n",
             ),
             ("src/deep/mod.rs", "mod inner;\n"),
             (
@@ -4101,6 +5102,8 @@ mod tests {
                 "mod tests {\n    use super::helper::work;\n}\n",
             ),
             ("src/helper.rs", "pub fn work() -> i32 { 1 }\n"),
+            ("src/registries.rs", "pub mod traits;\n"),
+            ("src/registries/traits.rs", "pub struct ToolExt;\n"),
             ("standalone/loose.rs", "use crate::Missing;\n"),
         ] {
             let file = root.path().join(path);
@@ -4128,6 +5131,10 @@ mod tests {
         assert!(
             edges.contains(&("src/deep/inner.rs", "src/helper.rs")),
             "a matching module path wins over the declaring file: {edges:?}"
+        );
+        assert!(
+            edges.contains(&("src/report.rs", "src/registries/traits.rs")),
+            "the nearest matching module wins over its parent: {edges:?}"
         );
         assert!(
             !edges
@@ -5491,6 +6498,74 @@ mod tests {
     }
 
     #[test]
+    fn package_aliases_jsonc_and_runtime_extensions_resolve_within_their_package() {
+        let root = tempfile::tempdir().unwrap();
+        for package in ["app", "core"] {
+            fs::create_dir_all(root.path().join(package).join("src")).unwrap();
+            fs::write(root.path().join(package).join("package.json"), "{}").unwrap();
+            fs::write(
+                root.path().join(package).join("src/main.ts"),
+                "import value from '@/value.js?raw';\nexport default value;\n",
+            )
+            .unwrap();
+            fs::write(
+                root.path().join(package).join("src/value.ts"),
+                "export default 1;\n",
+            )
+            .unwrap();
+        }
+        fs::write(
+            root.path().join("app/tsconfig.json"),
+            "{ extends: './tsconfig.base.json', }",
+        )
+        .unwrap();
+        fs::write(
+            root.path().join("app/tsconfig.base.json"),
+            "{ compilerOptions: { paths: { '@/*': ['./src/*'], }, }, }",
+        )
+        .unwrap();
+        fs::write(
+            root.path().join("core/tsconfig.json"),
+            "{ // package-local alias\n compilerOptions: { paths: { '@/*': ['./src/*'], }, }, }",
+        )
+        .unwrap();
+
+        let result = analyze_codebase(&CodebaseRequest::new(root.path())).unwrap();
+        let report = result.report();
+        assert_eq!(report.dependency_edges().len(), 2);
+        for edge in report.dependency_edges() {
+            let source = &report.files()[edge.source().index()];
+            let target = &report.files()[edge.target().index()];
+            assert_eq!(source.package(), target.package());
+            assert!(target.path().ends_with("src/value.ts"));
+        }
+    }
+
+    #[test]
+    fn invalid_resolution_configuration_marks_the_package_graph_incomplete() {
+        let root = tempfile::tempdir().unwrap();
+        fs::write(root.path().join("package.json"), "{}").unwrap();
+        fs::write(root.path().join("tsconfig.json"), "{ compilerOptions:").unwrap();
+        fs::write(
+            root.path().join("main.ts"),
+            "import value from '@/value';\nexport default value;\n",
+        )
+        .unwrap();
+        fs::write(root.path().join("value.ts"), "export default 1;\n").unwrap();
+
+        let result = analyze_codebase(&CodebaseRequest::new(root.path())).unwrap();
+        let evidence = result.report().graph_evidence();
+        assert!(!evidence.is_complete());
+        assert_eq!(evidence.incomplete_packages().len(), 1);
+        assert_eq!(evidence.configuration_failures().len(), 1);
+        assert!(
+            evidence.configuration_failures()[0]
+                .reason()
+                .contains("cannot parse")
+        );
+    }
+
+    #[test]
     fn java_source_root_import_resolves_to_a_repository_file() {
         let root = tempfile::tempdir().unwrap();
         fs::create_dir_all(root.path().join("src/main/java/app")).unwrap();
@@ -5513,11 +6588,11 @@ mod tests {
     }
 
     #[test]
-    fn rust_root_use_resolves_leaf_or_parent_module_and_keeps_ambiguity_explicit() {
+    fn rust_root_use_prefers_the_nearest_matching_module() {
         for (name, leaf, parent, expected_internal, expected_ambiguous) in [
             ("leaf", true, false, 1, 0),
             ("parent", false, true, 1, 0),
-            ("both", true, true, 0, 1),
+            ("both", true, true, 1, 0),
         ] {
             let root = tempfile::tempdir().unwrap();
             fs::write(
@@ -6932,6 +8007,780 @@ mod tests {
             |value| value.kind() == smackdebt_analysis::ArchitectureComparisonKind::EdgeRemoved
         ));
         assert_eq!(result.stats().git_processes, 5);
+    }
+
+    #[test]
+    fn diff_reports_a_named_file_when_branch_reach_grows() {
+        let root = tempfile::tempdir().unwrap();
+        let repository_path = root.path();
+        git(repository_path, ["init", "-q"]);
+        git(
+            repository_path,
+            ["config", "user.email", "test@example.invalid"],
+        );
+        git(repository_path, ["config", "user.name", "Smackdebt Test"]);
+        fs::write(repository_path.join("package.json"), "{}").unwrap();
+        for index in 0..20 {
+            fs::write(
+                repository_path.join(format!("f{index}.ts")),
+                format!("export const f{index} = {index};\n"),
+            )
+            .unwrap();
+        }
+        git(repository_path, ["add", "."]);
+        git(repository_path, ["commit", "-qm", "initial"]);
+        fs::write(
+            repository_path.join("f1.ts"),
+            "import { f0 } from './f0.js';\nexport const f1 = f0 + 1;\n",
+        )
+        .unwrap();
+
+        let result =
+            analyze_diff(&DiffRequest::new(repository_path).with_reference("HEAD")).unwrap();
+        let comparison = result
+            .report()
+            .propagation_comparisons()
+            .iter()
+            .find(|comparison| {
+                matches!(
+                    comparison.subject(),
+                    smackdebt_analysis::PropagationSubject::File { .. }
+                )
+            })
+            .expect("file reach movement is retained");
+        assert_eq!(
+            comparison.direction(),
+            smackdebt_analysis::ComparisonDirection::Worse
+        );
+        assert_eq!(comparison.before(), (1, 20));
+        assert_eq!(comparison.after(), (2, 20));
+        assert_eq!(
+            result
+                .report()
+                .scope_verdict(result.report().root().unwrap())
+                .selection()
+                .facts()
+                .architecture()
+                .worse(),
+            1
+        );
+    }
+
+    #[test]
+    fn diff_withholds_reach_movement_when_only_current_graph_evidence_is_incomplete() {
+        let root = tempfile::tempdir().unwrap();
+        let repository_path = root.path();
+        git(repository_path, ["init", "-q"]);
+        git(
+            repository_path,
+            ["config", "user.email", "test@example.invalid"],
+        );
+        git(repository_path, ["config", "user.name", "Smackdebt Test"]);
+        fs::write(repository_path.join("package.json"), "{}").unwrap();
+        for index in 0..20 {
+            fs::write(
+                repository_path.join(format!("f{index}.ts")),
+                format!("export const f{index} = {index};\n"),
+            )
+            .unwrap();
+        }
+        git(repository_path, ["add", "."]);
+        git(repository_path, ["commit", "-qm", "initial"]);
+        fs::write(
+            repository_path.join("f1.ts"),
+            "import { f0 } from './f0.js';\nimport missing from './missing.js';\nexport const f1 = f0 + missing;\n",
+        )
+        .unwrap();
+
+        let result =
+            analyze_diff(&DiffRequest::new(repository_path).with_reference("HEAD")).unwrap();
+        let evidence = result.report().diff_graph_evidence().unwrap();
+        assert!(!evidence.current().is_complete());
+        assert!(evidence.base().is_complete());
+        assert_eq!(evidence.propagation().total(), 1);
+        assert_eq!(evidence.propagation().current(), 1);
+        assert_eq!(evidence.propagation().base(), 0);
+        assert!(result.report().propagation_comparisons().is_empty());
+        assert_eq!(
+            result
+                .report()
+                .scope_verdict(result.report().root().unwrap())
+                .selection()
+                .facts()
+                .architecture()
+                .total(),
+            0
+        );
+    }
+
+    #[test]
+    fn diff_withholds_reach_movement_when_only_base_graph_evidence_is_incomplete() {
+        let root = tempfile::tempdir().unwrap();
+        let repository_path = root.path();
+        git(repository_path, ["init", "-q"]);
+        git(
+            repository_path,
+            ["config", "user.email", "test@example.invalid"],
+        );
+        git(repository_path, ["config", "user.name", "Smackdebt Test"]);
+        fs::write(repository_path.join("package.json"), "{}").unwrap();
+        for index in 0..20 {
+            fs::write(
+                repository_path.join(format!("f{index}.ts")),
+                format!("export const f{index} = {index};\n"),
+            )
+            .unwrap();
+        }
+        fs::write(
+            repository_path.join("f1.ts"),
+            "import { f0 } from './f0.js';\nimport missing from './missing.js';\nexport const f1 = f0 + missing;\n",
+        )
+        .unwrap();
+        git(repository_path, ["add", "."]);
+        git(repository_path, ["commit", "-qm", "initial"]);
+        fs::write(repository_path.join("f1.ts"), "export const f1 = 1;\n").unwrap();
+
+        let result =
+            analyze_diff(&DiffRequest::new(repository_path).with_reference("HEAD")).unwrap();
+        let evidence = result.report().diff_graph_evidence().unwrap();
+        assert!(evidence.current().is_complete());
+        assert!(!evidence.base().is_complete());
+        assert_eq!(evidence.propagation().total(), 1);
+        assert_eq!(evidence.propagation().current(), 0);
+        assert_eq!(evidence.propagation().base(), 1);
+        assert!(result.report().propagation_comparisons().is_empty());
+    }
+
+    #[test]
+    fn diff_assigns_base_graph_failures_to_the_base_package_owner() {
+        let root = tempfile::tempdir().unwrap();
+        let repository_path = root.path();
+        git(repository_path, ["init", "-q"]);
+        git(
+            repository_path,
+            ["config", "user.email", "test@example.invalid"],
+        );
+        git(repository_path, ["config", "user.name", "Smackdebt Test"]);
+        fs::create_dir_all(repository_path.join("sub")).unwrap();
+        fs::write(repository_path.join("package.json"), "{}").unwrap();
+        fs::write(
+            repository_path.join("sub/a.ts"),
+            "import missing from './missing.js';\nexport default missing;\n",
+        )
+        .unwrap();
+        git(repository_path, ["add", "."]);
+        git(repository_path, ["commit", "-qm", "root package"]);
+        fs::write(repository_path.join("sub/package.json"), "{}").unwrap();
+
+        let result =
+            analyze_diff(&DiffRequest::new(repository_path).with_reference("HEAD")).unwrap();
+        let evidence = result.report().diff_graph_evidence().unwrap();
+        assert_eq!(
+            evidence.base().incomplete_packages(),
+            &[PackageId::from_index(0)]
+        );
+        assert_eq!(
+            evidence.current().incomplete_packages(),
+            &[PackageId::from_index(1)]
+        );
+    }
+
+    #[test]
+    fn unchanged_rust_module_uses_each_graph_sides_test_declaration_role() {
+        let root = tempfile::tempdir().unwrap();
+        let repository_path = root.path();
+        git(repository_path, ["init", "-q"]);
+        git(
+            repository_path,
+            ["config", "user.email", "test@example.invalid"],
+        );
+        git(repository_path, ["config", "user.name", "Smackdebt Test"]);
+        fs::create_dir_all(repository_path.join("src")).unwrap();
+        fs::write(
+            repository_path.join("Cargo.toml"),
+            "[package]\nname='roles'\nversion='0.1.0'\n",
+        )
+        .unwrap();
+        fs::write(
+            repository_path.join("src/lib.rs"),
+            "#[cfg(test)]\nmod helper;\npub fn run() {}\n",
+        )
+        .unwrap();
+        fs::write(
+            repository_path.join("src/helper.rs"),
+            "mod missing;\npub fn help() {}\n",
+        )
+        .unwrap();
+        git(repository_path, ["add", "."]);
+        git(repository_path, ["commit", "-qm", "test-only helper"]);
+        fs::write(
+            repository_path.join("src/lib.rs"),
+            "mod helper;\npub fn run() { helper::help(); }\n",
+        )
+        .unwrap();
+
+        let result =
+            analyze_diff(&DiffRequest::new(repository_path).with_reference("HEAD")).unwrap();
+        let evidence = result.report().diff_graph_evidence().unwrap();
+        assert!(evidence.base().is_complete());
+        assert!(!evidence.current().is_complete());
+        let helper = file_id(result.report(), "src/helper.rs");
+        assert_eq!(
+            result.report().files()[helper.index()].role(),
+            SourceRole::Primary
+        );
+    }
+
+    #[test]
+    fn diff_resolves_manifest_names_from_each_graph_side() {
+        let root = tempfile::tempdir().unwrap();
+        let repository_path = root.path();
+        git(repository_path, ["init", "-q"]);
+        git(
+            repository_path,
+            ["config", "user.email", "test@example.invalid"],
+        );
+        git(repository_path, ["config", "user.name", "Smackdebt Test"]);
+        for package in ["a", "b"] {
+            fs::create_dir_all(repository_path.join(package)).unwrap();
+        }
+        fs::write(
+            repository_path.join("a/package.json"),
+            "{\"name\":\"old-name\",\"main\":\"main.js\"}\n",
+        )
+        .unwrap();
+        fs::write(
+            repository_path.join("b/package.json"),
+            "{\"name\":\"b\",\"main\":\"main.js\"}\n",
+        )
+        .unwrap();
+        fs::write(
+            repository_path.join("a/main.js"),
+            "import value from 'b';\nexport default value;\n",
+        )
+        .unwrap();
+        fs::write(
+            repository_path.join("b/main.js"),
+            "import value from 'old-name';\nexport default value;\n",
+        )
+        .unwrap();
+        git(repository_path, ["add", "."]);
+        git(repository_path, ["commit", "-qm", "old package name"]);
+        fs::write(
+            repository_path.join("a/package.json"),
+            "{\"name\":\"new-name\",\"main\":\"main.js\"}\n",
+        )
+        .unwrap();
+        fs::write(
+            repository_path.join("b/main.js"),
+            "import value from 'new-name';\nexport default value;\n",
+        )
+        .unwrap();
+
+        let result =
+            analyze_diff(&DiffRequest::new(repository_path).with_reference("HEAD")).unwrap();
+        assert_eq!(result.report().architecture_findings().len(), 1);
+        assert!(result.report().architecture_comparisons().is_empty());
+        assert!(
+            result
+                .report()
+                .resolution_diagnostics()
+                .iter()
+                .all(|diagnostic| diagnostic.kind() != ResolutionIssueKind::Unresolved)
+        );
+    }
+
+    #[test]
+    fn unchanged_gemspec_names_resolve_on_both_sides_of_an_unrelated_diff() {
+        let root = tempfile::tempdir().unwrap();
+        let repository_path = root.path();
+        git(repository_path, ["init", "-q"]);
+        git(
+            repository_path,
+            ["config", "user.email", "test@example.invalid"],
+        );
+        git(repository_path, ["config", "user.name", "Smackdebt Test"]);
+        for package in ["a", "b"] {
+            fs::create_dir_all(repository_path.join(package)).unwrap();
+        }
+        fs::write(
+            repository_path.join("a/a.gemspec"),
+            "Gem::Specification.new do |spec|\n  spec.name = 'a-gem'\nend\n",
+        )
+        .unwrap();
+        fs::write(
+            repository_path.join("b/b.gemspec"),
+            "Gem::Specification.new do |spec|\n  spec.name = 'b-gem'\nend\n",
+        )
+        .unwrap();
+        fs::write(
+            repository_path.join("a/main.js"),
+            "import value from 'b-gem';\nexport default value;\n",
+        )
+        .unwrap();
+        fs::write(
+            repository_path.join("b/main.js"),
+            "import value from 'a-gem';\nexport default value;\n",
+        )
+        .unwrap();
+        fs::write(repository_path.join("note.md"), "before\n").unwrap();
+        git(repository_path, ["add", "."]);
+        git(repository_path, ["commit", "-qm", "gemspec packages"]);
+        fs::write(repository_path.join("note.md"), "after\n").unwrap();
+
+        let result =
+            analyze_diff(&DiffRequest::new(repository_path).with_reference("HEAD")).unwrap();
+        assert_eq!(result.report().architecture_findings().len(), 1);
+        assert!(result.report().architecture_comparisons().is_empty());
+    }
+
+    #[test]
+    fn changed_ignore_rules_select_unchanged_tracked_sources_per_side() {
+        let root = tempfile::tempdir().unwrap();
+        let repository_path = root.path();
+        git(repository_path, ["init", "-q"]);
+        git(
+            repository_path,
+            ["config", "user.email", "test@example.invalid"],
+        );
+        git(repository_path, ["config", "user.name", "Smackdebt Test"]);
+        fs::write(repository_path.join("package.json"), "{}\n").unwrap();
+        fs::write(repository_path.join(".gitignore"), "").unwrap();
+        fs::write(
+            repository_path.join("hidden.ts"),
+            "import missing from './missing.js';\nexport default missing;\n",
+        )
+        .unwrap();
+        fs::write(repository_path.join("main.ts"), "export default 1;\n").unwrap();
+        git(repository_path, ["add", "."]);
+        git(repository_path, ["commit", "-qm", "visible source"]);
+        fs::write(repository_path.join(".gitignore"), "hidden.ts\n").unwrap();
+        fs::write(
+            repository_path.join("hidden.ts"),
+            "import changed from './missing.js';\nexport default changed;\n",
+        )
+        .unwrap();
+
+        let result =
+            analyze_diff(&DiffRequest::new(repository_path).with_reference("HEAD")).unwrap();
+        let evidence = result.report().diff_graph_evidence().unwrap();
+        assert!(!evidence.base().is_complete());
+        assert!(evidence.current().is_complete());
+        assert!(
+            result
+                .report()
+                .files()
+                .iter()
+                .any(|file| file.path() == "hidden.ts")
+        );
+    }
+
+    #[test]
+    fn a_modified_source_ignored_on_both_sides_never_enters_diff_analysis() {
+        let root = tempfile::tempdir().unwrap();
+        let repository_path = root.path();
+        git(repository_path, ["init", "-q"]);
+        git(
+            repository_path,
+            ["config", "user.email", "test@example.invalid"],
+        );
+        git(repository_path, ["config", "user.name", "Smackdebt Test"]);
+        fs::write(repository_path.join("package.json"), "{}\n").unwrap();
+        fs::write(repository_path.join(".gitignore"), "hidden.ts\n").unwrap();
+        fs::write(
+            repository_path.join("hidden.ts"),
+            "import missing from './missing.js';\nexport default missing;\n",
+        )
+        .unwrap();
+        fs::write(repository_path.join("main.ts"), "export default 1;\n").unwrap();
+        git(repository_path, ["add", "."]);
+        git(repository_path, ["add", "-f", "hidden.ts"]);
+        git(repository_path, ["commit", "-qm", "ignored tracked source"]);
+        fs::write(
+            repository_path.join("hidden.ts"),
+            "import changed from './still-missing.js';\nexport default changed;\n",
+        )
+        .unwrap();
+
+        let result =
+            analyze_diff(&DiffRequest::new(repository_path).with_reference("HEAD")).unwrap();
+        let evidence = result.report().diff_graph_evidence().unwrap();
+        assert!(evidence.base().is_complete());
+        assert!(evidence.current().is_complete());
+        assert!(
+            result
+                .report()
+                .files()
+                .iter()
+                .all(|file| file.path() != "hidden.ts")
+        );
+    }
+
+    #[test]
+    fn diff_fails_when_a_reachable_base_manifest_object_is_missing() {
+        let root = tempfile::tempdir().unwrap();
+        let repository_path = root.path();
+        git(repository_path, ["init", "-q"]);
+        git(
+            repository_path,
+            ["config", "user.email", "test@example.invalid"],
+        );
+        git(repository_path, ["config", "user.name", "Smackdebt Test"]);
+        fs::write(
+            repository_path.join("package.json"),
+            "{\"name\":\"example\"}\n",
+        )
+        .unwrap();
+        fs::write(repository_path.join("main.ts"), "export default 1;\n").unwrap();
+        git(repository_path, ["add", "."]);
+        git(repository_path, ["commit", "-qm", "base"]);
+        fs::write(repository_path.join("main.ts"), "export default 2;\n").unwrap();
+
+        let output = Command::new("git")
+            .args(["rev-parse", "HEAD:package.json"])
+            .current_dir(repository_path)
+            .output()
+            .unwrap();
+        assert!(output.status.success());
+        let object = String::from_utf8(output.stdout).unwrap();
+        let object = object.trim();
+        fs::remove_file(
+            repository_path
+                .join(".git/objects")
+                .join(&object[..2])
+                .join(&object[2..]),
+        )
+        .unwrap();
+
+        let error =
+            analyze_diff(&DiffRequest::new(repository_path).with_reference("HEAD")).unwrap_err();
+        assert!(matches!(error, ProjectError::Inspect { .. }));
+    }
+
+    #[test]
+    fn propagation_compares_each_named_package_instead_of_unrelated_maxima() {
+        let root = tempfile::tempdir().unwrap();
+        let repository_path = root.path();
+        git(repository_path, ["init", "-q"]);
+        git(
+            repository_path,
+            ["config", "user.email", "test@example.invalid"],
+        );
+        git(repository_path, ["config", "user.name", "Smackdebt Test"]);
+        for package in ["a", "b", "c", "d"] {
+            fs::create_dir_all(repository_path.join(package)).unwrap();
+            fs::write(repository_path.join(package).join("package.json"), "{}").unwrap();
+        }
+        fs::write(repository_path.join("a/main.js"), "export default 1;\n").unwrap();
+        for package in ["b", "c", "d"] {
+            fs::write(
+                repository_path.join(package).join("main.js"),
+                "import value from '../a/main.js';\nexport default value;\n",
+            )
+            .unwrap();
+        }
+        git(repository_path, ["add", "."]);
+        git(repository_path, ["commit", "-qm", "a reaches four"]);
+        fs::write(repository_path.join("a/main.js"), "export default 1;\n").unwrap();
+        fs::write(repository_path.join("b/main.js"), "export default 1;\n").unwrap();
+        for package in ["c", "d"] {
+            fs::write(
+                repository_path.join(package).join("main.js"),
+                "import value from '../b/main.js';\nexport default value;\n",
+            )
+            .unwrap();
+        }
+
+        let result =
+            analyze_diff(&DiffRequest::new(repository_path).with_reference("HEAD")).unwrap();
+        let report = result.report();
+        let package_id = |path: &str| {
+            report
+                .packages()
+                .iter()
+                .find(|package| package.path() == path)
+                .unwrap()
+                .id()
+        };
+        let a = package_id("a");
+        let b = package_id("b");
+        let package_rows: Vec<_> = report
+            .propagation_comparisons()
+            .iter()
+            .filter_map(|comparison| match comparison.subject() {
+                smackdebt_analysis::PropagationSubject::Package { source } => {
+                    Some((source, comparison.before(), comparison.after()))
+                }
+                smackdebt_analysis::PropagationSubject::File { .. } => None,
+            })
+            .collect();
+        assert!(package_rows.contains(&(a, (4, 4), (1, 4))));
+        assert!(package_rows.contains(&(b, (1, 4), (3, 4))));
+        assert!(!package_rows.contains(&(a, (4, 4), (3, 4))));
+    }
+
+    #[test]
+    fn diff_reports_a_new_material_core_from_the_existing_two_graphs() {
+        let root = tempfile::tempdir().unwrap();
+        let repository_path = root.path();
+        git(repository_path, ["init", "-q"]);
+        git(
+            repository_path,
+            ["config", "user.email", "test@example.invalid"],
+        );
+        git(repository_path, ["config", "user.name", "Smackdebt Test"]);
+        fs::write(repository_path.join("package.json"), "{}").unwrap();
+        for index in 0..20 {
+            fs::write(
+                repository_path.join(format!("f{index}.ts")),
+                format!("export const f{index} = {index};\n"),
+            )
+            .unwrap();
+        }
+        git(repository_path, ["add", "."]);
+        git(repository_path, ["commit", "-qm", "initial"]);
+        for index in 0..5 {
+            let next = (index + 1) % 5;
+            fs::write(
+                repository_path.join(format!("f{index}.ts")),
+                format!(
+                    "import {{ f{next} }} from './f{next}.js';\nexport const f{index} = f{next} + 1;\n"
+                ),
+            )
+            .unwrap();
+        }
+
+        let result =
+            analyze_diff(&DiffRequest::new(repository_path).with_reference("HEAD")).unwrap();
+        let comparison = &result.report().core_comparisons()[0];
+        assert_eq!(
+            comparison.direction(),
+            smackdebt_analysis::ComparisonDirection::Worse
+        );
+        assert_eq!(comparison.before(), (1, 20));
+        assert_eq!(comparison.after(), (5, 20));
+        assert_eq!(comparison.after_members().len(), 5);
+    }
+
+    #[test]
+    fn diff_counts_a_core_candidate_before_incomplete_evidence_withholds_it() {
+        let root = tempfile::tempdir().unwrap();
+        let repository_path = root.path();
+        git(repository_path, ["init", "-q"]);
+        git(
+            repository_path,
+            ["config", "user.email", "test@example.invalid"],
+        );
+        git(repository_path, ["config", "user.name", "Smackdebt Test"]);
+        fs::write(repository_path.join("package.json"), "{}").unwrap();
+        for index in 0..20 {
+            fs::write(
+                repository_path.join(format!("f{index}.ts")),
+                format!("export const f{index} = {index};\n"),
+            )
+            .unwrap();
+        }
+        git(repository_path, ["add", "."]);
+        git(repository_path, ["commit", "-qm", "initial"]);
+        for index in 0..5 {
+            let next = (index + 1) % 5;
+            fs::write(
+                repository_path.join(format!("f{index}.ts")),
+                format!(
+                    "import {{ f{next} }} from './f{next}.js';\nexport const f{index} = f{next} + 1;\n"
+                ),
+            )
+            .unwrap();
+        }
+        fs::write(
+            repository_path.join("f5.ts"),
+            "import missing from './missing.js';\nexport const f5 = missing;\n",
+        )
+        .unwrap();
+
+        let result =
+            analyze_diff(&DiffRequest::new(repository_path).with_reference("HEAD")).unwrap();
+        let evidence = result.report().diff_graph_evidence().unwrap();
+        assert_eq!(evidence.core().total(), 1);
+        assert_eq!(evidence.core().current(), 1);
+        assert_eq!(evidence.core().base(), 0);
+        assert!(result.report().core_comparisons().is_empty());
+    }
+
+    #[test]
+    fn diff_does_not_compare_disjoint_largest_dependency_cycles() {
+        let root = tempfile::tempdir().unwrap();
+        let repository_path = root.path();
+        git(repository_path, ["init", "-q"]);
+        git(
+            repository_path,
+            ["config", "user.email", "test@example.invalid"],
+        );
+        git(repository_path, ["config", "user.name", "Smackdebt Test"]);
+        fs::write(repository_path.join("package.json"), "{}").unwrap();
+        for index in 0..20 {
+            fs::write(
+                repository_path.join(format!("f{index}.ts")),
+                format!("export const f{index} = {index};\n"),
+            )
+            .unwrap();
+        }
+        for index in 0..5 {
+            let next = (index + 1) % 5;
+            fs::write(
+                repository_path.join(format!("f{index}.ts")),
+                format!(
+                    "import {{ f{next} }} from './f{next}.js';\nexport const f{index} = f{next};\n"
+                ),
+            )
+            .unwrap();
+        }
+        git(repository_path, ["add", "."]);
+        git(repository_path, ["commit", "-qm", "first core"]);
+        for index in 0..5 {
+            fs::write(
+                repository_path.join(format!("f{index}.ts")),
+                format!("export const f{index} = {index};\n"),
+            )
+            .unwrap();
+        }
+        for index in 5..11 {
+            let next = if index == 10 { 5 } else { index + 1 };
+            fs::write(
+                repository_path.join(format!("f{index}.ts")),
+                format!(
+                    "import {{ f{next} }} from './f{next}.js';\nexport const f{index} = f{next};\n"
+                ),
+            )
+            .unwrap();
+        }
+
+        let result =
+            analyze_diff(&DiffRequest::new(repository_path).with_reference("HEAD")).unwrap();
+        let rows = result.report().core_comparisons();
+        assert_eq!(rows.len(), 2);
+        assert!(rows.iter().all(|row| {
+            row.before_members().contains(&row.anchor())
+                && row.after_members().contains(&row.anchor())
+        }));
+        assert!(
+            rows.iter()
+                .any(|row| row.before() == (5, 20) && row.after() == (1, 20))
+        );
+        assert!(
+            rows.iter()
+                .any(|row| row.before() == (1, 20) && row.after() == (6, 20))
+        );
+        assert!(
+            !rows
+                .iter()
+                .any(|row| row.before() == (5, 20) && row.after() == (6, 20))
+        );
+    }
+
+    #[test]
+    fn adding_a_code_link_resolves_hidden_coupling_in_the_diff() {
+        let root = tempfile::tempdir().unwrap();
+        let repository_path = root.path();
+        git(repository_path, ["init", "-q"]);
+        git(
+            repository_path,
+            ["config", "user.email", "test@example.invalid"],
+        );
+        git(repository_path, ["config", "user.name", "Smackdebt Test"]);
+        fs::write(repository_path.join("package.json"), "{}").unwrap();
+        fs::create_dir_all(repository_path.join("left")).unwrap();
+        fs::create_dir_all(repository_path.join("right")).unwrap();
+        for revision in 0..5 {
+            fs::write(
+                repository_path.join("left/a.ts"),
+                format!("export const a = {revision};\n"),
+            )
+            .unwrap();
+            fs::write(
+                repository_path.join("right/b.ts"),
+                format!("export const b = {revision};\n"),
+            )
+            .unwrap();
+            git(repository_path, ["add", "."]);
+            git(
+                repository_path,
+                ["commit", "-qm", &format!("change {revision}")],
+            );
+        }
+        fs::write(
+            repository_path.join("left/a.ts"),
+            "import { b } from '../right/b.js';\nexport const a = b + 1;\n",
+        )
+        .unwrap();
+
+        let result =
+            analyze_diff(&DiffRequest::new(repository_path).with_reference("HEAD")).unwrap();
+        let comparison = result
+            .report()
+            .change_leakage_comparisons()
+            .iter()
+            .find(|comparison| {
+                comparison.kind() == smackdebt_analysis::ChangeLeakageKind::HiddenCoupling
+            })
+            .expect("the new code link resolves the hidden pair");
+        assert_eq!(
+            comparison.direction(),
+            smackdebt_analysis::ComparisonDirection::Better
+        );
+    }
+
+    #[test]
+    fn diff_counts_a_leakage_candidate_before_incomplete_evidence_withholds_it() {
+        let root = tempfile::tempdir().unwrap();
+        let repository_path = root.path();
+        git(repository_path, ["init", "-q"]);
+        git(
+            repository_path,
+            ["config", "user.email", "test@example.invalid"],
+        );
+        git(repository_path, ["config", "user.name", "Smackdebt Test"]);
+        fs::write(repository_path.join("package.json"), "{}").unwrap();
+        fs::create_dir_all(repository_path.join("left")).unwrap();
+        fs::create_dir_all(repository_path.join("right")).unwrap();
+        for revision in 0..5 {
+            fs::write(
+                repository_path.join("left/a.ts"),
+                format!("export const a = {revision};\n"),
+            )
+            .unwrap();
+            fs::write(
+                repository_path.join("right/b.ts"),
+                format!("export const b = {revision};\n"),
+            )
+            .unwrap();
+            git(repository_path, ["add", "."]);
+            git(
+                repository_path,
+                ["commit", "-qm", &format!("change {revision}")],
+            );
+        }
+        fs::write(
+            repository_path.join("left/a.ts"),
+            "import { b } from '../right/b.js';\nexport const a = b + 1;\n",
+        )
+        .unwrap();
+        fs::write(
+            repository_path.join("other.ts"),
+            "import missing from './missing.js';\nexport default missing;\n",
+        )
+        .unwrap();
+
+        let result =
+            analyze_diff(&DiffRequest::new(repository_path).with_reference("HEAD")).unwrap();
+        let evidence = result.report().diff_graph_evidence().unwrap();
+        // The new dependency resolves one hidden-coupling candidate and creates
+        // one leaky-interface candidate. Both are counted before the incomplete
+        // current graph withholds them.
+        assert_eq!(evidence.leakage().total(), 2);
+        assert_eq!(evidence.leakage().current(), 2);
+        assert_eq!(evidence.leakage().base(), 0);
+        assert!(result.report().change_leakage_comparisons().is_empty());
     }
 
     #[test]

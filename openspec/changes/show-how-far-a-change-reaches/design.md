@@ -56,8 +56,8 @@ Every computation here rides an existing pass and records no new one.
   at no new I/O cost.
 - Name the two co-change shapes that a dependency graph alone cannot see, and
   name them only when the evidence is strong enough to survive review.
-- Give the verdict head three system numbers that make an architecture argument
-  without pretending to rate one.
+- Attach each human architecture number to a package, file, cycle, or pair the
+  reader can inspect next.
 - Keep the default view about the same size it is today: at most one or two new
   items on real repositories.
 
@@ -65,8 +65,7 @@ Every computation here rides an existing pass and records no new one.
 
 - No new schema version. Version 4 gains members additively.
 - No gate signal, no baseline movement, and no change to the ratcheted set.
-- No diff-mode surface: no comparison, no debt-diff member, no diff verdict
-  input.
+- No amplification comparison and no new comparison family or verdict input.
 - No module-depth or layering model. Directory distance is the only structural
   metric introduced, and it is an integer over the paths discovery already owns.
 - No per-file change histograms and no per-file amplification.
@@ -219,11 +218,13 @@ repetition ever becomes a real complaint, the shape to reach for is folding a
 file pair whose operands equal its package pair's into that package card as
 evidence — one card, both levels — rather than dropping the more specific fact.
 
-### The system numbers are stated, never rated
+### The system numbers are attached to subjects, never rated
 
-Reach, core size, and amplification join the verdict head as analysis-owned
-sentences beside the share and the coverage qualifier, and they never move a
-tier. Two reasons. First, they are not debt: a large reach in a layered
+Reach, core size, and amplification remain analysis-owned facts and never move
+a tier. Human output states reach only beside its source package or file and
+core size only beside its cycle. Amplification stays machine-only because its
+scope median does not identify a narrower place to inspect. Two reasons keep
+them unrated. First, they are not debt: a large reach in a layered
 monolith may be exactly the intended architecture, and a tier that dropped
 because of it would be wrong in a way the user cannot argue with. Second, two of
 the three derive from history, and the tier must not move with wall-clock time —
@@ -231,9 +232,40 @@ the same rule that keeps history signals out of the gate.
 
 Absence is a first-class outcome. A one-package repository states no reach; a
 three-file core in a two-hundred-file repository states nothing; a scope with
-nine commits states no amplification. A hedged sentence would be worse than
-silence, because a reader cannot tell a weak number from a strong one once it is
-printed.
+nine commits stores no amplification. A graph with insufficient evidence makes
+no human reach, core, or leakage claim. The machine report retains the measured
+rows and the evidence reason instead of turning uncertainty into a hedge.
+
+Diff evidence keeps the current and base graph status as separate report
+values. Candidate reach, core, and leakage comparisons are formed before the
+evidence check, then counted by family and by every incomplete side that
+withheld them. Only a candidate supported on both sides becomes movement. This
+keeps a missing row distinguishable from unchanged or below-floor evidence and
+prevents an incomplete graph from moving the verdict.
+
+Each diff graph is built from its own file facts: presence, package ownership,
+role, and trust come from that side's tree. Reach comparison subjects are the
+union of the material package and file subjects selected on either side, and a
+subject is compared only with itself. Core movement uses a file present on both
+sides as an anchor and compares the component containing that file on each
+side. When the two largest cycles are disjoint, the old and new anchors produce
+separate movements instead of one row that mixes their values. The architecture
+build retains the per-file reach and component data it already computes, so
+these identity rules add no graph traversal.
+
+The base tree is enumerated through the existing `git cat-file --batch`
+process. Git decodes tree objects; discovery applies the same source,
+dependency-directory, nested-ignore, negation, manifest, package, and
+configuration policy it applies to the filesystem walk. Inventory reads no
+source blobs. It requests only reachable ignore files and name-bearing
+manifests, while project analysis reads source blobs only for files selected by
+the resulting base inventory. Directories are considered parent-first, so an
+ancestor exclusion prevents a nested ignore object read. Metadata read or text
+errors fail the diff; absence is never treated as an empty rule or unnamed
+package. Project reconciles every Git change with current and base inventory
+presence before either source is read. This keeps changed ignore rules and
+every recognized manifest form, including gemspec files, truthful on each side
+without another Git process.
 
 ### Reach is scoped, because exact global reach is not affordable or useful
 

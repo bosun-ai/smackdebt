@@ -18,6 +18,7 @@ pub const fn smackdebt_discovery::Inventory::visited_entries(&self) -> usize
 pub struct smackdebt_discovery::Package
 impl smackdebt_discovery::Package
 pub fn smackdebt_discovery::Package::manifest_name(&self) -> core::option::Option<&str>
+pub fn smackdebt_discovery::Package::resolution_config(&self) -> core::option::Option<&smackdebt_discovery::RelativePath>
 pub fn smackdebt_discovery::Package::root(&self) -> &smackdebt_discovery::RelativePath
 pub struct smackdebt_discovery::RelativePath(_)
 impl smackdebt_discovery::RelativePath
@@ -26,5 +27,11 @@ impl core::convert::AsRef<std::path::Path> for smackdebt_discovery::RelativePath
 pub fn smackdebt_discovery::RelativePath::as_ref(&self) -> &std::path::Path
 impl core::fmt::Display for smackdebt_discovery::RelativePath
 pub fn smackdebt_discovery::RelativePath::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
+pub struct smackdebt_discovery::SnapshotInventory
+impl smackdebt_discovery::SnapshotInventory
+pub fn smackdebt_discovery::SnapshotInventory::packages(&self) -> &[(std::path::PathBuf, core::option::Option<alloc::string::String>)]
+pub fn smackdebt_discovery::SnapshotInventory::resolution_configs(&self) -> &[std::path::PathBuf]
+pub fn smackdebt_discovery::SnapshotInventory::source_paths(&self) -> &[std::path::PathBuf]
+pub fn smackdebt_discovery::discover_snapshot(&std::path::Path, &[std::path::PathBuf], impl core::ops::function::FnMut(&std::path::Path) -> core::io::error::Result<alloc::vec::Vec<u8>>) -> core::io::error::Result<smackdebt_discovery::SnapshotInventory>
 pub fn smackdebt_discovery::generic_source_roles(&std::path::Path) -> alloc::vec::Vec<smackdebt_analysis::source::SourceRole>
 pub fn smackdebt_discovery::glob_matches(&str, &str) -> bool

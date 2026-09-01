@@ -18,7 +18,7 @@ use ignore::{DirEntry, Walk, WalkBuilder};
 /// This rule applies regardless of ignore-file content and wins over `!`
 /// negations, because dependency directories are promised excluded by
 /// default.
-fn is_dependency_dir(name: &OsStr) -> bool {
+pub(crate) fn is_dependency_dir(name: &OsStr) -> bool {
     matches!(
         name.to_str(),
         Some(".git" | ".hg" | ".svn" | "target" | "node_modules" | "vendor")

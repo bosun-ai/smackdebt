@@ -184,6 +184,34 @@ mod tests {
     }
 
     #[test]
+    fn dependency_calls_and_exports_are_read_from_exact_syntax() {
+        let javascript = analyze(
+            "x.ts",
+            "export type WorkflowRunGraph = { note: 'from elsewhere' };\n\
+             export { run } from './run.js';\n\
+             required.value('./not-a-module');\n\
+             require('./needed.js');\n",
+        );
+        let targets: Vec<_> = javascript
+            .dependencies()
+            .iter()
+            .map(smackdebt_analysis::DependencySyntax::target)
+            .collect();
+        assert_eq!(targets, ["./run.js", "./needed.js"]);
+
+        let ruby = analyze(
+            "x.rb",
+            "requires :reason\nrequired.value('not-a-module')\nrequire_relative './needed'\n",
+        );
+        let targets: Vec<_> = ruby
+            .dependencies()
+            .iter()
+            .map(smackdebt_analysis::DependencySyntax::target)
+            .collect();
+        assert_eq!(targets, ["./needed"]);
+    }
+
+    #[test]
     fn listed_languages_use_owned_parsers_and_kotlin_stays_unsupported() {
         for (path, source) in [
             ("x.c", "int x(void) { return 1; }"),

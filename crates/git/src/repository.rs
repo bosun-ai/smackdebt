@@ -919,6 +919,65 @@ impl ObjectReader {
             .ok_or_else(|| GitError::UnsafeArgument(path.to_string_lossy().into_owned()))?;
         self.read_object(&format!("{reference}:{path}"))
     }
+
+    /// Lists regular files in one commit tree through this batch process.
+    pub fn tree_files(&mut self, reference: &str) -> Result<Vec<PathBuf>, GitError> {
+        validate_ref(reference)?;
+        let root = self.read_object(&format!("{reference}^{{tree}}"))?;
+        let mut files = Vec::new();
+        self.collect_tree_files(&root, Path::new(""), &mut files)?;
+        files.sort();
+        Ok(files)
+    }
+
+    fn collect_tree_files(
+        &mut self,
+        tree: &[u8],
+        parent: &Path,
+        files: &mut Vec<PathBuf>,
+    ) -> Result<(), GitError> {
+        let mut offset = 0;
+        while offset < tree.len() {
+            let mode_end = tree[offset..]
+                .iter()
+                .position(|byte| *byte == b' ')
+                .map(|position| offset + position)
+                .ok_or_else(|| GitError::InvalidOutput("tree entry lacks mode".into()))?;
+            let name_start = mode_end + 1;
+            let name_end = tree[name_start..]
+                .iter()
+                .position(|byte| *byte == 0)
+                .map(|position| name_start + position)
+                .ok_or_else(|| GitError::InvalidOutput("tree entry lacks name".into()))?;
+            let oid_start = name_end + 1;
+            let oid_end = oid_start + 20;
+            let oid = tree
+                .get(oid_start..oid_end)
+                .ok_or_else(|| GitError::InvalidOutput("tree entry lacks object id".into()))?;
+            let name = std::str::from_utf8(&tree[name_start..name_end])
+                .map_err(|_| GitError::InvalidOutput("tree path is not UTF-8".into()))?;
+            let path = parent.join(name);
+            let mode = &tree[offset..mode_end];
+            if mode == b"40000" {
+                let child = self.read_object(&hex_object_id(oid))?;
+                self.collect_tree_files(&child, &path, files)?;
+            } else if mode == b"100644" || mode == b"100755" {
+                files.push(path);
+            }
+            offset = oid_end;
+        }
+        Ok(())
+    }
+}
+
+fn hex_object_id(bytes: &[u8]) -> String {
+    const HEX: &[u8; 16] = b"0123456789abcdef";
+    let mut result = String::with_capacity(bytes.len() * 2);
+    for byte in bytes {
+        result.push(HEX[(byte >> 4) as usize] as char);
+        result.push(HEX[(byte & 0x0f) as usize] as char);
+    }
+    result
 }
 
 impl Drop for ObjectReader {
@@ -1383,6 +1442,24 @@ mod tests {
             reader.read_path("HEAD", Path::new("bad\nname.rs")),
             Err(GitError::UnsafeArgument(_))
         ));
+    }
+
+    #[test]
+    fn batch_reader_lists_tree_files_without_another_process() {
+        let repo = Repo::new();
+        fs::create_dir_all(repo.path.join("nested")).unwrap();
+        fs::write(repo.path.join("root.rs"), "fn root() {}\n").unwrap();
+        fs::write(repo.path.join("nested/leaf.rs"), "fn leaf() {}\n").unwrap();
+        git(&repo.path, ["add", "."]);
+        git(&repo.path, ["commit", "-qm", "tree"]);
+        let adapter = GitRepository::discover(&repo.path).unwrap();
+        let mut reader = adapter.object_reader(4).unwrap();
+        let processes = adapter.git_processes();
+        assert_eq!(
+            reader.tree_files("HEAD").unwrap(),
+            [PathBuf::from("nested/leaf.rs"), PathBuf::from("root.rs")]
+        );
+        assert_eq!(adapter.git_processes(), processes);
     }
 
     #[test]

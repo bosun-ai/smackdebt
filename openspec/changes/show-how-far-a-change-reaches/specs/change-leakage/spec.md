@@ -396,9 +396,11 @@ SHALL be implemented as named integer constants.
 ### Requirement: Change leakage states facts and never moves a verdict
 No change-leakage finding and no amplification fact SHALL change a tier, the
 counts behind it, the worst offender, a health rating, a size rating, or an
-architecture finding. They SHALL NOT enter a debt-diff selection, a comparison,
-or a diff verdict, so diff output is unchanged by this capability. They SHALL
-NOT enter the ratchet gate, which excludes history-derived signals by rule.
+architecture finding. Amplification SHALL NOT enter a debt-diff selection, a
+comparison, or a diff verdict. A leakage finding added or removed because the
+branch changed a trusted graph relation SHALL enter the existing architecture
+comparison family without becoming a tier input of its own. Neither fact SHALL
+enter the ratchet gate, which excludes history-derived signals by rule.
 
 A change-leakage finding SHALL be claimable by problem clustering exactly as an
 existing finding family is, and its rating SHALL be the Watch rating the finding
@@ -410,4 +412,4 @@ carries, so the vocabulary a reader already knows keeps its meaning.
 
 #### Scenario: A worktree diff is taken
 - **WHEN** a diff runs over a tree whose codebase report carries leakage findings
-- **THEN** the diff verdict, its per-family counts, and its selection are what they would be without the capability
+- **THEN** an added or removed trusted leakage finding appears as architecture movement while amplification remains absent

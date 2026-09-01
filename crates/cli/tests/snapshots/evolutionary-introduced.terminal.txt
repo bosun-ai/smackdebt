@@ -1,11 +1,16 @@
 smackdebt diff · repository root
-  You made it worse.
-worse 1 (evolutionary) · better 0 · changed 0
+  Better here, worse there.
+worse 1 (evolutionary) · better 1 (architecture) · changed 0
 
 AREAS
-  a · worse 1
+  a · worse 1 · better 1
   b · worse 1
+
+ARCHITECTURE
+  better change reaches less code · a · 2 of 3 → 1 of 3
 
 HISTORY
   watch a ↔ b changed together in 3 of 7 commits · 43% · no code dependency
   worse a ↔ b now change together without a code dependency
+
+  inspect directories and files for more details
