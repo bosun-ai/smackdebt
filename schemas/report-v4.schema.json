@@ -867,6 +867,7 @@
         "unit_kind",
         "kind",
         "direction",
+        "participation",
         "before",
         "after",
         "ratings"
@@ -906,6 +907,12 @@
             "worse",
             "better",
             "changed"
+          ]
+        },
+        "participation": {
+          "enum": [
+            "verdict",
+            "context"
           ]
         },
         "before": {

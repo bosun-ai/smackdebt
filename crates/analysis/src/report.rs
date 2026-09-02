@@ -760,6 +760,7 @@ pub struct Diagnostic {
     kind: DiagnosticKind,
     message: String,
     excluded_lines: u32,
+    verdict_eligible: bool,
 }
 
 impl Diagnostic {
@@ -776,6 +777,7 @@ impl Diagnostic {
             kind,
             message: message.into(),
             excluded_lines,
+            verdict_eligible: true,
         }
     }
 
@@ -793,6 +795,13 @@ impl Diagnostic {
     }
     pub const fn excluded_lines(&self) -> u32 {
         self.excluded_lines
+    }
+    pub const fn as_context(mut self) -> Self {
+        self.verdict_eligible = false;
+        self
+    }
+    pub const fn affects_verdict(&self) -> bool {
+        self.verdict_eligible
     }
 }
 
@@ -1578,10 +1587,7 @@ impl Report {
         let mut selection = DebtDiffSelection::default();
         for &id in scope.comparisons() {
             let comparison = &self.comparisons[id.index()];
-            let role = comparison
-                .file()
-                .map_or(SourceRole::Primary, |file| self.files[file.index()].role());
-            selection.select_source(comparison, role);
+            selection.select_source(comparison);
         }
         for &id in scope.architecture_comparisons() {
             selection.select_architecture(&self.architecture_comparisons[id.index()]);
@@ -2335,7 +2341,8 @@ mod tests {
                 ComparisonKind::Regressed,
                 Some(Rating::Healthy),
                 Some(Rating::High),
-            ),
+            )
+            .with_source_roles(Some(SourceRole::Fixture), Some(SourceRole::Fixture)),
         ];
         for member in members {
             let id = member.id();

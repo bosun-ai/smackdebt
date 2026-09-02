@@ -84,8 +84,10 @@ whenever measured repository share is unavailable.
 Anonymous semantic anchors, exact-syntax bytes, and their fingerprints SHALL remain
 opaque analysis input even though languages construct the analysis-owned value
 at the private workspace seam. Version 4 SHALL serialize only the existing human unit
-identity, source span, comparison kind, direction, measurements, ratings, and
-`ambiguous_identity` diagnostic needed to explain the result. It SHALL NOT add a
+identity, source span, comparison kind, direction, verdict participation,
+measurements, ratings, and `ambiguous_identity` diagnostic needed to explain
+the result. Each source comparison SHALL carry `participation` as `verdict` or
+`context` so its relation to `summary.debt_diff` is explicit. It SHALL NOT add a
 match-key, anchor, digest, source fragment, similarity score, or source ordinal
 member to any table.
 
@@ -100,3 +102,7 @@ member to any table.
 #### Scenario: An unmatched unit exists on one side
 - **WHEN** an anonymous unit has no plausible candidate on the other side
 - **THEN** JSON carries Added or Removed rather than `ambiguous`
+
+#### Scenario: A source role changes across a diff
+- **WHEN** either side of a retained comparison has a fixture or generated role
+- **THEN** JSON carries `participation: context`, retains the comparison, and excludes it from `summary.debt_diff`

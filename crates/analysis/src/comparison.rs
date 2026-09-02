@@ -3,7 +3,7 @@ use std::collections::BTreeMap;
 
 use crate::health::{HealthPolicy, Measurements, Rating};
 use crate::report::{ComparisonId, FileId};
-use crate::source::{SourceSpan, UnitFact, UnitIdentity, UnitMatchKey};
+use crate::source::{SourceRole, SourceSpan, UnitFact, UnitIdentity, UnitMatchKey};
 
 /// Whether a diff unit was added, removed, or changed.
 #[derive(Clone, Copy, Debug, Eq, Hash, Ord, PartialEq, PartialOrd)]
@@ -25,6 +25,13 @@ pub enum ComparisonDirection {
     Changed,
 }
 
+/// Whether a retained source comparison may move the diff verdict.
+#[derive(Clone, Copy, Debug, Eq, Hash, Ord, PartialEq, PartialOrd)]
+pub enum ComparisonParticipation {
+    Verdict,
+    Context,
+}
+
 /// A named unit comparison between two source versions.
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct Comparison {
@@ -38,6 +45,7 @@ pub struct Comparison {
     file: Option<FileId>,
     span: Option<SourceSpan>,
     anonymous_ambiguity: bool,
+    participation: ComparisonParticipation,
 }
 
 impl Comparison {
@@ -61,6 +69,7 @@ impl Comparison {
             file: None,
             span: None,
             anonymous_ambiguity: false,
+            participation: ComparisonParticipation::Verdict,
         }
     }
 
@@ -110,6 +119,29 @@ impl Comparison {
         self.anonymous_ambiguity = true;
         self
     }
+    /// Records whether every source side present may move diff debt.
+    ///
+    /// A fixture or generated side makes the whole comparison context, even
+    /// when the file's role changes on the other side of the diff.
+    pub const fn with_source_roles(
+        mut self,
+        before: Option<SourceRole>,
+        after: Option<SourceRole>,
+    ) -> Self {
+        self.participation = if role_is_verdict_eligible(before) && role_is_verdict_eligible(after)
+        {
+            ComparisonParticipation::Verdict
+        } else {
+            ComparisonParticipation::Context
+        };
+        self
+    }
+    pub const fn participation(&self) -> ComparisonParticipation {
+        self.participation
+    }
+    pub const fn affects_verdict(&self) -> bool {
+        matches!(self.participation, ComparisonParticipation::Verdict)
+    }
     pub const fn direction(&self) -> ComparisonDirection {
         match self.kind {
             ComparisonKind::Regressed => ComparisonDirection::Worse,
@@ -126,6 +158,13 @@ impl Comparison {
             | ComparisonKind::Ambiguous
             | ComparisonKind::Unchanged => ComparisonDirection::Changed,
         }
+    }
+}
+
+const fn role_is_verdict_eligible(role: Option<SourceRole>) -> bool {
+    match role {
+        Some(role) => role.affects_verdict(),
+        None => true,
     }
 }
 

@@ -30,7 +30,7 @@ use smackdebt_analysis::{
 };
 use smackdebt_discovery::{
     DiscoveredFile, Inventory, discover_snapshot, generic_source_roles, glob_matches,
-    is_source_path,
+    has_generated_javascript_name, is_source_path,
 };
 use smackdebt_git::{Change, ContributorIdentity, GitRepository};
 use smackdebt_languages::{AnalysisError as LanguageError, Analyzer};
@@ -1359,7 +1359,9 @@ fn analyze_diff_input(
 fn diff_units(side: &DiffSide) -> Option<&[smackdebt_analysis::UnitFact]> {
     match side {
         DiffSide::Missing => Some(&[]),
-        DiffSide::Analyzed { analysis, role, .. } if verdict_eligible(analysis, *role) => {
+        DiffSide::Analyzed { analysis, .. }
+            if matches!(analysis.parse_status(), ParseStatus::Parsed) =>
+        {
             Some(analysis.units())
         }
         _ => None,
@@ -1434,11 +1436,10 @@ fn add_diff_result(
     policy: HealthPolicy,
 ) {
     let file_id = FileId::from_index(result.index);
-    let has_ambiguous_identity = included_in_code_diff
-        && result
-            .comparisons
-            .iter()
-            .any(Comparison::is_anonymous_ambiguity);
+    let before_role = result.before.role();
+    let current_role = result.current.role();
+    let mut has_ambiguous_identity = false;
+    let mut ambiguity_affects_verdict = false;
 
     for comparison in result.comparisons.iter().filter(|_| included_in_code_diff) {
         let comparison_id = ComparisonId::from_index(indexes.comparison);
@@ -1451,25 +1452,32 @@ fn add_diff_result(
             comparison.before_rating(),
             comparison.after_rating(),
         )
-        .with_file(file_id);
+        .with_file(file_id)
+        .with_source_roles(before_role, current_role);
         if let Some(span) = comparison.span() {
             retained = retained.with_span(span);
         }
         if comparison.is_anonymous_ambiguity() {
+            has_ambiguous_identity = true;
             retained = retained.with_anonymous_ambiguity();
+            ambiguity_affects_verdict |= retained.affects_verdict();
         }
         report.add_comparison(retained);
         report.link_comparison(scope_id, comparison_id);
         indexes.comparison += 1;
     }
     if has_ambiguous_identity {
-        report.add_diagnostic(Diagnostic::new(
+        let mut diagnostic = Diagnostic::new(
             DiagnosticId::from_index(report.diagnostic_count()),
             Some(file_id),
             DiagnosticKind::AmbiguousIdentity,
             "anonymous units could not be matched safely",
             0,
-        ));
+        );
+        if !ambiguity_affects_verdict {
+            diagnostic = diagnostic.as_context();
+        }
+        report.add_diagnostic(diagnostic);
     }
 
     let selected = match &result.current {
@@ -1888,12 +1896,37 @@ fn classify_source_role(
     if Analyzer::has_generated_marker(path, source) {
         return Ok(SourceRole::Generated);
     }
+    if has_generated_javascript_name(path) || has_generated_javascript_content(path, source) {
+        return Ok(SourceRole::Generated);
+    }
     let generic = generic_source_roles(path);
     if generic.is_empty() {
         Ok(SourceRole::Primary)
     } else {
         one_role(generic)
     }
+}
+
+fn has_generated_javascript_content(path: &Path, source: &[u8]) -> bool {
+    const MINIMUM_BYTES: usize = 65_536;
+    const MINIMUM_BYTES_PER_NONEMPTY_LINE: usize = 512;
+
+    let supported_extension = path
+        .extension()
+        .and_then(|extension| extension.to_str())
+        .is_some_and(|extension| matches!(extension, "js" | "mjs" | "cjs" | "jsx" | "ts" | "tsx"));
+    if !supported_extension || source.len() < MINIMUM_BYTES {
+        return false;
+    }
+
+    let nonempty_lines = source
+        .split(|byte| *byte == b'\n')
+        .filter(|line| line.iter().any(|byte| !byte.is_ascii_whitespace()))
+        .count();
+    nonempty_lines != 0
+        && nonempty_lines
+            .checked_mul(MINIMUM_BYTES_PER_NONEMPTY_LINE)
+            .is_some_and(|minimum| source.len() >= minimum)
 }
 
 fn role_for_unavailable_source(
@@ -2327,6 +2360,15 @@ enum DiffSideSelector {
 }
 
 impl DiffSide {
+    fn role(&self) -> Option<SourceRole> {
+        match self {
+            Self::Analyzed { role, .. }
+            | Self::Unsupported { role, .. }
+            | Self::Failed { role, .. } => Some(*role),
+            Self::Missing | Self::RoleConflict { .. } => None,
+        }
+    }
+
     fn references(&self) -> &[DependencySyntax] {
         match self {
             Self::Analyzed { analysis, .. } => analysis.dependencies(),
@@ -5320,7 +5362,7 @@ mod tests {
     }
 
     #[test]
-    fn source_role_precedence_is_explicit_then_marker_then_generic_then_primary() {
+    fn source_role_precedence_keeps_explicit_rules_ahead_of_generated_javascript() {
         let generated = b"// @generated\nexport function work() {}\n";
         assert_eq!(
             classify_source_role(
@@ -5340,6 +5382,103 @@ mod tests {
         );
         assert_eq!(
             classify_source_role(Path::new("src/work.js"), b"function work() {}", &[]),
+            Ok(SourceRole::Primary)
+        );
+        assert_eq!(
+            classify_source_role(
+                Path::new("src/vendor.min.js"),
+                b"function work() {}",
+                &[SourceRoleRule::primary("src/vendor.min.js")],
+            ),
+            Ok(SourceRole::Primary)
+        );
+        assert_eq!(
+            classify_source_role(Path::new("tests/vendor.min.js"), b"function work() {}", &[],),
+            Ok(SourceRole::Generated)
+        );
+        assert_eq!(
+            classify_source_role(
+                Path::new("src/client.bundle.ts"),
+                b"function work() {}",
+                &[],
+            ),
+            Ok(SourceRole::Primary)
+        );
+    }
+
+    #[test]
+    fn generated_javascript_content_uses_exact_size_and_density_edges() {
+        let exact_edge = vec![b'x'; 65_536];
+        for path in [
+            "src/client.js",
+            "src/client.mjs",
+            "src/client.cjs",
+            "src/client.jsx",
+            "src/client.ts",
+            "src/client.tsx",
+        ] {
+            assert!(
+                has_generated_javascript_content(Path::new(path), &exact_edge),
+                "{path}",
+            );
+        }
+
+        let mut exact_lines = Vec::with_capacity(65_536);
+        for _ in 0..127 {
+            exact_lines.extend(std::iter::repeat_n(b'x', 511));
+            exact_lines.push(b'\n');
+        }
+        exact_lines.extend(std::iter::repeat_n(b'x', 512));
+        assert_eq!(exact_lines.len(), 65_536);
+        assert!(has_generated_javascript_content(
+            Path::new("src/client.js"),
+            &exact_lines,
+        ));
+
+        let below_size = vec![b'x'; 65_535];
+        assert!(!has_generated_javascript_content(
+            Path::new("src/client.js"),
+            &below_size,
+        ));
+
+        let mut below_density = exact_lines;
+        below_density[255] = b'\n';
+        assert!(!has_generated_javascript_content(
+            Path::new("src/client.js"),
+            &below_density,
+        ));
+        assert!(!has_generated_javascript_content(
+            Path::new("src/client.vue"),
+            &exact_edge,
+        ));
+    }
+
+    #[test]
+    fn ordinary_javascript_content_and_common_directories_remain_primary() {
+        let mut multiline = Vec::with_capacity(65_536);
+        for _ in 0..256 {
+            multiline.extend(std::iter::repeat_n(b'x', 255));
+            multiline.push(b'\n');
+        }
+        assert_eq!(multiline.len(), 65_536);
+        assert!(!has_generated_javascript_content(
+            Path::new("src/large.js"),
+            &multiline,
+        ));
+
+        for path in ["public/app.js", "share/tool.js", "assets/editor.js"] {
+            assert_eq!(
+                classify_source_role(Path::new(path), b"export const value = 1;", &[]),
+                Ok(SourceRole::Primary),
+                "{path}",
+            );
+        }
+        assert_eq!(
+            classify_source_role(
+                Path::new("src/authored.js"),
+                b"export const compact = true;",
+                &[],
+            ),
             Ok(SourceRole::Primary)
         );
     }

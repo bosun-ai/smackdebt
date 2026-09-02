@@ -112,7 +112,10 @@ architecture, and evolutionary movement in one decision from the debt-diff
 selection: the typed identities that count as human debt movement. Healthy
 added or removed units, unchanged and ambiguous comparisons, and fixture or
 generated source stay in the machine report and never move a verdict. Every
-family keeps its own counts, including zero counts, so a report can name the
+retained source comparison carries `participation` as `verdict` or `context`,
+derived once from both finalized source roles, so role transitions remain
+machine context without entering debt movement. Every family keeps its own
+counts, including zero counts, so a report can name the
 family that moved. The worst offender is the top of the same finding rank with
 its path resolved once, falling back to the first witness of a package cycle.
 The root verdict completes while the report is built, and any other retained
@@ -148,13 +151,17 @@ paths and file metadata. Source-role classification handles generated files
 instead of excluding a whole directory by name.
 
 Role classification has one fixed order: explicit configuration,
-language-owned generated markers, generic filename and path rules, the
-test-declared Rust module rule that project analysis applies once module
-declarations resolve, then the primary fallback. Conflicting matches at one
-level stop configuration with status 2. Primary, test, example, and benchmark source participate in default
-verdicts; fixture and generated source remain context. Each language owns its
-generated marker syntax, while discovery owns only generic path and filename
-rules.
+language-owned generated markers, generated JavaScript name and content
+evidence, generic filename and path rules, the test-declared Rust module rule
+that project analysis applies once module declarations resolve, then the
+primary fallback. Discovery owns the exact `.js`, `.mjs`, and `.cjs` filename
+shapes. Project composition applies the size and nonempty-line density rule to
+the source buffer it already read for JavaScript, JSX, TypeScript, and TSX; it
+does not reread source, and Vue remains outside that rule. Conflicting matches
+at one level stop configuration with status 2. Primary, test, example, and
+benchmark source participate in default verdicts; fixture and generated source
+remain context. Each language owns its generated marker syntax, while discovery
+owns path and filename rules.
 
 A directory containing one or more recognized manifests is one package root.
 Cargo, npm, Python, Maven, Gradle, CMake, Bundler, and gemspec manifests in the
@@ -644,6 +651,9 @@ Files expose SourceRole, parse outcome, and trust. Findings retain unit kind,
 role, trust, measurements, and spans, including recovered advisory facts that
 do not enter health or diff verdicts. Static relations expose `uses` or
 `module_ownership` separately from role, trust, resolution, and locations.
+Source comparisons expose `participation` as `verdict` or `context`. Analysis
+derives it once from both source sides after their roles are final, so a role
+transition stays inspectable without entering `summary.debt_diff`.
 History keeps eligible and context mappings separate and exposes exact churn,
 coupling, and concentration operands, plus the selected window. Hotspots, size
 findings, orphan files, stable-dependency findings, and knowledge-concentration

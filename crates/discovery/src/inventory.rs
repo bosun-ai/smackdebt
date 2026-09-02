@@ -479,6 +479,29 @@ pub fn generic_source_roles(path: &Path) -> Vec<SourceRole> {
     role.into_iter().collect()
 }
 
+/// Whether the file name is one of the generated JavaScript shapes.
+///
+/// This is deliberately name-only. Project composition applies it after
+/// explicit rules and language markers, before the generic path rules.
+pub fn has_generated_javascript_name(path: &Path) -> bool {
+    let Some(name) = path.file_name().and_then(|name| name.to_str()) else {
+        return false;
+    };
+    [
+        ".min.js",
+        ".min.mjs",
+        ".min.cjs",
+        ".bundle.js",
+        ".bundle.mjs",
+        ".bundle.cjs",
+        "-bundle.js",
+        "-bundle.mjs",
+        "-bundle.cjs",
+    ]
+    .iter()
+    .any(|suffix| name.ends_with(suffix) && name.len() > suffix.len())
+}
+
 /// A non-fatal inventory diagnostic.
 #[derive(Clone, Debug, Eq, PartialEq)]
 enum InventoryDiagnostic {
@@ -1379,6 +1402,37 @@ mod tests {
             ),
         ] {
             assert_eq!(generic_source_roles(Path::new(path)), vec![role], "{path}");
+        }
+    }
+
+    #[test]
+    fn generated_javascript_names_match_only_the_exact_file_shapes() {
+        for path in [
+            "vendor.min.js",
+            "vendor.min.mjs",
+            "vendor.min.cjs",
+            "client.bundle.js",
+            "client.bundle.mjs",
+            "client.bundle.cjs",
+            "client-bundle.js",
+            "client-bundle.mjs",
+            "client-bundle.cjs",
+            "public/client.bundle.js",
+        ] {
+            assert!(has_generated_javascript_name(Path::new(path)), "{path}");
+        }
+
+        for path in [
+            "client.bundle.ts",
+            "client.bundle.jsx",
+            "client-bundle.tsx",
+            "client.bundle.JS",
+            "bundle.js",
+            ".min.js",
+            "client.min.js.map",
+            "assets/editor.js",
+        ] {
+            assert!(!has_generated_javascript_name(Path::new(path)), "{path}");
         }
     }
 

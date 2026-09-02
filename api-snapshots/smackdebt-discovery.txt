@@ -36,4 +36,5 @@ pub fn smackdebt_discovery::SnapshotInventory::source_paths(&self) -> &[std::pat
 pub fn smackdebt_discovery::discover_snapshot(&std::path::Path, &[std::path::PathBuf], impl core::ops::function::FnMut(&std::path::Path) -> core::io::error::Result<alloc::vec::Vec<u8>>) -> core::io::error::Result<smackdebt_discovery::SnapshotInventory>
 pub fn smackdebt_discovery::generic_source_roles(&std::path::Path) -> alloc::vec::Vec<smackdebt_analysis::source::SourceRole>
 pub fn smackdebt_discovery::glob_matches(&str, &str) -> bool
+pub fn smackdebt_discovery::has_generated_javascript_name(&std::path::Path) -> bool
 pub fn smackdebt_discovery::is_source_path(&std::path::Path) -> bool

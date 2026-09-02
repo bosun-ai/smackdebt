@@ -94,19 +94,32 @@
 
 ## 3. Generated JavaScript context
 
-- [ ] 3.1 Add exact `.js`, `.mjs`, and `.cjs` generated filename fixtures,
+- [x] 3.1 Add exact `.js`, `.mjs`, and `.cjs` generated filename fixtures,
       prove explicit configuration wins, and prove similar authored names and
       small `.ts` bundle names follow the remaining rules.
-- [ ] 3.2 Apply the 65,536-byte and 512-byte-per-nonempty-line rule from the
+- [x] 3.2 Apply the 65,536-byte and 512-byte-per-nonempty-line rule from the
       existing source read with exact edge fixtures.
-- [ ] 3.3 Keep generated files in machine and file-detail views while excluding
+- [x] 3.3 Keep generated files in machine and file-detail views while excluding
       them from verdicts, root worst-offender selection, default problems, and
       codebase navigation.
-- [ ] 3.4 Prove a large ordinary multiline file and a small authored one-line
+- [x] 3.4 Prove a large ordinary multiline file and a small authored one-line
       file remain primary, and prove common directory names add no role alone.
-- [ ] 3.5 Build the release binary and verify Netdisco root and `diff HEAD~1`
+- [x] 3.5 Build the release binary and verify Netdisco root and `diff HEAD~1`
       keep authored Rust and JavaScript visible while bundled assets no longer
       own the default report before committing this slice.
+
+      **Completion note (2026-09-01).** Built the release binary and ran
+      Netdisco root and `diff HEAD~1` in terminal and JSON; all four invocations
+      exited 0. Root coverage was 90 selected and 90 analyzed, with no
+      unsupported or failed files and 14 generated files. The graph was
+      incomplete and withheld 2 reach facts. `swagger-ui-bundle.js` was
+      generated and no longer appeared as a worst offender, default problem, or
+      navigation target. Authored Rust was the first worst offender, authored
+      JavaScript remained in default problems, and navigation selected authored
+      JavaScript. The diff selected no source files, emitted no comparisons,
+      reported no debt change, and had incomplete current and base graph status
+      with zero withheld reach, core, or leakage comparisons. No private source
+      or complete private output was retained.
 
 ## 4. Neutral and representative diffs
 

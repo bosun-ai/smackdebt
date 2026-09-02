@@ -13,14 +13,16 @@ use unicode_width::UnicodeWidthStr;
 use support::coverage_failure_repository;
 use support::edges::assert_no_dependency_edge_rows;
 use support::hermetic::hermetic_env;
+#[cfg(feature = "evidence-stats")]
+use support::{Commit, Identity};
 use support::{
-    Commit, GeneratedRepository, Identity, Invocation, amplification_repository,
-    bulk_commit_repository, change_leakage_repository, copy_language_truth_files, core_repository,
-    deepened_signal_repository, evolution_repository, module_wiring_repository,
-    propagation_repository, ref_diff_repository, rust_test_scope_repository, shallow_clone,
-    signal_table_repository, source_role_repository, stable_dependency_repository,
-    static_architecture_repository, test_scoped_workspace_repository, wide_directory_repository,
-    workspace_manifest_repository, worktree_change_repository,
+    GeneratedRepository, Invocation, amplification_repository, bulk_commit_repository,
+    change_leakage_repository, copy_language_truth_files, core_repository,
+    deepened_signal_repository, evolution_repository, generated_javascript_repository,
+    module_wiring_repository, propagation_repository, ref_diff_repository,
+    rust_test_scope_repository, shallow_clone, signal_table_repository, source_role_repository,
+    stable_dependency_repository, static_architecture_repository, test_scoped_workspace_repository,
+    wide_directory_repository, workspace_manifest_repository, worktree_change_repository,
 };
 
 #[derive(Debug, Deserialize)]
@@ -185,6 +187,286 @@ fn every_source_role_matches_the_public_fact_manifest() {
     assert_eq!(report["health"][health]["high"], facts["verdict_findings"]);
     assert_eq!(report["findings"].as_array().unwrap().len(), 6);
     assert_golden("unified-source-roles.json", &result.stdout);
+}
+
+#[test]
+fn generated_javascript_stays_visible_without_owning_default_guidance() {
+    let repository = generated_javascript_repository();
+    let serial = Invocation::new(["--json"]).run(repository.path());
+    serial.success();
+    let automatic = Invocation::new(["--json"])
+        .automatic_workers()
+        .run(repository.path());
+    assert_eq!(serial, automatic);
+    let report = checked_json(&serial.stdout);
+    let root = report["root"].as_u64().unwrap() as usize;
+    assert_eq!(report["scopes"][root]["coverage"]["selected_files"], 20);
+    assert_eq!(report["scopes"][root]["coverage"]["analyzed_files"], 20);
+    assert_eq!(report["scopes"][root]["coverage"]["context_files"], 12);
+
+    let role = |expected_path: &str| {
+        report["files"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .find(|file| file_path(&report, file["id"].as_u64().unwrap()) == expected_path)
+            .unwrap_or_else(|| panic!("missing {expected_path}"))["role"]
+            .as_str()
+            .unwrap()
+    };
+    for path in [
+        "bundles/vendor.min.js",
+        "bundles/vendor.min.mjs",
+        "bundles/vendor.min.cjs",
+        "bundles/client.bundle.js",
+        "bundles/client.bundle.mjs",
+        "bundles/client.bundle.cjs",
+        "bundles/client-bundle.js",
+        "bundles/client-bundle.mjs",
+        "bundles/client-bundle.cjs",
+        "bundles/collision.bundle.js",
+        "src/dense.tsx",
+        "transitions/from-primary.js",
+    ] {
+        assert_eq!(role(path), "generated", "{path}");
+    }
+    for path in [
+        "authored/large.js",
+        "authored/compact.js",
+        "configured.min.js",
+        "src/client.bundle.ts",
+        "public/app.js",
+        "share/tool.js",
+        "assets/editor.js",
+        "transitions/from-generated.js",
+    ] {
+        assert_eq!(role(path), "primary", "{path}");
+    }
+    assert!(
+        report["findings"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .any(|finding| finding["role"] == "generated")
+    );
+    assert!(
+        report["problems"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .filter(|problem| problem["visibility"] == "default")
+            .all(|problem| {
+                let file = problem["anchor"]["file"].as_u64().unwrap();
+                role(&file_path(&report, file)) != "generated"
+            })
+    );
+    assert!(
+        report["summary"]["worst"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .all(|worst| role(worst["path"].as_str().unwrap()) != "generated")
+    );
+
+    let default_text = assert_generated_codebase_terminal(repository.path());
+    let next_path = default_text
+        .lines()
+        .find_map(|line| line.trim().strip_prefix("next: smackdebt "))
+        .expect("authored debt supplies a navigation target");
+    assert_ne!(role(next_path), "generated");
+
+    let diff = Invocation::new(["diff", "HEAD~1", "--json"]).run(repository.path());
+    diff.success();
+    let parallel_diff = Invocation::new(["diff", "HEAD~1", "--json"])
+        .automatic_workers()
+        .run(repository.path());
+    assert_eq!(diff, parallel_diff);
+    let diff_report = checked_json(&diff.stdout);
+    assert_generated_diff_report(&diff_report);
+
+    let diff_terminal =
+        Invocation::new(["diff", "HEAD~1", "--color", "never"]).run(repository.path());
+    diff_terminal.success();
+    let parallel_diff_terminal = Invocation::new(["diff", "HEAD~1", "--color", "never"])
+        .automatic_workers()
+        .run(repository.path());
+    assert_eq!(diff_terminal, parallel_diff_terminal);
+    let diff_text = String::from_utf8(diff_terminal.stdout).unwrap();
+    assert!(diff_text.contains("No debt changed."), "{diff_text}");
+    assert!(!diff_text.contains("FINDINGS"), "{diff_text}");
+    assert!(
+        !diff_text.contains("transitions/from-generated.js"),
+        "{diff_text}"
+    );
+    assert!(
+        !diff_text.contains("transitions/from-primary.js"),
+        "{diff_text}"
+    );
+    assert!(!diff_text.contains("anonymous units"), "{diff_text}");
+    assert!(!diff_text.contains("inspect directories"), "{diff_text}");
+    assert!(
+        diff_report["diagnostics"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .any(|diagnostic| diagnostic["kind"] == "ambiguous_identity")
+    );
+
+    assert_generated_diff_detail(repository.path());
+
+    let collision_detail = Invocation::new([
+        "diff",
+        "HEAD~1",
+        "bundles/collision.bundle.js",
+        "--color",
+        "never",
+    ])
+    .run(repository.path());
+    collision_detail.success();
+    assert!(
+        String::from_utf8(collision_detail.stdout)
+            .unwrap()
+            .contains("anonymous units that could not be matched safely")
+    );
+}
+
+fn assert_generated_diff_detail(repository: &Path) {
+    let all = Invocation::new(["diff", "HEAD~1", "--all", "--color", "never"]).run(repository);
+    all.success();
+    let parallel_all = Invocation::new(["diff", "HEAD~1", "--all", "--color", "never"])
+        .automatic_workers()
+        .run(repository);
+    assert_eq!(all, parallel_all);
+    let all_text = String::from_utf8(all.stdout).unwrap();
+    assert!(all_text.contains("FINDINGS"), "{all_text}");
+    assert!(
+        all_text.contains("transitions/from-generated.js"),
+        "{all_text}"
+    );
+    assert!(
+        all_text.contains("transitions/from-primary.js"),
+        "{all_text}"
+    );
+    assert!(
+        all_text.ends_with("  inspect directories and files for more details\n"),
+        "{all_text}"
+    );
+
+    let file = Invocation::new([
+        "diff",
+        "HEAD~1",
+        "transitions/from-generated.js",
+        "--color",
+        "never",
+    ])
+    .run(repository);
+    file.success();
+    let parallel_file = Invocation::new([
+        "diff",
+        "HEAD~1",
+        "transitions/from-generated.js",
+        "--color",
+        "never",
+    ])
+    .automatic_workers()
+    .run(repository);
+    assert_eq!(file, parallel_file);
+    let file_text = String::from_utf8(file.stdout).unwrap();
+    assert!(file_text.contains("FINDINGS"), "{file_text}");
+    assert!(
+        file_text.contains("transitions/from-generated.js"),
+        "{file_text}"
+    );
+    assert!(
+        file_text.ends_with("  inspect directories and files for more details\n"),
+        "{file_text}"
+    );
+}
+
+fn assert_generated_codebase_terminal(repository: &Path) -> String {
+    let default = Invocation::new(["--color", "never"]).run(repository);
+    default.success();
+    let automatic_default = Invocation::new(["--color", "never"])
+        .automatic_workers()
+        .run(repository);
+    assert_eq!(default, automatic_default);
+    let default_text = String::from_utf8(default.stdout).unwrap();
+    assert!(!default_text.contains("bundles/"), "{default_text}");
+    assert!(!default_text.contains("src/dense.tsx"), "{default_text}");
+    assert!(default_text.contains("authored/"), "{default_text}");
+
+    let all = Invocation::new(["--all", "--color", "never"]).run(repository);
+    all.success();
+    let automatic_all = Invocation::new(["--all", "--color", "never"])
+        .automatic_workers()
+        .run(repository);
+    assert_eq!(all, automatic_all);
+    let all_text = String::from_utf8(all.stdout).unwrap();
+    assert!(all_text.contains("bundles/vendor.min.js"), "{all_text}");
+    assert!(all_text.contains("src/dense.tsx"), "{all_text}");
+
+    let file = Invocation::new(["src/dense.tsx", "--color", "never"]).run(repository);
+    file.success();
+    let automatic_file = Invocation::new(["src/dense.tsx", "--color", "never"])
+        .automatic_workers()
+        .run(repository);
+    assert_eq!(file, automatic_file);
+    let file_text = String::from_utf8(file.stdout).unwrap();
+    assert!(file_text.contains("src/dense.tsx"), "{file_text}");
+    assert!(file_text.contains("generated"), "{file_text}");
+
+    default_text
+}
+
+fn assert_generated_diff_report(diff_report: &Value) {
+    let comparison_details: Vec<_> = diff_report["comparisons"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .map(|comparison| {
+            let file = comparison["file"].as_u64().unwrap();
+            (
+                file_path(diff_report, file),
+                comparison["kind"].as_str().unwrap(),
+                comparison["direction"].as_str().unwrap(),
+                comparison["participation"].as_str().unwrap(),
+                diff_report["files"][file as usize]["role"]
+                    .as_str()
+                    .unwrap(),
+            )
+        })
+        .collect();
+    assert_eq!(
+        diff_report["verdict"]["tier"], "no_debt_change",
+        "{comparison_details:?}"
+    );
+    assert_eq!(diff_report["summary"]["debt_diff"]["total"], 0);
+    let comparison_paths: HashSet<_> = diff_report["comparisons"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .filter_map(|comparison| comparison["file"].as_u64())
+        .map(|file| file_path(diff_report, file))
+        .collect();
+    for path in [
+        "bundles/vendor.min.js",
+        "bundles/collision.bundle.js",
+        "transitions/from-generated.js",
+        "transitions/from-primary.js",
+    ] {
+        assert!(comparison_paths.contains(path), "missing {path}");
+        assert!(
+            diff_report["comparisons"]
+                .as_array()
+                .unwrap()
+                .iter()
+                .any(|comparison| comparison["file"]
+                    .as_u64()
+                    .is_some_and(|file| file_path(diff_report, file) == path)
+                    && comparison["participation"] == "context"),
+            "{path} must remain machine context"
+        );
+    }
 }
 
 #[test]
@@ -2481,10 +2763,11 @@ fn executable_readme_examples_match_named_public_fixtures() {
     let readme =
         fs::read_to_string(Path::new(env!("CARGO_MANIFEST_DIR")).join("../../README.md")).unwrap();
     let examples = readme_examples(&readme);
-    assert_eq!(examples.len(), 2);
+    assert_eq!(examples.len(), 3);
     for example in examples {
         let repository = match example.fixture.as_str() {
             "evolution" => evolution_repository(),
+            "generated-javascript" => generated_javascript_repository(),
             "worktree-change" => worktree_change_repository(),
             other => panic!("unknown README fixture {other}"),
         };
@@ -2658,6 +2941,14 @@ fn composition_work_counts_are_visible_without_changing_report_bytes() {
         vec!["--json"],
         roles.path(),
         [1, 14, 6, 0, 3, 6, 8],
+    );
+
+    let generated = generated_javascript_repository();
+    assert_evidence_flow(
+        "generated density file JSON",
+        vec!["src/dense.tsx", "--json"],
+        generated.path(),
+        [1, 3, 1, 0, 3, 1, 3],
     );
 }
 
@@ -3173,10 +3464,12 @@ fn assert_debt_diff_selection(report: &Value) {
     for id in scope["comparisons"].as_array().unwrap() {
         let id = id.as_u64().unwrap() as usize;
         let comparison = &report["comparisons"][id];
-        let role = comparison["file"].as_u64().map_or("primary", |file| {
-            report["files"][file as usize]["role"].as_str().unwrap()
-        });
-        if role == "fixture" || role == "generated" {
+        let participation = comparison["participation"].as_str().unwrap();
+        assert!(
+            participation == "verdict" || participation == "context",
+            "unknown comparison participation {participation}"
+        );
+        if participation == "context" {
             continue;
         }
         let before = &comparison["ratings"]["before"];
@@ -3436,6 +3729,10 @@ fn assert_index_integrity(report: &Value) {
     }
     assert_eq!(diagnostics, report["diagnostics"].as_array().unwrap().len());
     for comparison in report["comparisons"].as_array().unwrap() {
+        assert!(matches!(
+            comparison["participation"].as_str(),
+            Some("verdict" | "context")
+        ));
         if let Some(file) = comparison["file"].as_u64() {
             assert!((file as usize) < files);
         }

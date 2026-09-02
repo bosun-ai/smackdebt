@@ -19,6 +19,14 @@ worst-offender selection, default problem cards, or codebase navigation.
 - **WHEN** a generated file outranks every authored file by measurements
 - **THEN** it remains machine and file-detail context but cannot become the root worst offender, a default problem, or the `next:` target
 
+#### Scenario: A file changes between generated and primary roles
+- **WHEN** either side of a retained source comparison has the generated role
+- **THEN** the comparison remains machine context and does not move diff debt in either transition direction
+
+#### Scenario: Only generated source has an anonymous collision
+- **WHEN** every comparison represented by an ambiguous-identity diagnostic is machine context
+- **THEN** the diagnostic remains available in JSON and file detail without adding a default warning or guidance footer
+
 ## ADDED Requirements
 
 ### Requirement: Generated JavaScript uses narrow name and content evidence

@@ -37,7 +37,7 @@ comparison directions, and genuine Rust cycle witnesses do not move.
 
 #### Scenario: Generated JavaScript is inspected
 - **WHEN** the generated-role fixture is rendered at root and at each file
-- **THEN** generated files remain machine and file-detail context, authored files remain primary, and generated files own no default verdict, problem, worst offender, or navigation target
+- **THEN** generated files remain machine and file-detail context, authored files remain primary, role transitions retain `participation: context` comparisons without debt movement, and generated files own no default verdict, warning, problem, worst offender, or navigation target
 
 #### Scenario: A mixed diff is limited
 - **WHEN** the default, `--top 1`, and `--all` terminal views are rendered

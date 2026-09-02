@@ -3,11 +3,11 @@ use std::io::{self, Write};
 use serde::Serialize;
 use serde::ser::{SerializeMap, SerializeSeq, Serializer};
 use smackdebt_analysis::{
-    ArchitectureComparison, ArchitectureFinding, Comparison, DependencyEdge, Diagnostic,
-    EvolutionaryComparison, EvolutionaryFinding, ExternalDependency, FileHistory, FileRecord,
-    Finding, HealthCounts, Measurements, PackageEdge, PackageGraphMeasurement, PackageHistory,
-    PackagePresence, PackageRecord, ParseStatus, Report, ResolutionDiagnostic, Scope, SourceRole,
-    SourceTrust, UnitKind,
+    ArchitectureComparison, ArchitectureFinding, Comparison, ComparisonParticipation,
+    DependencyEdge, Diagnostic, EvolutionaryComparison, EvolutionaryFinding, ExternalDependency,
+    FileHistory, FileRecord, Finding, HealthCounts, Measurements, PackageEdge,
+    PackageGraphMeasurement, PackageHistory, PackagePresence, PackageRecord, ParseStatus, Report,
+    ResolutionDiagnostic, Scope, SourceRole, SourceTrust, UnitKind,
 };
 
 use crate::output::{
@@ -1275,7 +1275,7 @@ impl Serialize for ComparisonView<'_> {
     {
         let comparison = self.0;
         let span = comparison.span();
-        let mut map = serializer.serialize_map(Some(12))?;
+        let mut map = serializer.serialize_map(Some(13))?;
         map.serialize_entry("id", &comparison.id().get())?;
         map.serialize_entry("file", &comparison.file().map(|id| id.get()))?;
         map.serialize_entry("start_line", &span.map(|span| span.start_line()))?;
@@ -1285,6 +1285,13 @@ impl Serialize for ComparisonView<'_> {
         map.serialize_entry("unit_kind", unit_kind_name(comparison.identity().kind()))?;
         map.serialize_entry("kind", comparison_name(comparison.kind()))?;
         map.serialize_entry("direction", direction_name(comparison.direction()))?;
+        map.serialize_entry(
+            "participation",
+            match comparison.participation() {
+                ComparisonParticipation::Verdict => "verdict",
+                ComparisonParticipation::Context => "context",
+            },
+        )?;
         map.serialize_entry("before", &comparison.before().map(MeasurementsView))?;
         map.serialize_entry("after", &comparison.after().map(MeasurementsView))?;
         map.serialize_entry("ratings", &RatingsView(comparison))?;

@@ -2866,6 +2866,10 @@ fn assert_index_integrity(report: &serde_json::Value) {
     for (index, comparison) in comparisons.iter().enumerate() {
         assert_eq!(comparison["id"], index);
         assert!(comparison["unit_kind"].is_string());
+        assert!(matches!(
+            comparison["participation"].as_str(),
+            Some("verdict" | "context")
+        ));
         if let Some(file) = comparison["file"].as_u64() {
             assert!((file as usize) < files.len());
         }

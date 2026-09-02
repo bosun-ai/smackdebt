@@ -12,7 +12,9 @@ use crate::propagation::{
     ROOT_REACH_REACHED,
 };
 use crate::report::{ComparisonId, DiffCounts};
-use crate::source::{SourceRole, UnitIdentity};
+#[cfg(test)]
+use crate::source::SourceRole;
+use crate::source::UnitIdentity;
 
 /// The frozen codebase answer.
 ///
@@ -639,8 +641,8 @@ impl DebtDiffSelection {
     /// moves debt only while it is rated, so the healthy units a refactor adds
     /// or deletes stay out. A measurement change counts only while the unit is
     /// rated. Fixture and generated source never moves a verdict.
-    pub fn select_source(&mut self, comparison: &Comparison, role: SourceRole) {
-        if !moves_debt(comparison, role) {
+    pub fn select_source(&mut self, comparison: &Comparison) {
+        if !moves_debt(comparison) {
             return;
         }
         self.source.push(comparison.id());
@@ -985,8 +987,8 @@ fn repeats<T: Copy + Ord>(identities: &[T]) -> bool {
     sorted.windows(2).any(|pair| pair[0] == pair[1])
 }
 
-fn moves_debt(comparison: &Comparison, role: SourceRole) -> bool {
-    if !role.affects_verdict() {
+fn moves_debt(comparison: &Comparison) -> bool {
+    if !comparison.affects_verdict() {
         return false;
     }
     match comparison.kind() {
@@ -1289,27 +1291,25 @@ mod tests {
     fn a_diff_that_moves_no_rated_debt_changed_nothing() {
         let mut selection = DebtDiffSelection::default();
         for index in 0..204 {
-            selection.select_source(
-                &source(index, ComparisonKind::Added, None, Some(Rating::Healthy)),
-                SourceRole::Primary,
-            );
-            selection.select_source(
-                &source(index, ComparisonKind::Removed, Some(Rating::Healthy), None),
-                SourceRole::Primary,
-            );
-            selection.select_source(
-                &source(
-                    index,
-                    ComparisonKind::Unchanged,
-                    Some(Rating::High),
-                    Some(Rating::High),
-                ),
-                SourceRole::Primary,
-            );
-            selection.select_source(
-                &source(index, ComparisonKind::Ambiguous, None, None),
-                SourceRole::Primary,
-            );
+            selection.select_source(&source(
+                index,
+                ComparisonKind::Added,
+                None,
+                Some(Rating::Healthy),
+            ));
+            selection.select_source(&source(
+                index,
+                ComparisonKind::Removed,
+                Some(Rating::Healthy),
+                None,
+            ));
+            selection.select_source(&source(
+                index,
+                ComparisonKind::Unchanged,
+                Some(Rating::High),
+                Some(Rating::High),
+            ));
+            selection.select_source(&source(index, ComparisonKind::Ambiguous, None, None));
         }
         assert!(selection.is_empty());
         assert_eq!(selection.tier(), DiffTier::NoDebtChange);
@@ -1365,7 +1365,7 @@ mod tests {
         ];
         for (comparison, direction) in members {
             let mut selection = DebtDiffSelection::default();
-            selection.select_source(&comparison, SourceRole::Primary);
+            selection.select_source(&comparison);
             assert_eq!(
                 selection.source(),
                 &[comparison.id()],
@@ -1381,33 +1381,34 @@ mod tests {
     #[test]
     fn a_healthy_metric_change_never_reaches_the_selection() {
         let mut selection = DebtDiffSelection::default();
-        selection.select_source(
-            &source(
-                0,
-                ComparisonKind::MetricChanged,
-                Some(Rating::Healthy),
-                Some(Rating::Healthy),
-            ),
-            SourceRole::Primary,
-        );
+        selection.select_source(&source(
+            0,
+            ComparisonKind::MetricChanged,
+            Some(Rating::Healthy),
+            Some(Rating::Healthy),
+        ));
         assert!(selection.source().is_empty());
     }
 
     #[test]
-    fn fixture_and_generated_source_never_moves_the_verdict() {
+    fn either_context_role_keeps_a_source_comparison_out_of_the_verdict() {
         for role in [SourceRole::Fixture, SourceRole::Generated] {
-            let mut selection = DebtDiffSelection::default();
-            selection.select_source(
-                &source(
+            for (before, after) in [
+                (Some(role), Some(SourceRole::Primary)),
+                (Some(SourceRole::Primary), Some(role)),
+            ] {
+                let mut selection = DebtDiffSelection::default();
+                let comparison = source(
                     0,
                     ComparisonKind::Regressed,
                     Some(Rating::Healthy),
                     Some(Rating::High),
-                ),
-                role,
-            );
-            assert!(selection.is_empty(), "{role:?}");
-            assert_eq!(selection.tier(), DiffTier::NoDebtChange);
+                )
+                .with_source_roles(before, after);
+                selection.select_source(&comparison);
+                assert!(selection.is_empty(), "{before:?} -> {after:?}");
+                assert_eq!(selection.tier(), DiffTier::NoDebtChange);
+            }
         }
         for role in [
             SourceRole::Primary,
@@ -1416,15 +1417,14 @@ mod tests {
             SourceRole::Benchmark,
         ] {
             let mut selection = DebtDiffSelection::default();
-            selection.select_source(
-                &source(
-                    0,
-                    ComparisonKind::Regressed,
-                    Some(Rating::Healthy),
-                    Some(Rating::High),
-                ),
-                role,
-            );
+            let comparison = source(
+                0,
+                ComparisonKind::Regressed,
+                Some(Rating::Healthy),
+                Some(Rating::High),
+            )
+            .with_source_roles(Some(role), Some(role));
+            selection.select_source(&comparison);
             assert_eq!(selection.tier(), DiffTier::Worse, "{role:?}");
         }
     }
@@ -1466,15 +1466,12 @@ mod tests {
     #[test]
     fn a_package_cycle_makes_a_diff_worse_when_no_source_comparison_moved() {
         let mut selection = DebtDiffSelection::default();
-        selection.select_source(
-            &source(
-                0,
-                ComparisonKind::Unchanged,
-                Some(Rating::High),
-                Some(Rating::High),
-            ),
-            SourceRole::Primary,
-        );
+        selection.select_source(&source(
+            0,
+            ComparisonKind::Unchanged,
+            Some(Rating::High),
+            Some(Rating::High),
+        ));
         selection.select_architecture(&architecture(
             0,
             ArchitectureComparisonKind::CycleIntroduced,
@@ -1612,9 +1609,9 @@ mod tests {
             Some(Rating::Healthy),
             Some(Rating::High),
         );
-        selection.select_source(&regression, SourceRole::Primary);
+        selection.select_source(&regression);
         assert!(!selection.has_duplicate_identity());
-        selection.select_source(&regression, SourceRole::Primary);
+        selection.select_source(&regression);
         assert!(selection.has_duplicate_identity());
     }
 

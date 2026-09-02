@@ -43,6 +43,9 @@ pub smackdebt_analysis::ComparisonKind::MetricChanged
 pub smackdebt_analysis::ComparisonKind::Regressed
 pub smackdebt_analysis::ComparisonKind::Removed
 pub smackdebt_analysis::ComparisonKind::Unchanged
+pub enum smackdebt_analysis::ComparisonParticipation
+pub smackdebt_analysis::ComparisonParticipation::Context
+pub smackdebt_analysis::ComparisonParticipation::Verdict
 pub enum smackdebt_analysis::CouplingLink
 pub smackdebt_analysis::CouplingLink::Direct
 pub smackdebt_analysis::CouplingLink::Indirect(smackdebt_analysis::PackageId)
@@ -337,6 +340,7 @@ pub const fn smackdebt_analysis::ChangeLeakageFindingId::get(self) -> u32
 pub const fn smackdebt_analysis::ChangeLeakageFindingId::index(self) -> usize
 pub struct smackdebt_analysis::Comparison
 impl smackdebt_analysis::Comparison
+pub const fn smackdebt_analysis::Comparison::affects_verdict(&self) -> bool
 pub const fn smackdebt_analysis::Comparison::after(&self) -> core::option::Option<smackdebt_analysis::Measurements>
 pub const fn smackdebt_analysis::Comparison::after_rating(&self) -> core::option::Option<smackdebt_analysis::Rating>
 pub const fn smackdebt_analysis::Comparison::before(&self) -> core::option::Option<smackdebt_analysis::Measurements>
@@ -348,9 +352,11 @@ pub fn smackdebt_analysis::Comparison::identity(&self) -> &smackdebt_analysis::U
 pub const fn smackdebt_analysis::Comparison::is_anonymous_ambiguity(&self) -> bool
 pub const fn smackdebt_analysis::Comparison::kind(&self) -> smackdebt_analysis::ComparisonKind
 pub fn smackdebt_analysis::Comparison::new(smackdebt_analysis::ComparisonId, smackdebt_analysis::UnitIdentity, smackdebt_analysis::ComparisonKind, core::option::Option<smackdebt_analysis::Measurements>, core::option::Option<smackdebt_analysis::Measurements>, core::option::Option<smackdebt_analysis::Rating>, core::option::Option<smackdebt_analysis::Rating>) -> Self
+pub const fn smackdebt_analysis::Comparison::participation(&self) -> smackdebt_analysis::ComparisonParticipation
 pub const fn smackdebt_analysis::Comparison::span(&self) -> core::option::Option<smackdebt_analysis::SourceSpan>
 pub const fn smackdebt_analysis::Comparison::with_anonymous_ambiguity(self) -> Self
 pub fn smackdebt_analysis::Comparison::with_file(self, smackdebt_analysis::FileId) -> Self
+pub const fn smackdebt_analysis::Comparison::with_source_roles(self, core::option::Option<smackdebt_analysis::SourceRole>, core::option::Option<smackdebt_analysis::SourceRole>) -> Self
 pub const fn smackdebt_analysis::Comparison::with_span(self, smackdebt_analysis::SourceSpan) -> Self
 pub struct smackdebt_analysis::ComparisonId(_)
 impl smackdebt_analysis::ComparisonId
@@ -462,7 +468,7 @@ pub fn smackdebt_analysis::DebtDiffSelection::select_change_leakage(&mut self, s
 pub fn smackdebt_analysis::DebtDiffSelection::select_core(&mut self, &smackdebt_analysis::CoreComparison)
 pub fn smackdebt_analysis::DebtDiffSelection::select_evolutionary(&mut self, smackdebt_analysis::EvolutionaryComparison)
 pub fn smackdebt_analysis::DebtDiffSelection::select_propagation(&mut self, smackdebt_analysis::PropagationComparison)
-pub fn smackdebt_analysis::DebtDiffSelection::select_source(&mut self, &smackdebt_analysis::Comparison, smackdebt_analysis::SourceRole)
+pub fn smackdebt_analysis::DebtDiffSelection::select_source(&mut self, &smackdebt_analysis::Comparison)
 pub fn smackdebt_analysis::DebtDiffSelection::source(&self) -> &[smackdebt_analysis::ComparisonId]
 pub const fn smackdebt_analysis::DebtDiffSelection::tier(&self) -> smackdebt_analysis::DiffTier
 pub struct smackdebt_analysis::DependencyCoverage
@@ -516,6 +522,8 @@ pub fn smackdebt_analysis::DependencySyntax::with_span(self, smackdebt_analysis:
 pub fn smackdebt_analysis::DependencySyntax::with_test_scope(self) -> Self
 pub struct smackdebt_analysis::Diagnostic
 impl smackdebt_analysis::Diagnostic
+pub const fn smackdebt_analysis::Diagnostic::affects_verdict(&self) -> bool
+pub const fn smackdebt_analysis::Diagnostic::as_context(self) -> Self
 pub const fn smackdebt_analysis::Diagnostic::excluded_lines(&self) -> u32
 pub const fn smackdebt_analysis::Diagnostic::file(&self) -> core::option::Option<smackdebt_analysis::FileId>
 pub const fn smackdebt_analysis::Diagnostic::id(&self) -> smackdebt_analysis::DiagnosticId

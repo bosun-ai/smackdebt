@@ -859,12 +859,26 @@ or directory subtree while keeping displayed paths repository-relative.
 
 Every selected file has one source role: primary, test, example, benchmark,
 fixture, or generated. Classification checks explicit `source_roles`
-configuration first, then language-owned generated markers, generic filenames
-and paths, then a Rust file whose every module declaration is test-scoped, and
-finally primary. Different matches at the same level are an
+configuration first, then language-owned generated markers. It next treats
+`.min`, `.bundle`, and `-bundle` names as generated for `.js`, `.mjs`, and
+`.cjs` files. JavaScript, JSX, TypeScript, and TSX source is also generated when
+it is at least 65,536 bytes and averages at least 512 bytes per nonempty
+physical line. That content check uses the source already read for analysis;
+Vue documents do not use it. Generic filenames and paths follow, then a Rust
+file whose every module declaration is test-scoped, and finally primary.
+Different matches at the same level are an
 invalid configuration and exit with status 2. Primary, test, example, and
 benchmark source affect default verdicts. Fixture and generated source remain
-visible for inspection without affecting those verdicts.
+visible in JSON, `--all`, and explicit file inspection without affecting
+verdicts, default problems, root worst-offender selection, or navigation.
+Explicit configuration wins over generated evidence. Directory names alone do
+not assign the generated role, so authored source under `public`, `share`, or
+`assets` remains authored unless another rule matches it.
+
+<!-- smackdebt-example fixture=generated-javascript status=0 stderr=empty stdout=smackdebt_·_bundles/vendor.min.js|0_high|PROBLEMS|generated -->
+```console
+smackdebt bundles/vendor.min.js --color never
+```
 
 Files that cannot be parsed stay visible in the coverage summary. Smackdebt
 does not quietly count them as healthy.
@@ -924,6 +938,12 @@ terminal prints for it. In a diff the tier and sentence are the diff answer and
 `summary.worst` names at most three offenders with real repository-relative
 path strings. Every value in the head also exists in a table, and both come from
 the same completed report.
+
+Each source comparison has `participation: "verdict"` or
+`participation: "context"`. Context comparisons remain available for tools and
+file inspection but do not enter `summary.debt_diff`. The value is derived from
+both sides of the comparison, so a change between generated and primary roles
+is explained without treating generated source as debt movement.
 
 When any selected source file was not analyzed, the verdict block always says:
 

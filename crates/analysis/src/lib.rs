@@ -107,7 +107,9 @@ pub use stable_dependencies::{MINIMUM_STABLE_DEPENDENCY_REFERENCES, stable_depen
 pub use strongly_connected_components::strongly_connected_components;
 pub use test_scope::{ModuleDeclaration, test_declared_files};
 
-pub use comparison::{Comparison, ComparisonDirection, ComparisonKind, compare_units};
+pub use comparison::{
+    Comparison, ComparisonDirection, ComparisonKind, ComparisonParticipation, compare_units,
+};
 pub use health::{
     HealthAssessment, HealthCounts, HealthPolicy, Measurements, Rating, Signal, SignalAssessment,
     Thresholds,

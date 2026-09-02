@@ -410,12 +410,14 @@ impl Presentation {
         let ambiguous_identity = report.diagnostics().iter().any(|diagnostic| {
             diagnostic.kind() == DiagnosticKind::AmbiguousIdentity
                 && diagnostic_belongs_to_scope(report, diagnostic, selected)
+                && (file_detail || diagnostic.affects_verdict())
         });
         let verdict_only = report.mode() == ReportMode::Diff
             && verdict.diff_tier() == Some(DiffTier::NoDebtChange)
             && verdict.qualifier().is_none()
             && !withheld_graph_comparison
-            && !ambiguous_identity;
+            && !ambiguous_identity
+            && findings.rows.is_empty();
         let next = match report.mode() {
             ReportMode::Codebase => first_problem_path(report, displayed, selected, all)
                 .or_else(|| drill_path_from_visible(report, selected, areas.first()))
@@ -1258,13 +1260,29 @@ fn diff_finding_rows(
     selection: &DebtDiffSelection,
 ) -> Section {
     let mut section = Section::new("FINDINGS");
-    // The selection already holds each debt-moving comparison exactly once,
-    // so this visits every identity without a de-duplication set.
+    // Default output follows the debt-moving selection. Detail output adds
+    // changed context rows from the retained scope links, without duplicating
+    // verdict rows or admitting healthy authored changes.
     let mut comparisons: Vec<&Comparison> = selection
         .source()
         .iter()
         .map(|id| &report.comparisons()[id.index()])
         .collect();
+    if all || displayed.kind() == ScopeKind::File {
+        comparisons.extend(
+            displayed
+                .comparisons()
+                .iter()
+                .map(|id| &report.comparisons()[id.index()])
+                .filter(|comparison| {
+                    !comparison.affects_verdict()
+                        && !matches!(
+                            comparison.kind(),
+                            ComparisonKind::Unchanged | ComparisonKind::Ambiguous
+                        )
+                }),
+        );
+    }
     comparisons.sort_by(|left, right| {
         direction_rank(left.direction())
             .cmp(&direction_rank(right.direction()))
@@ -1743,7 +1761,7 @@ fn warning_rows(report: &Report, selected: &Scope, file_detail: bool) -> (Sectio
     warnings.extend(history_warnings(report));
     warnings.extend(graph_evidence_warning(report).map(warning));
     warnings.extend(resolution_warning(report, selected));
-    warnings.extend(diagnostic_warnings(report, selected));
+    warnings.extend(diagnostic_warnings(report, selected, file_detail));
     section.rows = warnings;
     if file_detail {
         // An import that could not be followed is file detail; at every other
@@ -1806,7 +1824,7 @@ fn diagnostic_belongs_to_scope(report: &Report, diagnostic: &Diagnostic, selecte
         .is_none_or(|file| file_belongs_to_scope(report, file, selected))
 }
 
-fn diagnostic_warnings(report: &Report, selected: &Scope) -> Vec<Row> {
+fn diagnostic_warnings(report: &Report, selected: &Scope, include_context: bool) -> Vec<Row> {
     let mut warnings = Vec::new();
     for kind in [
         DiagnosticKind::NestedRepository,
@@ -1826,6 +1844,9 @@ fn diagnostic_warnings(report: &Report, selected: &Scope) -> Vec<Row> {
             .filter(|diagnostic| {
                 diagnostic_belongs_to_scope(report, diagnostic, selected)
                     && diagnostic.kind() == kind
+                    && (kind != DiagnosticKind::AmbiguousIdentity
+                        || include_context
+                        || diagnostic.affects_verdict())
             })
             .filter(|diagnostic| !diagnostic.message().starts_with("Git history"))
         {

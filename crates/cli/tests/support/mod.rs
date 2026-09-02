@@ -282,6 +282,93 @@ pub(crate) fn source_role_repository() -> GeneratedRepository {
     repository
 }
 
+pub(crate) fn generated_javascript_repository() -> GeneratedRepository {
+    fn exact_size_source(nonempty_lines: usize) -> Vec<u8> {
+        let mut source =
+            b"export function work(a, b) { if (a) { if (b) { return 1; } } return 0; }\n".to_vec();
+        for _ in 1..nonempty_lines - 1 {
+            source.extend_from_slice(b"//x\n");
+        }
+        source.extend_from_slice(b"//");
+        source.resize(65_536, b'x');
+        source
+    }
+
+    let repository = GeneratedRepository::new("main");
+    repository.write("package.json", b"{}\n");
+    repository.write(
+        ".smackdebt.toml",
+        b"[thresholds.cognitive]\nwatch=1\nhigh=2\n[thresholds.cyclomatic]\nwatch=1\nhigh=2\n[thresholds.function_lines]\nwatch=1\nhigh=2\n[source_roles]\nprimary=['configured.min.js']\n",
+    );
+    let source = b"export function work(a, b) { if (a) { if (b) { return 1; } } return 0; }\n";
+    for path in [
+        "bundles/vendor.min.js",
+        "bundles/vendor.min.mjs",
+        "bundles/vendor.min.cjs",
+        "bundles/client.bundle.js",
+        "bundles/client.bundle.mjs",
+        "bundles/client.bundle.cjs",
+        "bundles/client-bundle.js",
+        "bundles/client-bundle.mjs",
+        "bundles/client-bundle.cjs",
+    ] {
+        repository.write(path, source);
+    }
+    let collision = b"items.map(() => { if (ready) { return 1; } return 0; });\nitems.map(() => { if (ready) { return 1; } return 0; });\n";
+    repository.write("bundles/collision.bundle.js", collision);
+    repository.write("src/dense.tsx", &exact_size_source(128));
+    repository.write("authored/large.js", &exact_size_source(129));
+    repository.write("authored/compact.js", source);
+    repository.write("configured.min.js", source);
+    repository.write("src/client.bundle.ts", source);
+    repository.write("public/app.js", source);
+    repository.write("share/tool.js", source);
+    repository.write("assets/editor.js", source);
+    repository.write("transitions/from-generated.js", &exact_size_source(128));
+    repository.write("transitions/from-primary.js", source);
+    repository.commit(Commit {
+        message: "test: generated javascript context",
+        identity: Identity {
+            name: "Generated Fixture",
+            address: "generated-fixture@example.invalid",
+        },
+        date: "2026-01-01T12:00:00Z",
+    });
+    repository.write(
+        "transitions/from-generated.js",
+        b"export function work(a, b, c) { if (a) { if (b) { if (c) { return 3; } } } return 0; }\n",
+    );
+    let mut primary_to_generated = exact_size_source(128);
+    let first_line_end = primary_to_generated
+        .iter()
+        .position(|byte| *byte == b'\n')
+        .unwrap();
+    primary_to_generated.splice(
+        ..=first_line_end,
+        b"export function work(a, b, c) { if (a) { if (b) { if (c) { return 4; } } } return 0; }\n"
+            .iter()
+            .copied(),
+    );
+    primary_to_generated.truncate(65_536);
+    repository.write("transitions/from-primary.js", &primary_to_generated);
+    let mut changed_collision = b"// changed outside the callbacks\n".to_vec();
+    changed_collision.extend_from_slice(collision);
+    repository.write("bundles/collision.bundle.js", &changed_collision);
+    repository.write(
+        "bundles/vendor.min.js",
+        b"export function work(a, b, c) { if (a) { if (b) { if (c) { return 2; } } } return 0; }\n",
+    );
+    repository.commit(Commit {
+        message: "test: change generated javascript context",
+        identity: Identity {
+            name: "Generated Fixture",
+            address: "generated-fixture@example.invalid",
+        },
+        date: "2026-01-02T12:00:00Z",
+    });
+    repository
+}
+
 /// A repository whose findings tie until the role class and hot rank keys.
 ///
 /// `src/hot.js` carries fewer statements than `src/cold.js` but changes in five
