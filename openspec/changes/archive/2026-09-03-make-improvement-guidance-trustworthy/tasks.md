@@ -258,5 +258,17 @@
       graph and improvement-guidance features. Release evidence, performance
       tests, the debt gate, strict OpenSpec validation, diff checks, and the
       complete workspace check passed.
-- [ ] 5.5 Update product and architecture documentation to match verified bytes,
+- [x] 5.5 Update product and architecture documentation to match verified bytes,
       then archive this change only after every task is complete.
+
+      **Completion note (2026-09-03).** Audited the README, architecture guide,
+      schema, checked examples, and acceptance bytes against one fresh release
+      build. Smackdebt and Fluyt root and diff runs agreed in terminal and JSON.
+      The architecture guide now distinguishes codebase reach, core, and leakage
+      facts from their current/base diff comparisons, qualifies verdict-only
+      no-debt output when comparison confidence is reduced, and lists gate exit
+      status 3. README examples, exact diff sentences and footer, coverage,
+      Astro, generated JavaScript, anonymous matching, graph suppression,
+      problem rank, and all nine release profiles already matched. Focused README
+      tests, acceptance, the debt gate, strict OpenSpec validation, diff checks,
+      and the complete workspace check passed before archival.

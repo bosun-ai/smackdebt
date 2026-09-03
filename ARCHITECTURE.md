@@ -496,10 +496,11 @@ yields each package's reach-in count; every package large enough for the fact to
 mean anything and small enough for the closure node limit is closed over
 eagerly, one transient bit set at a time, so rendering a scope
 from a finished report performs no closure; the file components already computed
-for cycle findings give the core size; and a bounded candidate set of cycle
-members and hub-degree files carries one exact reverse reach each. Every one of
-these facts is stated only: none moves a tier, a count, or a worst offender, and
-none reaches the ratchet gate or a diff report.
+for cycle findings give the core size; and a fixed candidate set of cycle
+members and hub-degree files carries one exact reverse reach each. In a codebase
+report these facts are stated only: none moves a tier, a count, or a worst
+offender, and none reaches the ratchet gate. Diff analysis compares the
+corresponding facts from the current and base graphs as described above.
 
 The selected history window is applied once, where streamed records become
 facts, so activity, churn, coupling, and concentration describe the same
@@ -607,8 +608,9 @@ qualifier exists. Reach, core, and
 change-size aggregates stay out of the terminal verdict because they do not name
 an action. `AREAS` appears
 only for several debt-bearing children and shows at most five with word-labeled
-counts. `WARNINGS` groups one sentence per kind. A diff that moves no debt
-writes the verdict block and nothing after it.
+counts. `WARNINGS` groups one sentence per kind. A diff that moves no debt and
+has no comparison-confidence warning writes the verdict block and nothing after
+it.
 
 Codebase debt is one `PROBLEMS` section rendered from the ranked problem table.
 The renderer filters that table by anchor to the displayed scope, truncates it,
@@ -664,7 +666,7 @@ JSON starts with `schema_version: 4` and then answers the common question
 before any table. `verdict` states the frozen tier id, its analysis-owned
 sentence, and the mode; `summary` states the checked, high, watch, and
 High-architecture counts, the word-labeled debt-diff totals, and up to three
-fully resolved worst offenders carrying path strings. The head is a bounded
+fully resolved worst offenders carrying path strings. The head is a small
 denormalization of facts the tables also carry, produced from the same
 completed verdict, and acceptance rebuilds it from those tables.
 
@@ -722,7 +724,8 @@ Exit codes describe report production, not code health:
 
 - `0`: report produced;
 - `1`: analysis could not produce a report;
-- `2`: invalid arguments or configuration.
+- `2`: invalid arguments or configuration;
+- `3`: gate baseline exceeded.
 
 One bad file does not stop a codebase report. Invocation failures go to standard
 error. JSON standard output stays valid when the report contains non-fatal
