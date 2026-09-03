@@ -169,7 +169,7 @@
 
 ## 5. Real-repository proof and closeout
 
-- [ ] 5.1 Consume the task 0.1 completion note and run one newly built release
+- [x] 5.1 Consume the task 0.1 completion note and run one newly built release
       binary on Smackdebt root and `diff d4e78ba`, Fluyt root and
       `diff master`, GraphEditor current
       `f42f3ae8e76241e06254b7787a87a2f198fb70c2` against base
@@ -177,13 +177,50 @@
       Astro file, Astro directory and `diff HEAD`, Netdisco root and
       `diff HEAD~1`, Swiftide root and `diff HEAD~1`, and Parity
       `diff HEAD~1`.
-- [ ] 5.2 For every run record selected, analyzed, unsupported, and failed file
+- [x] 5.2 For every run record selected, analyzed, unsupported, and failed file
       counts; graph status; emitted and suppressed architecture comparisons;
       visible directions; terminal footer when present; and exit status. Review
       that terminal and JSON agree and that no private source enters fixtures.
-- [ ] 5.3 Run format, clippy, workspace tests, strict OpenSpec validation, diff
+- [x] 5.3 Run format, clippy, workspace tests, strict OpenSpec validation, diff
       checks, API snapshots, dependency-direction checks, allocation checks,
       acceptance snapshots, and `rtk just check`.
+
+      **Completion note (2026-09-03).** Built one fresh release binary from
+      `1218040625a1d0c6a55b4f9ae7b05523e30b03dd`; its SHA-256 was
+      `9ee555c46c00b37601275ac0069ed4a36ab76d60db278d7e0d6bfbd4d68e9018`.
+      Every matrix command ran once with plain terminal output and once with
+      `--json --jobs 1`; every invocation exited 0. The digest is SHA-256 of
+      the complete JSON bytes. Coverage is selected/analyzed/unsupported/failed.
+      Graph is current/base for diffs and current for codebase reports.
+      Suppression is propagation/core/leakage. Comparison counts are
+      source/emitted package-cycle/propagation/core/leakage/history rows.
+
+      | Case and command | JSON digest | Coverage | Graph; suppression | Comparisons | Terminal and review |
+      | --- | --- | --- | --- | --- | --- |
+      | Smackdebt `1218040`: `smackdebt`, `smackdebt diff d4e78ba` | `2fbef48026adfef627ff75cfb4fad712aa898100827479dd3357e0b7d1898bfd`, `4e8040f5049ff9d4503c6345e1ddc47404159b9846604d7a037bdd6e7e39f792` | 120/120/0/0, 31/31/0/0 | incomplete; 1/1/0, incomplete/incomplete; 0/0/0 | 0/0/0/0/0/0, 766/0/0/0/0/0 | root is worn; diff is mixed 3 worse, 7 better, 12 changed, visibly shows one row in each direction, and has the footer. Closure rows are 237 Added, 26 Removed, and 71 ambiguous across the later 31-file diff; 18 files carry the grouped warning, so unsafe matches stay visible rather than being guessed. |
+      | Fluyt `ea3aceb` with its current worktree: `smackdebt`, `smackdebt diff master` | `f2b74c5e5c692b78eaa95b1b6101e1a974c61cea9b45795659f64e703985a646`, `4393ae01305fdfda29b882a678fc207b992a208646a4f6d76a9677eee8f2e039` | 1887/1887/0/0, 63/63/0/0 | incomplete; 4/0/0, incomplete/incomplete; 1/0/0 | 0/0/0/0/0/0, 342/0/1/0/0/0 | root fights back; diff is mixed 4 worse, 2 better, 2 changed, visibly shows every direction, and has the footer. `WorkflowRunMiniMap.vue` has no comparison because it is unchanged from `master`. The 21-file anonymous warning is honest but still leaves a broad drill-down. |
+      | Clean detached GraphEditor `f42f3ae8e...`: `smackdebt diff 02caca0d3bf05599e1232130cf9265cc9926c9b3` | `36e2b0e8f4583105abedf47aace27c98f196bd67f358f614ecb84fa2ab9a914f` | 24/24/0/0 | incomplete/incomplete; 2/0/0 | 259/0/1/0/0/0 | worse 6, better 0, changed 2; three worse rows are visible and the footer is present. `GraphEditor.vue` has 27 Added, 1 Removed, 20 MetricChanged, and 11 ambiguous groups, replacing the pre-change 125 Added and 95 Removed while retaining the 20 changed rows. |
+      | Marketing `85bfabe` with its current worktree: `smackdebt`, `smackdebt src/pages/demo.astro`, `smackdebt src/pages`, `smackdebt diff HEAD` | `4e39b8cbc7862084e8ae21ca23095bb7512f1cdd11e84cf40f84ca51a830c312`, `c407e58656a5f1b4a47b868ae1b4f1c3450a200a387dbe16db0b2e6a161cad08`, `7225ebdadbcb9e39f821f0151528a042319adc1219ccb2b94a2f48e999eec14b`, `fb1971d15922786a2179aae42221d4f07a07acbfe871b8b2ab7bdb406f3ad111` | 117/2/115/0, 1/0/1/0, 27/0/27/0, 3/0/3/0 | incomplete; 0/0/0, incomplete; 0/0/0, incomplete; 0/0/0, incomplete/incomplete; 0/0/0 | all zero | root, file, and directory retain their exact scopes and state their exact incomplete coverage. Diff says no debt changed, explains 0 of 3 analyzed, and has the footer. The result is truthful but offers little debt guidance until Astro has analysis support. |
+      | Netdisco `fe5eeae`: `smackdebt`, `smackdebt diff HEAD~1` | `a581d23843625c99f6ffdc78f6805ca0f7ca0f5b08fa202e29d009f534e010a8`, `cf0e3a6365184600f285f5c631e1e56259cdd2f3f8bf193ef1cd444de83dc092` | 90/90/0/0, 0/0/0/0 | incomplete; 2/0/0, incomplete/incomplete; 0/0/0 | all zero | root fights back; the named bundle is one of 14 generated files and is absent from default output. Authored Rust is worst, and authored JavaScript remains in problems and navigation. Large public JavaScript still fills much of the short report, so project role configuration may still be needed. Diff is verdict-only with no footer. |
+      | Swiftide `aadfb7b`: `smackdebt`, `smackdebt diff HEAD~1` | `cc940aa1f1366dae64c0d121b430d7ce53f695722a971fbbe5a893577745f11b`, `7bf8c2b7958b5e57c5885d3b6a355677990a294e2a10176d23bac66e399767d0` | 207/207/0/0, 3/3/0/0 | incomplete; 3/0/0, incomplete/incomplete; 0/0/0 | 0/0/0/0/0/0, 14/0/0/0/0/0 | root is worn. Diff says no debt changed, retains precise `complete`, `complete_stream`, and `prompt` method comparisons in JSON, and shows one anonymous-match warning plus the footer. The default warning preserves trust but requires a file drill-down to act on it. |
+      | Clean detached Parity `b30f99a8fe29aa386358aafc83d78d64ca88e8bf`: `smackdebt diff HEAD~1` | `39af894a4ae315f04a839a8ce2702fb188b0cd1ed29b75cd12afba3ff20bd809` | 0/0/0/0 | incomplete/incomplete; 0/0/0 | all zero | the documentation-only commit is exactly the no-debt verdict form with no footer. |
+
+      Jobs 1 and jobs 4 produced byte-identical terminal and JSON output for
+      Smackdebt `diff d4e78ba`, Fluyt `diff master`, the detached GraphEditor
+      comparison, and the detached Parity comparison. Repository movement since
+      task 0.1 is recorded as observed state rather than treated as a product
+      failure. Terminal conclusions and counts agreed with JSON in every case.
+      No private source, contributor identity, raw history, secret, or complete
+      private terminal or JSON output was retained. Both temporary worktrees
+      were removed after review.
+
+      The explicit format, clippy, workspace-test, strict OpenSpec, diff,
+      architecture, API-snapshot, dependency-direction, allocation, and
+      acceptance checks passed. Workspace tests reported 649 passed and 1
+      ignored; the focused allocation check passed; both API snapshot modes
+      passed; and the final `rtk just check` passed, including acceptance
+      evidence, performance checks, and the debt gate. Release baselines were
+      deliberately not run.
 - [ ] 5.4 Run release baselines only after the complete correctness gate passes,
       review every output and workload change, and complete the deferred release
       task only when its evidence is valid.
