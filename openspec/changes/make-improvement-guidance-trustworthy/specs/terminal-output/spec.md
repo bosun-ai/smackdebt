@@ -131,8 +131,9 @@ more than `n` debt-comparison rows across all three families and SHALL select th
 first `n` rows by the exact key without reservation. No view SHALL add an
 omitted-row notice.
 
-Every non-empty diff SHALL end, after any warnings, with the exact undecorated
-line `  inspect directories and files for more details\n`. It SHALL NOT print a
+Every diff that renders a comparison section or warning SHALL end, after any
+warnings, with the exact undecorated line
+`  inspect directories and files for more details\n`. It SHALL NOT print a
 `next:` line. A `no_debt_change` diff SHALL remain verdict-only unless one of
 these comparison-trust facts exists: an incomplete-coverage qualifier or
 warning, an anonymous-match warning, a suppressed graph-comparison warning, or
@@ -154,8 +155,8 @@ concentration, coupling, and other context SHALL NOT pierce verdict-only output.
 - **WHEN** the user supplies `--top 1` to a mixed diff
 - **THEN** exactly one ranked row is visible and the report does not expand to represent every direction
 
-#### Scenario: A non-empty diff is rendered
-- **WHEN** any terminal diff has at least one visible section or warning
+#### Scenario: Diff detail is rendered
+- **WHEN** a terminal diff has at least one visible comparison section or warning
 - **THEN** its final bytes are exactly `  inspect directories and files for more details\n` and it contains no `next:` line
 
 #### Scenario: No debt changed

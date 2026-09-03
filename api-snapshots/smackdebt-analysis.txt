@@ -601,11 +601,13 @@ pub const fn smackdebt_analysis::EvolutionaryFindingId::get(self) -> u32
 pub const fn smackdebt_analysis::EvolutionaryFindingId::index(self) -> usize
 pub struct smackdebt_analysis::EvolutionaryReportFacts
 impl smackdebt_analysis::EvolutionaryReportFacts
+pub fn smackdebt_analysis::EvolutionaryReportFacts::comparison_suppressions(&self) -> &[smackdebt_analysis::HistoryComparisonSuppression]
 pub fn smackdebt_analysis::EvolutionaryReportFacts::comparisons(&self) -> &[smackdebt_analysis::EvolutionaryComparison]
 pub fn smackdebt_analysis::EvolutionaryReportFacts::concentration_findings(&self) -> &[smackdebt_analysis::KnowledgeConcentrationFinding]
 pub fn smackdebt_analysis::EvolutionaryReportFacts::file_coupling(&self) -> &[smackdebt_analysis::FileChangeCoupling]
 pub fn smackdebt_analysis::EvolutionaryReportFacts::findings(&self) -> &[smackdebt_analysis::EvolutionaryFinding]
 pub fn smackdebt_analysis::EvolutionaryReportFacts::new(smackdebt_analysis::HistoryCoverage, alloc::vec::Vec<smackdebt_analysis::FileHistory>, alloc::vec::Vec<smackdebt_analysis::PackageHistory>, alloc::vec::Vec<smackdebt_analysis::ChangeCoupling>, alloc::vec::Vec<smackdebt_analysis::ContributorConcentration>, alloc::vec::Vec<smackdebt_analysis::EvolutionaryFinding>, alloc::vec::Vec<smackdebt_analysis::EvolutionaryComparison>) -> Self
+pub fn smackdebt_analysis::EvolutionaryReportFacts::with_comparison_suppressions(self, alloc::vec::Vec<smackdebt_analysis::HistoryComparisonSuppression>) -> Self
 pub fn smackdebt_analysis::EvolutionaryReportFacts::with_concentration_findings(self, alloc::vec::Vec<smackdebt_analysis::KnowledgeConcentrationFinding>) -> Self
 pub fn smackdebt_analysis::EvolutionaryReportFacts::with_file_coupling(self, alloc::vec::Vec<smackdebt_analysis::FileChangeCoupling>) -> Self
 pub struct smackdebt_analysis::ExternalDependency
@@ -802,6 +804,17 @@ impl smackdebt_analysis::HistoryCommitFact
 pub fn smackdebt_analysis::HistoryCommitFact::changes(&self) -> &[smackdebt_analysis::HistoryChangeFact]
 pub const fn smackdebt_analysis::HistoryCommitFact::contributor(&self) -> smackdebt_analysis::ContributorId
 pub fn smackdebt_analysis::HistoryCommitFact::new(smackdebt_analysis::ContributorId, alloc::vec::Vec<smackdebt_analysis::HistoryChangeFact>) -> Self
+pub struct smackdebt_analysis::HistoryComparisonSuppression
+impl smackdebt_analysis::HistoryComparisonSuppression
+pub const fn smackdebt_analysis::HistoryComparisonSuppression::id(self) -> smackdebt_analysis::HistoryComparisonSuppressionId
+pub const fn smackdebt_analysis::HistoryComparisonSuppression::left(self) -> smackdebt_analysis::PackageId
+pub const fn smackdebt_analysis::HistoryComparisonSuppression::new(smackdebt_analysis::HistoryComparisonSuppressionId, smackdebt_analysis::PackageId, smackdebt_analysis::PackageId) -> Self
+pub const fn smackdebt_analysis::HistoryComparisonSuppression::right(self) -> smackdebt_analysis::PackageId
+pub struct smackdebt_analysis::HistoryComparisonSuppressionId(_)
+impl smackdebt_analysis::HistoryComparisonSuppressionId
+pub const fn smackdebt_analysis::HistoryComparisonSuppressionId::from_index(usize) -> Self
+pub const fn smackdebt_analysis::HistoryComparisonSuppressionId::get(self) -> u32
+pub const fn smackdebt_analysis::HistoryComparisonSuppressionId::index(self) -> usize
 pub struct smackdebt_analysis::HistoryCoverage
 impl smackdebt_analysis::HistoryCoverage
 pub const fn smackdebt_analysis::HistoryCoverage::availability(&self) -> smackdebt_analysis::HistoryAvailability
@@ -1099,6 +1112,7 @@ pub fn smackdebt_analysis::ReportBuilder::link_evolutionary_comparison(&mut self
 pub fn smackdebt_analysis::ReportBuilder::link_evolutionary_finding(&mut self, smackdebt_analysis::ScopeId, smackdebt_analysis::EvolutionaryFindingId)
 pub fn smackdebt_analysis::ReportBuilder::link_file(&mut self, smackdebt_analysis::ScopeId, smackdebt_analysis::FileId)
 pub fn smackdebt_analysis::ReportBuilder::link_finding(&mut self, smackdebt_analysis::ScopeId, smackdebt_analysis::FindingId)
+pub fn smackdebt_analysis::ReportBuilder::link_history_comparison_suppression(&mut self, smackdebt_analysis::ScopeId, smackdebt_analysis::HistoryComparisonSuppressionId)
 pub fn smackdebt_analysis::ReportBuilder::link_propagation_comparison(&mut self, smackdebt_analysis::ScopeId, smackdebt_analysis::PropagationComparisonId)
 pub fn smackdebt_analysis::ReportBuilder::new(smackdebt_analysis::ReportMode) -> Self
 pub fn smackdebt_analysis::ReportBuilder::set_architecture(&mut self, smackdebt_analysis::ArchitectureReportFacts)
@@ -1145,6 +1159,7 @@ pub fn smackdebt_analysis::Scope::add_evolutionary_comparison(&mut self, smackde
 pub fn smackdebt_analysis::Scope::add_evolutionary_finding(&mut self, smackdebt_analysis::EvolutionaryFindingId)
 pub fn smackdebt_analysis::Scope::add_file(&mut self, smackdebt_analysis::FileId)
 pub fn smackdebt_analysis::Scope::add_finding(&mut self, smackdebt_analysis::FindingId)
+pub fn smackdebt_analysis::Scope::add_history_comparison_suppression(&mut self, smackdebt_analysis::HistoryComparisonSuppressionId)
 pub fn smackdebt_analysis::Scope::add_propagation_comparison(&mut self, smackdebt_analysis::PropagationComparisonId)
 pub fn smackdebt_analysis::Scope::architecture_comparisons(&self) -> &[smackdebt_analysis::ArchitectureComparisonId]
 pub fn smackdebt_analysis::Scope::architecture_findings(&self) -> &[smackdebt_analysis::ArchitectureFindingId]
@@ -1159,6 +1174,7 @@ pub fn smackdebt_analysis::Scope::evolutionary_findings(&self) -> &[smackdebt_an
 pub fn smackdebt_analysis::Scope::files(&self) -> &[smackdebt_analysis::FileId]
 pub fn smackdebt_analysis::Scope::findings(&self) -> &[smackdebt_analysis::FindingId]
 pub const fn smackdebt_analysis::Scope::health(&self) -> smackdebt_analysis::HealthCounts
+pub fn smackdebt_analysis::Scope::history_comparison_suppressions(&self) -> &[smackdebt_analysis::HistoryComparisonSuppressionId]
 pub const fn smackdebt_analysis::Scope::id(&self) -> smackdebt_analysis::ScopeId
 pub const fn smackdebt_analysis::Scope::kind(&self) -> smackdebt_analysis::ScopeKind
 pub fn smackdebt_analysis::Scope::name(&self) -> &str

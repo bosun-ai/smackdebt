@@ -23,8 +23,8 @@ use crate::{
 use crate::{
     ChangeCoupling, ContributorConcentration, CouplingLink, EvolutionaryComparison,
     EvolutionaryComparisonId, EvolutionaryFinding, EvolutionaryFindingId, EvolutionaryReportFacts,
-    FileChangeCoupling, FileHistory, HistoryCoverage, KnowledgeConcentrationFinding,
-    PackageHistory,
+    FileChangeCoupling, FileHistory, HistoryComparisonSuppression, HistoryComparisonSuppressionId,
+    HistoryCoverage, KnowledgeConcentrationFinding, PackageHistory,
 };
 #[cfg(test)]
 use crate::{HealthPolicy, LocalUnitId, Signal, Thresholds, compare_units};
@@ -413,6 +413,7 @@ pub struct Scope {
     change_leakage_comparisons: Vec<ChangeLeakageComparisonId>,
     evolutionary_findings: Vec<EvolutionaryFindingId>,
     evolutionary_comparisons: Vec<EvolutionaryComparisonId>,
+    history_comparison_suppressions: Vec<HistoryComparisonSuppressionId>,
     coverage: Coverage,
     health: HealthCounts,
     diff: DiffCounts,
@@ -442,6 +443,7 @@ impl Scope {
             change_leakage_comparisons: Vec::new(),
             evolutionary_findings: Vec::new(),
             evolutionary_comparisons: Vec::new(),
+            history_comparison_suppressions: Vec::new(),
             coverage: Coverage::default(),
             health: HealthCounts::default(),
             diff: DiffCounts::default(),
@@ -493,6 +495,9 @@ impl Scope {
     }
     pub fn evolutionary_comparisons(&self) -> &[EvolutionaryComparisonId] {
         &self.evolutionary_comparisons
+    }
+    pub fn history_comparison_suppressions(&self) -> &[HistoryComparisonSuppressionId] {
+        &self.history_comparison_suppressions
     }
     pub const fn diff(&self) -> DiffCounts {
         self.diff
@@ -560,6 +565,14 @@ impl Scope {
     pub fn add_evolutionary_comparison(&mut self, comparison: EvolutionaryComparisonId) {
         if !self.evolutionary_comparisons.contains(&comparison) {
             self.evolutionary_comparisons.push(comparison);
+        }
+    }
+    pub fn add_history_comparison_suppression(
+        &mut self,
+        suppression: HistoryComparisonSuppressionId,
+    ) {
+        if !self.history_comparison_suppressions.contains(&suppression) {
+            self.history_comparison_suppressions.push(suppression);
         }
     }
     pub fn set_path(&mut self, path: PathId) {
@@ -847,6 +860,7 @@ pub struct Report {
     contributor_concentration: Vec<ContributorConcentration>,
     evolutionary_findings: Vec<EvolutionaryFinding>,
     evolutionary_comparisons: Vec<EvolutionaryComparison>,
+    history_comparison_suppressions: Vec<HistoryComparisonSuppression>,
     hotspots: Vec<Hotspot>,
     size_findings: Vec<SizeFinding>,
     orphan_files: Vec<OrphanFile>,
@@ -1048,6 +1062,7 @@ impl ReportBuilder {
         self.report.contributor_concentration = facts.concentration;
         self.report.evolutionary_findings = facts.findings;
         self.report.evolutionary_comparisons = facts.comparisons;
+        self.report.history_comparison_suppressions = facts.comparison_suppressions;
         self.report.knowledge_concentration_findings = facts.concentration_findings;
     }
 
@@ -1093,6 +1108,14 @@ impl ReportBuilder {
         comparison: EvolutionaryComparisonId,
     ) {
         self.report.scopes[scope.index()].add_evolutionary_comparison(comparison);
+    }
+
+    pub fn link_history_comparison_suppression(
+        &mut self,
+        scope: ScopeId,
+        suppression: HistoryComparisonSuppressionId,
+    ) {
+        self.report.scopes[scope.index()].add_history_comparison_suppression(suppression);
     }
 
     pub fn link_file(&mut self, scope: ScopeId, file: FileId) {
@@ -1244,6 +1267,7 @@ impl Report {
             contributor_concentration: Vec::new(),
             evolutionary_findings: Vec::new(),
             evolutionary_comparisons: Vec::new(),
+            history_comparison_suppressions: Vec::new(),
             hotspots: Vec::new(),
             size_findings: Vec::new(),
             orphan_files: Vec::new(),
@@ -1917,6 +1941,12 @@ fn aggregate_scope(scopes: &mut [Scope], files: &[FileRecord], scope_id: ScopeId
         for comparison_id in comparison_ids {
             scopes[index].add_evolutionary_comparison(comparison_id);
         }
+        let suppression_ids = scopes[child_id.index()]
+            .history_comparison_suppressions
+            .clone();
+        for suppression_id in suppression_ids {
+            scopes[index].add_history_comparison_suppression(suppression_id);
+        }
     }
     scopes[index].coverage = coverage;
     scopes[index].health = health;
@@ -1932,6 +1962,41 @@ mod tests {
     use crate::hotspot::Hotspot;
     use crate::verdict::{CodebaseTier, DebtFamily, DiffTier, WorstOffenderReason};
     use crate::{ComparisonKind, UnitFact, UnitKind};
+
+    mod history_suppression_tests {
+        use super::*;
+
+        #[test]
+        fn history_comparison_suppression_follows_affected_scope_links() {
+            let mut builder = ReportBuilder::new(ReportMode::Diff);
+            let root = ScopeId::from_index(0);
+            let package = ScopeId::from_index(1);
+            let mut root_scope = Scope::new(root, ScopeKind::Repository, ".", None);
+            root_scope.add_child(package);
+            builder.add_scope(root_scope);
+            builder.add_scope(Scope::new(package, ScopeKind::Package, "app", Some(root)));
+            builder.set_root(root);
+            let suppression = HistoryComparisonSuppression::new(
+                HistoryComparisonSuppressionId::from_index(0),
+                PackageId::from_index(0),
+                PackageId::from_index(1),
+            );
+            builder.set_evolution(
+                EvolutionaryReportFacts::default().with_comparison_suppressions(vec![suppression]),
+            );
+            builder.link_history_comparison_suppression(package, suppression.id());
+
+            let report = builder.finish();
+            assert_eq!(
+                report.scopes()[package.index()].history_comparison_suppressions(),
+                &[suppression.id()]
+            );
+            assert_eq!(
+                report.scopes()[root.index()].history_comparison_suppressions(),
+                &[suppression.id()]
+            );
+        }
+    }
 
     /// Builds a one-package repository whose single file carries the given
     /// units, so verdict composition can be proven without any project work.
@@ -2359,7 +2424,7 @@ mod tests {
         assert_eq!(verdict.selection().source(), &[ComparisonId::from_index(0)]);
         assert!(!verdict.selection().has_duplicate_identity());
         assert_eq!(verdict.diff_tier(), Some(DiffTier::Worse));
-        assert_eq!(verdict.sentence(), "You made it worse.");
+        assert_eq!(verdict.sentence(), "Debt increased.");
         assert_eq!(verdict.facts().source(), DiffCounts::new(1, 0, 0));
         // The healthy addition and the fixture regression stay in the machine
         // report while neither moves the verdict.
@@ -2407,7 +2472,7 @@ mod tests {
         let report = fixture.finish();
         let verdict = report.verdict().unwrap();
         assert_eq!(verdict.diff_tier(), Some(DiffTier::Worse));
-        assert_eq!(verdict.sentence(), "You made it worse.");
+        assert_eq!(verdict.sentence(), "Debt increased.");
         assert!(verdict.facts().moved(DebtFamily::Architecture));
         assert!(!verdict.facts().moved(DebtFamily::Source));
         assert_eq!(verdict.facts().source(), DiffCounts::default());

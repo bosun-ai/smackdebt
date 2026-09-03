@@ -620,6 +620,22 @@ Architecture rows include cycle, reach, core, and leakage movement, each with a
 named subject and exact evidence. Navigation opens the first visible row against
 the same comparison ref.
 
+Diff presentation applies one comparison limit across those three sections. Its
+stable key is direction, section family, repository-relative subject or pair,
+present start line before an absent line, family kind, then comparison identity.
+The default mixed view first reserves one row for every present direction and
+fills its remaining space from that key. An explicit `--top` takes its requested
+count directly, while `--all` keeps every useful row. Current history context and
+generated-source detail do not consume the default comparison limit. The tier
+ids and movement rules stay fixed; their sentences describe debt movement
+without addressing the reader.
+
+A no-debt diff stops after its verdict unless comparison confidence is reduced
+by incomplete source, anonymous matching, withheld graph comparisons, renames,
+or history availability. In that case only the related qualifier and warnings
+are shown before the detail footer. Current history findings do not open a
+documentation-only diff.
+
 Empty optional sections, healthy rows, bars, summary ratios, processing totals,
 raw dependency edges, references outside the repository, churn totals,
 cyclomatic-one values, weak coupling, and omission bookkeeping stay out of every

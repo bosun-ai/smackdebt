@@ -74,7 +74,8 @@ pub use evolution::{
     EvolutionAccumulator, EvolutionaryComparison, EvolutionaryComparisonId,
     EvolutionaryComparisonKind, EvolutionaryFinding, EvolutionaryFindingId,
     EvolutionaryFindingKind, EvolutionaryReportFacts, FileChangeCoupling, FileChangeCouplingId,
-    FileHistory, HistoryAvailability, HistoryChangeFact, HistoryCommitFact, HistoryCoverage,
+    FileHistory, HistoryAvailability, HistoryChangeFact, HistoryCommitFact,
+    HistoryComparisonSuppression, HistoryComparisonSuppressionId, HistoryCoverage,
     KnowledgeConcentrationFinding, KnowledgeConcentrationFindingId, PackageHistory,
 };
 pub use evolutionary_comparison::compare_evolution;

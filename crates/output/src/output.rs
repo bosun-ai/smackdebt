@@ -1,7 +1,7 @@
 //! Stable terminal and JSON views over the shared report.
 
 use std::cmp::Reverse;
-use std::collections::BTreeSet;
+use std::collections::{BTreeMap, BTreeSet};
 use std::fmt;
 use std::io::{self, Write};
 use std::num::NonZeroUsize;
@@ -16,8 +16,8 @@ use smackdebt_analysis::{
     KnowledgeConcentrationFindingId, Language, Measurements, PackageId, ProblemAnchor, ProblemCard,
     ProblemEvidence, ProblemPattern, ProblemVisibility, PropagationReach, Rating, Report,
     ReportMode, ResolutionIssueKind, Scope, ScopeId, ScopeKind, Signal, SizeFinding, SizeFindingId,
-    SourceRole, SourceTrust, StableDependencyFindingId, UnitKind, Verdict, instability,
-    qualifies_for_finding,
+    SourceRole, SourceTrust, StableDependencyFindingId, UnitIdentity, UnitKind, Verdict,
+    instability, qualifies_for_finding,
 };
 use unicode_width::{UnicodeWidthChar, UnicodeWidthStr};
 
@@ -307,6 +307,68 @@ struct Section {
     rows: Vec<Row>,
 }
 
+#[derive(Clone, Copy, Debug, Eq, Ord, PartialEq, PartialOrd)]
+enum DiffRowIdentity {
+    Source(usize),
+    Cycle(usize),
+    Core(usize),
+    Propagation(usize),
+    Leakage(usize),
+    History(usize),
+}
+
+#[derive(Clone, Debug, Eq, Ord, PartialEq, PartialOrd)]
+struct DiffRowKey {
+    direction: ComparisonDirection,
+    family: DiffFamily,
+    subject: String,
+    line: DiffLine,
+    kind: (ArchitectureDiffKind, u16),
+    comparison_identity: DiffComparisonIdentity,
+}
+
+#[derive(Clone, Copy, Debug, Eq, Ord, PartialEq, PartialOrd)]
+enum DiffFamily {
+    Source,
+    Architecture,
+    History,
+}
+
+#[derive(Clone, Copy, Debug, Eq, Ord, PartialEq, PartialOrd)]
+enum DiffLine {
+    Present(u32),
+    Absent,
+}
+
+#[derive(Clone, Debug, Eq, Ord, PartialEq, PartialOrd)]
+enum DiffComparisonIdentity {
+    Source(UnitIdentity),
+    Paths(Vec<String>),
+}
+
+#[derive(Debug, Eq, Ord, PartialEq, PartialOrd)]
+struct DiffRowCandidate {
+    key: DiffRowKey,
+    token: DiffRowIdentity,
+}
+
+#[derive(Debug, Default)]
+struct DiffRowSelection(BTreeMap<DiffRowIdentity, DiffRowKey>);
+
+impl DiffRowSelection {
+    fn contains(&self, identity: DiffRowIdentity) -> bool {
+        self.0.contains_key(&identity)
+    }
+
+    fn key(&self, identity: DiffRowIdentity) -> &DiffRowKey {
+        &self.0[&identity]
+    }
+
+    fn len(&self) -> usize {
+        self.0.len()
+    }
+}
+
 impl Section {
     const fn new(heading: &'static str) -> Self {
         Self {
@@ -338,9 +400,29 @@ struct Presentation {
     next: Option<String>,
     /// Whether a clean diff suppresses every section after the verdict.
     verdict_only: bool,
+    /// Whether a no-debt diff shows only comparison-confidence warnings.
+    trust_only: bool,
 }
 
 impl Presentation {
+    fn empty(mode: ReportMode) -> Self {
+        Self {
+            mode,
+            scope_label: terminal_path(".").to_owned(),
+            verdict: Verdict::default(),
+            areas: Section::new("AREAS"),
+            problems: Section::new("PROBLEMS"),
+            findings: Section::new("FINDINGS"),
+            architecture: Section::new("ARCHITECTURE"),
+            history: Section::new("HISTORY"),
+            warnings: Section::new("WARNINGS"),
+            warning_detail: Vec::new(),
+            next: None,
+            verdict_only: false,
+            trust_only: false,
+        }
+    }
+
     fn new(
         report: &Report,
         selected_scope: Option<ScopeId>,
@@ -351,29 +433,11 @@ impl Presentation {
             .or_else(|| report.root())
             .and_then(|id| report.scopes().get(id.index()));
         let Some(selected) = selected else {
-            return Self {
-                mode: report.mode(),
-                scope_label: terminal_path(".").to_owned(),
-                verdict: Verdict::default(),
-                areas: Section::new("AREAS"),
-                problems: Section::new("PROBLEMS"),
-                findings: Section::new("FINDINGS"),
-                architecture: Section::new("ARCHITECTURE"),
-                history: Section::new("HISTORY"),
-                warnings: Section::new("WARNINGS"),
-                warning_detail: Vec::new(),
-                next: None,
-                verdict_only: false,
-            };
+            return Self::empty(report.mode());
         };
         let verdict = report.scope_verdict(selected.id());
         let displayed = descend(report, selected);
-        let displayed_verdict = if displayed.id() == selected.id() {
-            verdict.clone()
-        } else {
-            report.scope_verdict(displayed.id())
-        };
-        let selection = displayed_verdict.selection();
+        let selection = verdict.selection();
         // A relationship that could not be followed is file detail: it reaches
         // a reader with `--all` or at a file scope, and at every other scope
         // the grouped warning sentence is its whole terminal presence.
@@ -390,6 +454,15 @@ impl Presentation {
         } else {
             Section::new("PROBLEMS")
         };
+        let diff_rows = (!codebase).then(|| {
+            select_diff_rows(
+                report,
+                selection,
+                all,
+                top,
+                verdict.diff_tier() == Some(DiffTier::Mixed),
+            )
+        });
         let (findings, architecture, history) = if codebase {
             (
                 Section::new("FINDINGS"),
@@ -397,27 +470,31 @@ impl Presentation {
                 Section::new("HISTORY"),
             )
         } else {
+            let diff_rows = diff_rows.as_ref().expect("diff rows were selected");
             (
-                diff_finding_rows(report, displayed, all, top, selection),
-                diff_architecture_rows(report, verdict.selection(), all),
-                history_rows(report, selected, detail, verdict.selection()),
+                DiffFindingRows {
+                    report,
+                    displayed,
+                    all,
+                    top,
+                    selection,
+                    diff_rows,
+                }
+                .section(),
+                diff_architecture_rows(report, selection, diff_rows),
+                history_rows(report, selected, detail, selection, diff_rows),
             )
         };
-        let (warnings, warning_detail) = warning_rows(report, selected, file_detail);
-        let withheld_graph_comparison = report
-            .diff_graph_evidence()
-            .is_some_and(|evidence| evidence.suppressed_total() > 0);
-        let ambiguous_identity = report.diagnostics().iter().any(|diagnostic| {
-            diagnostic.kind() == DiagnosticKind::AmbiguousIdentity
-                && diagnostic_belongs_to_scope(report, diagnostic, selected)
-                && (file_detail || diagnostic.affects_verdict())
-        });
-        let verdict_only = report.mode() == ReportMode::Diff
-            && verdict.diff_tier() == Some(DiffTier::NoDebtChange)
-            && verdict.qualifier().is_none()
-            && !withheld_graph_comparison
-            && !ambiguous_identity
-            && findings.rows.is_empty();
+        let no_debt = report.mode() == ReportMode::Diff
+            && verdict.diff_tier() == Some(DiffTier::NoDebtChange);
+        let trust = comparison_trust(report, selected, file_detail, &verdict);
+        let trust_only = no_debt && !all && trust.exists;
+        let verdict_only = no_debt && !trust.exists && findings.rows.is_empty();
+        let (warnings, warning_detail) = if trust_only {
+            comparison_trust_warning_rows(report, selected, file_detail, trust.history)
+        } else {
+            warning_rows(report, selected, file_detail)
+        };
         let next = match report.mode() {
             ReportMode::Codebase => first_problem_path(report, displayed, selected, all)
                 .or_else(|| drill_path_from_visible(report, selected, areas.first()))
@@ -446,7 +523,34 @@ impl Presentation {
             warning_detail,
             next,
             verdict_only,
+            trust_only,
         }
+    }
+}
+
+struct ComparisonTrust {
+    exists: bool,
+    history: bool,
+}
+
+fn comparison_trust(
+    report: &Report,
+    selected: &Scope,
+    file_detail: bool,
+    verdict: &Verdict,
+) -> ComparisonTrust {
+    let graph = report
+        .diff_graph_evidence()
+        .is_some_and(|evidence| evidence.suppressed_total() > 0);
+    let ambiguous_identity = report.diagnostics().iter().any(|diagnostic| {
+        diagnostic.kind() == DiagnosticKind::AmbiguousIdentity
+            && diagnostic_belongs_to_scope(report, diagnostic, selected)
+            && (file_detail || diagnostic.affects_verdict())
+    });
+    let history = !selected.history_comparison_suppressions().is_empty();
+    ComparisonTrust {
+        exists: verdict.qualifier().is_some() || graph || ambiguous_identity || history,
+        history,
     }
 }
 
@@ -1252,25 +1356,226 @@ fn knowledge_evidence(report: &Report, id: KnowledgeConcentrationFindingId) -> S
     )
 }
 
-fn diff_finding_rows(
+#[derive(Clone, Copy, Debug, Eq, Ord, PartialEq, PartialOrd)]
+enum ArchitectureDiffKind {
+    Source,
+    Cycle,
+    Core,
+    Propagation,
+    Leakage,
+    History,
+}
+
+impl ArchitectureDiffKind {
+    const fn key(self, family_kind: u16) -> (Self, u16) {
+        (self, family_kind)
+    }
+}
+
+fn source_diff_row_key(report: &Report, comparison: &Comparison) -> DiffRowKey {
+    let subject = comparison
+        .file()
+        .and_then(|file| report.files().get(file.index()))
+        .map_or_else(String::new, |file| file.path().to_owned());
+    let line = comparison.span().map_or(DiffLine::Absent, |span| {
+        DiffLine::Present(span.start_line())
+    });
+    DiffRowKey {
+        direction: comparison.direction(),
+        family: DiffFamily::Source,
+        subject,
+        line,
+        kind: ArchitectureDiffKind::Source.key(comparison.kind() as u16),
+        comparison_identity: DiffComparisonIdentity::Source(comparison.identity().clone()),
+    }
+}
+
+fn diff_row_candidates(report: &Report, selection: &DebtDiffSelection) -> Vec<DiffRowCandidate> {
+    let mut rows = Vec::with_capacity(
+        selection.source().len()
+            + selection.architecture().len()
+            + selection.core().len()
+            + selection.propagation().len()
+            + selection.leakage().len()
+            + selection.evolutionary().len(),
+    );
+    for id in selection.source() {
+        let comparison = &report.comparisons()[id.index()];
+        rows.push(DiffRowCandidate {
+            key: source_diff_row_key(report, comparison),
+            token: DiffRowIdentity::Source(id.index()),
+        });
+    }
+    for id in selection.architecture() {
+        let comparison = &report.architecture_comparisons()[id.index()];
+        let mut subjects = comparison
+            .packages()
+            .iter()
+            .filter_map(|package| report.packages().get(package.index()))
+            .map(|package| package.path())
+            .collect::<Vec<_>>();
+        subjects.sort_unstable();
+        let subject = subjects.join(" ↔ ");
+        rows.push(DiffRowCandidate {
+            key: DiffRowKey {
+                direction: comparison.direction(),
+                family: DiffFamily::Architecture,
+                subject: subject.clone(),
+                line: DiffLine::Absent,
+                kind: ArchitectureDiffKind::Cycle.key(comparison.kind() as u16),
+                comparison_identity: DiffComparisonIdentity::Paths(
+                    subjects.into_iter().map(str::to_owned).collect(),
+                ),
+            },
+            token: DiffRowIdentity::Cycle(id.index()),
+        });
+    }
+    for id in selection.core() {
+        let comparison = &report.core_comparisons()[id.index()];
+        let subject = report.files()[comparison.anchor().index()]
+            .path()
+            .to_owned();
+        rows.push(DiffRowCandidate {
+            key: DiffRowKey {
+                direction: comparison.direction(),
+                family: DiffFamily::Architecture,
+                subject: subject.clone(),
+                line: DiffLine::Absent,
+                kind: ArchitectureDiffKind::Core.key(0),
+                comparison_identity: DiffComparisonIdentity::Paths(vec![subject]),
+            },
+            token: DiffRowIdentity::Core(id.index()),
+        });
+    }
+    for id in selection.propagation() {
+        let comparison = report.propagation_comparisons()[id.index()];
+        let subject = match comparison.subject() {
+            smackdebt_analysis::PropagationSubject::Package { source } => {
+                report.packages()[source.index()].path()
+            }
+            smackdebt_analysis::PropagationSubject::File { source, .. } => {
+                report.files()[source.index()].path()
+            }
+        };
+        rows.push(DiffRowCandidate {
+            key: DiffRowKey {
+                direction: comparison.direction(),
+                family: DiffFamily::Architecture,
+                subject: subject.to_owned(),
+                line: DiffLine::Absent,
+                kind: ArchitectureDiffKind::Propagation.key(0),
+                comparison_identity: DiffComparisonIdentity::Paths(vec![subject.to_owned()]),
+            },
+            token: DiffRowIdentity::Propagation(id.index()),
+        });
+    }
+    for id in selection.leakage() {
+        let comparison = report.change_leakage_comparisons()[id.index()];
+        let left = report.files()[comparison.left().index()].path();
+        let right = report.files()[comparison.right().index()].path();
+        let subject = format!("{left} ↔ {right}");
+        rows.push(DiffRowCandidate {
+            key: DiffRowKey {
+                direction: comparison.direction(),
+                family: DiffFamily::Architecture,
+                subject: subject.clone(),
+                line: DiffLine::Absent,
+                kind: ArchitectureDiffKind::Leakage.key(comparison.kind() as u16),
+                comparison_identity: DiffComparisonIdentity::Paths(vec![
+                    left.to_owned(),
+                    right.to_owned(),
+                ]),
+            },
+            token: DiffRowIdentity::Leakage(id.index()),
+        });
+    }
+    for id in selection.evolutionary() {
+        let comparison = report.evolutionary_comparisons()[id.index()];
+        let pair = comparison.coupling();
+        let left = report.packages()[pair.left().index()].path();
+        let right = report.packages()[pair.right().index()].path();
+        let subject = format!("{left} ↔ {right}");
+        rows.push(DiffRowCandidate {
+            key: DiffRowKey {
+                direction: comparison.direction(),
+                family: DiffFamily::History,
+                subject: subject.clone(),
+                line: DiffLine::Absent,
+                kind: ArchitectureDiffKind::History.key(comparison.kind() as u16),
+                comparison_identity: DiffComparisonIdentity::Paths(vec![
+                    left.to_owned(),
+                    right.to_owned(),
+                ]),
+            },
+            token: DiffRowIdentity::History(id.index()),
+        });
+    }
+    rows
+}
+
+fn select_diff_rows(
     report: &Report,
-    displayed: &Scope,
+    selection: &DebtDiffSelection,
     all: bool,
     top: Option<NonZeroUsize>,
-    selection: &DebtDiffSelection,
-) -> Section {
-    let mut section = Section::new("FINDINGS");
-    // Default output follows the debt-moving selection. Detail output adds
-    // changed context rows from the retained scope links, without duplicating
-    // verdict rows or admitting healthy authored changes.
-    let mut comparisons: Vec<&Comparison> = selection
-        .source()
-        .iter()
-        .map(|id| &report.comparisons()[id.index()])
-        .collect();
-    if all || displayed.kind() == ScopeKind::File {
-        comparisons.extend(
-            displayed
+    mixed: bool,
+) -> DiffRowSelection {
+    let mut rows = diff_row_candidates(report, selection);
+    rows.sort_unstable();
+
+    let limit = if all { rows.len() } else { finding_limit(top) };
+    let mut chosen = BTreeMap::new();
+    if mixed && top.is_none() {
+        for direction in [
+            ComparisonDirection::Worse,
+            ComparisonDirection::Better,
+            ComparisonDirection::Changed,
+        ] {
+            if let Some(row) = rows.iter().find(|row| row.key.direction == direction) {
+                chosen.insert(row.token, row.key.clone());
+            }
+        }
+    }
+    for row in rows {
+        if chosen.len() == limit {
+            break;
+        }
+        chosen.insert(row.token, row.key);
+    }
+    DiffRowSelection(chosen)
+}
+
+struct DiffFindingRows<'a> {
+    report: &'a Report,
+    displayed: &'a Scope,
+    all: bool,
+    top: Option<NonZeroUsize>,
+    selection: &'a DebtDiffSelection,
+    diff_rows: &'a DiffRowSelection,
+}
+
+impl DiffFindingRows<'_> {
+    fn section(self) -> Section {
+        let Self {
+            report,
+            displayed,
+            all,
+            top,
+            selection,
+            diff_rows,
+        } = self;
+        let mut section = Section::new("FINDINGS");
+        // Default output follows the debt-moving selection. Detail output adds
+        // changed context rows from the retained scope links, without duplicating
+        // verdict rows or admitting healthy authored changes.
+        let mut comparisons: Vec<&Comparison> = selection
+            .source()
+            .iter()
+            .filter(|id| diff_rows.contains(DiffRowIdentity::Source(id.index())))
+            .map(|id| &report.comparisons()[id.index()])
+            .collect();
+        if all || displayed.kind() == ScopeKind::File {
+            let mut context = displayed
                 .comparisons()
                 .iter()
                 .map(|id| &report.comparisons()[id.index()])
@@ -1280,39 +1585,42 @@ fn diff_finding_rows(
                             comparison.kind(),
                             ComparisonKind::Unchanged | ComparisonKind::Ambiguous
                         )
-                }),
-        );
-    }
-    comparisons.sort_by(|left, right| {
-        direction_rank(left.direction())
-            .cmp(&direction_rank(right.direction()))
-            .then_with(|| left.identity().name().cmp(right.identity().name()))
-    });
-    if !all && displayed.kind() != ScopeKind::File {
-        comparisons.truncate(finding_limit(top));
-    }
-    for comparison in comparisons {
-        let path = comparison
-            .file()
-            .and_then(|file| report.files().get(file.index()))
-            .map(FileRecord::path);
-        let head = format!(
-            "{} · {}",
-            unit_identity(comparison.identity(), path.unwrap_or_default()),
-            unit_kind_label(comparison.identity().kind())
-        );
-        let mut row = Row::new(Some(Word::direction(comparison.direction())), head);
-        if let Some(path) = path {
-            row = row.with_location(match comparison.span() {
-                Some(span) => format!("{path}:{}", span.start_line()),
-                None => path.to_owned(),
+                })
+                .collect::<Vec<_>>();
+            context.sort_by(|left, right| {
+                source_diff_row_key(report, left).cmp(&source_diff_row_key(report, right))
             });
+            let context_limit = top.map_or(context.len(), |limit| {
+                limit.get().saturating_sub(diff_rows.len())
+            });
+            comparisons.extend(context.into_iter().take(context_limit));
+        }
+        comparisons.sort_by(|left, right| {
+            source_diff_row_key(report, left).cmp(&source_diff_row_key(report, right))
+        });
+        for comparison in comparisons {
+            let path = comparison
+                .file()
+                .and_then(|file| report.files().get(file.index()))
+                .map(FileRecord::path);
+            let head = format!(
+                "{} · {}",
+                unit_identity(comparison.identity(), path.unwrap_or_default()),
+                unit_kind_label(comparison.identity().kind())
+            );
+            let mut row = Row::new(Some(Word::direction(comparison.direction())), head);
+            if let Some(path) = path {
+                row = row.with_location(match comparison.span() {
+                    Some(span) => format!("{path}:{}", span.start_line()),
+                    None => path.to_owned(),
+                });
+            }
+            section
+                .rows
+                .push(row.with_facts(changed_measurements(comparison)));
         }
         section
-            .rows
-            .push(row.with_facts(changed_measurements(comparison)));
     }
-    section
 }
 
 /// The signals a card states, in the order policy rates them.
@@ -1401,40 +1709,65 @@ const fn changed_summary(kind: ComparisonKind) -> &'static str {
 /// that counts as debt.
 ///
 /// Every other edge change is a graph fact the machine report keeps.
-fn diff_architecture_rows(report: &Report, selection: &DebtDiffSelection, all: bool) -> Section {
+fn diff_architecture_rows(
+    report: &Report,
+    selection: &DebtDiffSelection,
+    diff_rows: &DiffRowSelection,
+) -> Section {
     let mut section = Section::new("ARCHITECTURE");
     let mut rows: Vec<_> = selection
         .architecture()
         .iter()
-        .map(|id| cycle_comparison_row(report, id.index()))
+        .filter(|id| diff_rows.contains(DiffRowIdentity::Cycle(id.index())))
+        .map(|id| {
+            (
+                diff_rows.key(DiffRowIdentity::Cycle(id.index())),
+                cycle_comparison_row(report, id.index()),
+            )
+        })
         .chain(
             selection
                 .core()
                 .iter()
-                .map(|id| core_comparison_row(report, id.index())),
+                .filter(|id| diff_rows.contains(DiffRowIdentity::Core(id.index())))
+                .map(|id| {
+                    (
+                        diff_rows.key(DiffRowIdentity::Core(id.index())),
+                        core_comparison_row(report, id.index()).3,
+                    )
+                }),
         )
         .chain(
             selection
                 .propagation()
                 .iter()
-                .map(|id| propagation_comparison_row(report, id.index())),
+                .filter(|id| diff_rows.contains(DiffRowIdentity::Propagation(id.index())))
+                .map(|id| {
+                    (
+                        diff_rows.key(DiffRowIdentity::Propagation(id.index())),
+                        propagation_comparison_row(report, id.index()).3,
+                    )
+                }),
         )
         .chain(
             selection
                 .leakage()
                 .iter()
-                .map(|id| leakage_comparison_row(report, id.index())),
+                .filter(|id| diff_rows.contains(DiffRowIdentity::Leakage(id.index())))
+                .map(|id| {
+                    (
+                        diff_rows.key(DiffRowIdentity::Leakage(id.index())),
+                        leakage_comparison_row(report, id.index()).3,
+                    )
+                }),
         )
         .collect();
-    rows.sort_by(|left, right| (&left.0, &left.1, &left.2).cmp(&(&right.0, &right.1, &right.2)));
-    section.rows = rows.into_iter().map(|row| row.3).collect();
-    if !all {
-        section.rows.truncate(3);
-    }
+    rows.sort_by(|left, right| left.0.cmp(right.0));
+    section.rows = rows.into_iter().map(|row| row.1).collect();
     section
 }
 
-fn cycle_comparison_row(report: &Report, index: usize) -> (u8, u8, String, Row) {
+fn cycle_comparison_row(report: &Report, index: usize) -> Row {
     let comparison = &report.architecture_comparisons()[index];
     let head = if comparison.kind() == ArchitectureComparisonKind::CycleIntroduced {
         "package dependency cycle introduced"
@@ -1454,12 +1787,7 @@ fn cycle_comparison_row(report: &Report, index: usize) -> (u8, u8, String, Row) 
             }
         })
         .collect();
-    (
-        direction_rank(comparison.direction()),
-        0,
-        head.to_owned(),
-        Row::new(Some(Word::direction(comparison.direction())), head).with_stacked(witness),
-    )
+    Row::new(Some(Word::direction(comparison.direction())), head).with_stacked(witness)
 }
 
 fn core_comparison_row(report: &Report, index: usize) -> (u8, u8, String, Row) {
@@ -1617,12 +1945,7 @@ fn unmatched_import_rows(report: &Report, selected: &Scope) -> Vec<Row> {
         .collect()
 }
 
-fn history_rows(
-    report: &Report,
-    selected: &Scope,
-    detail: bool,
-    selection: &DebtDiffSelection,
-) -> Section {
+fn current_history_rows(report: &Report, selected: &Scope, detail: bool) -> Section {
     let mut section = Section::new("HISTORY");
     let relevant_packages = report
         .files()
@@ -1726,27 +2049,57 @@ fn history_rows(
         section.rows.truncate(3);
     }
 
+    section
+}
+
+fn history_rows(
+    report: &Report,
+    selected: &Scope,
+    detail: bool,
+    selection: &DebtDiffSelection,
+    diff_rows: &DiffRowSelection,
+) -> Section {
+    let mut section = current_history_rows(report, selected, detail);
     if report.mode() == ReportMode::Diff {
-        for id in selection.evolutionary() {
-            let comparison = report.evolutionary_comparisons()[id.index()];
-            let pair = comparison.coupling();
-            let left = package_name(report, pair.left().index()).unwrap_or("?");
-            let right = package_name(report, pair.right().index()).unwrap_or("?");
-            let outcome = match comparison.kind() {
-                smackdebt_analysis::EvolutionaryComparisonKind::FindingIntroduced => {
-                    "now change together without a code dependency"
-                }
-                smackdebt_analysis::EvolutionaryComparisonKind::FindingRemoved => {
-                    "no longer change together without a code dependency"
-                }
-            };
-            section.rows.push(Row::new(
-                Some(Word::direction(comparison.direction())),
-                format!("{left} ↔ {right} {outcome}"),
-            ));
-        }
+        append_evolutionary_comparisons(&mut section, report, selection, diff_rows);
     }
     section
+}
+
+fn append_evolutionary_comparisons(
+    section: &mut Section,
+    report: &Report,
+    selection: &DebtDiffSelection,
+    diff_rows: &DiffRowSelection,
+) {
+    let mut comparisons = selection
+        .evolutionary()
+        .iter()
+        .filter(|id| diff_rows.contains(DiffRowIdentity::History(id.index())))
+        .collect::<Vec<_>>();
+    comparisons.sort_by(|left, right| {
+        diff_rows
+            .key(DiffRowIdentity::History(left.index()))
+            .cmp(diff_rows.key(DiffRowIdentity::History(right.index())))
+    });
+    for id in comparisons {
+        let comparison = report.evolutionary_comparisons()[id.index()];
+        let pair = comparison.coupling();
+        let left = package_name(report, pair.left().index()).unwrap_or("?");
+        let right = package_name(report, pair.right().index()).unwrap_or("?");
+        let outcome = match comparison.kind() {
+            smackdebt_analysis::EvolutionaryComparisonKind::FindingIntroduced => {
+                "now change together without a code dependency"
+            }
+            smackdebt_analysis::EvolutionaryComparisonKind::FindingRemoved => {
+                "no longer change together without a code dependency"
+            }
+        };
+        section.rows.push(Row::new(
+            Some(Word::direction(comparison.direction())),
+            format!("{left} ↔ {right} {outcome}"),
+        ));
+    }
 }
 
 /// The grouped diagnostics, and the per-file detail behind them.
@@ -1783,6 +2136,34 @@ fn warning_rows(report: &Report, selected: &Scope, file_detail: bool) -> (Sectio
         }
     }
     (section, warning_detail)
+}
+
+fn comparison_trust_warning_rows(
+    report: &Report,
+    selected: &Scope,
+    include_context: bool,
+    history_relevant: bool,
+) -> (Section, Vec<String>) {
+    let mut section = Section::new("WARNINGS");
+    if history_relevant {
+        section.rows.extend(history_warnings(report));
+    }
+    section
+        .rows
+        .extend(graph_evidence_warning(report).map(|text| Row::new(Some(Word::Warning), text)));
+    section.rows.extend(diagnostic_warnings_for(
+        report,
+        selected,
+        include_context,
+        &[
+            DiagnosticKind::UnsupportedLanguage,
+            DiagnosticKind::UnreadableFile,
+            DiagnosticKind::OversizedFile,
+            DiagnosticKind::ParseFailure,
+            DiagnosticKind::AmbiguousIdentity,
+        ],
+    ));
+    (section, Vec::new())
 }
 
 fn history_warnings(report: &Report) -> Vec<Row> {
@@ -1825,17 +2206,31 @@ fn diagnostic_belongs_to_scope(report: &Report, diagnostic: &Diagnostic, selecte
 }
 
 fn diagnostic_warnings(report: &Report, selected: &Scope, include_context: bool) -> Vec<Row> {
+    diagnostic_warnings_for(
+        report,
+        selected,
+        include_context,
+        &[
+            DiagnosticKind::NestedRepository,
+            DiagnosticKind::UnsupportedLanguage,
+            DiagnosticKind::UnreadableFile,
+            DiagnosticKind::OversizedFile,
+            DiagnosticKind::ParseFailure,
+            DiagnosticKind::AmbiguousIdentity,
+            DiagnosticKind::UnsafeReference,
+            DiagnosticKind::Other,
+        ],
+    )
+}
+
+fn diagnostic_warnings_for(
+    report: &Report,
+    selected: &Scope,
+    include_context: bool,
+    kinds: &[DiagnosticKind],
+) -> Vec<Row> {
     let mut warnings = Vec::new();
-    for kind in [
-        DiagnosticKind::NestedRepository,
-        DiagnosticKind::UnsupportedLanguage,
-        DiagnosticKind::UnreadableFile,
-        DiagnosticKind::OversizedFile,
-        DiagnosticKind::ParseFailure,
-        DiagnosticKind::AmbiguousIdentity,
-        DiagnosticKind::UnsafeReference,
-        DiagnosticKind::Other,
-    ] {
+    for &kind in kinds {
         let mut files = BTreeSet::new();
         let mut count = 0;
         for diagnostic in report
@@ -1976,9 +2371,10 @@ impl<'a, W: Write> Renderer<'a, W> {
         }
         // Codebase debt is one ranked section of named problems; a diff keeps
         // its three sections this round.
-        let sections: &[&Section] = match view.mode {
-            ReportMode::Codebase => &[&view.areas, &view.problems],
-            ReportMode::Diff => &[
+        let sections: &[&Section] = match (view.mode, view.trust_only) {
+            (ReportMode::Diff, true) => &[],
+            (ReportMode::Codebase, _) => &[&view.areas, &view.problems],
+            (ReportMode::Diff, false) => &[
                 &view.areas,
                 &view.findings,
                 &view.architecture,
@@ -2696,15 +3092,18 @@ mod tests {
     use smackdebt_analysis::{
         ArchitectureComparison, ArchitectureComparisonId, ArchitectureFinding,
         ArchitectureFindingId, ArchitectureFindingKind, ArchitectureGraph, ArchitectureReportFacts,
-        ChangeCoupling, ChangeLeakageFinding, ComparisonId, ContributorConcentration, Coverage,
-        DependencyCoverage, DependencyEdge, DependencyEdgeId, EvolutionaryFinding,
-        EvolutionaryFindingId, EvolutionaryReportFacts, FileActivity, FileChangeCoupling,
-        FileChangeCouplingId, FileId, FileRecord, FindingId, HealthCounts, HealthPolicy,
-        HistoryCoverage, Hotspot, KnowledgeConcentrationFinding, KnowledgeConcentrationFindingId,
-        Measurements, PackageEdge, PackageEdgeId, PackageGraphMeasurement, PackageId,
-        PackageRecord, ParseStatus, Report, ReportBuilder, ReportMode, Scope, ScopeId, SizePolicy,
-        SourceCoverageOutcome, SourceRole, SourceSpan, SourceTrust, StableDependencyEvidence,
-        StableDependencyFinding, StableDependencyFindingId, UnitIdentity, UnitKind,
+        ChangeCoupling, ChangeLeakageFinding, ComparisonId, ComparisonSuppression,
+        ContributorConcentration, Coverage, DependencyCoverage, DependencyEdge, DependencyEdgeId,
+        DiagnosticId, DiffGraphEvidence, EvolutionaryComparison, EvolutionaryComparisonId,
+        EvolutionaryComparisonKind, EvolutionaryFinding, EvolutionaryFindingId,
+        EvolutionaryReportFacts, FileActivity, FileChangeCoupling, FileChangeCouplingId, FileId,
+        FileRecord, FindingId, GraphEvidence, HealthCounts, HealthPolicy, HistoryAvailability,
+        HistoryComparisonSuppression, HistoryComparisonSuppressionId, HistoryCoverage, Hotspot,
+        KnowledgeConcentrationFinding, KnowledgeConcentrationFindingId, Measurements, PackageEdge,
+        PackageEdgeId, PackageGraphMeasurement, PackageId, PackageRecord, ParseStatus, Report,
+        ReportBuilder, ReportMode, Scope, ScopeId, SizePolicy, SourceCoverageOutcome, SourceRole,
+        SourceSpan, SourceTrust, StableDependencyEvidence, StableDependencyFinding,
+        StableDependencyFindingId, UnitIdentity, UnitKind,
     };
 
     /// Every private-use codepoint, which may never reach a machine consumer.
@@ -3017,6 +3416,214 @@ mod tests {
                 .link_architecture_comparison(file_scope, ArchitectureComparisonId::from_index(1));
         }
         builder.finish()
+    }
+
+    mod mixed_diff_fixture {
+        use super::*;
+
+        pub(super) fn three_family_diff_report() -> Report {
+            let mut builder = ReportBuilder::new(ReportMode::Diff);
+            let root = ScopeId::from_index(0);
+            builder.add_scope(Scope::new(root, ScopeKind::Repository, ".", None));
+            builder.set_root(root);
+            builder.set_packages(
+                ["z", "y", "c", "d", "a", "b"]
+                    .into_iter()
+                    .enumerate()
+                    .map(|(index, path)| {
+                        PackageRecord::current(PackageId::from_index(index), root, path)
+                    })
+                    .collect(),
+            );
+            for (index, path) in ["a/changed.rs", "b/other.rs"].into_iter().enumerate() {
+                let file = FileId::from_index(index);
+                builder.add_file(
+                    FileRecord::new(
+                        file,
+                        root,
+                        path,
+                        Coverage::new(1, 1, 0, 0, 10, 0),
+                        HealthCounts::new(0, 1, 0),
+                    )
+                    .with_package(PackageId::from_index(index)),
+                );
+                builder.link_file(root, file);
+                let before = Measurements::new(15, 1, 1);
+                let after = Measurements::new(15, 1, 2 + index as u32);
+                let id = ComparisonId::from_index(index);
+                let identity = ["zeta", "alpha"][index];
+                builder.add_comparison(
+                    Comparison::new(
+                        id,
+                        UnitIdentity::new(identity, UnitKind::Function),
+                        ComparisonKind::MetricChanged,
+                        Some(before),
+                        Some(after),
+                        Some(Rating::Watch),
+                        Some(Rating::Watch),
+                    )
+                    .with_file(file)
+                    .with_span(SourceSpan::new(2 + index as u32, 3 + index as u32)),
+                );
+                builder.link_comparison(root, id);
+            }
+            builder.set_architecture(ArchitectureReportFacts::new(
+                ArchitectureGraph::new(
+                    DependencyCoverage::default(),
+                    Vec::new(),
+                    Vec::new(),
+                    Vec::new(),
+                    Vec::new(),
+                    Vec::new(),
+                ),
+                Vec::new(),
+                vec![
+                    ArchitectureComparison::new(
+                        ArchitectureComparisonId::from_index(0),
+                        ArchitectureComparisonKind::CycleIntroduced,
+                        vec![PackageId::from_index(2), PackageId::from_index(3)],
+                    )
+                    .with_witness(vec![
+                        PackageId::from_index(2),
+                        PackageId::from_index(3),
+                        PackageId::from_index(2),
+                    ]),
+                    ArchitectureComparison::new(
+                        ArchitectureComparisonId::from_index(1),
+                        ArchitectureComparisonKind::CycleIntroduced,
+                        vec![PackageId::from_index(4), PackageId::from_index(5)],
+                    )
+                    .with_witness(vec![
+                        PackageId::from_index(4),
+                        PackageId::from_index(5),
+                        PackageId::from_index(4),
+                    ]),
+                ],
+            ));
+            builder.link_architecture_comparison(root, ArchitectureComparisonId::from_index(0));
+            builder.link_architecture_comparison(root, ArchitectureComparisonId::from_index(1));
+            let couplings = [
+                ChangeCoupling::new(PackageId::from_index(2), PackageId::from_index(3), 4, 5),
+                ChangeCoupling::new(PackageId::from_index(4), PackageId::from_index(5), 4, 5),
+            ];
+            builder.set_evolution(EvolutionaryReportFacts::new(
+                HistoryCoverage::default(),
+                Vec::new(),
+                Vec::new(),
+                couplings.to_vec(),
+                Vec::new(),
+                Vec::new(),
+                couplings
+                    .into_iter()
+                    .enumerate()
+                    .map(|(index, coupling)| {
+                        EvolutionaryComparison::new(
+                            EvolutionaryComparisonId::from_index(index),
+                            EvolutionaryComparisonKind::FindingRemoved,
+                            ComparisonDirection::Better,
+                            coupling,
+                        )
+                    })
+                    .collect(),
+            ));
+            builder.link_evolutionary_comparison(root, EvolutionaryComparisonId::from_index(0));
+            builder.link_evolutionary_comparison(root, EvolutionaryComparisonId::from_index(1));
+            builder.finish()
+        }
+    }
+
+    mod no_debt_diff_fixture {
+        use super::*;
+
+        pub(super) fn no_debt_diff_with_context(
+            history: HistoryCoverage,
+            history_comparison_suppressed: bool,
+            graph_warning: bool,
+            current_history: bool,
+            ambiguous_identity: bool,
+        ) -> Report {
+            let mut builder = ReportBuilder::new(ReportMode::Diff);
+            let root = ScopeId::from_index(0);
+            builder.add_scope(Scope::new(root, ScopeKind::Repository, ".", None));
+            builder.set_root(root);
+            builder.set_packages(vec![
+                PackageRecord::current(PackageId::from_index(0), root, "app"),
+                PackageRecord::current(PackageId::from_index(1), root, "core"),
+            ]);
+            let file = FileId::from_index(0);
+            builder.add_file(
+                FileRecord::new(
+                    file,
+                    root,
+                    "app/main.rs",
+                    Coverage::new(1, 1, 0, 0, 10, 0),
+                    HealthCounts::new(1, 0, 0),
+                )
+                .with_package(PackageId::from_index(0)),
+            );
+            builder.link_file(root, file);
+            let coupling =
+                ChangeCoupling::new(PackageId::from_index(0), PackageId::from_index(1), 4, 5);
+            builder.set_evolution(
+                EvolutionaryReportFacts::new(
+                    history,
+                    Vec::new(),
+                    Vec::new(),
+                    current_history.then_some(coupling).into_iter().collect(),
+                    Vec::new(),
+                    current_history
+                        .then(|| {
+                            EvolutionaryFinding::new(EvolutionaryFindingId::from_index(0), coupling)
+                        })
+                        .into_iter()
+                        .collect(),
+                    Vec::new(),
+                )
+                .with_comparison_suppressions(
+                    history_comparison_suppressed
+                        .then(|| {
+                            HistoryComparisonSuppression::new(
+                                HistoryComparisonSuppressionId::from_index(0),
+                                PackageId::from_index(0),
+                                PackageId::from_index(1),
+                            )
+                        })
+                        .into_iter()
+                        .collect(),
+                ),
+            );
+            if current_history {
+                builder.link_evolutionary_finding(root, EvolutionaryFindingId::from_index(0));
+            }
+            if history_comparison_suppressed {
+                builder.link_history_comparison_suppression(
+                    root,
+                    HistoryComparisonSuppressionId::from_index(0),
+                );
+            }
+            if graph_warning {
+                let mut suppression = ComparisonSuppression::default();
+                suppression.record(true, false);
+                builder.set_diff_graph_evidence(DiffGraphEvidence::new(
+                    GraphEvidence::default(),
+                    GraphEvidence::default(),
+                    suppression,
+                    ComparisonSuppression::default(),
+                    ComparisonSuppression::default(),
+                ));
+            }
+            if ambiguous_identity {
+                let id = DiagnosticId::from_index(builder.diagnostic_count());
+                builder.add_diagnostic(Diagnostic::new(
+                    id,
+                    Some(file),
+                    DiagnosticKind::AmbiguousIdentity,
+                    "app/main.rs has anonymous units that could not be matched safely",
+                    0,
+                ));
+            }
+            builder.finish()
+        }
     }
 
     /// A report whose files each own a file scope under one directory, so a
@@ -4145,21 +4752,155 @@ mod tests {
         );
     }
 
-    #[test]
-    fn a_clean_diff_writes_the_verdict_block_and_nothing_else() {
-        let report = diff_report(None);
-        let terminal = render(&report, TerminalOptions::new(100, true, false));
-        assert_eq!(
-            terminal,
-            "smackdebt diff · repository root\n  No debt changed.\nworse 0 · better 0 · changed 0\n"
+    mod neutral_diff_tests {
+        use super::no_debt_diff_fixture::no_debt_diff_with_context;
+        use super::*;
+
+        #[test]
+        fn a_clean_diff_writes_the_verdict_block_and_nothing_else() {
+            let report = diff_report(None);
+            let terminal = render(&report, TerminalOptions::new(100, true, false));
+            assert_eq!(
+                terminal,
+                "smackdebt diff · repository root\n  No debt changed.\nworse 0 · better 0 · changed 0\n"
+            );
+        }
+
+        #[test]
+        fn a_no_debt_diff_shows_only_comparison_trust_warnings() {
+            let graph_report =
+                no_debt_diff_with_context(HistoryCoverage::default(), false, true, true, false);
+            let graph = render(&graph_report, TerminalOptions::default());
+            assert!(
+            graph.contains(
+                "warning 1 architecture comparison hidden because dependency data is incomplete after the change."
+            ),
+            "{graph}"
         );
+            assert!(!graph.contains("HISTORY"), "{graph}");
+            assert!(!graph.contains("changed together"), "{graph}");
+            assert!(graph.ends_with("  inspect directories and files for more details\n"));
+
+            let incomplete = HistoryCoverage::new(
+                HistoryAvailability::Incomplete,
+                None,
+                1,
+                1,
+                1,
+                0,
+                None,
+                None,
+                1,
+                0,
+                0,
+                0,
+                None,
+            );
+            let history_report = no_debt_diff_with_context(incomplete, true, false, false, false);
+            let history = render(&history_report, TerminalOptions::default());
+            assert!(
+                history.contains("warning History is incomplete."),
+                "{history}"
+            );
+            assert!(!history.contains("FINDINGS"), "{history}");
+            assert!(history.ends_with("  inspect directories and files for more details\n"));
+        }
+
+        #[test]
+        fn a_documentation_only_diff_hides_current_history_context() {
+            let report =
+                no_debt_diff_with_context(HistoryCoverage::default(), false, false, true, false);
+            let terminal = render(&report, TerminalOptions::default());
+            assert_eq!(
+                terminal,
+                "smackdebt diff · repository root\n  No debt changed.\nworse 0 · better 0 · changed 0\n"
+            );
+        }
+
+        #[test]
+        fn all_keeps_anonymous_matching_warning_in_a_no_debt_diff() {
+            let report =
+                no_debt_diff_with_context(HistoryCoverage::default(), false, false, false, true);
+            let terminal = render(&report, TerminalOptions::new(100, true, true));
+            assert!(
+                terminal.contains("1 file has anonymous units that could not be matched safely."),
+                "{terminal}"
+            );
+            assert!(terminal.ends_with("  inspect directories and files for more details\n"));
+        }
+    }
+
+    mod mixed_diff_tests {
+        use super::mixed_diff_fixture::three_family_diff_report;
+        use super::*;
+
+        #[test]
+        fn a_mixed_default_reserves_each_direction_across_all_comparison_families() {
+            let report = three_family_diff_report();
+            let default = render(&report, TerminalOptions::default());
+            assert!(default.contains("Debt increased in some places and decreased in others."));
+            assert!(default.contains("  worse package dependency cycle introduced"));
+            assert!(default.contains("  better a ↔ b no longer change together"));
+            assert!(default.contains("  changed zeta · function"));
+            assert!(!default.contains("  changed alpha · function"));
+            assert_eq!(visible_diff_rows(&default), 3, "{default}");
+
+            let top_one = render(
+                &report,
+                TerminalOptions::default().with_top(NonZeroUsize::new(1)),
+            );
+            assert_eq!(visible_diff_rows(&top_one), 1, "{top_one}");
+            assert!(top_one.contains("  worse package dependency cycle introduced"));
+            assert!(top_one.contains("        a\n        → b\n"), "{top_one}");
+
+            let all = render(&report, TerminalOptions::new(100, true, false));
+            assert_eq!(visible_diff_rows(&all), 6, "{all}");
+            assert!(all.contains("  changed alpha · function"));
+            assert!(all.contains("  changed zeta · function"));
+            assert_before(
+                &all,
+                "  changed zeta · function",
+                "  changed alpha · function",
+            );
+            assert_before(&all, "        a\n        → b\n", "        c\n        → d\n");
+            assert_before(
+                &all,
+                "  better a ↔ b no longer change together",
+                "  better c ↔ d no longer change together",
+            );
+            assert!(all.ends_with("  inspect directories and files for more details\n"));
+        }
+    }
+
+    fn assert_before(text: &str, first: &str, second: &str) {
+        let first = text
+            .find(first)
+            .unwrap_or_else(|| panic!("missing {first}:\n{text}"));
+        let second = text
+            .find(second)
+            .unwrap_or_else(|| panic!("missing {second}:\n{text}"));
+        assert!(
+            first < second,
+            "expected first fragment before second:\n{text}"
+        );
+    }
+
+    fn visible_diff_rows(terminal: &str) -> usize {
+        terminal
+            .lines()
+            .filter(|line| {
+                ["  worse ", "  better ", "  changed "]
+                    .iter()
+                    .any(|prefix| line.starts_with(prefix))
+            })
+            .count()
     }
 
     #[test]
     fn an_introduced_cycle_makes_a_diff_worse_when_no_source_comparison_moved() {
         let report = diff_report(Some(ArchitectureComparisonKind::CycleIntroduced));
         let terminal = render(&report, TerminalOptions::new(100, false, false));
-        assert!(terminal.contains("You made it worse."), "{terminal}");
+        assert!(terminal.contains("Debt increased."), "{terminal}");
         assert!(
             terminal.contains("worse 1 (architecture) · better 0 · changed 0"),
             "{terminal}"

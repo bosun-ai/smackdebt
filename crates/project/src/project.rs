@@ -767,6 +767,7 @@ pub(super) fn analyze_diff(request: &DiffRequest) -> Result<ProjectReport, Proje
     );
     let evolutionary_findings = evolution.findings().to_vec();
     let evolutionary_comparisons = evolution.comparisons().to_vec();
+    let history_comparison_suppressions = evolution.comparison_suppressions().to_vec();
     let (current_leakage_candidates, current_leakage, suppressed_leakage) =
         leakage_findings(&current_architecture, &evolution, &current_files);
     let (before_leakage_candidates, _, _) =
@@ -862,6 +863,17 @@ pub(super) fn analyze_diff(request: &DiffRequest) -> Result<ProjectReport, Proje
         builder.link_evolutionary_comparison(
             package_records[pair.right().index()].scope(),
             comparison.id(),
+        );
+    }
+    for suppression in history_comparison_suppressions {
+        builder.link_history_comparison_suppression(root, suppression.id());
+        builder.link_history_comparison_suppression(
+            package_records[suppression.left().index()].scope(),
+            suppression.id(),
+        );
+        builder.link_history_comparison_suppression(
+            package_records[suppression.right().index()].scope(),
+            suppression.id(),
         );
     }
     for comparison in &propagation_comparisons {
@@ -7739,7 +7751,10 @@ mod tests {
         let mixed = analyze_diff(&request).unwrap();
         let verdict = mixed.report().verdict().unwrap();
         assert_eq!(verdict.diff_tier(), Some(DiffTier::Mixed));
-        assert_eq!(verdict.sentence(), "Better here, worse there.");
+        assert_eq!(
+            verdict.sentence(),
+            "Debt increased in some places and decreased in others."
+        );
         assert_eq!(verdict.facts().source().worse(), 1);
         assert_eq!(verdict.facts().source().better(), 1);
         assert!(

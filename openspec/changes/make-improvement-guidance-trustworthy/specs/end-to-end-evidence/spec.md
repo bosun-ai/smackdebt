@@ -17,7 +17,7 @@ the real CLI process in terminal and JSON mode. The fixture set SHALL include:
 - each neutral diff tier sentence, default selection, `--top 1`, `--all`, a
   fully checked verdict-only no-debt diff, a warning-bearing no-debt diff, and a
   documentation-only no-debt diff with retained current history context, and a
-  non-empty diff footer. The warning-bearing case SHALL use a comparison-trust
+  comparison-detail footer. The warning-bearing case SHALL use a comparison-trust
   warning rather than unrelated current-state context.
 
 Acceptance SHALL assert status, stream placement, exact relevant bytes, JSON
@@ -41,7 +41,7 @@ comparison directions, and genuine Rust cycle witnesses do not move.
 
 #### Scenario: A mixed diff is limited
 - **WHEN** the default, `--top 1`, and `--all` terminal views are rendered
-- **THEN** default represents each present direction, top one emits one ranked row, all emits every useful row, and every non-empty view ends with the exact detail footer
+- **THEN** default represents each present direction, top one emits one ranked row, all emits every useful row, and every view with comparison detail ends with the exact detail footer
 
 ### Requirement: Real repositories prove that guidance is useful
 Before implementation task 1.1, the current release binary SHALL capture the

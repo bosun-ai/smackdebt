@@ -1,5 +1,5 @@
 smackdebt diff · repository root
-  Better here, worse there.
+  Debt increased in some places and decreased in others.
 worse 1 (evolutionary) · better 1 (architecture) · changed 0
 
 AREAS

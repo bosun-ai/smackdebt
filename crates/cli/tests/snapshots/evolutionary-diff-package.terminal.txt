@@ -1,5 +1,5 @@
 smackdebt diff · b
-  You made it better.
+  Debt decreased.
 worse 0 · better 1 (evolutionary) · changed 0
 
 HISTORY

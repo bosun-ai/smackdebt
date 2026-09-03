@@ -369,6 +369,25 @@ pub(crate) fn generated_javascript_repository() -> GeneratedRepository {
     repository
 }
 
+pub(crate) fn comparison_trust_warning_repository() -> GeneratedRepository {
+    let repository = GeneratedRepository::new("main");
+    repository.write(
+        "package.json",
+        b"{\"name\":\"trust-warning\",\"private\":true}\n",
+    );
+    repository.write("README.txt", b"fixture documentation\n");
+    repository.write("docs/note.md", b"fixture documentation\n");
+    repository.write("page.astro", b"<h1>Before</h1>\n");
+    repository.commit(commit(
+        "base",
+        "Fixture Author",
+        "fixture@example.invalid",
+        "2026-02-01T12:00:00Z",
+    ));
+    repository.write("page.astro", b"<h1>After</h1>\n");
+    repository
+}
+
 /// A repository whose findings tie until the role class and hot rank keys.
 ///
 /// `src/hot.js` carries fewer statements than `src/cold.js` but changes in five

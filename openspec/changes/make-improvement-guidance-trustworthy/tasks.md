@@ -123,19 +123,49 @@
 
 ## 4. Neutral and representative diffs
 
-- [ ] 4.1 Replace the four analysis-owned diff sentences with the exact neutral
+- [x] 4.1 Replace the four analysis-owned diff sentences with the exact neutral
       sentences and retain tier identifiers and movement rules.
-- [ ] 4.2 Apply the exact view-wide direction, family, subject, line, kind, and
+- [x] 4.2 Apply the exact view-wide direction, family, subject, line, kind, and
       identity key; reserve one default witness per present direction, then fill
       from that same key.
-- [ ] 4.3 Prove section ordering, default mixed representation, literal
+- [x] 4.3 Prove section ordering, default mixed representation, literal
       `--top 1`, `--all`, fully checked verdict-only no-debt output,
       comparison-trust-warning no-debt output, documentation-only no-debt with
       retained current history context, and the exact unchanged diff footer.
-- [ ] 4.4 Update terminal and JSON snapshots, README examples, schema examples,
+- [x] 4.4 Update terminal and JSON snapshots, README examples, schema examples,
       and documentation tests together.
-- [ ] 4.5 Build the release binary and verify mixed Fluyt output and Parity's
+- [x] 4.5 Build the release binary and verify mixed Fluyt output and Parity's
       documentation-only diff in terminal and JSON before committing this slice.
+
+      **Completion note (2026-09-03).** The final release build passed
+      `rtk just gate` with zero regressions and seven improvements, followed by
+      the complete `rtk just check` gate. Focused analysis, output, CLI, and
+      executable README tests also passed. Mixed selection uses one typed key
+      across source, architecture, and history; its default view retains one
+      Worse, Better, and Changed witness, while `--top 1` remains one row and
+      `--all` retains useful detail. Comparison-confidence warnings now read
+      analysis-owned suppression facts for qualifying co-change pairs whose
+      explanation changed while history was incomplete or affected by rename
+      gaps. Negative coverage proves an ordinary dependency change with no
+      qualifying co-change evidence creates no warning.
+
+      On the final Fluyt checkout, `smackdebt diff master` exited 0 in terminal
+      and JSON modes. Coverage was 63/63/0/0, graph status was incomplete on
+      both sides, suppression was 1/0/0, and comparison counts were
+      342/0/1/0/0/0. The terminal showed mixed totals of 4 worse, 2 better, and
+      2 changed, retained one visible row for every direction, and ended with
+      the exact detail footer. Jobs 1 and jobs 4 JSON both hashed to
+      `f5912e32fe0fcf79a38dcaff09a9dc8f00a45350bb9a6271e06fe8cd56fda6b8`.
+
+      In a clean detached Parity worktree at
+      `b30f99a8fe29aa386358aafc83d78d64ca88e8bf`, `smackdebt diff HEAD~1`
+      exited 0 and printed only the no-debt verdict block with no footer.
+      Coverage and every comparison count were zero; graph status was
+      incomplete on both sides with 0/0/0 suppression. Jobs 1 and jobs 4 JSON
+      both hashed to
+      `4cb84719299eec6afd2dd1a05fdf0fde5b8c6000f0e8ccbaff07f231869a4a20`.
+      The temporary worktree was removed, and no private source or complete
+      private output was retained.
 
 ## 5. Real-repository proof and closeout
 

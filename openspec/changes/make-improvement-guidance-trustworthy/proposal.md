@@ -43,9 +43,9 @@ short report answers the selected scope and shows evidence for its conclusion.
   for each present direction before filling the remaining limit by the exact
   view-wide direction, family, subject, line, kind, and identity key across
   source, architecture, and history. Explicit limits are never exceeded.
-- Every non-empty diff continues to end with exactly
-  `inspect directories and files for more details` and never regains a `next:`
-  line.
+- Every diff that shows comparison detail or warnings continues to end with
+  exactly `inspect directories and files for more details` and never regains a
+  `next:` line.
 - JSON schema version 4 gains `astro` in the language vocabulary and
   `selected_files` and `analyzed_files` in the qualifier. Match keys and syntax
   digests remain private.

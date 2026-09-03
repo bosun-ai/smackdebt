@@ -17,12 +17,13 @@ use support::hermetic::hermetic_env;
 use support::{Commit, Identity};
 use support::{
     GeneratedRepository, Invocation, amplification_repository, bulk_commit_repository,
-    change_leakage_repository, copy_language_truth_files, core_repository,
-    deepened_signal_repository, evolution_repository, generated_javascript_repository,
-    module_wiring_repository, propagation_repository, ref_diff_repository,
-    rust_test_scope_repository, shallow_clone, signal_table_repository, source_role_repository,
-    stable_dependency_repository, static_architecture_repository, test_scoped_workspace_repository,
-    wide_directory_repository, workspace_manifest_repository, worktree_change_repository,
+    change_leakage_repository, comparison_trust_warning_repository, copy_language_truth_files,
+    core_repository, deepened_signal_repository, evolution_repository,
+    generated_javascript_repository, module_wiring_repository, propagation_repository,
+    ref_diff_repository, rust_test_scope_repository, shallow_clone, signal_table_repository,
+    source_role_repository, stable_dependency_repository, static_architecture_repository,
+    test_scoped_workspace_repository, wide_directory_repository, workspace_manifest_repository,
+    worktree_change_repository,
 };
 
 #[derive(Debug, Deserialize)]
@@ -380,6 +381,32 @@ fn assert_generated_diff_detail(repository: &Path) {
     assert!(
         file_text.ends_with("  inspect directories and files for more details\n"),
         "{file_text}"
+    );
+
+    let top_one = Invocation::new([
+        "diff",
+        "HEAD~1",
+        "transitions/from-generated.js",
+        "--top",
+        "1",
+        "--color",
+        "never",
+    ])
+    .run(repository);
+    top_one.success();
+    let top_one_text = String::from_utf8(top_one.stdout).unwrap();
+    let visible_comparisons = top_one_text
+        .lines()
+        .filter(|line| {
+            ["  worse ", "  better ", "  changed "]
+                .iter()
+                .any(|prefix| line.starts_with(prefix))
+        })
+        .count();
+    assert_eq!(visible_comparisons, 1, "{top_one_text}");
+    assert!(
+        top_one_text.contains("transitions/from-generated.js"),
+        "{top_one_text}"
     );
 }
 
@@ -2699,7 +2726,6 @@ fn readme_console_examples_use_the_simple_terminal_vocabulary() {
         "| `unstable_dependency` | `depends on less stable code` |",
         "| `measured` |",
         "changed together in 33 of 98 commits · 34% · no direct dependency · linked via crates/output",
-        "29% · no code dependency",
         "one contributor made 57 of 60 commits",
         // Verdict facts shown in captured output.
         "A change in one package can reach 6 of 12 packages.",
@@ -2763,33 +2789,63 @@ fn executable_readme_examples_match_named_public_fixtures() {
     let readme =
         fs::read_to_string(Path::new(env!("CARGO_MANIFEST_DIR")).join("../../README.md")).unwrap();
     let examples = readme_examples(&readme);
-    assert_eq!(examples.len(), 3);
+    assert_eq!(examples.len(), 16);
     for example in examples {
-        let repository = match example.fixture.as_str() {
-            "evolution" => evolution_repository(),
-            "generated-javascript" => generated_javascript_repository(),
-            "worktree-change" => worktree_change_repository(),
-            other => panic!("unknown README fixture {other}"),
-        };
-        let arguments = example
-            .command
-            .split_whitespace()
-            .skip(1)
-            .collect::<Vec<_>>();
-        let result = Invocation::new(arguments).run(repository.path());
-        assert_eq!(result.status.code(), Some(example.status));
-        assert_eq!(example.stderr, "empty");
+        assert_readme_example(example);
+    }
+}
+
+fn assert_readme_example(example: ReadmeExample) {
+    let repository = readme_example_repository(&example.fixture);
+    let arguments = example
+        .command
+        .split_whitespace()
+        .skip(1)
+        .collect::<Vec<_>>();
+    let result = Invocation::new(arguments).run(repository.path());
+    assert_eq!(result.status.code(), Some(example.status));
+    assert_readme_stderr(&result, &example.stderr);
+    assert_readme_stdout(result.stdout, &example);
+}
+
+fn readme_example_repository(fixture: &str) -> GeneratedRepository {
+    match fixture {
+        "evolution" => evolution_repository(),
+        "generated-javascript" => generated_javascript_repository(),
+        "comparison-trust-warning" => comparison_trust_warning_repository(),
+        "worktree-change" => worktree_change_repository(),
+        other => panic!("unknown README fixture {other}"),
+    }
+}
+
+fn assert_readme_stderr(result: &support::ProcessResult, expected: &str) {
+    if expected == "empty" {
         assert!(result.stderr.is_empty(), "{}", result.stderr_text());
-        assert_short_terminal_text(&result.stdout);
-        let output = String::from_utf8(result.stdout).unwrap();
-        let mut remainder = output.as_str();
-        for fragment in example.stdout_fragments {
-            let visible = fragment.replace('_', " ");
-            let position = remainder
-                .find(&visible)
-                .unwrap_or_else(|| panic!("missing ordered stdout fragment {visible}"));
-            remainder = &remainder[position + visible.len()..];
-        }
+    } else {
+        assert_eq!(
+            result.stderr_text(),
+            format!("{}\n", expected.replace('_', " "))
+        );
+    }
+}
+
+fn assert_readme_stdout(stdout: Vec<u8>, example: &ReadmeExample) {
+    if example.stdout_fragments == ["empty"] {
+        assert!(stdout.is_empty(), "{}", String::from_utf8_lossy(&stdout));
+        return;
+    }
+    assert_short_terminal_text(&stdout);
+    let output = String::from_utf8(stdout).unwrap();
+    let mut remainder = output.as_str();
+    for fragment in &example.stdout_fragments {
+        let visible = fragment.replace('_', " ");
+        let position = remainder.find(&visible).unwrap_or_else(|| {
+            panic!(
+                "missing ordered stdout fragment {visible} for `{}`:\n{output}",
+                example.command
+            )
+        });
+        remainder = &remainder[position + visible.len()..];
     }
 }
 

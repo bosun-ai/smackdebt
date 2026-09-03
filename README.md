@@ -193,7 +193,7 @@ Compare the current worktree with the branch it came from:
 $ smackdebt diff
 
 smackdebt diff · repository root
-  Better here, worse there.
+  Debt increased in some places and decreased in others.
 worse 1 (source) · better 1 (source) · changed 2 (source)
 
 AREAS
@@ -211,16 +211,7 @@ FINDINGS
         crates/cli/tests/unified_acceptance.rs:2436
         statements 118 → 121
 
-HISTORY
-  watch crates/analysis ↔ crates/cli changed together in 26 of 77 commits
-        34% · no direct dependency · linked via crates/output
-  watch crates/output ↔ crates/project changed together in 19 of 65 commits
-        29% · no code dependency
-  watch one contributor made 13 of 13 commits to repository root
-
-WARNINGS
-  warning 3 imports could not be followed
-        2 named nothing in the repository · 1 matched more than one file
+  inspect directories and files for more details
 ```
 
 Every diff count is labeled with its word and printed even when it is zero, and
@@ -241,9 +232,16 @@ The diff tiers are fixed in the same way:
 | Tier | Sentence |
 | --- | --- |
 | `no_debt_change` | No debt changed. |
-| `better` | You made it better. |
-| `worse` | You made it worse. |
-| `mixed` | Better here, worse there. |
+| `better` | Debt decreased. |
+| `worse` | Debt increased. |
+| `mixed` | Debt increased in some places and decreased in others. |
+
+The default diff uses one three-row limit across `FINDINGS`, `ARCHITECTURE`,
+and `HISTORY`. A mixed result first keeps one row for each direction that is
+present, then fills any space left in stable path order. `--top N` is literal:
+`--top 1` prints one comparison row. `--all` prints every useful comparison.
+No view adds an omitted-row notice. Every diff that shows comparison detail or
+warnings ends with `inspect directories and files for more details`.
 
 Adding or deleting healthy code moves no debt. A diff that moves no debt prints
 the verdict block and nothing else — here a clean worktree against the commit it
@@ -817,9 +815,74 @@ stable stdout fragments that must appear in the stated order.
 smackdebt --color never --jobs 1 --history 36500d
 ```
 
-<!-- smackdebt-example fixture=worktree-change status=0 stderr=empty stdout=smackdebt_diff_·_repository_root|worse|better|changed|AREAS|FINDINGS|ARCHITECTURE -->
+<!-- smackdebt-example fixture=worktree-change status=0 stderr=empty stdout=smackdebt_diff_·_repository_root|Debt_increased_in_some_places_and_decreased_in_others.|worse|better|changed|AREAS|FINDINGS -->
 ```console
 smackdebt diff main --color never --jobs 1 --history 36500d
+```
+
+<!-- smackdebt-example fixture=worktree-change status=0 stderr=empty stdout=Debt_increased_in_some_places_and_decreased_in_others.|worse_b|better_a|changed_c|inspect_directories_and_files_for_more_details -->
+```console
+smackdebt diff main --color never --jobs 1 --history 36500d
+```
+
+<!-- smackdebt-example fixture=worktree-change status=0 stderr=empty stdout=Debt_increased.|worse_package_dependency_cycle_introduced|inspect_directories_and_files_for_more_details -->
+```console
+smackdebt diff main c --color never --jobs 1 --history 36500d
+```
+
+<!-- smackdebt-example fixture=worktree-change status=0 stderr=empty stdout=Debt_decreased.|better_a|inspect_directories_and_files_for_more_details -->
+```console
+smackdebt diff main a --color never --jobs 1 --history 36500d
+```
+
+<!-- smackdebt-example fixture=worktree-change status=0 stderr=empty stdout=No_debt_changed. -->
+```console
+smackdebt diff main new/untracked.js --color never --jobs 1 --history 36500d
+```
+
+<!-- smackdebt-example fixture=comparison-trust-warning status=0 stderr=empty stdout=No_debt_changed.|Not_all_source_was_checked.|0_of_1_source_files_were_analyzed.|WARNINGS|1_source_file_uses_an_unsupported_language.|inspect_directories_and_files_for_more_details -->
+```console
+smackdebt diff main --color never --jobs 1 --history 36500d
+```
+
+<!-- smackdebt-example fixture=comparison-trust-warning status=0 stderr=empty stdout=smackdebt_·_page.astro|Not_all_source_was_checked.|0_of_1_source_files_were_analyzed.|1_source_file_uses_an_unsupported_language. -->
+```console
+smackdebt page.astro --color never --jobs 1 --history 36500d
+```
+
+<!-- smackdebt-example fixture=comparison-trust-warning status=1 stderr=smackdebt:_path_not_found:_does/not/exist stdout=empty -->
+```console
+smackdebt does/not/exist --color never
+```
+
+<!-- smackdebt-example fixture=comparison-trust-warning status=1 stderr=smackdebt:_no_source_files_found_under:_docs stdout=empty -->
+```console
+smackdebt docs --color never
+```
+
+<!-- smackdebt-example fixture=comparison-trust-warning status=1 stderr=smackdebt:_not_a_source_file:_README.txt stdout=empty -->
+```console
+smackdebt README.txt --color never
+```
+
+<!-- smackdebt-example fixture=generated-javascript status=0 stderr=empty stdout=No_debt_changed.|1_file_has_anonymous_units_that_could_not_be_matched_safely.|inspect_directories_and_files_for_more_details -->
+```console
+smackdebt diff HEAD~1 bundles/collision.bundle.js --color never --jobs 1 --history 36500d
+```
+
+<!-- smackdebt-example fixture=generated-javascript status=0 stderr=empty stdout=FINDINGS|transitions/from-generated.js|inspect_directories_and_files_for_more_details -->
+```console
+smackdebt diff HEAD~1 transitions/from-generated.js --all --color never --jobs 1 --history 36500d
+```
+
+<!-- smackdebt-example fixture=worktree-change status=0 stderr=empty stdout=Debt_increased_in_some_places_and_decreased_in_others.|FINDINGS|worse_b|inspect_directories_and_files_for_more_details -->
+```console
+smackdebt diff main --top 1 --color never --jobs 1 --history 36500d
+```
+
+<!-- smackdebt-example fixture=worktree-change status=0 stderr=empty stdout=Debt_increased_in_some_places_and_decreased_in_others.|FINDINGS|ARCHITECTURE|HISTORY|inspect_directories_and_files_for_more_details -->
+```console
+smackdebt diff main --all --color never --jobs 1 --history 36500d
 ```
 Terminal and JSON output contain only aggregate contributor counts and
 concentration operands. History and all other analysis stay on the local

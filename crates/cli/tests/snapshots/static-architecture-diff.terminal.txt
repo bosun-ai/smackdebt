@@ -1,5 +1,5 @@
 smackdebt diff · repository root
-  You made it worse.
+  Debt increased.
 worse 1 (architecture) · better 0 · changed 0
 worst: app/main.js — package dependency cycle
 

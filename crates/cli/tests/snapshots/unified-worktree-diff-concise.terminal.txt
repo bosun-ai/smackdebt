@@ -1,5 +1,5 @@
 smackdebt diff · repository root
-  Better here, worse there.
+  Debt increased in some places and decreased in others.
 worse 4 (source, architecture) · better 4 (source, architecture, evolutionary) · changed 1 (source)
 worst: c/main.js — package dependency cycle
 
@@ -14,25 +14,11 @@ FINDINGS
   worse b · function
         b/main.js:1
         cognitive 1 → 6 · cyclomatic 2 → 4 · statements 1 → 2 · nesting 1 → 3
-  worse renamed · function
-        e/new.js:1
-        added · cognitive 3 · cyclomatic 3 · statements 2 · nesting 2 · parameters 1
   better a · function
         a/main.js:2
         cognitive 3 → 0 · cyclomatic 3 → 1 · statements 2 → 1 · nesting 2 → 0
-
-ARCHITECTURE
-  worse package dependency cycle introduced
-        c
-        → d
-        → c
-  worse change reaches more code · c · 1 of 9 → 3 of 9
-  better package dependency cycle removed
-        a
-        → b
-        → a
-
-HISTORY
-  better h ↔ i no longer change together without a code dependency
+  changed c · function
+        c/main.js:2
+        statements 2 → 3
 
   inspect directories and files for more details

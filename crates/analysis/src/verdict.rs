@@ -517,9 +517,9 @@ impl DiffTier {
     pub const fn sentence(self) -> &'static str {
         match self {
             Self::NoDebtChange => "No debt changed.",
-            Self::Better => "You made it better.",
-            Self::Worse => "You made it worse.",
-            Self::Mixed => "Better here, worse there.",
+            Self::Better => "Debt decreased.",
+            Self::Worse => "Debt increased.",
+            Self::Mixed => "Debt increased in some places and decreased in others.",
         }
     }
 
@@ -1277,9 +1277,13 @@ mod tests {
     fn every_diff_tier_keeps_its_frozen_id_and_sentence() {
         let vocabulary = [
             (DiffTier::NoDebtChange, "no_debt_change", "No debt changed."),
-            (DiffTier::Better, "better", "You made it better."),
-            (DiffTier::Worse, "worse", "You made it worse."),
-            (DiffTier::Mixed, "mixed", "Better here, worse there."),
+            (DiffTier::Better, "better", "Debt decreased."),
+            (DiffTier::Worse, "worse", "Debt increased."),
+            (
+                DiffTier::Mixed,
+                "mixed",
+                "Debt increased in some places and decreased in others.",
+            ),
         ];
         for (tier, id, sentence) in vocabulary {
             assert_eq!(tier.id(), id);
@@ -1595,7 +1599,7 @@ mod tests {
         ));
         let verdict = Verdict::diff(counts(1_000, 0, 0, 1), selection, Vec::new());
         assert_eq!(verdict.diff_tier(), Some(DiffTier::Worse));
-        assert_eq!(verdict.sentence(), "You made it worse.");
+        assert_eq!(verdict.sentence(), "Debt increased.");
         assert_eq!(verdict.tier(), CodebaseTier::Worn);
         assert!(verdict.facts().moved(DebtFamily::Architecture));
     }

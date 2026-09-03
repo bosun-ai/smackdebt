@@ -1,5 +1,6 @@
 smackdebt diff · repository root
-  Better here, worse there.
+  Debt increased in some places and decreased in
+        others.
 worse 4 (source, architecture) · better 4
         (source, architecture, evolutionary) ·
         changed 1 (source)
@@ -38,18 +39,18 @@ FINDINGS
         statements 2 → 3
 
 ARCHITECTURE
+  worse change reaches more code · c
+        1 of 9 → 3 of 9
   worse package dependency cycle introduced
         c
         → d
         → c
-  worse change reaches more code · c
-        1 of 9 → 3 of 9
+  better change reaches less code · a
+        2 of 9 → 1 of 9
   better package dependency cycle removed
         a
         → b
         → a
-  better change reaches less code · a
-        2 of 9 → 1 of 9
 
 HISTORY
   h ↔ i changed together in 4 of 4 commits

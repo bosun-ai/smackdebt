@@ -24,6 +24,7 @@ evolution_index!(ContributorId);
 evolution_index!(EvolutionaryFindingId);
 evolution_index!(FileChangeCouplingId);
 evolution_index!(EvolutionaryComparisonId);
+evolution_index!(HistoryComparisonSuppressionId);
 evolution_index!(KnowledgeConcentrationFindingId);
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
@@ -380,12 +381,35 @@ impl EvolutionAccumulator {
         } else {
             Vec::new()
         };
-        let comparisons = if history_is_sufficient {
+        let comparison_history_is_trusted = history_is_sufficient && coverage.rename_gaps() == 0;
+        let comparisons = if comparison_history_is_trusted {
             before_explanation_pairs.map_or_else(Vec::new, |before| {
                 crate::compare_evolution(&eligible_coupling, before, explanation_pairs)
             })
         } else {
             Vec::new()
+        };
+        let comparison_suppressions = if comparison_history_is_trusted {
+            Vec::new()
+        } else {
+            before_explanation_pairs.map_or_else(Vec::new, |before| {
+                eligible_coupling
+                    .iter()
+                    .filter(|pair| crate::change_coupling::qualifies_for_finding(**pair))
+                    .filter(|pair| {
+                        pair_is_explained(before, pair.left(), pair.right())
+                            != pair_is_explained(explanation_pairs, pair.left(), pair.right())
+                    })
+                    .enumerate()
+                    .map(|(index, pair)| {
+                        HistoryComparisonSuppression::new(
+                            HistoryComparisonSuppressionId::from_index(index),
+                            pair.left(),
+                            pair.right(),
+                        )
+                    })
+                    .collect()
+            })
         };
         let concentration_findings = if history_is_sufficient {
             crate::knowledge_concentration(&concentration)
@@ -402,11 +426,41 @@ impl EvolutionAccumulator {
             comparisons,
         )
         .with_concentration_findings(concentration_findings)
+        .with_comparison_suppressions(comparison_suppressions)
         .with_file_coupling(file_coupling);
         // The amplification travels beside the facts rather than inside them:
         // it is keyed by directory, and only the composition that owns the
         // directory tree can turn it into the answer a scope states.
         (facts, amplification)
+    }
+}
+
+/// One package-pair comparison withheld because its history evidence cannot be
+/// trusted. The pair changed explanation state across the diff, so history is
+/// required to decide whether that change added or removed evolutionary debt.
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub struct HistoryComparisonSuppression {
+    id: HistoryComparisonSuppressionId,
+    left: PackageId,
+    right: PackageId,
+}
+
+impl HistoryComparisonSuppression {
+    pub const fn new(
+        id: HistoryComparisonSuppressionId,
+        left: PackageId,
+        right: PackageId,
+    ) -> Self {
+        Self { id, left, right }
+    }
+    pub const fn id(self) -> HistoryComparisonSuppressionId {
+        self.id
+    }
+    pub const fn left(self) -> PackageId {
+        self.left
+    }
+    pub const fn right(self) -> PackageId {
+        self.right
     }
 }
 
@@ -442,6 +496,21 @@ mod tests {
                 })
                 .collect(),
         )
+    }
+
+    fn qualifying_pair_accumulator() -> EvolutionAccumulator {
+        let mut accumulator = EvolutionAccumulator::default();
+        let directories = directories(2);
+        for contributor in 0..3 {
+            accumulator.accept(
+                commit(
+                    contributor,
+                    &[(0, 0, Some(1), Some(0)), (1, 1, Some(1), Some(0))],
+                ),
+                &directories,
+            );
+        }
+        accumulator
     }
 
     #[test]
@@ -532,6 +601,107 @@ mod tests {
         .with_window(Some(90), 1);
         assert_eq!(coverage.window_days(), Some(90));
         assert_eq!(coverage.window_excluded_commits(), 1);
+    }
+
+    #[test]
+    fn changed_explanations_record_comparisons_withheld_by_incomplete_history() {
+        let left = PackageId::from_index(0);
+        let right = PackageId::from_index(1);
+        let before = BTreeSet::from([(left, right)]);
+        let after = BTreeSet::new();
+        let (facts, _) = qualifying_pair_accumulator().finish(
+            HistoryCoverage::new(
+                HistoryAvailability::Incomplete,
+                None,
+                3,
+                3,
+                6,
+                0,
+                None,
+                None,
+                6,
+                0,
+                0,
+                0,
+                Some("history is shallow".to_owned()),
+            ),
+            2,
+            2,
+            &crate::PackageContainment::default(),
+            &after,
+            Some(&before),
+        );
+
+        assert!(facts.comparisons().is_empty());
+        assert_eq!(
+            facts.comparison_suppressions(),
+            [HistoryComparisonSuppression::new(
+                HistoryComparisonSuppressionId::from_index(0),
+                left,
+                right,
+            )]
+        );
+    }
+
+    #[test]
+    fn unchanged_explanations_need_no_history_comparison_warning() {
+        let pair = (PackageId::from_index(0), PackageId::from_index(1));
+        let explanations = BTreeSet::from([pair]);
+        let (facts, _) = EvolutionAccumulator::default().finish(
+            HistoryCoverage::default(),
+            0,
+            2,
+            &crate::PackageContainment::default(),
+            &explanations,
+            Some(&explanations),
+        );
+
+        assert!(facts.comparison_suppressions().is_empty());
+    }
+
+    #[test]
+    fn changed_explanations_without_qualifying_coupling_need_no_warning() {
+        let pair = (PackageId::from_index(0), PackageId::from_index(1));
+        let (facts, _) = EvolutionAccumulator::default().finish(
+            HistoryCoverage::default(),
+            0,
+            2,
+            &crate::PackageContainment::default(),
+            &BTreeSet::new(),
+            Some(&BTreeSet::from([pair])),
+        );
+
+        assert!(facts.comparison_suppressions().is_empty());
+    }
+
+    #[test]
+    fn rename_gaps_withhold_changed_explanation_comparisons() {
+        let pair = (PackageId::from_index(0), PackageId::from_index(1));
+        let (facts, _) = qualifying_pair_accumulator().finish(
+            HistoryCoverage::new(
+                HistoryAvailability::Complete,
+                None,
+                3,
+                3,
+                6,
+                0,
+                None,
+                None,
+                6,
+                0,
+                0,
+                1,
+                None,
+            ),
+            2,
+            2,
+            &crate::PackageContainment::default(),
+            &BTreeSet::new(),
+            Some(&BTreeSet::from([pair])),
+        );
+
+        assert!(facts.comparisons().is_empty());
+        assert_eq!(facts.comparison_suppressions().len(), 1);
     }
 
     /// The change graph is narrower than the population evolutionary findings
@@ -1578,6 +1748,7 @@ pub struct EvolutionaryReportFacts {
     pub(crate) concentration: Vec<ContributorConcentration>,
     pub(crate) findings: Vec<EvolutionaryFinding>,
     pub(crate) comparisons: Vec<EvolutionaryComparison>,
+    pub(crate) comparison_suppressions: Vec<HistoryComparisonSuppression>,
     pub(crate) concentration_findings: Vec<KnowledgeConcentrationFinding>,
     pub(crate) file_coupling: Vec<FileChangeCoupling>,
 }
@@ -1601,6 +1772,7 @@ impl EvolutionaryReportFacts {
             concentration,
             findings,
             comparisons,
+            comparison_suppressions: Vec::new(),
             concentration_findings: Vec::new(),
             file_coupling: Vec::new(),
         }
@@ -1611,6 +1783,13 @@ impl EvolutionaryReportFacts {
         findings: Vec<KnowledgeConcentrationFinding>,
     ) -> Self {
         self.concentration_findings = findings;
+        self
+    }
+    pub fn with_comparison_suppressions(
+        mut self,
+        suppressions: Vec<HistoryComparisonSuppression>,
+    ) -> Self {
+        self.comparison_suppressions = suppressions;
         self
     }
     /// Adds the retained file change coupling pairs, kept in their own table.
@@ -1632,6 +1811,9 @@ impl EvolutionaryReportFacts {
     }
     pub fn comparisons(&self) -> &[EvolutionaryComparison] {
         &self.comparisons
+    }
+    pub fn comparison_suppressions(&self) -> &[HistoryComparisonSuppression] {
+        &self.comparison_suppressions
     }
 }
 

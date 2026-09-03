@@ -26,8 +26,8 @@ rows support both directions, state that explicit `--top` is never exceeded,
 state that no-debt expands only for source, anonymous-match, graph, rename, or
 history-availability facts that narrow comparison trust while unrelated
 current-state history remains hidden, and keep the exact final line
-`inspect directories and files for more details` for a non-empty diff. No diff
-example SHALL use `next:`.
+`inspect directories and files for more details` for a diff that shows
+comparison detail or warnings. No diff example SHALL use `next:`.
 
 #### Scenario: A user selects an Astro file
 - **WHEN** they read the scope and language sections

@@ -1523,7 +1523,7 @@ fn static_architecture_diff_snapshot_uses_unchanged_return_edges() {
     // still worse, because the new package cycle is the debt that moved.
     assert!(report["comparisons"].as_array().unwrap().is_empty());
     let text = String::from_utf8(terminal).unwrap();
-    assert!(text.contains("You made it worse."), "{text}");
+    assert!(text.contains("Debt increased."), "{text}");
     assert!(
         text.contains("worse 1 (architecture) · better 0 · changed 0"),
         "{text}"
@@ -2073,7 +2073,7 @@ fn diff_uses_history_as_context_and_can_explain_coupling() {
     ))
     .unwrap();
     assert!(
-        default_terminal.contains("Better here, worse there."),
+        default_terminal.contains("Debt increased in some places and decreased in others."),
         "{default_terminal}"
     );
     assert!(
@@ -2531,26 +2531,7 @@ fn empty_git_history_is_unavailable_in_coverage_terminal_and_diagnostics() {
 
 #[test]
 fn shallow_history_is_reported_as_incomplete() {
-    let origin = evolutionary_fixture();
-    let checkout = tempfile::tempdir().unwrap();
-    let mut clone = Command::new("git");
-    hermetic_env(&mut clone);
-    let output = clone
-        .args([
-            "clone",
-            "--depth",
-            "1",
-            &format!("file://{}", origin.path().display()),
-            ".",
-        ])
-        .current_dir(checkout.path())
-        .output()
-        .unwrap();
-    assert!(
-        output.status.success(),
-        "{}",
-        String::from_utf8_lossy(&output.stderr)
-    );
+    let checkout = shallow_evolutionary_fixture();
     let json = run_in(
         checkout.path(),
         ["--json", "--jobs", "1", "--history", "36500d"],
@@ -2562,7 +2543,7 @@ fn shallow_history_is_reported_as_incomplete() {
         report["history_coverage"]["reason"],
         "repository history is shallow"
     );
-    assert_eq!(report["history_coverage"]["commits"], 1);
+    assert_eq!(report["history_coverage"]["commits"], 6);
     assert!(report["history_coverage"].get("revision").is_some());
     assert!(report["history_coverage"].get("newest_timestamp").is_some());
     assert!(report["history_coverage"].get("oldest_timestamp").is_some());
@@ -2588,6 +2569,33 @@ fn shallow_history_is_reported_as_incomplete() {
             .is_empty()
     );
     assert!(!report["files"].as_array().unwrap().is_empty());
+}
+
+#[test]
+fn changed_dependency_with_shallow_history_shows_only_the_relevant_trust_warning() {
+    let checkout = shallow_evolutionary_fixture();
+    fs::write(
+        checkout.path().join("b/main.test.js"),
+        "import { a } from '../a/main';\nexport const expected = a;\n",
+    )
+    .unwrap();
+
+    let terminal = String::from_utf8(run_in(
+        checkout.path(),
+        ["diff", "HEAD", "--color", "never", "--history", "36500d"],
+    ))
+    .unwrap();
+    assert!(terminal.contains("No debt changed."), "{terminal}");
+    assert!(
+        terminal.contains("warning History is incomplete."),
+        "{terminal}"
+    );
+    assert!(!terminal.contains("HISTORY"), "{terminal}");
+    assert!(!terminal.contains("changed together"), "{terminal}");
+    assert!(
+        terminal.ends_with("  inspect directories and files for more details\n"),
+        "{terminal}"
+    );
 }
 
 /// A path-selected machine head answers the question the terminal answers for
@@ -3526,6 +3534,38 @@ fn evolutionary_fixture() -> tempfile::TempDir {
         "b only",
     );
     project
+}
+
+fn shallow_evolutionary_fixture() -> tempfile::TempDir {
+    let origin = evolutionary_fixture();
+    fs::write(origin.path().join("a/main.js"), "export const a = 7;\n").unwrap();
+    fs::write(origin.path().join("b/main.js"), "export const b = 7;\n").unwrap();
+    commit_as(
+        origin.path(),
+        "Both Example",
+        "both@example.invalid",
+        "together at head",
+    );
+    let checkout = tempfile::tempdir().unwrap();
+    let mut clone = Command::new("git");
+    hermetic_env(&mut clone);
+    let output = clone
+        .args([
+            "clone",
+            "--depth",
+            "6",
+            &format!("file://{}", origin.path().display()),
+            ".",
+        ])
+        .current_dir(checkout.path())
+        .output()
+        .unwrap();
+    assert!(
+        output.status.success(),
+        "{}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    checkout
 }
 
 /// A repository holding one file per frozen file pattern plus the history one
