@@ -40,6 +40,10 @@ LEAKAGE_SIMILARITY_FLOOR_PERMILLE = 200
 # `.git/info/exclude` naming four of them, and the walk has honored that file
 # since discovery moved onto the ignore crate, so every Git-bearing profile
 # visits four fewer entries than an equally sized profile without a repository.
+# Diff object reads include every base tree object, each name-bearing manifest
+# needed by snapshot discovery, and each changed base source blob. Small diff is
+# 3 trees + 1 manifest + 4 blobs; large dependency diff is 101 trees + 100
+# manifests + 200 blobs.
 EXPECTED_WORK = {
     "one-file": [1, 13, 1, 0, 2, 1, 3],
     "hundred-file": [1, 112, 100, 0, 2, 100, 102],
@@ -48,8 +52,8 @@ EXPECTED_WORK = {
     "many-package": [1, 3008, 1000, 0, 2, 1000, 1002],
     "evolution-dense": [1, 304, 100, 0, 3, 100, 102],
     "evolution-wide": [1, 2104, 2000, 0, 3, 2000, 2002],
-    "small-diff": [1, 108, 100, 6, 7, 104, 112],
-    "large-dependency-diff": [1, 1204, 1000, 202, 7, 1200, 1404],
+    "small-diff": [1, 108, 100, 8, 7, 104, 112],
+    "large-dependency-diff": [1, 1204, 1000, 401, 7, 1200, 1404],
 }
 PRIVATE_KEYS = {
     "source_text",
