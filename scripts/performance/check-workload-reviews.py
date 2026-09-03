@@ -101,8 +101,8 @@ def validate(
                 problems.append(f"{row['family']}: expected outcome failed")
 
     baseline_revisions = {row.get("workspace_revision") for row in baselines}
-    if len(baselines) != 8:
-        problems.append("exactly eight public profiles are required")
+    if len(baselines) != 9:
+        problems.append("exactly nine public profiles are required")
     if baseline_revisions != {revision}:
         problems.append("workload reviews and public profiles must share one revision")
     if any(row.get("workspace_dirty") is not False for row in baselines):

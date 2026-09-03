@@ -702,7 +702,9 @@ line followed by the closed arrow path. Human activity rows say `commit` or
 
 The release baseline workflow is `scripts/performance/release-baselines.sh`.
 It requires a clean tree, captures one revision/toolchain/host state, and then
-records all eight profiles against that starting state. Each measured command
+records all nine profiles against that starting state: one-file, hundred-file,
+small-diff, graph-sparse, graph-dense, many-package, evolution-dense,
+evolution-wide, and large-dependency-diff. Each measured command
 first validates its JSON against the committed schema and semantic facts, then
 checks serial/automatic bytes and a reviewed report digest. Parser
 timing is diagnostic evidence on standard error only in the allocation build;

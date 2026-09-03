@@ -47,11 +47,11 @@ licenses:
     cargo deny check licenses bans sources
 
 performance-tests:
-    python3 -m unittest scripts/performance/test_workload.py
+    python3 -m unittest discover -s scripts/performance -p 'test_*.py'
     python3 scripts/performance/check-baselines.py
 
 release-workflow-tests:
-    python3 -m unittest scripts/performance/test_workload.py
+    python3 -m unittest scripts/performance/test_release_head.py
 
 release-evidence-check:
     python3 scripts/performance/check-baselines.py --release-head

@@ -8,6 +8,7 @@ from pathlib import Path, PurePosixPath
 
 PUBLIC_PROFILES = {
     "evolution-dense",
+    "evolution-wide",
     "graph-dense",
     "graph-sparse",
     "hundred-file",
