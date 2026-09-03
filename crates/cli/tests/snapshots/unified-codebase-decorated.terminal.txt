@@ -9,17 +9,17 @@ AREAS
   e · 1 watch
 
 PROBLEMS
+[31m[0m high b · function · b/main.js:1
+        cognitive 6 · cyclomatic 4 · statements 2
 [31m[0m high circular dependency · c/main.js
         c/main.js
         → d/main.js
         → c/main.js
         2 files in the cycle
         a change here reaches 2 files
-[31m[0m high b · function · b/main.js:1
-        cognitive 6 · cyclomatic 4 · statements 2
 [38;5;208m[0m watch renamed · function · e/new.js:1
         cognitive 3 · cyclomatic 3 · statements 2
 [38;5;208m[0m watch c · function · c/main.js:2
         statements 3
 
-[36m[0m next: smackdebt c/main.js
+[36m[0m next: smackdebt b/main.js

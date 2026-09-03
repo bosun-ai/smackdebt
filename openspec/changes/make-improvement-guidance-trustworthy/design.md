@@ -208,6 +208,25 @@ other context never pierce the verdict-only form. A documentation-only diff
 therefore remains exactly `No debt changed.` even when the current repository
 retains history context.
 
+### Problem cards prefer primary application debt at equal rating
+
+Problem-card rating remains the first rank key. Immediately after it, one
+three-way source priority distinguishes cards that claim primary source, cards
+that claim no source finding, and cards whose source findings are all
+non-primary, in that order. Claimed High count and every existing key follow.
+
+The middle class is deliberate. A cycle, package coupling, contributor
+concentration, or stable-dependency card may carry no source finding even when
+it describes an important application problem. Treating the absent role as an
+ordinary optional sort value would let type representation decide its position.
+Keeping it between primary and non-primary source lets primary application debt
+lead without pushing structural or history evidence below benchmarks and tests.
+
+The rule changes order only. It does not change claiming, visibility, ratings,
+verdict participation, thresholds, or serialized card shape. A High
+non-primary card still leads a Watch primary card, and a repository with only
+non-primary debt still shows it.
+
 ### Neutral sentences are analysis-owned
 
 The diff tier identifiers and movement policy remain unchanged. Their frozen

@@ -27,12 +27,12 @@ PROBLEMS
   watch everything depends on this · hub/hub.js
         hub/hub.js:1 · function · cyclomatic 2
         10 files import this
+  watch plain · function · god/plain.js:1
+        cyclomatic 2
   watch one author · hot
         one contributor made 11 of 11 commits
   watch god/long.js · file
         41 lines
-  watch plain · function · god/plain.js:1
-        cyclomatic 2
 
 WARNINGS
   warning 1 architecture fact hidden because dependency data is incomplete.

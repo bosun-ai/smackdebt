@@ -43,6 +43,10 @@ short report answers the selected scope and shows evidence for its conclusion.
   for each present direction before filling the remaining limit by the exact
   view-wide direction, family, subject, line, kind, and identity key across
   source, architecture, and history. Explicit limits are never exceeded.
+- Problem cards keep rating as their strongest priority, then put primary
+  application debt before cards made only from non-primary source. Cards with
+  no source finding keep an explicit middle priority, so architecture and
+  history problems are not demoted by an absent source role.
 - Every diff that shows comparison detail or warnings continues to end with
   exactly `inspect directories and files for more details` and never regains a
   `next:` line.
@@ -65,6 +69,8 @@ short report answers the selected scope and shows evidence for its conclusion.
   diff sentences.
 - `terminal-output`: exact scope errors, grouped match warnings, representative
   mixed diffs, and the unchanged diff footer.
+- `problem-clustering`: primary application cards lead non-primary cards at the
+  same rating while architecture and history cards keep deliberate priority.
 - `report-schema-v4`: Astro and qualifier file counts, with private match keys.
 - `analysis-performance`: generated classification reuses the selected source
   read and matching adds no file or Git work.
@@ -81,8 +87,7 @@ short report answers the selected scope and shows evidence for its conclusion.
   cycles stay unchanged.
 - `debt-ratchet`: generated and ambiguous source remain outside debt movement
   under the accepted selection rule.
-- `hotspot-analysis` and `problem-clustering`: existing ranks remain the fill
-  order after representative rows are reserved.
+- `hotspot-analysis`: the existing source-finding rank remains unchanged.
 
 ## Impact
 

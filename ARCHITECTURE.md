@@ -143,6 +143,14 @@ table leaves analysis in display order and no renderer sorts it, and a card's
 `default` or `detail` visibility is a display fact that changes nothing the
 report measured.
 
+Problem ranking keeps rating first, then puts cards claiming primary application
+source before cards with no source finding and cards whose source findings are
+all non-primary. The explicit middle class keeps architecture and history cards
+from receiving an accidental position merely because they have no source role.
+Every existing claimed-count and evidence key follows this priority. The rule
+changes order only; it changes no card visibility, claim, rating, count, or
+verdict.
+
 ## Package discovery
 
 Discovery performs one filesystem walk without reading source contents. It

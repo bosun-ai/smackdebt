@@ -411,10 +411,14 @@ that file, and a card of their own exists only when nothing else names the file
 or the pair, so the report never states one subject twice.
 
 Cards are ranked against each other, so the first card is the problem to look at
-first. The order is the card's rating, then how many High findings it claims,
-then hot before not hot, then how many findings it claims, then the pattern,
-then the accepted finding rank of its top claimed finding, then the anchor's
-path and line.
+first. The order is the card's rating, then primary application source before
+cards with no source finding and non-primary source, then how many High findings
+it claims, then hot before not hot, then how many findings it claims, then the
+pattern, then the accepted finding rank of its top claimed finding, then the
+anchor's path and line. Architecture and history cards have no source finding,
+so they keep the middle position deliberately. Rating stays strongest: a High
+benchmark problem still appears before a Watch primary problem, and no role is
+hidden.
 
 ### The one-screen budget
 

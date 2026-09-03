@@ -16,6 +16,7 @@ use crate::report::{
     FileActivity, FileId, FileRecord, Finding, FindingId, FindingRank, PackageId, PackageRecord,
 };
 use crate::size::{SizeFinding, SizeFindingId};
+use crate::source::SourceRole;
 use crate::{GraphEvidence, PackageClosure};
 use std::cmp::Reverse;
 use std::collections::{BTreeMap, BTreeSet};
@@ -331,15 +332,14 @@ impl ProblemPolicy {
 
 /// The complete problem-card display order owned by analysis policy.
 ///
-/// The keys are, in order: rating, claimed High count, hot state, claimed
-/// finding count, the frozen pattern order, the accepted finding rank of the
-/// card's top claimed source finding, the anchor's repository-relative path,
-/// and the anchor's start line. A card with no claimed source finding orders
-/// before one that has such a finding when every earlier key ties, because
-/// `None` precedes `Some`.
+/// The keys are, in order: rating, source priority, claimed High count, hot
+/// state, claimed finding count, the frozen pattern order, the accepted finding
+/// rank of the card's top claimed source finding, the anchor's
+/// repository-relative path, and the anchor's start line.
 #[derive(Clone, Copy, Debug, Eq, Ord, PartialEq, PartialOrd)]
 pub struct ProblemRank<'a> {
     rating: Reverse<u8>,
+    source_priority: ProblemSourcePriority,
     claimed_high: Reverse<u32>,
     hot: Reverse<bool>,
     claimed: Reverse<u32>,
@@ -347,6 +347,17 @@ pub struct ProblemRank<'a> {
     finding: Option<FindingRank<'a>>,
     path: &'a str,
     start_line: u32,
+}
+
+/// Which source class a card can direct the reader toward.
+///
+/// Cards without source findings keep their own position because architecture
+/// and history problems do not have a source role to inherit.
+#[derive(Clone, Copy, Debug, Eq, Ord, PartialEq, PartialOrd)]
+enum ProblemSourcePriority {
+    Primary,
+    NoSourceFinding,
+    NonPrimary,
 }
 
 impl<'a> ProblemRank<'a> {
@@ -362,6 +373,7 @@ impl<'a> ProblemRank<'a> {
     ) -> Self {
         Self {
             rating: Reverse(card.rating().rank()),
+            source_priority: ProblemSourcePriority::NoSourceFinding,
             claimed_high: Reverse(claimed_high),
             hot: Reverse(card.is_hot()),
             claimed: Reverse(card.claimed_findings().len() as u32),
@@ -370,6 +382,11 @@ impl<'a> ProblemRank<'a> {
             path,
             start_line,
         }
+    }
+
+    fn with_source_priority(mut self, source_priority: ProblemSourcePriority) -> Self {
+        self.source_priority = source_priority;
+        self
     }
 }
 
@@ -1134,7 +1151,8 @@ fn rank<'a>(input: &ProblemInput<'a>, cards: Vec<ProblemCard>) -> Vec<ProblemCar
                 top_finding_rank(input, &card),
                 anchor_path(input, card.anchor()),
                 anchor_start_line(input, &card),
-            );
+            )
+            .with_source_priority(source_priority(input, &card));
             (key, card)
         })
         .collect();
@@ -1142,6 +1160,27 @@ fn rank<'a>(input: &ProblemInput<'a>, cards: Vec<ProblemCard>) -> Vec<ProblemCar
     // every rank key ties, so the answer stays data-stable.
     ranked.sort_by(|left, right| left.0.cmp(&right.0));
     ranked.into_iter().map(|(_, card)| card).collect()
+}
+
+/// Primary source is the next action at equal rating. Cards without source
+/// findings keep architecture and history evidence ahead of non-primary source.
+fn source_priority(input: &ProblemInput<'_>, card: &ProblemCard) -> ProblemSourcePriority {
+    let mut has_source_finding = false;
+    for claim in card.claimed_findings() {
+        let ClaimedFinding::Source(id) = claim else {
+            continue;
+        };
+        has_source_finding = true;
+        if input.findings[id.index()].role() == SourceRole::Primary {
+            return ProblemSourcePriority::Primary;
+        }
+    }
+
+    if has_source_finding {
+        ProblemSourcePriority::NonPrimary
+    } else {
+        ProblemSourcePriority::NoSourceFinding
+    }
 }
 
 /// How many of a card's claimed findings are rated High.
@@ -2261,26 +2300,27 @@ mod tests {
         let watch_card = card(ProblemPattern::Tangle, Rating::Watch, true, 9);
         assert!(rank(&high_card, 0, "z", 9) < rank(&watch_card, 9, "a", 1));
 
-        // KEY 2 claimed High count: rating ties, so more High claims precede.
+        // KEY 3 claimed High count: rating and source priority tie, so more
+        // High claims precede.
         let three_high = card(ProblemPattern::Measured, Rating::High, false, 3);
         assert!(rank(&three_high, 3, "z", 9) < rank(&high_card, 1, "a", 1));
 
-        // KEY 3 hot: rating and High claims tie, so the hot card precedes even
-        // when the cold card claims more findings.
+        // KEY 4 hot: earlier keys tie, so the hot card precedes even when the
+        // cold card claims more findings.
         let hot = card(ProblemPattern::Measured, Rating::High, true, 1);
         let cold_many = card(ProblemPattern::Measured, Rating::High, false, 4);
         assert!(rank(&hot, 1, "z", 9) < rank(&cold_many, 1, "a", 1));
 
-        // KEY 4 claimed finding count: heat ties, so more claims precede.
+        // KEY 5 claimed finding count: heat ties, so more claims precede.
         let two_claims = card(ProblemPattern::Measured, Rating::High, false, 2);
         assert!(rank(&two_claims, 1, "z", 9) < rank(&high_card, 1, "a", 1));
 
-        // KEY 5 pattern: every count ties, so the frozen claiming order
+        // KEY 6 pattern: every count ties, so the frozen claiming order
         // decides and a tangle precedes a measured card.
         let tangle = card(ProblemPattern::Tangle, Rating::High, false, 1);
         assert!(rank(&tangle, 1, "z", 9) < rank(&high_card, 1, "a", 1));
 
-        // KEY 6 the accepted finding rank: the pattern ties, so the top
+        // KEY 7 the accepted finding rank: the pattern ties, so the top
         // claimed finding decides.
         let worst = Finding::new(
             FindingId::from_index(0),
@@ -2314,11 +2354,11 @@ mod tests {
             )
         );
 
-        // KEY 7 anchor path: every earlier key ties, so the earlier path
+        // KEY 8 anchor path: every earlier key ties, so the earlier path
         // precedes.
         assert!(rank(&high_card, 1, "a", 9) < rank(&high_card, 1, "b", 1));
 
-        // KEY 8 anchor start line: the path ties too, so the earlier start
+        // KEY 9 anchor start line: the path ties too, so the earlier start
         // line precedes.
         assert!(rank(&high_card, 1, "a", 1) < rank(&high_card, 1, "a", 2));
     }

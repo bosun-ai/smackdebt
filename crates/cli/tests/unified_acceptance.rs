@@ -1769,11 +1769,11 @@ fn top_counts_the_problem_cards_a_codebase_view_shows() {
     assert_eq!(problem_heads(&limited).len(), 1, "{limited}");
     assert_eq!(
         problem_heads(&limited)[0],
-        "  high circular dependency · c/main.js",
+        "  high b · function · b/main.js:1",
         "{limited}"
     );
     assert!(!limited.contains("renamed"), "{limited}");
-    assert!(!limited.contains("b/main.js:1"), "{limited}");
+    assert!(!limited.contains("circular dependency"), "{limited}");
     // A limit above the cards shows them all and adds no filler row; it buys
     // that breadth with the evidence depth its own rung allows, so it is not
     // the default view byte for byte.

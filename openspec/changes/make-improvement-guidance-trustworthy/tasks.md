@@ -167,6 +167,27 @@
       The temporary worktree was removed, and no private source or complete
       private output was retained.
 
+- [x] 4.6 Put primary application problem cards before no-source and
+      non-primary cards at the same rating while keeping rating first; prove
+      the policy with focused ranking tests, regenerate and review the affected
+      committed terminal and JSON bytes, and verify root guidance on Smackdebt,
+      Fluyt, Swiftide, and Netdisco with one release binary.
+
+      **Completion note (2026-09-03).** Rating remains the first problem-rank
+      key. At equal rating, primary-source cards now precede relationship-only
+      cards and non-primary-source cards. Focused tests prove all three classes,
+      stable ordering, and that High non-primary debt still precedes Watch
+      primary debt. The committed pattern and unified snapshots changed only in
+      card order and the resulting root navigation target; normalized JSON was
+      otherwise identical. One release binary made Fluyt lead with
+      `bow/src/util/manifests/step-form.ts`, whose card claims 13 trusted primary
+      findings, while the High benchmark card remained default-visible lower in
+      the table and still preceded Watch primary cards. Smackdebt and Swiftide
+      retained useful leading findings, and Netdisco retained authored
+      JavaScript first. The workload review passed all six outcomes. Independent
+      review and the final `rtk just check` both passed with zero debt-gate
+      regressions.
+
 ## 5. Real-repository proof and closeout
 
 - [x] 5.1 Consume the task 0.1 completion note and run one newly built release
