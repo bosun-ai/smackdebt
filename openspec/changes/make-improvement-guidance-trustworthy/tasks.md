@@ -242,8 +242,21 @@
       passed; and the final `rtk just check` passed, including acceptance
       evidence, performance checks, and the debt gate. Release baselines were
       deliberately not run.
-- [ ] 5.4 Run release baselines only after the complete correctness gate passes,
+- [x] 5.4 Run release baselines only after the complete correctness gate passes,
       review every output and workload change, and complete the deferred release
       task only when its evidence is valid.
+
+      Nine release profiles were recorded from clean accepted revision
+      `a939eb7a778596eba8cdb1ccbcb765a4e90d03d6` with five stable-work samples
+      each. Workload identity, source shape, report digests, resource maxima,
+      budgets, and metadata agreed across the evidence; every generated report
+      passed correctness review, and all six real-workload outcomes passed
+      without retaining private output. Quiet-host rerecording removed isolated
+      timing noise from the two largest profiles. The remaining sub-second
+      large-diff increase is accepted for its changed work: 401 rather than 202
+      object reads, 1,200 parser visits, 1,404 analysis passes, and the current
+      graph and improvement-guidance features. Release evidence, performance
+      tests, the debt gate, strict OpenSpec validation, diff checks, and the
+      complete workspace check passed.
 - [ ] 5.5 Update product and architecture documentation to match verified bytes,
       then archive this change only after every task is complete.
