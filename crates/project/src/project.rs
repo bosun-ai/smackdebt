@@ -1476,6 +1476,38 @@ fn analyze_diff_side(
     }
 }
 
+/// One matched comparison as the report keeps it: the same measurements,
+/// placed in the file it came from, told what its source roles allow, and
+/// carrying whatever the matcher could not settle about its identity.
+fn retained_comparison(
+    comparison: &Comparison,
+    id: ComparisonId,
+    file: FileId,
+    roles: (Option<SourceRole>, Option<SourceRole>),
+) -> Comparison {
+    let mut retained = Comparison::new(
+        id,
+        comparison.identity().clone(),
+        comparison.kind(),
+        comparison.before(),
+        comparison.after(),
+        comparison.before_rating(),
+        comparison.after_rating(),
+    )
+    .with_file(file)
+    .with_source_roles(roles.0, roles.1);
+    if let Some(span) = comparison.span() {
+        retained = retained.with_span(span);
+    }
+    if comparison.is_anonymous_ambiguity() {
+        retained = retained.with_anonymous_ambiguity();
+    }
+    if comparison.is_unpaired_anonymous() {
+        retained = retained.with_unpaired_anonymous();
+    }
+    retained
+}
+
 fn add_diff_result(
     report: &mut AnalysisReportBuilder,
     result: DiffResult,
@@ -1493,24 +1525,15 @@ fn add_diff_result(
 
     for comparison in result.comparisons.iter().filter(|_| included_in_code_diff) {
         let comparison_id = ComparisonId::from_index(indexes.comparison);
-        let mut retained = Comparison::new(
+        let retained = retained_comparison(
+            comparison,
             comparison_id,
-            comparison.identity().clone(),
-            comparison.kind(),
-            comparison.before(),
-            comparison.after(),
-            comparison.before_rating(),
-            comparison.after_rating(),
-        )
-        .with_file(file_id)
-        .with_source_roles(before_role, current_role);
-        if let Some(span) = comparison.span() {
-            retained = retained.with_span(span);
-        }
-        if comparison.is_anonymous_ambiguity() {
+            file_id,
+            (before_role, current_role),
+        );
+        if retained.is_anonymous_ambiguity() {
             has_ambiguous_identity = true;
-            retained = retained.with_anonymous_ambiguity();
-            ambiguity_affects_verdict |= retained.affects_verdict();
+            ambiguity_affects_verdict |= retained.source_moves_debt();
         }
         report.add_comparison(retained);
         report.link_comparison(scope_id, comparison_id);

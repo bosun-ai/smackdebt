@@ -404,22 +404,27 @@ fn unit_draft<L: Language>(site: &UnitSite<'_, '_>, scratch: &mut Scratch) -> Un
 }
 
 /// How a unit that declares no identity of its own is paired across versions.
+///
+/// A unit carries every kind of evidence it has, not the best one: an anchor
+/// follows the unit through an edit, its exact syntax follows it through a
+/// move, and the matcher needs the second when an anchor is shared by sibling
+/// units it cannot otherwise tell apart.
 fn inferred_match_evidence<L: Language>(
     site: &UnitSite<'_, '_>,
     declared_container: Option<&str>,
     enclosing_declared: Option<&UnitIdentity>,
 ) -> UnitMatchEvidence {
-    if let Some(anchor) = L::match_anchor(site.node, site.source) {
-        return UnitMatchEvidence::semantic(
-            declared_container,
-            enclosing_declared,
-            site.kind,
-            anchor,
-        );
-    }
-    site.source
+    let evidence =
+        L::match_anchor(site.node, site.source).map_or_else(UnitMatchEvidence::none, |anchor| {
+            UnitMatchEvidence::semantic(declared_container, enclosing_declared, site.kind, anchor)
+        });
+    match site
+        .source
         .get(site.node.start_byte()..site.node.end_byte())
-        .map_or_else(UnitMatchEvidence::none, UnitMatchEvidence::exact_syntax)
+    {
+        Some(syntax) => evidence.with_exact_syntax(syntax),
+        None => evidence,
+    }
 }
 
 fn nearest_declared_unit(mut parent: Option<usize>, drafts: &[UnitDraft]) -> Option<&UnitIdentity> {

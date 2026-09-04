@@ -34,6 +34,7 @@ mod source;
 mod stable_dependencies;
 mod strongly_connected_components;
 mod test_scope;
+mod unit_matching;
 mod verdict;
 
 pub use architecture::{
@@ -107,10 +108,9 @@ pub use size::{SizeFinding, SizeFindingId, SizePolicy, SizeSubject};
 pub use stable_dependencies::{MINIMUM_STABLE_DEPENDENCY_REFERENCES, stable_dependency_findings};
 pub use strongly_connected_components::strongly_connected_components;
 pub use test_scope::{ModuleDeclaration, test_declared_files};
+pub use unit_matching::compare_units;
 
-pub use comparison::{
-    Comparison, ComparisonDirection, ComparisonKind, ComparisonParticipation, compare_units,
-};
+pub use comparison::{Comparison, ComparisonDirection, ComparisonKind, ComparisonParticipation};
 pub use health::{
     HealthAssessment, HealthCounts, HealthPolicy, Measurements, Rating, Signal, SignalAssessment,
     Thresholds,

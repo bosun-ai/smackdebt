@@ -1,9 +1,6 @@
-use std::cmp::Ordering;
-use std::collections::BTreeMap;
-
-use crate::health::{HealthPolicy, Measurements, Rating};
+use crate::health::{Measurements, Rating};
 use crate::report::{ComparisonId, FileId};
-use crate::source::{SourceRole, SourceSpan, UnitFact, UnitIdentity, UnitMatchKey};
+use crate::source::{SourceRole, SourceSpan, UnitIdentity};
 
 /// Whether a diff unit was added, removed, or changed.
 #[derive(Clone, Copy, Debug, Eq, Hash, Ord, PartialEq, PartialOrd)]
@@ -45,7 +42,8 @@ pub struct Comparison {
     file: Option<FileId>,
     span: Option<SourceSpan>,
     anonymous_ambiguity: bool,
-    participation: ComparisonParticipation,
+    unpaired_anonymous: bool,
+    role_participation: ComparisonParticipation,
 }
 
 impl Comparison {
@@ -69,7 +67,8 @@ impl Comparison {
             file: None,
             span: None,
             anonymous_ambiguity: false,
-            participation: ComparisonParticipation::Verdict,
+            unpaired_anonymous: false,
+            role_participation: ComparisonParticipation::Verdict,
         }
     }
 
@@ -119,6 +118,19 @@ impl Comparison {
         self.anonymous_ambiguity = true;
         self
     }
+    /// Whether this is an anonymous unit the matcher gave up on pairing.
+    pub const fn is_unpaired_anonymous(&self) -> bool {
+        self.unpaired_anonymous
+    }
+    /// Records that no evidence paired this anonymous unit with the other side.
+    ///
+    /// The comparison stays in the machine report and reaches a reader under
+    /// `--all`, but it never moves debt: one edit the matcher could not follow
+    /// must not read as debt added over there and debt removed over here.
+    pub const fn with_unpaired_anonymous(mut self) -> Self {
+        self.unpaired_anonymous = true;
+        self
+    }
     /// Records whether every source side present may move diff debt.
     ///
     /// A fixture or generated side makes the whole comparison context, even
@@ -128,37 +140,65 @@ impl Comparison {
         before: Option<SourceRole>,
         after: Option<SourceRole>,
     ) -> Self {
-        self.participation = if role_is_verdict_eligible(before) && role_is_verdict_eligible(after)
-        {
-            ComparisonParticipation::Verdict
-        } else {
-            ComparisonParticipation::Context
-        };
+        self.role_participation =
+            if role_is_verdict_eligible(before) && role_is_verdict_eligible(after) {
+                ComparisonParticipation::Verdict
+            } else {
+                ComparisonParticipation::Context
+            };
         self
     }
     pub const fn participation(&self) -> ComparisonParticipation {
-        self.participation
+        if self.unpaired_anonymous {
+            return ComparisonParticipation::Context;
+        }
+        self.role_participation
     }
     pub const fn affects_verdict(&self) -> bool {
-        matches!(self.participation, ComparisonParticipation::Verdict)
+        matches!(self.participation(), ComparisonParticipation::Verdict)
     }
+    /// Whether the source this comparison names may move debt at all.
+    ///
+    /// An unpaired anonymous comparison is withheld from the verdict while
+    /// still naming verdict-eligible source. The file's diagnostic reads this
+    /// rather than participation, so a warning about the verdict is not filed
+    /// as context beside it.
+    pub const fn source_moves_debt(&self) -> bool {
+        matches!(self.role_participation, ComparisonParticipation::Verdict)
+    }
+    /// The direction a reader may read off this comparison.
+    ///
+    /// An unpaired anonymous unit has no direction to state: the matcher can
+    /// see the file changed here and cannot see which way, so calling the
+    /// leftover side added or removed debt would be a claim it has not earned.
     pub const fn direction(&self) -> ComparisonDirection {
-        match self.kind {
-            ComparisonKind::Regressed => ComparisonDirection::Worse,
-            ComparisonKind::Improved => ComparisonDirection::Better,
-            ComparisonKind::Added => match self.after_rating {
-                Some(Rating::Watch | Rating::High) => ComparisonDirection::Worse,
-                _ => ComparisonDirection::Changed,
-            },
-            ComparisonKind::Removed => match self.before_rating {
-                Some(Rating::Watch | Rating::High) => ComparisonDirection::Better,
-                _ => ComparisonDirection::Changed,
-            },
-            ComparisonKind::MetricChanged
-            | ComparisonKind::Ambiguous
-            | ComparisonKind::Unchanged => ComparisonDirection::Changed,
+        if self.unpaired_anonymous {
+            return ComparisonDirection::Changed;
         }
+        rated_direction(self.kind, self.before_rating, self.after_rating)
     }
+}
+
+/// Which way a paired or one-sided comparison moved debt.
+///
+/// A unit that was added or removed only moves debt while it was rated: the
+/// healthy units a refactor shuffles are changes, not debt.
+const fn rated_direction(
+    kind: ComparisonKind,
+    before_rating: Option<Rating>,
+    after_rating: Option<Rating>,
+) -> ComparisonDirection {
+    match kind {
+        ComparisonKind::Regressed => ComparisonDirection::Worse,
+        ComparisonKind::Improved => ComparisonDirection::Better,
+        ComparisonKind::Added if is_rated(after_rating) => ComparisonDirection::Worse,
+        ComparisonKind::Removed if is_rated(before_rating) => ComparisonDirection::Better,
+        _ => ComparisonDirection::Changed,
+    }
+}
+
+const fn is_rated(rating: Option<Rating>) -> bool {
+    matches!(rating, Some(Rating::Watch | Rating::High))
 }
 
 const fn role_is_verdict_eligible(role: Option<SourceRole>) -> bool {
@@ -166,201 +206,4 @@ const fn role_is_verdict_eligible(role: Option<SourceRole>) -> bool {
         Some(role) => role.affects_verdict(),
         None => true,
     }
-}
-
-#[derive(Clone, Debug, Eq, Ord, PartialEq, PartialOrd)]
-enum CandidateKey {
-    Declared(UnitIdentity),
-    Semantic(UnitMatchKey),
-    Fingerprint(UnitMatchKey),
-}
-
-struct PendingComparison<'a> {
-    identity: UnitIdentity,
-    kind: ComparisonKind,
-    before: Option<&'a UnitFact>,
-    after: Option<&'a UnitFact>,
-    span: SourceSpan,
-    anonymous_ambiguity: bool,
-}
-
-type CandidateGroups = BTreeMap<CandidateKey, Vec<usize>>;
-
-struct MatchState<'a> {
-    before: &'a [UnitFact],
-    after: &'a [UnitFact],
-    used_before: Vec<bool>,
-    used_after: Vec<bool>,
-    pending: Vec<PendingComparison<'a>>,
-    policy: HealthPolicy,
-}
-
-impl<'a> MatchState<'a> {
-    fn new(before: &'a [UnitFact], after: &'a [UnitFact], policy: HealthPolicy) -> Self {
-        Self {
-            before,
-            after,
-            used_before: vec![false; before.len()],
-            used_after: vec![false; after.len()],
-            pending: Vec::with_capacity(before.len() + after.len()),
-            policy,
-        }
-    }
-
-    fn append_shared(&mut self, before_groups: &CandidateGroups, after_groups: &CandidateGroups) {
-        for (key, before_indexes) in before_groups {
-            let Some(after_indexes) = after_groups.get(key) else {
-                continue;
-            };
-            mark_used(&mut self.used_before, before_indexes);
-            mark_used(&mut self.used_after, after_indexes);
-            if before_indexes.len() == 1 && after_indexes.len() == 1 {
-                let left = &self.before[before_indexes[0]];
-                let right = &self.after[after_indexes[0]];
-                self.pending.push(PendingComparison {
-                    identity: right.identity().clone(),
-                    kind: paired_kind(left, right, self.policy),
-                    before: Some(left),
-                    after: Some(right),
-                    span: right.span(),
-                    anonymous_ambiguity: false,
-                });
-                continue;
-            }
-            let representative = &self.after[after_indexes[0]];
-            self.pending.push(PendingComparison {
-                identity: representative.identity().clone(),
-                kind: ComparisonKind::Ambiguous,
-                before: None,
-                after: None,
-                span: representative.span(),
-                anonymous_ambiguity: !matches!(key, CandidateKey::Declared(_)),
-            });
-        }
-    }
-}
-
-fn candidate_key(unit: &UnitFact) -> Option<CandidateKey> {
-    match unit.match_evidence().key() {
-        UnitMatchKey::Declared => Some(CandidateKey::Declared(unit.identity().clone())),
-        value @ UnitMatchKey::Semantic { .. } => Some(CandidateKey::Semantic(value.clone())),
-        value @ UnitMatchKey::Fingerprint { .. } => Some(CandidateKey::Fingerprint(value.clone())),
-        UnitMatchKey::None => None,
-    }
-}
-
-fn paired_kind(before: &UnitFact, after: &UnitFact, policy: HealthPolicy) -> ComparisonKind {
-    let before_assessment = policy.assess(before.measurements());
-    let after_assessment = policy.assess(after.measurements());
-    match before_assessment.rating().cmp(&after_assessment.rating()) {
-        Ordering::Less => ComparisonKind::Regressed,
-        Ordering::Greater => ComparisonKind::Improved,
-        Ordering::Equal if before.measurements().rated() != after.measurements().rated() => {
-            ComparisonKind::MetricChanged
-        }
-        Ordering::Equal => ComparisonKind::Unchanged,
-    }
-}
-
-fn group_units(units: &[UnitFact]) -> CandidateGroups {
-    let mut groups = CandidateGroups::new();
-    for (index, unit) in units.iter().enumerate() {
-        if let Some(key) = candidate_key(unit) {
-            groups.entry(key).or_default().push(index);
-        }
-    }
-    groups
-}
-
-fn mark_used(used: &mut [bool], indexes: &[usize]) {
-    for index in indexes {
-        used[*index] = true;
-    }
-}
-
-fn append_one_sided<'a>(
-    units: &'a [UnitFact],
-    used: &[bool],
-    kind: ComparisonKind,
-    pending: &mut Vec<PendingComparison<'a>>,
-) {
-    for unit in units
-        .iter()
-        .enumerate()
-        .filter(|(index, _)| !used[*index])
-        .map(|(_, unit)| unit)
-    {
-        let (before, after) = match kind {
-            ComparisonKind::Removed => (Some(unit), None),
-            ComparisonKind::Added => (None, Some(unit)),
-            _ => unreachable!("one-sided comparison kind"),
-        };
-        pending.push(PendingComparison {
-            identity: unit.identity().clone(),
-            kind,
-            before,
-            after,
-            span: unit.span(),
-            anonymous_ambiguity: false,
-        });
-    }
-}
-
-fn finish_comparisons(
-    mut pending: Vec<PendingComparison<'_>>,
-    policy: HealthPolicy,
-) -> Vec<Comparison> {
-    pending.sort_unstable_by(|left, right| {
-        left.identity
-            .cmp(&right.identity)
-            .then_with(|| left.span.cmp(&right.span))
-            .then_with(|| left.kind.cmp(&right.kind))
-    });
-    pending
-        .into_iter()
-        .enumerate()
-        .map(|(index, value)| {
-            let before = value.before.map(UnitFact::measurements);
-            let after = value.after.map(UnitFact::measurements);
-            let mut comparison = Comparison::new(
-                ComparisonId::from_index(index),
-                value.identity,
-                value.kind,
-                before,
-                after,
-                before.map(|value| policy.assess(value).rating()),
-                after.map(|value| policy.assess(value).rating()),
-            )
-            .with_span(value.span);
-            if value.anonymous_ambiguity {
-                comparison = comparison.with_anonymous_ambiguity();
-            }
-            comparison
-        })
-        .collect()
-}
-
-/// Compares units through the strongest safe evidence each unit owns.
-pub fn compare_units(
-    before: &[UnitFact],
-    after: &[UnitFact],
-    policy: HealthPolicy,
-) -> Vec<Comparison> {
-    let before_groups = group_units(before);
-    let after_groups = group_units(after);
-    let mut state = MatchState::new(before, after, policy);
-    state.append_shared(&before_groups, &after_groups);
-    append_one_sided(
-        before,
-        &state.used_before,
-        ComparisonKind::Removed,
-        &mut state.pending,
-    );
-    append_one_sided(
-        after,
-        &state.used_after,
-        ComparisonKind::Added,
-        &mut state.pending,
-    );
-    finish_comparisons(state.pending, policy)
 }

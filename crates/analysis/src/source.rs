@@ -294,8 +294,21 @@ pub struct UnitIdentity {
 /// Private evidence used to pair one unit across two versions of a file.
 ///
 /// Language adapters can create this value, but only analysis can inspect it.
+///
+/// A unit can hold two independent kinds of evidence, and holding both is what
+/// lets the matcher stay honest. An *anchor* says where the unit sits — the
+/// name it is bound to, the chain of calls it hangs under — and survives an
+/// edit to the unit's body. A *fingerprint* of the exact bytes says what the
+/// unit is written as, and survives a move. Neither alone is enough: an anchor
+/// two sibling units share cannot tell them apart, and a fingerprint changes
+/// the moment anything inside the unit, or inside anything it encloses, is
+/// edited. The matcher reads the anchor first and keeps the fingerprint for
+/// the units an anchor could not tell apart.
 #[derive(Clone, Eq, Hash, Ord, PartialEq, PartialOrd)]
-pub struct UnitMatchEvidence(UnitMatchKey);
+pub struct UnitMatchEvidence {
+    key: UnitMatchKey,
+    fingerprint: Option<UnitFingerprint>,
+}
 
 impl std::fmt::Debug for UnitMatchEvidence {
     fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
@@ -312,16 +325,22 @@ pub(crate) enum UnitMatchKey {
         kind: UnitKind,
         anchor: String,
     },
-    Fingerprint {
-        digest: [u8; 32],
-        syntax_len: u64,
-    },
     None,
+}
+
+/// The exact syntax one unit is written with.
+#[derive(Clone, Copy, Debug, Eq, Hash, Ord, PartialEq, PartialOrd)]
+pub(crate) struct UnitFingerprint {
+    digest: [u8; 32],
+    syntax_len: u64,
 }
 
 impl UnitMatchEvidence {
     pub const fn declared() -> Self {
-        Self(UnitMatchKey::Declared)
+        Self {
+            key: UnitMatchKey::Declared,
+            fingerprint: None,
+        }
     }
 
     pub fn semantic(
@@ -330,27 +349,43 @@ impl UnitMatchEvidence {
         kind: UnitKind,
         anchor: impl Into<String>,
     ) -> Self {
-        Self(UnitMatchKey::Semantic {
-            language_container: language_container.map(str::to_owned),
-            declared_unit: declared_unit.cloned(),
-            kind,
-            anchor: anchor.into(),
-        })
+        Self {
+            key: UnitMatchKey::Semantic {
+                language_container: language_container.map(str::to_owned),
+                declared_unit: declared_unit.cloned(),
+                kind,
+                anchor: anchor.into(),
+            },
+            fingerprint: None,
+        }
     }
 
     pub fn exact_syntax(syntax: &[u8]) -> Self {
-        Self(UnitMatchKey::Fingerprint {
+        Self::none().with_exact_syntax(syntax)
+    }
+
+    /// Adds the bytes a unit is written with to the evidence it already holds.
+    pub fn with_exact_syntax(mut self, syntax: &[u8]) -> Self {
+        self.fingerprint = Some(UnitFingerprint {
             digest: *blake3::hash(syntax).as_bytes(),
             syntax_len: syntax.len() as u64,
-        })
+        });
+        self
     }
 
     pub const fn none() -> Self {
-        Self(UnitMatchKey::None)
+        Self {
+            key: UnitMatchKey::None,
+            fingerprint: None,
+        }
     }
 
     pub(crate) const fn key(&self) -> &UnitMatchKey {
-        &self.0
+        &self.key
+    }
+
+    pub(crate) const fn fingerprint(&self) -> Option<UnitFingerprint> {
+        self.fingerprint
     }
 }
 
