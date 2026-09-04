@@ -2880,7 +2880,9 @@ fn readme_console_examples_use_the_simple_terminal_vocabulary() {
         "| `measured` |",
         "changed together in 33 of 98 commits · 34% · no direct dependency · linked via crates/output",
         "one contributor made 57 of 60 commits",
-        // Verdict facts shown in captured output.
+        // The analysis-owned facts, each documented where it is stated: the
+        // typical change under a verdict head, the core on its cycle's card,
+        // the reach aggregates in the machine report.
         "A change in one package can reach 6 of 12 packages.",
         "A change here can reach 17 of 36 files in this package.",
         "9 of 86 files sit in one dependency cycle.",
@@ -2888,7 +2890,7 @@ fn readme_console_examples_use_the_simple_terminal_vocabulary() {
         "a change here reaches 14 files",
         "3 importers follow it",
         "instability 1/4 → 2/3",
-        "hot (7 commits)",
+        "hot (10 commits)",
         "2 files in the cycle",
         "imports 13 files",
         "11 files import this",

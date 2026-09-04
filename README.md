@@ -337,11 +337,12 @@ a coupling pair reads `<left> ↔ <right>` and a stable-dependency pair reads
 for the root package. The evidence follows on indented lines: a claimed
 finding's `path:line` with its measurements, a size finding's subject and
 measured value, `<n> files import this`, `imports <n> files`, `<n> rated units`,
-`<n> files in the cycle`, `hot (<n> commits)`, `a change here reaches <n>
-files`, `<n> importers follow it`, a coupling pair's commit operands and
-dependency state, and a contributor concentration's counts. A co-change finding
-names the two files it is about, and its evidence line names the one the card's
-head does not. A `hidden_coupling` card heads `<left> ↔ <right>` and states
+`<n> files in the cycle` — or, on the one cycle that is the repository's core,
+`9 of 86 files sit in one dependency cycle.` — `hot (<n> commits)`, `a change
+here reaches <n> files`, `<n> importers follow it`, a coupling pair's commit
+operands and dependency state, and a contributor concentration's counts. A
+co-change finding names the two files it is about, and its evidence line names
+the one the card's head does not. A `hidden_coupling` card heads `<left> ↔ <right>` and states
 `changed together in 6 of 9 commits · 67% · no dependency either way · 4
 directories away`, naming neither again. When such a finding lands on the card of
 a file that already carried debt, that card's head names one file, so the line
@@ -455,35 +456,41 @@ $ smackdebt --top 6 crates/analysis
 
 smackdebt · crates/analysis
   Worn in the usual places.
-  A change here can reach 17 of 36 files in this package.
+  3 of the repository's 18 high live here.
   A typical change here touches 4 files.
-4 high · 17 watch · 1,405 checked
+3 high · 17 watch · 1,585 checked
 worst: crates/analysis/src/evolution.rs — hot AND complex
 
 PROBLEMS
-  high hot and complex · crates/analysis/src/evolution.rs
-        crates/analysis/src/evolution.rs:59 · method · parameters 13
-        146 rated units
-        file · 1,666 lines
+  high change spreads far · crates/analysis/src/evolution.rs
+        crates/analysis/src/evolution.rs:60 · method · parameters 13
+        a change here reaches 14 files
+        file · 1,848 lines
   high everything depends on this · crates/analysis/src/report.rs
-        crates/analysis/src/report.rs:1631 · method · cognitive 18 · nesting 4
+        crates/analysis/src/report.rs:1904 · function · cognitive 23 · cyclomatic 15
         11 files import this
         imports 13 files
   high ArchitectureGraph::new · method · crates/analysis/src/architecture.rs:17
         parameters 6
-        file · 826 lines
-        hot (7 commits)
-  high compare_units · function · crates/analysis/src/comparison.rs:123
-        cognitive 56 · cyclomatic 25 · nesting 4
-        crates/analysis/src/comparison.rs:42 · method · parameters 7
+        file · 1,172 lines
+        hot (10 commits)
   high cycle_witness · function · crates/analysis/src/cycle_witness.rs:3
         cognitive 34 · cyclomatic 15 · nesting 5
   high strongly_connected_components · function · crates/analysis/src/
         strongly_connected_components.rs:1
         cognitive 30 · cyclomatic 15 · nesting 4
+  watch change spreads far · crates/analysis/src/comparison.rs
+        crates/analysis/src/comparison.rs:52 · method · parameters 7
+        a change here reaches 11 files
+        hot (5 commits)
 
-  next: smackdebt crates/analysis/src
+  next: smackdebt crates/analysis/src/evolution.rs
 ```
+
+The head states how far a typical change to this scope travels, because that is
+a fact about the scope the head already names. How far a change *reaches* is a
+claim about the dependency graph, so it stays on the row or card that says which
+code to look at — here, two `change spreads far` cards.
 
 A cycle witness is the one exception to the accounting: it costs one slot
 however many steps it stacks, because eliding a witness destroys the fact rather
@@ -702,29 +709,49 @@ unsupported aliases can therefore remain unresolved.
 
 Architecture evidence stays next to a named subject: an area row, a problem
 card, or an architecture diff row. The verdict does not state a repository-wide
-number without saying where to act.
+graph number without saying where to act.
 
 | Sentence | Where it appears | What the numbers count |
 | --- | --- | --- |
 | `a change here can reach 5 of 12 packages` | the named package area | packages that transitively depend on this package, counting this package |
-| `a change here can reach 17 of 36 files` | the named file or package problem | files inside the package that transitively depend on the named source, counting that source |
-| `9 of 86 files are in this cycle` | the named cycle problem | members of that cycle out of the files the dependency graph is built over |
+| `a change here reaches 17 files` | the named file or cycle problem | files inside the package that transitively depend on the named source, excluding that source |
+| `9 of 86 files sit in one dependency cycle.` | the card of the cycle that is the core | members of the largest cycle out of the files the dependency graph is built over |
 
-These facts do not change a codebase tier or rating. Each is absent when the
-graph is incomplete, the repository is too small, or the number is too weak to
-mean anything: package reach needs at least 3 packages and a reach of at least
-2, a package's file reach needs at least 20 files, and a core needs at least 5
-files and 2% of the graph. Typical change size remains available in JSON for
-tools that need history context, but it is not shown as a terminal action.
+The core is a superlative over the whole graph, so it belongs to exactly one
+card: the tangle whose own members are that cycle. Every other cycle states its
+own size instead, as `9 files in the cycle`. A core that no cycle card names —
+which happens only when its members span more than one package, because a cycle
+finding is raised per package — stays in JSON alone.
 
-Both file counts count the same population: the scope's primary, parsed files —
-the files the dependency graph is built over, which is what every other
+How far a *typical* change travels is measured from the scope's own commits
+rather than from the graph, so it needs no further subject and rides under the
+tier sentence at every scope that has one:
+
+| Sentence | Where it appears | What the numbers count |
+| --- | --- | --- |
+| `A typical change here touches 4 files.` | the verdict head, at a repository, package, or directory scope | the nearest-rank median of the files each commit touching this directory changed |
+
+These facts do not change a codebase tier or rating. Each is absent when its
+evidence is incomplete, the repository is too small, or the number is too weak
+to mean anything: package reach needs at least 3 packages and a reach of at
+least 2, a package's file reach needs at least 20 files, a core needs at least 5
+files and 2% of the graph, and a typical change needs at least 10 commits and a
+median of at least 3 files. Every graph fact also needs a complete dependency
+graph; a typical change needs a complete history stream instead. A file scope
+states no typical change, because a per-file histogram would state sample noise
+as a fact, and a diff states none at all, because a diff answers about a change
+rather than about a tree.
+
+Every file count here counts the same population: the scope's primary, parsed
+files — the files the dependency graph is built over, which is what every other
 dependency number in the report counts too. A package's tests, examples,
-benchmarks, fixtures, and generated files are outside both halves of the
-fraction, so a package that holds 41 files may read `36`, and a package with a
-large test suite may read about half its file count. A fraction whose halves
-came from two populations would answer nothing, which is why the denominator is
-the graph rather than the directory listing.
+benchmarks, fixtures, and generated files are outside both halves of a fraction,
+so a package that holds 41 files may read `36`, and a package with a large test
+suite may read about half its file count. A fraction whose halves came from two
+populations would answer nothing, which is why the denominator is the graph
+rather than the directory listing. Typical change size is the exception: it is
+counted from commits rather than from the graph, so it counts whatever files a
+commit touched.
 
 Two problem patterns come from the same family, joining what changed together
 with what depends on what:
@@ -1080,18 +1107,27 @@ debt:
 
 `verdict.reach`, `verdict.core_size`, and `verdict.amplification` keep the
 aggregate values for machine consumers: `reached` and `total`, `core` and
-`files`, `median` and `commits`. They are not terminal verdict lines. Each
-member is absent when its evidence is too weak, so a consumer reads presence
-rather than a zero:
+`files`, `median` and `commits`. Only `amplification` is a terminal verdict
+line; the two graph facts reach a reader on the area row and the cycle card
+that name a subject. Each member is absent when its evidence is too weak, so a
+consumer reads presence rather than a zero:
 
 ```json
 "verdict": {
   "tier": "worn", "sentence": "Worn in the usual places.",
   "reach": { "sentence": "A change in one package can reach 6 of 12 packages.", "reached": 6, "total": 12 },
   "core_size": { "sentence": "9 of 86 files sit in one dependency cycle.", "core": 9, "files": 86 },
+  "amplification": { "sentence": "A typical change here touches 4 files.", "median": 4, "commits": 77 },
   "mode": "codebase"
 }
 ```
+
+`verdict.reach` answers about whatever the selection is, so the sentence it
+carries differs by scope: the repository root closes over packages and reads
+`A change in one package can reach 6 of 12 packages.` — the same numbers the
+widest area row states — while a package closes over its own files and reads
+`A change here can reach 17 of 36 files in this package.`, which is an aggregate
+no terminal row states, because a package-wide number names no file to look at.
 
 The `problems` table holds every card in problem-rank order, `detail` cards
 included, and a row's position is that card's identity. `pattern` is one of the
