@@ -1519,6 +1519,11 @@ impl Report {
     /// them. A repository of one package is that package, and no consumer can
     /// select its package scope, so the root states the file reach the package
     /// scope would have stated rather than nothing.
+    ///
+    /// The package figure closes over every package, so a single package whose
+    /// imports could not all be followed can move it and the root states
+    /// nothing; the one-package fall-back is that package's own fact and is
+    /// gated with it.
     fn repository_reach(&self) -> Option<PropagationReach> {
         let reached = self
             .package_graph
@@ -1526,7 +1531,10 @@ impl Report {
             .map(|measurement| measurement.reach_in())
             .max()
             .unwrap_or(0);
-        PropagationReach::packages(reached, self.packages.len() as u32)
+        self.graph_evidence
+            .is_complete()
+            .then(|| PropagationReach::packages(reached, self.packages.len() as u32))
+            .flatten()
             .or_else(|| self.only_package_reach())
     }
 
@@ -1544,7 +1552,14 @@ impl Report {
 
     /// One package's own file reach, from the closure row it has when its
     /// value is material.
+    ///
+    /// The closure is over the package's own files, so its own evidence
+    /// decides whether it may be stated: a package whose imports were all
+    /// followed keeps its fact however incomplete a different package is.
     fn package_reach(&self, package: PackageId) -> Option<PropagationReach> {
+        if !self.graph_evidence.package_is_complete(package) {
+            return None;
+        }
         let closure = self
             .package_closures
             .iter()
@@ -1553,8 +1568,16 @@ impl Report {
     }
 
     /// The core the repository root states, and nothing anywhere else.
+    ///
+    /// The core is the *largest* cycle in the file dependency graph, so it is
+    /// a superlative over the whole graph: an import that could not be
+    /// followed anywhere could grow a cycle or make a different one the
+    /// largest, and a repository whose graph has a hole in it states no core.
     fn scope_core_size(&self, selected: ScopeId) -> Option<CoreSize> {
-        if self.mode == ReportMode::Diff || self.root != Some(selected) {
+        if self.mode == ReportMode::Diff
+            || self.root != Some(selected)
+            || !self.graph_evidence.is_complete()
+        {
             return None;
         }
         self.core_size
@@ -2277,6 +2300,29 @@ mod tests {
             offender.reason(),
             WorstOffenderReason::PackageDependencyCycle
         );
+    }
+
+    /// The core names the largest cycle of the whole file dependency graph,
+    /// so an import that could not be followed anywhere leaves it unstated.
+    #[test]
+    fn an_incomplete_dependency_graph_states_no_core_size() {
+        let core_size = |incomplete: Vec<PackageId>| {
+            let mut fixture = ReportFixture::new(ReportMode::Codebase);
+            fixture.add_file("src/left.rs", HealthCounts::default());
+            fixture.builder.set_propagation(
+                Vec::new(),
+                Vec::new(),
+                CoreSize::from_counts(6, 10),
+                Vec::new(),
+            );
+            fixture
+                .builder
+                .set_graph_evidence(GraphEvidence::new(incomplete, 1, 0, 0, Vec::new()));
+            let report = fixture.finish();
+            report.verdict().unwrap().core_size()
+        };
+        assert!(core_size(Vec::new()).is_some());
+        assert!(core_size(vec![PackageId::from_index(0)]).is_none());
     }
 
     #[test]

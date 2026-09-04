@@ -7264,6 +7264,55 @@ mod tests {
         }
     }
 
+    /// A package closes over its own files, so its own evidence decides
+    /// whether its reach may be stated.
+    #[test]
+    fn a_complete_package_states_the_reach_an_incomplete_one_withholds() {
+        let root = tempfile::tempdir().unwrap();
+        let files = smackdebt_analysis::PACKAGE_REACH_FILES;
+        for package in ["app", "core"] {
+            fs::create_dir_all(root.path().join(package)).unwrap();
+            fs::write(root.path().join(package).join("package.json"), "{}").unwrap();
+            for index in 0..files {
+                let source = if index + 1 < files {
+                    format!(
+                        "import next from './unit{}';\nexport default next;\n",
+                        index + 1
+                    )
+                } else {
+                    "export default 1;\n".to_owned()
+                };
+                fs::write(
+                    root.path().join(package).join(format!("unit{index}.js")),
+                    source,
+                )
+                .unwrap();
+            }
+        }
+        // One import of one primary file in `core` names nothing, which is
+        // what the two packages' evidence differs by.
+        fs::write(
+            root.path().join("core/unread.js"),
+            "import absent from './absent';\nexport default absent;\n",
+        )
+        .unwrap();
+
+        let result = analyze_codebase(&CodebaseRequest::new(root.path())).unwrap();
+        let report = result.report();
+        let scope = |path: &str| {
+            report
+                .packages()
+                .iter()
+                .find(|package| package.path() == path)
+                .expect("both packages are reported")
+                .scope()
+        };
+        assert_eq!(report.graph_evidence().incomplete_packages().len(), 1);
+        assert_eq!(report.graph_evidence().suppressed_reach(), 1);
+        assert!(report.scope_verdict(scope("app")).reach().is_some());
+        assert!(report.scope_verdict(scope("core")).reach().is_none());
+    }
+
     /// A leakage finding is about two files, so one unread package withholds
     /// only the findings that name it.
     #[test]
