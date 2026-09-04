@@ -4250,9 +4250,19 @@ fn build_architecture(
         })
         .map(FileRecord::id)
         .collect();
+    // Only a file the graph reads can leave a hole in it. `enters_file_graph`
+    // is the predicate the closures, the core, and the connection graph are
+    // built with, so asking it here keeps what withholds a fact and what
+    // produces it the same rule: a fixture, a test, or a generated file may
+    // publish every diagnostic its unread imports earned without costing its
+    // package the completeness those facts are stated from.
     let mut incomplete_packages: Vec<_> = parse_failure_files
         .iter()
-        .chain(internal_issue_files.iter())
+        .chain(
+            internal_issue_files
+                .iter()
+                .filter(|file| enters_file_graph(&files[file.index()])),
+        )
         .filter_map(|file| files[file.index()].package())
         .collect();
     let configuration_failures: Vec<_> = aliases
@@ -7249,6 +7259,75 @@ mod tests {
                 diagnostic.kind() == DiagnosticKind::ParseFailure
                     && diagnostic.message() == "parser recovered from syntax errors"
             }),
+        }
+    }
+
+    /// A file the file dependency graph never reads cannot leave a hole in it.
+    ///
+    /// A fixture and a test are outside the graph the reach, core, and leakage
+    /// facts are proved over, so an import either of them leaves unresolved
+    /// hides nothing from those facts. The diagnostic is still published:
+    /// what changes is only whether the package's evidence is called
+    /// incomplete.
+    #[test]
+    fn an_unread_import_outside_the_graph_leaves_the_package_complete() {
+        for path in ["tests/fixtures/dynamic.js", "tests/dynamic.test.js"] {
+            let evidence = unread_import_evidence(path);
+            assert!(evidence.complete, "{path}");
+            assert_eq!(evidence.incomplete_packages, 0, "{path}");
+            assert_eq!(evidence.diagnostics, 2, "{path}");
+            assert_eq!(evidence.suppressed_reach, 0, "{path}");
+        }
+    }
+
+    #[test]
+    fn an_unread_import_in_a_graph_file_marks_its_package_incomplete() {
+        let evidence = unread_import_evidence("src/dynamic.js");
+        assert!(!evidence.complete);
+        assert_eq!(evidence.incomplete_packages, 1);
+        assert_eq!(evidence.diagnostics, 2);
+    }
+
+    struct UnreadImportEvidence {
+        complete: bool,
+        incomplete_packages: usize,
+        diagnostics: usize,
+        suppressed_reach: u32,
+    }
+
+    /// One JavaScript package whose file at `path` leaves two imports
+    /// unresolved: a dynamic `require` and a name no file matches. Only that
+    /// path differs between the cases, so only the role it carries can explain
+    /// a difference in the evidence.
+    fn unread_import_evidence(path: &str) -> UnreadImportEvidence {
+        let root = tempfile::tempdir().unwrap();
+        let unread = root.path().join(path);
+        fs::create_dir_all(unread.parent().unwrap()).unwrap();
+        fs::write(root.path().join("package.json"), "{}").unwrap();
+        fs::write(
+            root.path().join("main.js"),
+            "import helper from './helper';\nexport default helper;\n",
+        )
+        .unwrap();
+        fs::write(root.path().join("helper.js"), "export default 1;\n").unwrap();
+        fs::write(
+            unread,
+            "import absent from './absent';\nconst late = require(moduleName);\nexport default [absent, late];\n",
+        )
+        .unwrap();
+
+        let result = analyze_codebase(&CodebaseRequest::new(root.path())).unwrap();
+        let report = result.report();
+        let evidence = report.graph_evidence();
+        UnreadImportEvidence {
+            complete: evidence.is_complete(),
+            incomplete_packages: evidence.incomplete_packages().len(),
+            diagnostics: report
+                .resolution_diagnostics()
+                .iter()
+                .filter(|diagnostic| diagnostic.kind() == ResolutionIssueKind::Unresolved)
+                .count(),
+            suppressed_reach: evidence.suppressed_reach(),
         }
     }
 
