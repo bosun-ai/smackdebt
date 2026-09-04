@@ -1464,7 +1464,10 @@ fn the_leakage_fixture_gains_one_default_card_and_states_no_weak_pair() {
         let with = rendered(vec![scope, "--history", "36500d"]);
         let without = rendered(vec![scope, "--history", "1d"]);
         let gained = problem_heads(&with).len() - problem_heads(&without).len();
-        let expected = usize::from(scope == "." || scope == "data");
+        // One history fact, seen from every scope that holds an end of it:
+        // the pair anchors in `data/src`, so the directory states it beside
+        // its package and the root.
+        let expected = usize::from(matches!(scope, "." | "data" | "data/src"));
         assert_eq!(gained, expected, "{scope}: {with}{without}");
         assert!(
             problem_body(&with).len() <= SCREEN_BUDGET,
@@ -2135,6 +2138,114 @@ fn terminal_width_color_and_path_drills_have_exact_public_bytes() {
     assert_golden("unified-directory.json", &directory_json.stdout);
 }
 
+/// Selecting a path inside a repository drills into the one report a root run
+/// builds rather than starting a smaller one.
+///
+/// This is the correctness bar for a scoped run: every measured table is the
+/// root run's bytes, and only the head — the verdict, its summary, and the
+/// answered index — moves to the selection. A reader at a sub-scope therefore
+/// sees the resolution index, the graph, and the history the root reader sees.
+#[test]
+fn a_selected_scope_answers_from_the_same_repository_report_as_the_root_run() {
+    let repository = worktree_change_repository();
+    let root = Invocation::new(["--json", "--history", "36500d"]).run(repository.path());
+    root.success();
+    let root_report = checked_json(&root.stdout);
+    let root_health = &root_report["health"][root_report["scopes"]
+        [root_report["root"].as_u64().unwrap() as usize]["health"]
+        .as_u64()
+        .unwrap() as usize];
+    assert!(root_health["high"].as_u64().unwrap() > 0, "{root_health}");
+    for path in ["a", "a/main.js"] {
+        let selected =
+            Invocation::new([path, "--json", "--history", "36500d"]).run(repository.path());
+        selected.success();
+        let scoped = checked_json(&selected.stdout);
+        for (table, value) in root_report.as_object().unwrap() {
+            if matches!(table.as_str(), "verdict" | "summary" | "selected_scope") {
+                continue;
+            }
+            assert_eq!(
+                &scoped[table], value,
+                "{path}: {table} is not the root table"
+            );
+        }
+        let scope = &root_report["scopes"][scoped["selected_scope"].as_u64().unwrap() as usize];
+        assert_eq!(
+            root_report["paths"][scope["path"].as_u64().unwrap() as usize],
+            path,
+            "{path}: the selection answers its own scope"
+        );
+        // The head is that scope's own aggregated health, framed by the
+        // repository total the walk now measures.
+        let health = &root_report["health"][scope["health"].as_u64().unwrap() as usize];
+        assert_eq!(scoped["summary"]["high"], health["high"], "{path}");
+        assert_eq!(scoped["summary"]["watch"], health["watch"], "{path}");
+        assert_eq!(scoped["verdict"]["share"]["high"], health["high"], "{path}");
+        assert_eq!(
+            scoped["verdict"]["share"]["repository_high"], root_health["high"],
+            "{path}"
+        );
+    }
+    let terminal = Invocation::new(["a", "--history", "36500d"]).run(repository.path());
+    terminal.success();
+    let terminal = String::from_utf8(terminal.stdout).unwrap();
+    assert!(
+        terminal.contains(&format!(
+            "0 of the repository's {} high live here.",
+            root_health["high"]
+        )),
+        "{terminal}"
+    );
+}
+
+/// A file scope resolves against the repository, so it names only the imports
+/// that genuinely match nothing and can still state its graph neighbours.
+#[test]
+fn a_file_scope_follows_the_siblings_that_exist_one_directory_away() {
+    let repository = worktree_change_repository();
+    let file =
+        Invocation::new(["a/main.js", "--json", "--history", "36500d"]).run(repository.path());
+    file.success();
+    let report = checked_json(&file.stdout);
+    let selected = report["paths"][report["scopes"]
+        [report["selected_scope"].as_u64().unwrap() as usize]["path"]
+        .as_u64()
+        .unwrap() as usize]
+        .as_str()
+        .unwrap()
+        .to_owned();
+    assert_eq!(selected, "a/main.js");
+    for diagnostic in report["resolution_diagnostics"].as_array().unwrap() {
+        let target = diagnostic["target"].as_str().unwrap_or_default();
+        assert!(
+            !target.contains("/c/main"),
+            "a sibling that exists is not unresolved: {diagnostic}"
+        );
+    }
+    // The edge the restricted walk could not see is a fact of this file again.
+    assert!(
+        report["dependency_edges"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .any(|edge| {
+                file_path(&report, edge["source"].as_u64().unwrap()) == "a/main.js"
+                    && file_path(&report, edge["target"].as_u64().unwrap()) == "c/main.js"
+            }),
+        "{}",
+        report["dependency_edges"]
+    );
+    let terminal =
+        Invocation::new(["a/main.js", "--all", "--history", "36500d"]).run(repository.path());
+    terminal.success();
+    let terminal = String::from_utf8(terminal.stdout).unwrap();
+    assert!(
+        !terminal.contains("named nothing in the repository"),
+        "{terminal}"
+    );
+}
+
 /// The one-screen invariant: zooming in changes which problems fill the
 /// budget and never how much is printed.
 #[test]
@@ -2765,7 +2876,7 @@ fn readme_console_examples_use_the_simple_terminal_vocabulary() {
         "Not all source was checked.",
         "<analyzed> of <selected> source files were analyzed.",
         // Repository share is available only when both totals were measured.
-        "A fresh explicit file or directory command inspects only that selection.",
+        "A path inside a Git repository selects a scope of that repository's report",
         "A retained sub-scope from a completed root report may carry `verdict.share`",
         "smackdebt: path not found: does/not/exist",
         "smackdebt: no source files found under: docs",
@@ -2883,9 +2994,11 @@ fn selected_binary_contains_the_requested_evidence_feature() {
     assert_eq!(stats["renderer_entries"], 1);
 }
 
+/// An unsupported selection costs no read and no parse of its own, while the
+/// repository it names a scope of is measured exactly once.
 #[cfg(feature = "evidence-stats")]
 #[test]
-fn explicit_astro_scopes_have_limited_work_evidence() {
+fn an_unsupported_scope_is_never_read_while_its_repository_is() {
     let repository = GeneratedRepository::new("main");
     repository.write("package.json", b"{}\n");
     repository.write("page.astro", b"<h1>Before</h1>\n");
@@ -2909,16 +3022,28 @@ fn explicit_astro_scopes_have_limited_work_evidence() {
         codebase.stderr_text()
     );
     let report = checked_json(&codebase.stdout);
-    assert_eq!(report["files"].as_array().unwrap().len(), 1);
-    assert_eq!(report["files"][0]["language"], "astro");
-    assert_eq!(report["files"][0]["trust"], "failed");
-    assert_eq!(report["scopes"][0]["coverage"]["unsupported_files"], 1);
+    let selected = report["selected_scope"].as_u64().unwrap() as usize;
+    let file = report["files"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .find(|file| file["scope"] == selected)
+        .unwrap();
+    assert_eq!(file["language"], "astro");
+    assert_eq!(file["trust"], "failed");
+    assert_eq!(
+        report["scopes"][selected]["coverage"]["unsupported_files"],
+        1
+    );
     assert!(report["findings"].as_array().unwrap().is_empty());
     assert!(report["dependency_edges"].as_array().unwrap().is_empty());
+    // Both source files are inventoried; only the supported one is read and
+    // parsed, so the unsupported selection adds nothing to either count.
+    assert_eq!(report["files"].as_array().unwrap().len(), 2);
     let codebase_stats = evidence_stats(&codebase);
     assert_eq!(codebase_stats["inventory_walks"], 1);
-    assert_eq!(codebase_stats["source_reads"], 0);
-    assert_eq!(codebase_stats["parser_visits"], 0);
+    assert_eq!(codebase_stats["source_reads"], 1);
+    assert_eq!(codebase_stats["parser_visits"], 1);
 
     fs::remove_file(repository.path().join("outside.rs")).unwrap();
     repository.commit(Commit {
@@ -2968,21 +3093,24 @@ fn composition_work_counts_are_visible_without_changing_report_bytes() {
             vec!["diff", "main", "--json", "--history", "36500d"],
             [1, 29, 8, 26, 7, 15, 28],
         ),
+        // A selection inside a repository answers one scope of the repository
+        // report, so it costs the repository run exactly — the same walk, the
+        // same reads, the same passes as the root rows above.
         (
             "package terminal",
             vec!["a", "--all"],
-            [1, 4, 1, 0, 3, 1, 3],
+            [1, 29, 8, 0, 3, 8, 10],
         ),
-        ("package JSON", vec!["a", "--json"], [1, 4, 1, 0, 3, 1, 3]),
+        ("package JSON", vec!["a", "--json"], [1, 29, 8, 0, 3, 8, 10]),
         (
             "file terminal",
             vec!["a/main.js", "--all"],
-            [1, 3, 1, 0, 3, 1, 3],
+            [1, 29, 8, 0, 3, 8, 10],
         ),
         (
             "file JSON",
             vec!["a/main.js", "--json"],
-            [1, 3, 1, 0, 3, 1, 3],
+            [1, 29, 8, 0, 3, 8, 10],
         ),
     ] {
         assert_evidence_flow(name, arguments, repository.path(), expected);
@@ -3008,7 +3136,7 @@ fn composition_work_counts_are_visible_without_changing_report_bytes() {
         ("directory terminal", vec!["src", "--all"]),
         ("directory JSON", vec!["src", "--json"]),
     ] {
-        assert_evidence_flow(name, arguments, languages.path(), [1, 13, 11, 0, 3, 11, 13]);
+        assert_evidence_flow(name, arguments, languages.path(), [1, 15, 11, 0, 3, 11, 13]);
     }
 
     let roles = source_role_repository();
@@ -3024,7 +3152,7 @@ fn composition_work_counts_are_visible_without_changing_report_bytes() {
         "generated density file JSON",
         vec!["src/dense.tsx", "--json"],
         generated.path(),
-        [1, 3, 1, 0, 3, 1, 3],
+        [1, 30, 20, 0, 3, 20, 22],
     );
 }
 

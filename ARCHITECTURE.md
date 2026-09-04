@@ -189,10 +189,14 @@ selects its file scope and a source-bearing directory selects its directory
 scope. An explicit directory with no recognized source and an explicit
 non-source file stop with their short path errors; neither can select the
 repository scope as a substitute. Missing paths keep their existing error.
-Inside a repository, discovery walks only that selected file or directory.
-Repository-relative identity is retained while each ancestor directory is
-inspected once for non-ignored package manifests and resolution configuration;
-sibling source is neither inventoried nor read.
+Inside a repository, discovery walks the repository. A selection there is a
+scope of the repository's one report: the resolution index, the dependency
+graph, and the history are the ones a root run measures, so a file scope names
+only the imports that genuinely match nothing and a sub-scope can be framed by
+the repository totals. The selection is still evaluated against the walk, so
+the three short path errors keep their meaning and no selection can silently
+become the repository scope. Outside a repository there is nothing to be a
+scope of, so discovery walks the selected file or directory alone.
 
 Unreadable paths, links, unsupported source, oversized files, and parse errors
 remain visible as coverage diagnostics. They are never counted as healthy.

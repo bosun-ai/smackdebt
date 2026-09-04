@@ -46,7 +46,13 @@ const RETAINED_RELATION_LOCATIONS: usize = 3;
 /// Analyzes the selected codebase.
 pub(super) fn analyze_codebase(request: &CodebaseRequest) -> Result<ProjectReport, ProjectError> {
     let selection = Selection::resolve(&request.path, request.automatic_scope)?;
-    let inventory = if request.automatic_scope {
+    // A selection with a repository behind it is a drill-down into that
+    // repository's one report: the walk covers the repository so the
+    // resolution index, the dependency graph, and the history are the ones a
+    // root run measures, and the selection decides only which scope is
+    // answered. A path with no repository behind it has nothing to drill into,
+    // so its walk stays the tree it named.
+    let inventory = if selection.repository {
         Inventory::discover_sources(&selection.inventory_root, request.excludes.clone())
     } else {
         Inventory::discover_selected_sources(
@@ -56,7 +62,7 @@ pub(super) fn analyze_codebase(request: &CodebaseRequest) -> Result<ProjectRepor
         )
     }
     .map_err(|source| ProjectError::Inspect {
-        path: selection.discovery_root.clone(),
+        path: selection.walk_root().to_path_buf(),
         source,
     })?;
     #[cfg(feature = "evidence-stats")]
@@ -2479,11 +2485,17 @@ fn rated_health(analysis: &FileAnalysis, role: SourceRole, policy: HealthPolicy)
 }
 
 struct Selection {
+    /// The root every recorded path is relative to.
     inventory_root: PathBuf,
+    /// The tree walked when no repository stands behind the selection.
     discovery_root: PathBuf,
     exact_file: Option<PathBuf>,
     prefix: Option<PathBuf>,
     label: String,
+    /// Whether a repository stands behind the selection, which is what makes
+    /// the selection a scope of one repository report rather than a report of
+    /// its own.
+    repository: bool,
 }
 
 impl Selection {
@@ -2517,22 +2529,15 @@ impl Selection {
                     .unwrap_or(Path::new(""))
                     .to_path_buf()
             });
-            let label = if automatic_scope {
-                ".".to_owned()
-            } else {
-                prefix
-                    .as_deref()
-                    .filter(|path| !path.as_os_str().is_empty())
-                    .unwrap_or(Path::new("."))
-                    .display()
-                    .to_string()
-            };
+            // The report is the repository however little of it is answered,
+            // so its root scope carries the repository's own name.
             return Ok(Self {
                 inventory_root: root,
                 discovery_root: selected_absolute,
                 exact_file,
                 prefix,
-                label,
+                label: ".".to_owned(),
+                repository: true,
             });
         }
         if absolute.is_file() {
@@ -2544,6 +2549,7 @@ impl Selection {
                 exact_file,
                 prefix: None,
                 label: path.display().to_string(),
+                repository: false,
             });
         }
         Ok(Self {
@@ -2552,7 +2558,18 @@ impl Selection {
             exact_file: None,
             prefix: None,
             label: path.display().to_string(),
+            repository: false,
         })
+    }
+
+    /// The tree the inventory walk covers, which the reader is shown if the
+    /// walk fails.
+    fn walk_root(&self) -> &Path {
+        if self.repository {
+            &self.inventory_root
+        } else {
+            &self.discovery_root
+        }
     }
 
     fn includes(&self, path: &Path) -> bool {
@@ -6919,8 +6936,10 @@ mod tests {
         assert_eq!(package_ids, [0, 2]);
     }
 
+    /// A path view is a scope of the repository report, so it carries the
+    /// repository's package table and points at one row of it.
     #[test]
-    fn path_view_keeps_only_the_selected_package_table() {
+    fn path_view_keeps_the_repository_package_table() {
         let root = repository();
         let repo = root.path().join("repo");
         for package in ["a", "b"] {
@@ -6945,8 +6964,10 @@ mod tests {
         assert_eq!(package_paths(codebase.report()).len(), 2);
         assert_eq!(
             package_paths(path.report()),
-            [(PackageId::from_index(0), "b".to_owned())]
+            package_paths(codebase.report())
         );
+        let selected = path.selected_scope().unwrap();
+        assert_eq!(path.report().scopes()[selected.index()].name(), "b");
     }
 
     #[test]
@@ -8736,8 +8757,11 @@ mod tests {
         assert_eq!(result.report().dependency_edges()[0].references(), 2);
     }
 
+    /// A package cannot say who imports it from its own files, so selecting
+    /// one reads the repository that answers the question and shows the
+    /// package.
     #[test]
-    fn package_selection_does_not_read_incoming_sibling_source() {
+    fn package_selection_reads_the_sibling_source_that_imports_it() {
         let root = tempfile::tempdir().unwrap();
         git(root.path(), ["init", "-q"]);
         for package in ["app", "core"] {
@@ -8752,12 +8776,13 @@ mod tests {
         fs::write(root.path().join("core/b.js"), "function core() {}\n").unwrap();
 
         let result = analyze_codebase(&CodebaseRequest::new(root.path().join("core"))).unwrap();
-        assert_eq!(result.report().files().len(), 1);
-        assert!(result.report().dependency_edges().is_empty());
+        assert_eq!(result.report().files().len(), 2);
+        assert_eq!(result.report().dependency_edges().len(), 1);
         assert_eq!(result.stats().inventory_walks, 1);
-        assert_eq!(result.stats().source_reads, 1);
+        assert_eq!(result.stats().source_reads, 2);
         let selected = result.selected_scope().unwrap();
         assert_eq!(result.report().scopes()[selected.index()].name(), "core");
+        assert_eq!(result.report().scopes()[0].name(), ".");
     }
 
     #[test]
@@ -8777,8 +8802,10 @@ mod tests {
         assert_eq!(result.report().scopes()[0].name(), ".");
     }
 
+    /// A file selection answers one file of the repository report, so the
+    /// walk is the repository and the answered scope is that file.
     #[test]
-    fn explicit_file_reads_only_that_repository_relative_source() {
+    fn explicit_file_selection_answers_one_scope_of_the_repository() {
         let root = repository();
         let repository_path = root.path().join("repo");
         fs::write(
@@ -8790,10 +8817,15 @@ mod tests {
         let result =
             analyze_codebase(&CodebaseRequest::new(repository_path.join("sample.rs"))).unwrap();
 
-        assert_eq!(result.report().files().len(), 1);
-        assert_eq!(result.report().files()[0].path(), "sample.rs");
+        assert_eq!(result.report().files().len(), 2);
         assert_eq!(result.stats().inventory_walks, 1);
-        assert_eq!(result.stats().source_reads, 1);
+        assert_eq!(result.stats().source_reads, 2);
+        let selected = result.selected_scope().unwrap();
+        assert_eq!(
+            result.report().scopes()[selected.index()].name(),
+            "sample.rs"
+        );
+        assert_eq!(result.report().scopes()[0].name(), ".");
     }
 
     #[test]

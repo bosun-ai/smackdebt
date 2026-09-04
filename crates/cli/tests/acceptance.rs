@@ -904,7 +904,16 @@ fn modified_astro_diff_retains_coverage_and_counts_one_unsupported_file() {
         .output()
         .unwrap();
     let report: serde_json::Value = serde_json::from_slice(&astro.stdout).unwrap();
-    assert_eq!(report["files"][0]["language"], "astro");
+    // The report is the repository; the selected scope is the one file asked
+    // about, and it is the file whose coverage the verdict qualifies.
+    let selected = report["selected_scope"].clone();
+    let file = report["files"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .find(|file| file["scope"] == selected)
+        .unwrap();
+    assert_eq!(file["language"], "astro");
     assert_eq!(report["verdict"]["qualifier"]["selected_files"], 1);
     assert_eq!(report["verdict"]["qualifier"]["analyzed_files"], 0);
     assert_eq!(
@@ -976,10 +985,10 @@ fn invalid_and_source_free_paths_return_exact_errors_without_repository_fallback
     }
 }
 
-/// Limited explicit analysis knows the selected High count but does not read
-/// the rest of the repository to invent a denominator.
+/// A path inside a repository is a scope of that repository's report, so its
+/// High count is framed by the repository total the same walk measured.
 #[test]
-fn fresh_explicit_scopes_omit_unmeasured_repository_share() {
+fn explicit_scopes_inside_a_repository_state_the_measured_share() {
     let packages = problem_pattern_fixture();
     let root = packages.path().to_str().unwrap().to_owned();
     let god = packages.path().join("god");
@@ -998,36 +1007,45 @@ fn fresh_explicit_scopes_omit_unmeasured_repository_share() {
         root_report["verdict"]
     );
 
-    // A limited explicit report does not pretend its retained root is the
-    // complete repository, so it carries no repository share.
     let package_terminal = String::from_utf8(run(["--color", "never", god])).unwrap();
     let package_lines: Vec<&str> = package_terminal.lines().collect();
     assert_eq!(package_lines[0], "smackdebt · god");
     assert_eq!(package_lines[1], "  Worn in the usual places.");
-    assert!(package_lines[2].contains(" high · "), "{package_terminal}");
+    assert_eq!(
+        package_lines[2],
+        "  3 of the repository's 4 high live here."
+    );
+    assert!(package_lines[3].contains(" high · "), "{package_terminal}");
     let package_report: serde_json::Value = serde_json::from_slice(&run(["--json", god])).unwrap();
     validate_schema(&package_report);
-    assert!(package_report["verdict"].get("share").is_none());
-    // The selected result remains truthful without claiming the measured root
-    // count belongs to this separate limited report.
+    // The selected result answers the package and states the repository total
+    // it was divided by, because one walk measured both.
     assert_eq!(package_report["summary"]["high"], 3);
     assert_eq!(root_report["summary"]["high"], 4);
+    assert_eq!(package_report["verdict"]["share"]["high"], 3);
+    assert_eq!(package_report["verdict"]["share"]["repository_high"], 4);
     assert_eq!(package_report["verdict"]["tier"], "worn");
 
-    // Other limited directories likewise avoid a repository-wide claim.
+    // The frame holds wherever the debt sits, including a directory that holds
+    // none of it.
     let split = split_debt_fixture();
     let messy = split.path().join("messy");
     let messy = messy.to_str().unwrap();
     let clean = split.path().join("clean");
     let clean = clean.to_str().unwrap();
     let messy_terminal = String::from_utf8(run(["--color", "never", messy])).unwrap();
-    assert!(!messy_terminal.contains("live here."), "{messy_terminal}");
+    assert!(messy_terminal.contains("live here."), "{messy_terminal}");
     let messy_report: serde_json::Value = serde_json::from_slice(&run(["--json", messy])).unwrap();
     validate_schema(&messy_report);
-    assert!(messy_report["verdict"].get("share").is_none());
+    let repository_high = messy_report["verdict"]["share"]["repository_high"].clone();
+    assert_eq!(messy_report["verdict"]["share"]["high"], repository_high);
     let clean_report: serde_json::Value = serde_json::from_slice(&run(["--json", clean])).unwrap();
     validate_schema(&clean_report);
-    assert!(clean_report["verdict"].get("share").is_none());
+    assert_eq!(clean_report["verdict"]["share"]["high"], 0);
+    assert_eq!(
+        clean_report["verdict"]["share"]["repository_high"],
+        repository_high
+    );
 }
 
 /// A repository without High debt has no fraction to divide, so no sub-scope
@@ -1238,16 +1256,20 @@ fn architecture_path_drill_shows_findings_without_edge_rows() {
     git(project.path(), ["init", "-b", "main"]);
     let output = run_in(project.path(), ["app", "--all", "--color", "never"]);
     let text = String::from_utf8(output).unwrap();
-    // Sibling source outside the selected path is not read. The local cycle
-    // remains visible and the cross-scope import becomes unresolved evidence.
+    // The selection is a scope of the repository, so a cycle that leaves it is
+    // a finding it can state — as a witness, never as a dependency edge row.
     assert!(!text.contains("core/main.js → app/main.js"), "{text}");
     assert!(!text.contains("app/main.js → core/main.js"), "{text}");
     assert!(
         text.contains("watch circular dependency · app/choice.js"),
         "{text}"
     );
-    assert!(!text.contains("        → core/main.js"), "{text}");
-    assert!(text.contains("3 imports could not be followed"), "{text}");
+    assert!(
+        text.contains("high circular dependency · app/main.js"),
+        "{text}"
+    );
+    assert!(text.contains("        → core/main.js"), "{text}");
+    assert!(text.contains("2 imports could not be followed"), "{text}");
     assert!(!text.contains("native/src/helper.rs"));
 
     // Module wiring is a relationship too: a Rust package states no ownership.
@@ -1325,7 +1347,10 @@ fn diff_and_path_views_state_findings_without_current_edges() {
     );
     let core = String::from_utf8(run_in(project.path(), ["core", "--color", "never"])).unwrap();
     assert!(!core.contains("app/main.js → core/main.js"), "{core}");
-    assert!(!core.contains("circular dependency"), "{core}");
+    // The cycle runs through this package, so its scope states the finding
+    // without ever printing the edges the finding was built from.
+    assert!(core.contains("circular dependency"), "{core}");
+    assert_no_dependency_edge_rows(&core, "static architecture core drill");
 }
 
 #[test]
@@ -1463,13 +1488,13 @@ fn unresolved_and_ambiguous_relations_reach_a_file_scope_and_all_only() {
             );
         }
         // The warning breakdown may repeat a cause's words, so each relation's
-        // own status is matched together with its target.
-        let choice_status = if case == 0 {
-            "./choice · could not be matched"
-        } else {
-            "./choice · matched more than one file"
-        };
-        for status in [choice_status, "require(moduleName) · could not be matched"] {
+        // own status is matched together with its target. Both scopes resolve
+        // against the same repository index, so one relation has one status
+        // wherever it is read.
+        for status in [
+            "./choice · matched more than one file",
+            "require(moduleName) · could not be matched",
+        ] {
             assert_eq!(
                 terminal.matches(status).count(),
                 1,
@@ -2494,12 +2519,17 @@ fn a_selected_package_states_actionable_history_only() {
     assert!(!text.contains("a ↔ b"), "{text}");
     assert!(!text.contains("c/main.js"));
     assert!(!text.contains("  c ·"));
+    // The selection answers one package of the repository report, so the pair
+    // table the terminal declines to state is the repository's own.
     let report: serde_json::Value = serde_json::from_slice(&run_in(
         project.path(),
         ["a", "--json", "--history", "36500d"],
     ))
     .unwrap();
-    assert!(report["change_coupling"].as_array().unwrap().is_empty());
+    let root: serde_json::Value =
+        serde_json::from_slice(&run_in(project.path(), ["--json", "--history", "36500d"])).unwrap();
+    assert!(!report["change_coupling"].as_array().unwrap().is_empty());
+    assert_eq!(report["change_coupling"], root["change_coupling"]);
 }
 
 #[test]

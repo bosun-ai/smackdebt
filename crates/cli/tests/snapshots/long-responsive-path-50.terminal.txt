@@ -1,5 +1,5 @@
 smackdebt · very-long-source-package-name
-  Solid, with rough edges.
+  Worn in the usual places.
 0 high · 1 watch · 1 checked
 worst: very-long-source-package-name/
         very-long-source-directory-name/
@@ -7,6 +7,18 @@ worst: very-long-source-package-name/
         complex
 
 PROBLEMS
+  high circular dependency ·
+        very-long-source-package-name/
+        very-long-source-directory-name/choice.js
+        very-long-source-package-name/
+        very-long-source-directory-name/choice.js
+        → very-long-target-package-name/
+        very-long-target-directory-name/
+        very-long-target-file-name.js
+        → very-long-source-package-name/
+        very-long-source-directory-name/
+        very-long-source-file-name.js
+        3 files in the cycle
   watch ExtremelyLongContainerNameThatMustRemainRe
         cognizable::extremelyLongMethodNameThatMus
         tRemainRecognizable · method · test ·
@@ -16,23 +28,9 @@ PROBLEMS
         statements 56
 
 WARNINGS
-  warning 4 imports could not be followed
-        3 named nothing in the repository
+  warning 2 imports could not be followed
+        1 named nothing in the repository
         1 matched more than one file
-  very-long-source-package-name/
-        very-long-source-directory-name/
-        choice.js:1 → ../../
-        very-long-target-package-name/
-        very-long-target-directory-name/
-        very-long-target-file-name.js
-        could not be matched
-  very-long-source-package-name/
-        very-long-source-directory-name/
-        very-long-source-file-name.js:1 → ../../
-        very-long-target-package-name/
-        very-long-target-directory-name/
-        very-long-target-file-name.js
-        could not be matched · test
   very-long-source-package-name/
         very-long-source-directory-name/
         very-long-source-file-name.js:2 → ./choice
@@ -44,5 +42,4 @@ WARNINGS
         could not be matched · test
 
   next: smackdebt very-long-source-package-name/
-        very-long-source-directory-name/
-        very-long-source-file-name.js
+        very-long-source-directory-name/choice.js

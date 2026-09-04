@@ -119,6 +119,7 @@ $ smackdebt crates/analysis
 
 smackdebt · crates/analysis
   Worn in the usual places.
+  4 of the repository's 20 high live here.
 4 high · 17 watch · 1,405 checked
 worst: crates/analysis/src/evolution.rs — hot AND complex
 
@@ -156,15 +157,19 @@ PROBLEMS
   next: smackdebt crates/analysis/src
 ```
 
-A fresh explicit file or directory command inspects only that selection. Its
-verdict therefore omits repository share because whole-repository High debt was
-not measured. A consumer drilling into a sub-scope of an already completed root
-report may show the analysis-owned sentence, for example `4 of the repository's
-20 high live here.`, because both counts exist in that report and selected
-source also exists outside the sub-scope. It omits the sentence when that child
-contains the root report's complete selected source inventory because the
+A path inside a Git repository selects a scope of that repository's report
+rather than starting a smaller one: the repository is analyzed and the selection
+decides what is answered. Imports resolve against every file the repository
+holds, the dependency graph and history are the repository's, and the verdict
+frames the selected High count with the analysis-owned sentence `4 of the
+repository's 20 high live here.` It omits that sentence when the selection
+contains the report's complete selected source inventory, because the
 denominator adds no information. The repository root itself prints no such
-sentence, and neither does a repository with no High debt.
+sentence, and neither does a repository with no High debt. Selecting a path this
+way costs a whole-repository run.
+
+A file or directory outside any Git repository has no repository to be a scope
+of, so it is inspected on its own and its verdict states no share.
 
 The default terminal view shows at most five affected areas and spends a fixed
 one-screen budget on problems, so zooming in changes which problems fill the
@@ -1054,9 +1059,10 @@ A retained sub-scope from a completed root report may carry `verdict.share`,
 holding the same sentence the terminal prints and both integer counts behind it.
 A retained sub-scope with the same selected-file total as the root omits the
 member because its denominator adds no information.
-A fresh explicit file or directory report omits this member because its limited
-inventory did not measure repository High debt. The member is also absent at the
-repository root and when the repository holds no High debt:
+A report of a file or directory outside any Git repository omits this member
+because its limited inventory did not measure repository High debt. The member
+is also absent at the repository root and when the repository holds no High
+debt:
 
 ```json
 "verdict": {
