@@ -52,13 +52,23 @@ pub(super) struct ByteRange {
 }
 
 impl ByteRange {
-    /// The span a node occupies, widened so a zero-width `MISSING` node still
-    /// touches the code it was inserted into.
-    fn of(node: Node<'_>) -> Self {
-        Self {
-            start: node.start_byte(),
-            end: node.end_byte().max(node.start_byte() + 1),
+    /// The span a node occupies.
+    ///
+    /// A `MISSING` node has no width: it marks the point the parser invented a
+    /// token at. That point is a boundary, so the span reaches one byte to
+    /// either side of it - a closer invented at the end of a block sits
+    /// exactly where the block it grew ends, and the unit that swallowed the
+    /// rest of the file has to see it.
+    pub(super) fn of(node: Node<'_>) -> Self {
+        let start = node.start_byte();
+        let end = node.end_byte();
+        if start == end {
+            return Self {
+                start: start.saturating_sub(1),
+                end: end + 1,
+            };
         }
+        Self { start, end }
     }
 
     const fn overlaps(self, other: Self) -> bool {
@@ -149,6 +159,14 @@ pub(super) fn parse_status(root: Node<'_>, scratch: &Scratch) -> ParseStatus {
     ParseStatus::Recovered(recovered_facts(&scratch.error_bytes, &scratch.fact_bytes))
 }
 
+/// Whether the recovery cost this parse anything it was read for.
+///
+/// The comparison can only speak for facts that survived: an error that
+/// destroyed a unit outright leaves no span to overlap. The empty-facts rule
+/// below catches a parse that lost everything, but one that keeps a single
+/// import while every unit is gone still reads as `Intact`. That blind spot is
+/// deliberate - closing it would take a guess at what the errors ate - and the
+/// file discloses its imperfect parse whatever this answers.
 fn recovered_facts(errors: &[ByteRange], facts: &[ByteRange]) -> RecoveredFacts {
     // A parse that yielded nothing offers no ground to place its errors
     // against: whatever the errors swallowed is exactly what is missing.
@@ -185,10 +203,6 @@ pub(super) fn document_status(
         node.has_error()
     });
     ParseStatus::Recovered(recovered_facts(&scratch.error_bytes, facts))
-}
-
-pub(super) fn node_bytes(node: Node<'_>) -> ByteRange {
-    ByteRange::of(node)
 }
 
 pub(super) fn analyze_included<L: Language>(
@@ -367,15 +381,19 @@ fn unit_draft<L: Language>(site: &UnitSite<'_, '_>, scratch: &mut Scratch) -> Un
         None => UnitIdentity::new(name, kind),
     };
     let enclosing_declared = nearest_declared_unit(parent, &scratch.unit_drafts).cloned();
+    let match_evidence = if declared_identity {
+        UnitMatchEvidence::declared()
+    } else {
+        inferred_match_evidence::<L>(
+            site,
+            declared_container.as_deref(),
+            enclosing_declared.as_ref(),
+        )
+    };
     UnitDraft {
         identity,
         declared_identity,
-        match_evidence: match_evidence::<L>(
-            site,
-            declared_identity,
-            declared_container.as_deref(),
-            enclosing_declared.as_ref(),
-        ),
+        match_evidence,
         span: SourceSpan::new(
             node.start_position().row as u32 + 1 + line_offset,
             node.end_position().row as u32 + 1 + line_offset,
@@ -385,15 +403,12 @@ fn unit_draft<L: Language>(site: &UnitSite<'_, '_>, scratch: &mut Scratch) -> Un
     }
 }
 
-fn match_evidence<L: Language>(
+/// How a unit that declares no identity of its own is paired across versions.
+fn inferred_match_evidence<L: Language>(
     site: &UnitSite<'_, '_>,
-    declared_identity: bool,
     declared_container: Option<&str>,
     enclosing_declared: Option<&UnitIdentity>,
 ) -> UnitMatchEvidence {
-    if declared_identity {
-        return UnitMatchEvidence::declared();
-    }
     if let Some(anchor) = L::match_anchor(site.node, site.source) {
         return UnitMatchEvidence::semantic(
             declared_container,

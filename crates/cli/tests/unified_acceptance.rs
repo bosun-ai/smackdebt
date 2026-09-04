@@ -2356,6 +2356,7 @@ fn failures_and_recoverable_coverage_obey_status_and_stream_contracts() {
         "analyzed_files",
         "unsupported_files",
         "failed_files",
+        "recovered_files",
     ] {
         assert_eq!(coverage[field], facts[field], "{field}");
     }
@@ -2365,6 +2366,25 @@ fn failures_and_recoverable_coverage_obey_status_and_stream_contracts() {
             .unwrap()
             .iter()
             .any(|diagnostic| { diagnostic["kind"] == facts["failed_diagnostic_kind"] })
+    );
+    // A recovery beside every measured fact is still disclosed as recovered
+    // and is still trusted, so the pair reaches a committed machine view.
+    let recovered = file_row(
+        &report,
+        facts["recovered_but_trusted_path"].as_str().unwrap(),
+    );
+    assert_eq!(recovered["parse_outcome"], "recovered");
+    assert_eq!(recovered["trust"], "trusted");
+    assert!(
+        report["diagnostics"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .any(|diagnostic| {
+                diagnostic["file"] == recovered["id"]
+                    && diagnostic["message"] == "parser recovered from syntax errors"
+            }),
+        "a trusted recovery still discloses itself"
     );
 
     let complete_history = evolution_repository();
@@ -3661,6 +3681,17 @@ fn assert_unified_facts(report: &Value) {
     );
 }
 
+/// The one file row whose path reads `path`.
+fn file_row<'a>(report: &'a Value, path: &str) -> &'a Value {
+    let paths = report["paths"].as_array().unwrap();
+    report["files"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .find(|file| paths[file["path"].as_u64().unwrap() as usize] == path)
+        .unwrap_or_else(|| panic!("no file row for {path}"))
+}
+
 fn assert_index_integrity(report: &Value) {
     let paths = report["paths"].as_array().unwrap().len();
     let scopes = report["scopes"].as_array().unwrap().len();
@@ -3751,6 +3782,7 @@ fn assert_index_integrity(report: &Value) {
         }
         assert!((scope["health"].as_u64().unwrap() as usize) < health);
     }
+    let mut recovered_rows = 0u64;
     for file in report["files"].as_array().unwrap() {
         assert!((file["path"].as_u64().unwrap() as usize) < paths);
         assert!((file["scope"].as_u64().unwrap() as usize) < scopes);
@@ -3768,17 +3800,32 @@ fn assert_index_integrity(report: &Value) {
             Some("parsed") => assert_eq!(file["trust"], "trusted"),
             // Recovery only clouds a file when an error region sits on a
             // measured unit or on a reference, so a recovered file reads as
-            // trusted or as advisory but never as failed.
-            Some("recovered") => assert!(
-                file["trust"] == "trusted" || file["trust"] == "advisory",
-                "file {} recovered but reads as {}",
-                file["id"],
-                file["trust"]
-            ),
+            // trusted or as advisory but never as failed. Which of the two it
+            // reads as is pinned per path by the tests that own each fixture.
+            Some("recovered") => {
+                recovered_rows += 1;
+                assert!(
+                    file["trust"] == "trusted" || file["trust"] == "advisory",
+                    "file {} recovered but reads as {}",
+                    file["id"],
+                    file["trust"]
+                );
+            }
             Some("failed") => assert_eq!(file["trust"], "failed"),
             None => {}
             Some(value) => panic!("unknown parse outcome {value}"),
         }
+    }
+    // Every recovered file reaches the coverage count whatever its trust, so
+    // a recovery can never be trusted into invisibility.
+    if let Some(answered) = report["selected_scope"]
+        .as_u64()
+        .or_else(|| report["root"].as_u64())
+    {
+        assert_eq!(
+            report["scopes"][answered as usize]["coverage"]["recovered_files"], recovered_rows,
+            "recovered file rows disagree with the coverage count"
+        );
     }
     for finding in report["findings"].as_array().unwrap() {
         let file = finding["file"].as_u64().unwrap() as usize;

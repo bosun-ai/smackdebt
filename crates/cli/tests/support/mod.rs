@@ -1571,6 +1571,12 @@ pub(crate) fn coverage_failure_repository() -> GeneratedRepository {
     repository.write("src/good.js", b"export function good() { return 1; }\n");
     repository.write("src/failed.js", b"export function failed() { return 1; }\n");
     repository.write("src/unsupported.kt", b"fun unsupported() = 1\n");
+    // One file the parser recovers from where nothing it measured was
+    // touched: the report counts it as recovered and still trusts it.
+    repository.write(
+        "src/tail.js",
+        b"export function tail(value) { return value; }\n\nexport function unterminated(\n",
+    );
     repository.commit(commit(
         "coverage inputs",
         "Coverage Fixture",

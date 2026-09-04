@@ -380,6 +380,16 @@ pub enum ParseStatus {
 /// Errors elsewhere - stray tokens between declarations, syntax the grammar
 /// does not know outside every unit - leave each measured unit and each
 /// extracted reference exactly as written.
+///
+/// The rule compares error regions against the facts a parse produced, so it
+/// cannot see a fact the recovery destroyed. A recovery that leaves nothing at
+/// all reads as `InDoubt`, but one that destroys every unit while an import
+/// survives reads as `Intact` on the strength of that import. The file
+/// discloses its imperfect parse either way.
+///
+/// The variant order is load-bearing: `Intact` sorts before `InDoubt`, so a
+/// document assembled from several parses keeps the worse answer by taking the
+/// maximum of them.
 #[derive(Clone, Copy, Debug, Eq, Hash, Ord, PartialEq, PartialOrd)]
 pub enum RecoveredFacts {
     /// The file yielded facts and no error region sat on one.

@@ -1907,6 +1907,17 @@ fn every_problem_pattern_reaches_a_committed_terminal_and_machine_view() {
         text.contains("  high recovered · function · advisory · god/recovered.js:1\n"),
         "{text}"
     );
+    // The machine view carries the same pair: the parse is disclosed as
+    // recovered and the trust it cost is stated beside it.
+    let paths = report["paths"].as_array().unwrap();
+    let recovered = report["files"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .find(|file| paths[file["path"].as_u64().unwrap() as usize] == "god/recovered.js")
+        .expect("the recovered fixture file has a row");
+    assert_eq!(recovered["parse_outcome"], "recovered");
+    assert_eq!(recovered["trust"], "advisory");
 
     // The same fixture rendered by default withholds exactly the cards whose
     // debt cannot move a verdict, and states the ones whose debt can.

@@ -101,7 +101,7 @@ pub(super) fn analyze_vue(
         }
         match node.kind() {
             "script_element" => {
-                document_facts.push(engine::node_bytes(node));
+                document_facts.push(engine::ByteRange::of(node));
                 if let Some(raw) = named_child(node, "raw_text") {
                     let start = raw.start_byte();
                     let end = raw.end_byte();
@@ -143,7 +143,7 @@ pub(super) fn analyze_vue(
                 false
             }
             "template_element" if !template_added => {
-                document_facts.push(engine::node_bytes(node));
+                document_facts.push(engine::ByteRange::of(node));
                 let index = units.len();
                 let measurements = match template_measurements(
                     node,

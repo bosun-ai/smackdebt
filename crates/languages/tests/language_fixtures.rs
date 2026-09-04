@@ -1646,6 +1646,72 @@ fn recovery_over_a_fact_or_over_everything_leaves_a_file_advisory() {
     }
 }
 
+/// An unterminated block ends at the closer the parser invents at the end of
+/// the file, so the unit holding it swallows every declaration that follows.
+/// The invented closer has no width, but it is inside the unit it grew, and a
+/// unit measured over code it does not own is exactly what advisory means.
+#[test]
+fn recovery_that_swallows_the_next_declaration_leaves_a_file_advisory() {
+    let cases = [
+        (
+            "swallowed.js",
+            "import { helper } from './helper.js';\n\nexport function first(value) {\n  return helper(value);\n\nexport function second(value) {\n  return value + 1;\n}\n",
+        ),
+        (
+            "swallowed.ts",
+            "import { helper } from './helper.js';\n\nexport function first(value: number): number {\n  return helper(value);\n\nexport function second(value: number): number {\n  return value + 1;\n}\n",
+        ),
+        (
+            "swallowed.c",
+            "#include \"helper.h\"\n\nint first(int value) {\n  return helper(value);\n\nint second(int value) {\n  return value + 1;\n}\n",
+        ),
+        (
+            "swallowed.vue",
+            "<template>\n\t<div>{{ label }}</div>\n</template>\n<script setup>\nimport { helper } from './helper.js';\nfunction first(value) {\n\treturn helper(value);\n\nfunction second(value) {\n\treturn value + 1;\n}\n</script>\n",
+        ),
+    ];
+    let mut analyzer = Analyzer::default();
+    for (path, source) in cases {
+        let result = analyzer
+            .analyze(Path::new(path), source.as_bytes().to_vec())
+            .unwrap();
+        assert_eq!(
+            result.parse_status(),
+            &ParseStatus::Recovered(RecoveredFacts::InDoubt),
+            "{path}"
+        );
+        assert_eq!(
+            result.parse_status().trust(),
+            SourceTrust::Advisory,
+            "{path}"
+        );
+    }
+}
+
+/// A known blind spot, pinned so a change to it is deliberate.
+///
+/// The rule compares error spans against the facts a parse produced, so it
+/// cannot see a fact the recovery destroyed. Where an error swallows every
+/// unit but leaves an import standing, the surviving import is enough to make
+/// the file read as trusted. The file still discloses its imperfect parse, and
+/// a recovery that leaves nothing at all is caught by the empty-facts rule.
+#[test]
+fn recovery_that_destroys_every_unit_beside_a_surviving_import_stays_trusted() {
+    let result = Analyzer::default()
+        .analyze(
+            Path::new("partial.js"),
+            b"import { helper } from './helper.js';\n\n) } ] )\n".to_vec(),
+        )
+        .unwrap();
+    assert_eq!(
+        result.parse_status(),
+        &ParseStatus::Recovered(RecoveredFacts::Intact)
+    );
+    assert_eq!(result.parse_status().trust(), SourceTrust::Trusted);
+    assert!(result.units().is_empty());
+    assert_eq!(result.dependencies().len(), 1);
+}
+
 /// Valid code that a stale grammar could only recover from now parses cleanly,
 /// so it never spends a package's graph trust.
 #[test]
