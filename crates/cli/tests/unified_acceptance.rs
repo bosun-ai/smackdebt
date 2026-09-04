@@ -1197,14 +1197,17 @@ fn a_sweeping_commit_is_counted_everywhere_but_in_the_file_pair_table() {
     }
 }
 
-/// JSON retains typical change size while terminal output avoids presenting it
-/// as an action.
+/// Every scope states how far a typical change to it travels, in the same
+/// words a machine consumer reads.
 ///
 /// The fixture's root sees ten commits of two files, five of three, and twelve
 /// of four, whose nearest-rank median is 3, while `core` and `core/src` see the
 /// twelve of four alone and state 4: a scope answers about its own directory
 /// rather than about the repository. `edge` has too few commits and `quiet` has
 /// a median below the floor, so each states nothing.
+///
+/// The fact is about the scope the head already names, so it needs no further
+/// subject and rides under the tier sentence rather than on a row.
 #[test]
 fn a_scope_states_how_many_files_a_typical_change_there_touches() {
     let repository = amplification_repository();
@@ -1253,27 +1256,36 @@ fn a_scope_states_how_many_files_a_typical_change_there_touches() {
         "a typical change of two files is what a directory is for"
     );
 
-    // Human output omits the aggregate at every scope and width.
+    // Human output states the same bytes, at every scope the join answered and
+    // at no other, whole at fifty columns.
     let rendered = |arguments: Vec<&str>| {
         let run = Invocation::new(arguments).run(repository.path());
         run.success();
         String::from_utf8(run.stdout).unwrap()
     };
     let root = rendered(vec!["--history", "36500d"]);
-    assert!(!root.contains("A typical change here"), "{root}");
+    assert!(
+        root.contains("  A typical change here touches 3 files.\n"),
+        "{root}"
+    );
     let directory = rendered(vec!["core/src", "--history", "36500d"]);
-    assert!(!directory.contains("A typical change here"), "{directory}");
+    assert!(
+        directory.contains("  A typical change here touches 4 files.\n"),
+        "{directory}"
+    );
     let narrow = Invocation::new(["core/src", "--history", "36500d"])
         .columns(50)
         .run(repository.path());
     narrow.success();
     let narrow_text = String::from_utf8(narrow.stdout).unwrap();
     assert!(
-        !narrow_text.contains("A typical change here"),
-        "{narrow_text}"
+        narrow_text.contains("  A typical change here touches 4 files.\n"),
+        "the sentence fits fifty columns whole: {narrow_text}"
     );
     let file = rendered(vec!["core/src/unit0.js", "--history", "36500d"]);
     assert!(!file.contains("A typical change here"), "{file}");
+    let quiet = rendered(vec!["quiet", "--history", "36500d"]);
+    assert!(!quiet.contains("A typical change here"), "{quiet}");
 
     // The same tree read through the default window states no typical change:
     // the fixture's commits carry fixed dates the ninety-day window excludes, so

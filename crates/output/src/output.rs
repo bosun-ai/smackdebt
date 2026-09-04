@@ -1085,10 +1085,17 @@ fn stated_verdict_facts(verdict: &Verdict) -> Vec<String> {
         facts.extend(coverage_qualifier_lines(qualifier));
     }
     // A sub-scope answers about itself; the share states what fraction of the
-    // whole that is. Architecture and history facts need a named row rather
-    // than an anonymous verdict line.
+    // whole that is.
     if let Some(share) = verdict.share() {
         facts.push(share.sentence());
+    }
+    // How much a typical change to this scope touches is a fact about the
+    // scope the head already names, measured from its own commits, so it needs
+    // no further subject. An architecture claim does: reach and core size are
+    // superlatives over a graph, and they stay on the area row or problem card
+    // that says where to act.
+    if let Some(amplification) = verdict.amplification() {
+        facts.push(amplification.sentence());
     }
     facts
 }
