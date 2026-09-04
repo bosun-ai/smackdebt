@@ -304,12 +304,17 @@ fn resolved_path_reference(
 /// the resolver knows, so it is named symbolically.
 ///
 /// A chain of several `super` segments normalizes to one `../` today, so the
-/// parent it would name is the wrong module; such a path keeps exactly the
-/// candidates it has always had.
+/// parent module it would name is the wrong one, two or more levels below the
+/// module the path counts from.  Such a path is offered no parent at all: a
+/// trailing `super` segment is the module itself rather than an item in it, so
+/// counting the leading segments is the only reading that sees the difference
+/// between `super::Item` and `super::super`.
 fn root_module_candidates(prefix: &str, path: &str, inline: bool) -> Vec<String> {
     let single_super = path
-        .strip_prefix("super::")
-        .is_some_and(|rest| !rest.starts_with("super::"));
+        .split("::")
+        .take_while(|segment| *segment == "super")
+        .count()
+        == 1;
     match prefix {
         // Inside an inline module the declaring file is already the root, and
         // the reference carries it as its own fallback.

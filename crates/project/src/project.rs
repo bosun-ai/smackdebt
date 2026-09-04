@@ -5343,13 +5343,24 @@ mod tests {
                 "src/builder/mod.rs",
                 "mod manifests;\npub struct DockerMode;\n",
             ),
-            ("src/builder/manifests.rs", "use super::DockerMode;\n"),
+            // A chain of several `super` segments would name this file's own
+            // parent, two levels below the module it counts from.
+            (
+                "src/builder/manifests.rs",
+                "use super::DockerMode;\nuse super::super::*;\n",
+            ),
             // The parent module lives beside its directory, 2018 style.
-            ("src/widget.rs", "mod parts;\npub struct Frame;\n"),
+            (
+                "src/widget.rs",
+                "mod deep;\nmod parts;\npub struct Frame;\n",
+            ),
             (
                 "src/widget/parts.rs",
                 "use super::Frame;\nuse self::helper;\npub fn helper() -> u32 { 1 }\n",
             ),
+            // The declaring file is the module of its own directory, so its
+            // parent is the directory above rather than beside it.
+            ("src/widget/deep/mod.rs", "use super::Frame;\n"),
             // The parent of a source-root module is the crate root.
             ("src/edge.rs", "use super::Root;\n"),
             // Nothing declares this file, so nothing can be named.
@@ -5362,7 +5373,7 @@ mod tests {
 
         let result = analyze_codebase(&CodebaseRequest::new(root.path())).unwrap();
         let report = result.report();
-        let edges: Vec<_> = report
+        let mut edges: Vec<_> = report
             .dependency_edges()
             .iter()
             .filter(|edge| edge.relation() == smackdebt_analysis::StaticRelationKind::Uses)
@@ -5373,17 +5384,22 @@ mod tests {
                 )
             })
             .collect();
-        assert!(
-            edges.contains(&("src/builder/manifests.rs", "src/builder/mod.rs")),
-            "a directory module declares its children: {edges:?}"
-        );
-        assert!(
-            edges.contains(&("src/widget/parts.rs", "src/widget.rs")),
-            "a module file beside its directory declares its children: {edges:?}"
-        );
-        assert!(
-            edges.contains(&("src/edge.rs", "src/lib.rs")),
-            "the crate root declares the modules of the source root: {edges:?}"
+        edges.sort_unstable();
+        // Every edge, so a fallback that names a module the reference did not
+        // ask for fails here instead of hiding among the ones it did.
+        assert_eq!(
+            edges,
+            [
+                // A directory module declares its children.
+                ("src/builder/manifests.rs", "src/builder/mod.rs"),
+                // The crate root declares the modules of the source root.
+                ("src/edge.rs", "src/lib.rs"),
+                // A module file beside its directory declares the children of
+                // that directory, whether they are files or directories.
+                ("src/widget/deep/mod.rs", "src/widget.rs"),
+                ("src/widget/parts.rs", "src/widget.rs"),
+            ],
+            "a reference resolves to the module that declares its root"
         );
         let unresolved: Vec<_> = report
             .resolution_diagnostics()
@@ -5393,8 +5409,8 @@ mod tests {
             .collect();
         assert_eq!(
             unresolved,
-            ["super::Nothing"],
-            "a file no module declares keeps its absence: {edges:?}"
+            ["super::super::*", "super::Nothing"],
+            "a module the walk cannot name exactly keeps its absence: {edges:?}"
         );
     }
 

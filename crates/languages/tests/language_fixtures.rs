@@ -1225,7 +1225,7 @@ fn a_rooted_item_falls_back_to_the_module_its_root_names() {
     let analysis = Analyzer::default()
         .analyze(
             Path::new("src/builder/manifests.rs"),
-            b"use super::DockerMode;\nuse super::*;\nuse self::helper;\nuse super::super::Far;\n"
+            b"use super::DockerMode;\nuse super::*;\nuse self::helper;\nuse super::super::Far;\nuse super::super::*;\nuse super::super;\n"
                 .to_vec(),
         )
         .unwrap();
@@ -1263,12 +1263,28 @@ fn a_rooted_item_falls_back_to_the_module_its_root_names() {
                 ])
             ),
             // A chain of several `super` segments normalizes to one level, so
-            // it is offered no parent module it could name wrongly.
+            // it is offered no parent module it could name wrongly.  A trailing
+            // `super` names a module rather than an item in one, which the
+            // count of leading segments is what separates.
             (
                 "super::super::Far",
                 DependencySyntaxState::Candidates(vec![
                     "../Far.rs".to_owned(),
                     "../Far/mod.rs".to_owned(),
+                ])
+            ),
+            (
+                "super::super::*",
+                DependencySyntaxState::Candidates(vec![
+                    "../super.rs".to_owned(),
+                    "../super/mod.rs".to_owned(),
+                ])
+            ),
+            (
+                "super::super",
+                DependencySyntaxState::Candidates(vec![
+                    "../super.rs".to_owned(),
+                    "../super/mod.rs".to_owned(),
                 ])
             ),
         ]
