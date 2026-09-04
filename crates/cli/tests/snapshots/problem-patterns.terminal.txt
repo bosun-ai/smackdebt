@@ -1,14 +1,14 @@
 smackdebt · repository root
   Worn in the usual places.
   Not all source was checked.
-  15 of 17 source files were analyzed.
-4 high · 2 watch · 6 checked
+  16 of 18 source files were analyzed.
+4 high · 3 watch · 7 checked
 worst: hot/hot.js — hot AND complex
 
 AREAS
   god · 3 high · 1 watch
   hot · 1 high
-  hub · 1 watch
+  hub · 2 watch
 
 PROBLEMS
   high does too much · god/god.js
@@ -27,7 +27,10 @@ PROBLEMS
   watch everything depends on this · hub/hub.js
         hub/hub.js:1 · function · cyclomatic 2
         10 files import this
+        hot (4 commits)
   watch plain · function · god/plain.js:1
+        cyclomatic 2
+  watch spread · function · hub/spread.js:11
         cyclomatic 2
   watch one author · hot
         one contributor made 11 of 11 commits

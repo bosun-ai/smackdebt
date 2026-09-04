@@ -1901,6 +1901,22 @@ fn every_problem_pattern_reaches_a_committed_terminal_and_machine_view() {
     ] {
         assert!(text.contains(fact), "{fact}: {text}");
     }
+    // The hub card states the heat that corroborates its degree, so a reader
+    // sees why the degree is worth naming.
+    assert!(
+        text.contains(
+            "  watch everything depends on this · hub/hub.js\n        hub/hub.js:1 · function · cyclomatic 2\n        10 files import this\n        hot (4 commits)\n"
+        ),
+        "{text}"
+    );
+    // The file that imports nine others and never changes with them carries
+    // debt, and nothing corroborates its breadth, so it is named by that debt
+    // rather than by a degree a reader cannot act on.
+    assert!(
+        text.contains("  watch spread · function · hub/spread.js:11\n"),
+        "{text}"
+    );
+    assert!(!text.contains("depends on many files"), "{text}");
     // A size finding states its subject and its measured value, and a card
     // that heads on one names the file in the identity-then-kind form a
     // finding head takes and states the value alone.
@@ -3639,10 +3655,11 @@ fn shallow_evolutionary_fixture() -> tempfile::TempDir {
 /// A repository holding one file per frozen file pattern plus the history one
 /// package needs to concentrate its knowledge.
 ///
-/// Package `god` does too much and is broad both ways, package `hub` is one
-/// widely imported file beside the nine that import it, and package `hot`
-/// carries every commit after the first, which makes its one file a hotspot
-/// and its package a single-author package.
+/// Package `god` does too much and is broad both ways, package `hub` holds
+/// both arms of the hub rule — one widely imported file that also changes
+/// often beside the nine that import it, and one file that imports nine and
+/// never changes — and package `hot` carries every commit after the first,
+/// which makes its one file a hotspot and its package a single-author package.
 fn problem_pattern_fixture() -> tempfile::TempDir {
     let project = tempfile::tempdir().unwrap();
     git(project.path(), ["init", "-b", "main"]);
@@ -3660,12 +3677,15 @@ fn problem_pattern_fixture() -> tempfile::TempDir {
         .unwrap();
     }
     // One widely imported file with one Watch unit, and the nine files of its
-    // own package that import it.
-    fs::write(
-        project.path().join("hub/hub.js"),
-        "export function pick(value) {\n  if (value) {\n    return 1;\n  }\n  return 0;\n}\n",
-    )
-    .unwrap();
+    // own package that import it. Later commits touch it on its own, which is
+    // the co-change proof a hub carrying debt needs before it is named by its
+    // degree rather than by that debt.
+    let pick = |version: u32| {
+        format!(
+            "export function pick(value) {{\n  if (value > {version}) {{\n    return 1;\n  }}\n  return 0;\n}}\n"
+        )
+    };
+    fs::write(project.path().join("hub/hub.js"), pick(0)).unwrap();
     for index in 0..9 {
         fs::write(
             project.path().join(format!("hub/user-{index}.js")),
@@ -3675,6 +3695,16 @@ fn problem_pattern_fixture() -> tempfile::TempDir {
         )
         .unwrap();
     }
+    // One file that imports those nine and never changes: nothing corroborates
+    // its breadth, so it is named by the Watch unit it holds rather than by
+    // how many files it depends on.
+    let mut spread = (0..9)
+        .map(|index| format!("import {{ user{index} }} from './user-{index}';\n"))
+        .collect::<String>();
+    spread.push_str(
+        "\nexport function spread(value) {\n  if (value) {\n    return user0 + user1 + user2 + user3 + user4 + user5 + user6 + user7 + user8;\n  }\n  return 0;\n}\n",
+    );
+    fs::write(project.path().join("hub/spread.js"), spread).unwrap();
     // Ten imports make the concentrated file broad without its length.
     let mut god = (0..9)
         .map(|index| format!("import user{index} from '../hub/user-{index}';\n"))
@@ -3740,6 +3770,18 @@ fn problem_pattern_fixture() -> tempfile::TempDir {
             "Pattern Test",
             "pattern@example.invalid",
             &format!("churn {version}"),
+        );
+    }
+    // Three commits of its own make the widely imported file a hotspot without
+    // coupling its package to another or concentrating its history, which
+    // needs ten commits.
+    for version in 1..=3 {
+        fs::write(project.path().join("hub/hub.js"), pick(version)).unwrap();
+        commit_as(
+            project.path(),
+            "Pattern Test",
+            "pattern@example.invalid",
+            &format!("pick {version}"),
         );
     }
     project

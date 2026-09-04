@@ -356,7 +356,7 @@ them are what a person reads:
 | Pattern | The terminal prints | What it needs |
 | --- | --- | --- |
 | `god_file` | `does too much` | a file that both concentrates rated debt — three High findings, or one High finding among at least six units rated Watch or High — and is broad, meaning it carries a size finding or imports at least ten files |
-| `hub` | `everything depends on this`, `depends on many files`, or `change spreads far` | a file whose imports in or out reach eight and, when its package's median is not zero, reach four times that median; the words state which direction fired |
+| `hub` | `everything depends on this`, `depends on many files`, or `change spreads far` | a file whose imports in or out reach eight and, when its package's median is not zero, reach four times that median, or whose reach alone reaches eight; the words state which direction fired. A file that carries debt of its own also needs co-change proof — it is a hotspot in the window, or a change-leakage finding names it — and is otherwise named by that debt instead |
 | `tangle` | `circular dependency` | one rated dependency cycle: High across packages, Watch inside one package |
 | `hot_mess` | `hot and complex` | a file that carries High debt and is a hotspot in the selected window, five touches by default |
 | `shotgun_pair` | `packages change together` | two packages that keep changing together with no code dependency explaining it |
@@ -393,8 +393,14 @@ thresholds are:
 A `god_file` needs both halves: concentrated debt alone means a file has bugs,
 and breadth alone means a file is large. A `hub` compares a file against the
 median of its own package, so the same file is the same problem at every
-selected scope. The two co-change patterns share their three thresholds and are
-explained in [Read how far a change reaches](#read-how-far-a-change-reaches).
+selected scope. A degree on its own is a shape rather than a problem — a view
+imports many components and an error module is imported everywhere because that
+is what each is for — so a file that carries debt keeps its `hub` card only
+where co-change says the degree costs something, and is otherwise named by the
+debt it holds. A file with no debt of its own keeps a `detail` `hub` card
+whatever its history, so a degree stays inspectable under `--all` and in JSON.
+The two co-change patterns share their three thresholds and are explained in
+[Read how far a change reaches](#read-how-far-a-change-reaches).
 
 Every card is either a `default` card or a `detail` card. A card is `default`
 when it claims at least one finding that affects the verdict, when it claims a

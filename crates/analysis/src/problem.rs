@@ -876,42 +876,60 @@ impl<'a, 'b> FilePass<'a, 'b> {
         }
     }
 
-    /// A file whose degree stands far above the files it ships with.
+    /// A file whose degree stands far above the files it ships with, where
+    /// co-change proves the degree costs something.
     ///
     /// The median is the package's own, so the same file is the same pattern
     /// at every selected scope.
+    ///
+    /// A degree on its own is a shape rather than a problem: a view imports
+    /// many components and an error module is imported everywhere because that
+    /// is what each is for, and no reader can act on being told so. So a file
+    /// that carries verdict debt is named by that debt unless co-change
+    /// corroborates its degree — the file changes often, or its importers
+    /// follow its changes. A file carrying no such debt keeps its hub card,
+    /// which `card` already places in `detail`, so a degree-only hub stays
+    /// inspectable under `--all` and in JSON without reaching the default view.
     fn hubs(&mut self, cards: &mut Vec<ProblemCard>) {
-        let policy = self.input.policy;
         for index in 0..self.input.files.len() {
             if self.claimed[index] {
                 continue;
             }
-            let (median_in, median_out) = self.facts.median(self.input.files[index].package());
-            let fan_in = self.facts.fan_in(index);
-            let fan_out = self.facts.fan_out(index);
-            let inbound = stands_out(fan_in, median_in, policy);
-            let outbound = stands_out(fan_out, median_out, policy);
-            let reach = self.input.exact_reach(FileId::from_index(index));
-            let spreads = reach.is_some_and(|reach| reach >= policy.hub_degree());
-            if !inbound && !outbound && !spreads {
+            if self.facts.verdict_affecting[index] && !self.corroborated(index) {
                 continue;
             }
-            let mut evidence = Vec::new();
-            if inbound {
-                evidence.push(ProblemEvidence::FanIn(fan_in));
-            }
-            if outbound {
-                evidence.push(ProblemEvidence::FanOut(fan_out));
-            }
-            // How far the change spreads is why the degree matters, so it
-            // follows the degree that made the pattern fire.
-            if let Some(reach) = reach {
-                evidence.push(ProblemEvidence::ReachIn(reach));
-            }
+            let Some(evidence) = self.hub_facts(index) else {
+                continue;
+            };
             let rating = self.claimed_rating(index);
             let card = self.card(index, ProblemPattern::Hub, rating, evidence);
             cards.push(card);
         }
+    }
+
+    /// The facts that make one file a hub, in the order a card states them,
+    /// and nothing when no arm of the rule fires.
+    fn hub_facts(&self, index: usize) -> Option<Vec<ProblemEvidence>> {
+        let policy = self.input.policy;
+        let (median_in, median_out) = self.facts.median(self.input.files[index].package());
+        let fan_in = self.facts.fan_in(index);
+        let fan_out = self.facts.fan_out(index);
+        let mut evidence = Vec::new();
+        if stands_out(fan_in, median_in, policy) {
+            evidence.push(ProblemEvidence::FanIn(fan_in));
+        }
+        if stands_out(fan_out, median_out, policy) {
+            evidence.push(ProblemEvidence::FanOut(fan_out));
+        }
+        let reach = self.input.exact_reach(FileId::from_index(index));
+        let spreads = reach.is_some_and(|reach| reach >= policy.hub_degree());
+        if evidence.is_empty() && !spreads {
+            return None;
+        }
+        // How far the change spreads is why the degree matters, so it
+        // follows the degree that made the pattern fire.
+        evidence.extend(reach.map(ProblemEvidence::ReachIn));
+        Some(evidence)
     }
 
     /// A file that changes often and carries High debt, which agrees with the
@@ -1000,6 +1018,17 @@ impl<'a, 'b> FilePass<'a, 'b> {
                 visibility: ProblemVisibility::Default,
             });
         }
+    }
+
+    /// Whether co-change proves a file's degree costs something: the file
+    /// changes often enough to be a hotspot in the selected window, or a
+    /// change-leakage finding names it.
+    ///
+    /// Both are statements about how the codebase actually changed, which is
+    /// what turns a count of edges into a cost a reader can act on.
+    fn corroborated(&self, index: usize) -> bool {
+        self.input.hot_touches(FileId::from_index(index)).is_some()
+            || !self.facts.leakage[index].is_empty()
     }
 
     /// How many importers follow one file, which is how many of its leakage
@@ -1561,12 +1590,12 @@ mod tests {
         assert_eq!(card.rating(), Rating::High);
         assert_eq!(card.anchor(), &ProblemAnchor::File(FileId::from_index(0)));
         assert_eq!(card.visibility(), ProblemVisibility::Default);
-        // A fan-out of nine leaves the same file outside the pattern. It is
-        // still unusually broad for its package, so the next pattern in
-        // claiming order takes it.
+        // A fan-out of nine leaves the same file outside the pattern. Its
+        // breadth is uncorroborated, so no later pattern renames it and the
+        // fallback names it by the debt it holds.
         assert_eq!(
             concentrated_file(3, 3, 9).file_pattern(0),
-            Some(ProblemPattern::Hub)
+            Some(ProblemPattern::Measured)
         );
     }
 
@@ -1579,10 +1608,10 @@ mod tests {
             Some(ProblemPattern::GodFile)
         );
         // Five debt-carrying units leaves the concentration conjunct
-        // unsatisfied, so the broad file is only a hub.
+        // unsatisfied, so the broad file is measured by the debt it holds.
         assert_eq!(
             concentrated_file(1, 5, 10).file_pattern(0),
-            Some(ProblemPattern::Hub)
+            Some(ProblemPattern::Measured)
         );
     }
 
@@ -1593,7 +1622,7 @@ mod tests {
         // rated unit would call this broad file a god file on its length
         // alone, which is what single-file components made routine.
         let tables = graded_file(1, 1, 20, 10);
-        assert_eq!(tables.file_pattern(0), Some(ProblemPattern::Hub));
+        assert_eq!(tables.file_pattern(0), Some(ProblemPattern::Measured));
         // The same file with six of those units carrying debt is one.
         assert_eq!(
             graded_file(1, 6, 20, 10).file_pattern(0),
@@ -1734,6 +1763,9 @@ mod tests {
 
     #[test]
     fn a_widely_imported_file_without_any_debt_claims_nothing_and_is_detail() {
+        // Nothing corroborates the degree, but the file has no debt to be
+        // named by either, so the card survives where a reader who asked for
+        // every card can still find it.
         let cards = imported_file(8).cluster();
         let card = &cards[0];
         assert_eq!(card.pattern(), ProblemPattern::Hub);
@@ -1798,20 +1830,9 @@ mod tests {
         );
     }
 
-    #[test]
-    fn a_widely_imported_file_that_also_carries_verdict_debt_is_a_default_card() {
-        let mut tables = imported_file(8);
-        tables.finding(0, "work", high(), 12);
-        let cards = tables.cluster();
-        let card = &cards[0];
-        assert_eq!(card.pattern(), ProblemPattern::Hub);
-        assert_eq!(card.rating(), Rating::High);
-        assert_eq!(card.visibility(), ProblemVisibility::Default);
-        assert_eq!(
-            card.claimed_findings(),
-            [ClaimedFinding::Source(FindingId::from_index(0))]
-        );
-    }
+    // The corroboration rule the `hub` pattern reads has its cases in
+    // `tests/problem_hubs.rs`, beside the crate, because this container is
+    // already at its size limit.
 
     #[test]
     fn a_generated_file_that_is_imported_everywhere_keeps_its_own_rating() {
