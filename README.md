@@ -1002,26 +1002,59 @@ Inside a repository, that inspection reads source only from the selected file
 or directory subtree while keeping displayed paths repository-relative.
 
 Every selected file has one source role: primary, test, example, benchmark,
-fixture, or generated. Classification checks explicit `source_roles`
+fixture, generated, or vendored. Classification checks explicit `source_roles`
 configuration first, then language-owned generated markers. It next treats
 `.min`, `.bundle`, and `-bundle` names as generated for `.js`, `.mjs`, and
 `.cjs` files. JavaScript, JSX, TypeScript, and TSX source is also generated when
 it is at least 65,536 bytes and averages at least 512 bytes per nonempty
 physical line. That content check uses the source already read for analysis;
-Vue documents do not use it. Generic filenames and paths follow, then a Rust
+Vue documents do not use it. A `.js`, `.mjs`, or `.cjs` file whose name begins
+with `jquery` is vendored, which is the one library family named outright.
+Generic filenames and paths follow, then a Rust
 file whose every module declaration is test-scoped, and finally primary.
 Different matches at the same level are an
 invalid configuration and exit with status 2. Primary, test, example, and
-benchmark source affect default verdicts. Fixture and generated source remain
+benchmark source affect default verdicts. Fixture, generated, and vendored
+source remain
 visible in JSON, `--all`, and explicit file inspection without affecting
 verdicts, default problems, root worst-offender selection, or navigation.
 Explicit configuration wins over generated evidence. Directory names alone do
-not assign the generated role, so authored source under `public`, `share`, or
-`assets` remains authored unless another rule matches it.
+not assign the generated or vendored role, so authored source under `public`,
+`share`, or `assets` remains authored unless another rule matches it.
 
 <!-- smackdebt-example fixture=generated-javascript status=0 stderr=empty stdout=smackdebt_·_bundles/vendor.min.js|0_high|PROBLEMS|generated -->
 ```console
 smackdebt bundles/vendor.min.js --color never
+```
+
+A `.js`, `.mjs`, or `.cjs` file is also vendored when the repository shows, all
+at once, that it neither wrote it nor works on it: the file declares no `import`
+and no `export` of its own, nothing in the repository imports it, no package
+manifest names it as something it publishes, installs, or runs, its name is not
+a conventional entry name such as `index.js` or a tool configuration name such
+as `*.config.js` or a dotfile, and no commit inside the history window touched
+it. Every one of those is an absence, so all of them must hold. The rule is
+skipped entirely when the history window holds no commits, because a window with
+nothing in it proves nothing about any file.
+
+The module test decides which files the rule may look at. A file that states its
+own imports and exports is one the dependency graph can speak about: nothing
+importing it makes it an orphan, which the report already says. A file that
+states neither is a script a page or a build tool loads by name, so no import
+could ever have named it — and that is the shape a vendored browser library
+arrives in. TypeScript and JSX spellings are never considered, however cold or
+unimported they are, because both compile from source the repository authored.
+
+The cost is stated rather than hidden: a plain script that the repository did
+write, that nothing imports, and that no one has touched inside the window reads
+as vendored too. Its findings stay in JSON, in `--all`, and in its own file
+report, so nothing is lost — but the default verdict stops counting it.
+Widening `--history` or naming the file under `[source_roles] primary` restores
+it.
+
+<!-- smackdebt-example fixture=source-roles status=0 stderr=empty stdout=smackdebt_·_share/jquery.plugin.js|0_high|PROBLEMS|vendored -->
+```console
+smackdebt share/jquery.plugin.js --color never
 ```
 
 Files that cannot be parsed stay visible in the coverage summary. Smackdebt
@@ -1325,6 +1358,7 @@ example = ["examples/**"]
 benchmark = ["benches/**"]
 fixture = ["testdata/**"]
 generated = ["src/client/generated.rs"]
+vendored = ["public/javascripts/**"]
 
 [thresholds.cognitive]
 watch = 15

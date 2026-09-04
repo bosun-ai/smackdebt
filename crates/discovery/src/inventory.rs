@@ -112,6 +112,51 @@ impl ManifestKind {
         (!name.is_empty()).then(|| name.to_owned())
     }
 
+    /// The source files this manifest names as its own, relative to its
+    /// directory.
+    ///
+    /// A file a package publishes, installs as a command, or runs as a script
+    /// is reached through the manifest, so nothing in the repository has to
+    /// import it. Only npm manifests are read: they are the one recognized
+    /// manifest kind that names JavaScript files by path.
+    ///
+    /// Script values are shell commands, so every whitespace-separated word
+    /// that spells a JavaScript file is taken and the rest of the command is
+    /// ignored. Naming one path too many only spares a file from a rule of
+    /// absences, so a loose read here can never invent a fact.
+    fn declared_paths(self, source: &str) -> Vec<String> {
+        if self != Self::Npm {
+            return Vec::new();
+        }
+        let Ok(manifest) = serde_json::from_str::<serde_json::Value>(source) else {
+            return Vec::new();
+        };
+        let mut paths = Vec::new();
+        for field in ["main", "module", "browser", "bin"] {
+            match manifest.get(field) {
+                Some(serde_json::Value::String(value)) => paths.push(value.clone()),
+                Some(serde_json::Value::Object(entries)) => paths.extend(
+                    entries
+                        .values()
+                        .filter_map(serde_json::Value::as_str)
+                        .map(str::to_owned),
+                ),
+                _ => {}
+            }
+        }
+        if let Some(serde_json::Value::Object(scripts)) = manifest.get("scripts") {
+            paths.extend(
+                scripts
+                    .values()
+                    .filter_map(serde_json::Value::as_str)
+                    .flat_map(str::split_whitespace)
+                    .filter(|word| is_runtime_javascript_name(&word.to_ascii_lowercase()))
+                    .map(str::to_owned),
+            );
+        }
+        paths
+    }
+
     fn for_file(path: &Path) -> Option<Self> {
         let name = path.file_name()?.to_str()?;
         match name {
@@ -411,6 +456,7 @@ pub struct Package {
     root: RelativePath,
     manifests: Vec<ManifestKind>,
     manifest_name: Option<String>,
+    declared_paths: Vec<String>,
     resolution_config: Option<RelativePath>,
 }
 
@@ -431,6 +477,15 @@ impl Package {
     /// package root.  A manifest kind without a readable name leaves it absent.
     pub fn manifest_name(&self) -> Option<&str> {
         self.manifest_name.as_deref()
+    }
+
+    /// Returns the paths this package's manifest names as its own, as written.
+    ///
+    /// The paths come from the manifest that was already read to recognize the
+    /// package root, so no file is opened for them. They are spelled relative
+    /// to the package directory, which is where the manifest wrote them.
+    pub fn declared_paths(&self) -> &[String] {
+        &self.declared_paths
     }
 
     /// Returns the package-root TypeScript or JavaScript resolution config.
@@ -500,6 +555,56 @@ pub fn has_generated_javascript_name(path: &Path) -> bool {
     ]
     .iter()
     .any(|suffix| name.ends_with(suffix) && name.len() > suffix.len())
+}
+
+/// Whether the file name is one no repository invents for its own code.
+///
+/// The list is deliberately one library family. A vendored copy of jQuery or
+/// one of its plugins keeps the upstream name — `jquery.js`,
+/// `jquery-3.7.1.js`, `jquery.floatThead.js` — because the page that loads it
+/// names the file, so renaming it costs more than carrying it. Every other
+/// vendored library is left to the evidence rule: guessing at names would
+/// eventually silence a file the repository really did author.
+pub fn has_vendored_javascript_name(path: &Path) -> bool {
+    let Some(name) = path.file_name().and_then(|name| name.to_str()) else {
+        return false;
+    };
+    let name = name.to_ascii_lowercase();
+    is_runtime_javascript_name(&name) && name.starts_with("jquery")
+}
+
+/// Whether the file name is a JavaScript spelling a browser or a runtime loads.
+///
+/// TypeScript and JSX spellings are excluded: both are compiled from source a
+/// repository authored, so neither is ever shipped as a vendored copy.
+fn is_runtime_javascript_name(name: &str) -> bool {
+    [".js", ".mjs", ".cjs"]
+        .iter()
+        .any(|suffix| name.ends_with(suffix) && name.len() > suffix.len())
+}
+
+/// Whether the path names JavaScript a browser or a runtime loads as written.
+pub fn is_runtime_javascript_path(path: &Path) -> bool {
+    path.file_name()
+        .and_then(|name| name.to_str())
+        .is_some_and(|name| is_runtime_javascript_name(&name.to_ascii_lowercase()))
+}
+
+/// Whether a tool finds this file by its name rather than through an import.
+///
+/// A bundler, a linter, or a formatter looks for a fixed configuration name and
+/// loads it directly, so the dependency graph never records the one thing that
+/// reads the file. No importer is the normal state of such a file rather than
+/// evidence that the repository stopped caring about it.
+pub fn is_tool_configuration_name(path: &Path) -> bool {
+    let Some(name) = path.file_name().and_then(|name| name.to_str()) else {
+        return false;
+    };
+    let name = name.to_ascii_lowercase();
+    name.starts_with('.')
+        || [".config.js", ".config.mjs", ".config.cjs", ".conf.js"]
+            .iter()
+            .any(|suffix| name.ends_with(suffix) && name.len() > suffix.len())
 }
 
 /// A non-fatal inventory diagnostic.
@@ -696,6 +801,7 @@ struct Walker {
     files: Vec<RawFile>,
     manifest_dirs: BTreeMap<PathBuf, Vec<ManifestKind>>,
     manifest_names: BTreeMap<PathBuf, Option<String>>,
+    manifest_paths: BTreeMap<PathBuf, Vec<String>>,
     resolution_configs: BTreeMap<PathBuf, RelativePath>,
     diagnostics: Vec<InventoryDiagnostic>,
     stats: InventoryStats,
@@ -732,6 +838,7 @@ impl Walker {
             files: Vec::new(),
             manifest_dirs: BTreeMap::new(),
             manifest_names: BTreeMap::new(),
+            manifest_paths: BTreeMap::new(),
             resolution_configs: BTreeMap::new(),
             diagnostics: Vec::new(),
             stats: InventoryStats::default(),
@@ -910,19 +1017,25 @@ impl Walker {
         }
     }
 
-    /// Reads the declared name of one recognized manifest.
+    /// Reads the declared name and declared paths of one recognized manifest.
     ///
     /// The first manifest kind of a directory that declares a usable name owns
     /// the package name.  An unreadable or nameless manifest is not an error.
     fn record_manifest_name(&mut self, parent: &Path, manifest: ManifestKind, absolute: &Path) {
-        let entry = self.manifest_names.entry(parent.to_path_buf()).or_default();
-        if entry.is_some() {
-            return;
-        }
         let Ok(source) = fs::read_to_string(absolute) else {
             return;
         };
-        *entry = manifest.declared_name(absolute, &source);
+        let name = self.manifest_names.entry(parent.to_path_buf()).or_default();
+        if name.is_none() {
+            *name = manifest.declared_name(absolute, &source);
+        }
+        let declared = manifest.declared_paths(&source);
+        if !declared.is_empty() {
+            self.manifest_paths
+                .entry(parent.to_path_buf())
+                .or_default()
+                .extend(declared);
+        }
     }
 
     fn finish(mut self, root: PathBuf) -> io::Result<Inventory> {
@@ -939,6 +1052,7 @@ impl Walker {
                 root: RelativePath::new(path.clone()).expect("package root is relative"),
                 manifests: self.manifest_dirs.get(path).cloned().unwrap_or_default(),
                 manifest_name: self.manifest_names.get(path).cloned().flatten(),
+                declared_paths: self.manifest_paths.get(path).cloned().unwrap_or_default(),
                 resolution_config: nearest_resolution_config(path, &self.resolution_configs),
             })
             .collect();

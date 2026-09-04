@@ -279,6 +279,9 @@ pub(crate) fn source_role_repository() -> GeneratedRepository {
         "tests/generated.js",
         b"// @generated\nexport function work(a, b) { if (a) { if (b) { return 1; } } return 0; }\n",
     );
+    // A vendored library name under a directory no rule reads, so the name is
+    // the only thing that can have decided the role.
+    repository.write("share/jquery.plugin.js", source);
     repository
 }
 

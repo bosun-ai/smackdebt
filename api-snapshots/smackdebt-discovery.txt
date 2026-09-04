@@ -18,6 +18,7 @@ pub fn smackdebt_discovery::Inventory::source_files(&self) -> impl core::iter::t
 pub const fn smackdebt_discovery::Inventory::visited_entries(&self) -> usize
 pub struct smackdebt_discovery::Package
 impl smackdebt_discovery::Package
+pub fn smackdebt_discovery::Package::declared_paths(&self) -> &[alloc::string::String]
 pub fn smackdebt_discovery::Package::manifest_name(&self) -> core::option::Option<&str>
 pub fn smackdebt_discovery::Package::resolution_config(&self) -> core::option::Option<&smackdebt_discovery::RelativePath>
 pub fn smackdebt_discovery::Package::root(&self) -> &smackdebt_discovery::RelativePath
@@ -37,4 +38,7 @@ pub fn smackdebt_discovery::discover_snapshot(&std::path::Path, &[std::path::Pat
 pub fn smackdebt_discovery::generic_source_roles(&std::path::Path) -> alloc::vec::Vec<smackdebt_analysis::source::SourceRole>
 pub fn smackdebt_discovery::glob_matches(&str, &str) -> bool
 pub fn smackdebt_discovery::has_generated_javascript_name(&std::path::Path) -> bool
+pub fn smackdebt_discovery::has_vendored_javascript_name(&std::path::Path) -> bool
+pub fn smackdebt_discovery::is_runtime_javascript_path(&std::path::Path) -> bool
 pub fn smackdebt_discovery::is_source_path(&std::path::Path) -> bool
+pub fn smackdebt_discovery::is_tool_configuration_name(&std::path::Path) -> bool

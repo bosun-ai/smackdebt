@@ -30,7 +30,8 @@ use smackdebt_analysis::{
 };
 use smackdebt_discovery::{
     DiscoveredFile, Inventory, discover_snapshot, generic_source_roles, glob_matches,
-    has_generated_javascript_name, is_source_path,
+    has_generated_javascript_name, has_vendored_javascript_name, is_runtime_javascript_path,
+    is_source_path, is_tool_configuration_name,
 };
 use smackdebt_git::{Change, ContributorIdentity, GitRepository};
 use smackdebt_languages::{AnalysisError as LanguageError, Analyzer};
@@ -480,6 +481,9 @@ pub(super) fn analyze_diff(request: &DiffRequest) -> Result<ProjectReport, Proje
                 role: *role,
                 trust: analysis.parse_status().trust(),
                 language: analysis.language(),
+                // A diff never classifies vendored source, so the fact that
+                // rule reads is not carried across the object boundary.
+                module_syntax: false,
             });
         }
         if let DiffSide::Analyzed { analysis, role, .. } = &result.before {
@@ -490,6 +494,7 @@ pub(super) fn analyze_diff(request: &DiffRequest) -> Result<ProjectReport, Proje
                 role: *role,
                 trust: analysis.parse_status().trust(),
                 language: analysis.language(),
+                module_syntax: false,
             });
         }
         let is_selected = selected_paths.contains(result.change.current_path());
@@ -566,6 +571,7 @@ pub(super) fn analyze_diff(request: &DiffRequest) -> Result<ProjectReport, Proje
                     role: rated.role,
                     trust: rated.analysis.parse_status().trust(),
                     language: rated.analysis.language(),
+                    module_syntax: rated.module_syntax,
                 };
                 current_dependencies.push(dependencies.clone());
                 before_dependencies.push(SourceDependencies {
@@ -624,23 +630,42 @@ pub(super) fn analyze_diff(request: &DiffRequest) -> Result<ProjectReport, Proje
         before_files.push(before_record);
     }
     let current_manifest_names = manifest_names_for(&inventory, &package_roots);
+    let current_manifest_paths = manifest_paths_for(&inventory, &package_roots);
     let current_architecture = build_architecture(
         &work,
         &current_files,
         &current_dependencies,
         &aliases,
-        &current_package_roots,
-        &package_roots,
-        &current_manifest_names,
+        PackageTables {
+            side_roots: &current_package_roots,
+            roots: &package_roots,
+            manifests: ManifestFacts {
+                names: &current_manifest_names,
+                paths: &current_manifest_paths,
+            },
+        },
+        // A diff answers what two trees say about the changed units. Neither
+        // tree carries the per-file window activity the vendored rule reads, so
+        // the rule stands down and both sides keep the roles their names and
+        // markers state.
+        WindowedHistory::Absent,
     );
     let before_architecture = build_architecture(
         &work,
         &before_files,
         &before_dependencies,
         &before_aliases,
-        &before_package_roots,
-        &package_roots,
-        &before_manifest_names,
+        PackageTables {
+            side_roots: &before_package_roots,
+            roots: &package_roots,
+            manifests: ManifestFacts {
+                names: &before_manifest_names,
+                // The base tree is read from Git objects, which the walk never
+                // opens, so no manifest of that tree was read.
+                paths: &[],
+            },
+        },
+        WindowedHistory::Absent,
     );
     let before_edges: Vec<_> = before_architecture
         .package_edges
@@ -1762,8 +1787,11 @@ fn analyze_current_files(
                         };
                     }
                 };
+                let module_syntax = declares_module_syntax(path, &source);
                 match analyze_bytes(analyzer, FileId::from_index(index), path, source, work) {
-                    Ok(value) => FileResult::Analyzed(rate_file(value, role, policy)),
+                    Ok(value) => {
+                        FileResult::Analyzed(rate_file(value, role, policy, module_syntax))
+                    }
                     Err(LanguageError::Unsupported(language)) => {
                         FileResult::Unsupported { language, role }
                     }
@@ -1917,12 +1945,41 @@ fn classify_source_role(
     if has_generated_javascript_name(path) || has_generated_javascript_content(path, source) {
         return Ok(SourceRole::Generated);
     }
+    if has_vendored_javascript_name(path) {
+        return Ok(SourceRole::Vendored);
+    }
     let generic = generic_source_roles(path);
     if generic.is_empty() {
         Ok(SourceRole::Primary)
     } else {
         one_role(generic)
     }
+}
+
+/// Whether the source is written as a module rather than as a plain script.
+///
+/// A module states its own imports and exports, so the dependency graph can see
+/// whether anything uses it: nothing importing a module is an orphan, a fact
+/// the report already states. A script states nothing - a page or a build tool
+/// loads it by name - so no import could ever have named it and an empty fan-in
+/// is what such a file is supposed to look like. Only a script can therefore be
+/// read as a vendored copy.
+///
+/// Only statement positions count, so the `module.exports` a UMD wrapper hides
+/// inside a function leaves the file the script it is. Only the JavaScript a
+/// runtime loads as written is read at all, because that is the only source the
+/// vendored rule can classify.
+fn declares_module_syntax(path: &Path, source: &[u8]) -> bool {
+    if !is_runtime_javascript_path(path) {
+        return false;
+    }
+    source.split(|byte| *byte == b'\n').any(|line| {
+        let line = line.trim_ascii_start();
+        ["export", "import"].iter().any(|keyword| {
+            line.strip_prefix(keyword.as_bytes())
+                .is_some_and(|rest| matches!(rest.first(), Some(b' ' | b'\t' | b'{' | b'*' | b'(')))
+        })
+    })
 }
 
 fn has_generated_javascript_content(path: &Path, source: &[u8]) -> bool {
@@ -2240,6 +2297,8 @@ fn failed_history_availability(
 struct RatedFile {
     analysis: FileAnalysis,
     role: SourceRole,
+    /// Whether the source states its own imports and exports.
+    module_syntax: bool,
     health: HealthCounts,
     debt: Vec<(usize, HealthAssessment)>,
     /// Whether this file's facts may produce default signals.
@@ -2254,7 +2313,12 @@ struct RatedFile {
     container_statements: Vec<(String, u32)>,
 }
 
-fn rate_file(analysis: FileAnalysis, role: SourceRole, policy: HealthPolicy) -> RatedFile {
+fn rate_file(
+    analysis: FileAnalysis,
+    role: SourceRole,
+    policy: HealthPolicy,
+    module_syntax: bool,
+) -> RatedFile {
     let mut health = HealthCounts::default();
     let mut debt = Vec::new();
     let mut max_rating = Rating::Healthy;
@@ -2293,6 +2357,7 @@ fn rate_file(analysis: FileAnalysis, role: SourceRole, policy: HealthPolicy) -> 
     RatedFile {
         analysis,
         role,
+        module_syntax,
         health,
         debt,
         signals_verdict,
@@ -2597,6 +2662,7 @@ struct CodebaseReportBuilder<'a> {
     aliases: ResolutionRules,
     package_roots: Vec<PathBuf>,
     manifest_names: Vec<Option<String>>,
+    manifest_paths: Vec<Vec<String>>,
     packages: Vec<PackageRecord>,
     evolution: EvolutionInput,
     file_debt: Vec<FileDebt>,
@@ -2630,6 +2696,11 @@ impl<'a> CodebaseReportBuilder<'a> {
             .packages()
             .iter()
             .map(|package| package.manifest_name().map(str::to_owned))
+            .collect();
+        let manifest_paths: Vec<_> = inventory
+            .packages()
+            .iter()
+            .map(|package| package.declared_paths().to_vec())
             .collect();
         let mut hierarchy = HierarchyBuilder::new(label, &package_roots);
         let packages = package_roots
@@ -2668,6 +2739,7 @@ impl<'a> CodebaseReportBuilder<'a> {
             aliases,
             package_roots,
             manifest_names,
+            manifest_paths,
             packages,
             evolution,
             file_debt: Vec::with_capacity(candidates.len()),
@@ -2730,6 +2802,7 @@ impl<'a> CodebaseReportBuilder<'a> {
                     role: rated.role,
                     trust: analysis.parse_status().trust(),
                     language: analysis.language(),
+                    module_syntax: rated.module_syntax,
                 });
                 let recovered = matches!(analysis.parse_status(), ParseStatus::Recovered(_));
                 let failed = matches!(analysis.parse_status(), ParseStatus::Failed);
@@ -2838,6 +2911,36 @@ impl<'a> CodebaseReportBuilder<'a> {
         }
     }
 
+    /// Restates every file the architecture pass proved vendored.
+    ///
+    /// The role is settled after these tables were filled, so each one is
+    /// brought to the answer the file would have carried had its role been
+    /// known when it was rated: the file drops the health it contributed, its
+    /// findings are re-evidenced so no verdict, card, or offender counts them,
+    /// its size findings go with the verdict they were raised for, and the
+    /// hotspot table stops seeing rated units. The findings themselves stay,
+    /// because a vendored file is still inspectable on its own.
+    fn restate_vendored_files(&mut self, vendored: &BTreeSet<FileId>) {
+        if vendored.is_empty() {
+            return;
+        }
+        for file in vendored {
+            let record = &mut self.files[file.index()];
+            *record = record.clone().in_context_role(SourceRole::Vendored);
+            let debt = &mut self.file_debt[file.index()];
+            *debt = FileDebt::new(*file, 0, Rating::Healthy, debt.touches());
+        }
+        for finding in &mut self.findings {
+            if vendored.contains(&finding.file()) {
+                *finding = finding
+                    .clone()
+                    .with_evidence(SourceRole::Vendored, finding.trust());
+            }
+        }
+        self.size_findings
+            .retain(|finding| !vendored.contains(&finding.file()));
+    }
+
     fn add_general_diagnostic(&mut self, kind: DiagnosticKind, message: impl Into<String>) {
         let id = DiagnosticId::from_index(self.diagnostics.len());
         self.diagnostics
@@ -2854,10 +2957,23 @@ impl<'a> CodebaseReportBuilder<'a> {
             &self.files,
             &self.dependencies,
             &self.aliases,
-            &self.package_roots,
-            &self.package_roots,
-            &self.manifest_names,
+            PackageTables {
+                side_roots: &self.package_roots,
+                roots: &self.package_roots,
+                manifests: ManifestFacts {
+                    names: &self.manifest_names,
+                    paths: &self.manifest_paths,
+                },
+            },
+            if self.evolution.coverage.availability() == HistoryAvailability::Unavailable
+                || self.evolution.coverage.commits() == 0
+            {
+                WindowedHistory::Absent
+            } else {
+                WindowedHistory::Streamed
+            },
         );
+        self.restate_vendored_files(&architecture.vendored);
         let architecture_findings_for_links = architecture.findings.clone();
         let explanation_pairs = architecture.explanation_pairs.clone();
         self.disclose_skipped_closures(&architecture.skipped_closures);
@@ -3441,6 +3557,9 @@ struct ArchitectureBuild {
     connections: ConnectionGraph,
     /// The package of every file that enters the file dependency graph.
     graph_packages: Vec<Option<PackageId>>,
+    /// The files the resolved relations proved this repository only carries,
+    /// which the caller restates in the tables it owns.
+    vendored: BTreeSet<FileId>,
 }
 
 #[derive(Clone)]
@@ -3451,6 +3570,8 @@ struct SourceDependencies {
     role: SourceRole,
     trust: SourceTrust,
     language: Language,
+    /// Whether the file is written as a module rather than a plain script.
+    module_syntax: bool,
 }
 
 type DependencyEdgeKey = (
@@ -3844,6 +3965,24 @@ fn manifest_names_for(inventory: &Inventory, package_roots: &[PathBuf]) -> Vec<O
         .collect()
 }
 
+/// The paths each package's manifest names, aligned with `package_roots`.
+fn manifest_paths_for(inventory: &Inventory, package_roots: &[PathBuf]) -> Vec<Vec<String>> {
+    let declared: BTreeMap<_, _> = inventory
+        .packages()
+        .iter()
+        .map(|package| {
+            (
+                package.root().as_path().to_path_buf(),
+                package.declared_paths().to_vec(),
+            )
+        })
+        .collect();
+    package_roots
+        .iter()
+        .map(|root| declared.get(root).cloned().unwrap_or_default())
+        .collect()
+}
+
 /// Returns the report package that owns one repository path.
 fn package_of(path: &Path, side_package_roots: &[PathBuf], package_roots: &[PathBuf]) -> PackageId {
     let root = nearest_package_root(path, side_package_roots);
@@ -4146,21 +4285,60 @@ fn parse_resolution_aliases(
     Ok(aliases)
 }
 
+/// What each package's own manifest states about itself, in package order.
+///
+/// The two tables are read together wherever a package is asked what it owns,
+/// so a build can never hold one without the other.
+#[derive(Clone, Copy)]
+struct ManifestFacts<'a> {
+    names: &'a [Option<String>],
+    /// The paths each manifest names as something it publishes, installs, or
+    /// runs, spelled relative to the package directory.
+    paths: &'a [Vec<String>],
+}
+
+/// The package facts one graph side is built against.
+///
+/// `side_roots` are the package roots of the tree being read; `roots` are the
+/// report's own package positions, which the two sides of a diff share.
+#[derive(Clone, Copy)]
+struct PackageTables<'a> {
+    side_roots: &'a [PathBuf],
+    roots: &'a [PathBuf],
+    manifests: ManifestFacts<'a>,
+}
+
+/// Whether the streamed history window holds commits.
+///
+/// A file's absence from the window is evidence only when the window has
+/// something to be absent from. An empty or unavailable window says nothing
+/// about any file, so the rules that read coldness stand down rather than
+/// treating ignorance as proof.
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+enum WindowedHistory {
+    Streamed,
+    Absent,
+}
+
 fn build_architecture(
     work: &AnalysisWork,
     files: &[FileRecord],
     dependencies: &[SourceDependencies],
     aliases: &ResolutionRules,
-    side_package_roots: &[PathBuf],
-    package_roots: &[PathBuf],
-    manifest_names: &[Option<String>],
+    packages: PackageTables<'_>,
+    history: WindowedHistory,
 ) -> ArchitectureBuild {
+    let PackageTables {
+        side_roots: side_package_roots,
+        roots: package_roots,
+        manifests,
+    } = packages;
     work.record_algorithm_pass();
     let mut index = BTreeMap::new();
     for source in dependencies {
         index.insert(source.path.clone(), source.file);
     }
-    let manifest_index = ManifestNameIndex::new(manifest_names);
+    let manifest_index = ManifestNameIndex::new(manifests.names);
     let mut tables = ReferenceTables::default();
     for dependencies in dependencies {
         let source = dependencies.file;
@@ -4172,7 +4350,7 @@ fn build_architecture(
                         reference,
                         dependencies,
                         &manifest_index,
-                        manifest_names,
+                        manifests.names,
                         package_roots,
                         &index,
                     );
@@ -4219,7 +4397,7 @@ fn build_architecture(
                                 reference,
                                 dependencies,
                                 &manifest_index,
-                                manifest_names,
+                                manifests.names,
                                 package_roots,
                                 &index,
                             );
@@ -4260,6 +4438,86 @@ fn build_architecture(
     } = tables;
 
     let coverage = coverage.finish();
+
+    let mut diagnostics: Vec<ResolutionDiagnostic> = diagnostic_values
+        .into_iter()
+        .map(
+            |((source, target, kind, reason, relation, role, trust), (references, locations))| {
+                ResolutionDiagnostic::new(source, locations[0], target, kind, reason)
+                    .with_evidence(relation, role, trust)
+                    .with_occurrences(references, locations)
+            },
+        )
+        .collect();
+
+    let mut file_edges: Vec<_> = edge_values
+        .into_iter()
+        .enumerate()
+        .map(
+            |(edge_index, ((source, target, relation, role, trust), (references, locations)))| {
+                DependencyEdge::new(
+                    DependencyEdgeId::from_index(edge_index),
+                    source,
+                    target,
+                    references,
+                    locations,
+                )
+                .with_relation(relation)
+                .with_evidence(role, trust)
+            },
+        )
+        .collect();
+    let mut external: Vec<_> = external_values
+        .into_iter()
+        .map(
+            |((file, target, relation, role, trust), (references, locations))| {
+                ExternalDependency::new(file, target, references)
+                    .with_evidence(locations, relation, role, trust)
+            },
+        )
+        .collect();
+
+    // The last role this build settles, and the first point at which it can be:
+    // vendored source is recognized by what nothing does with it, so the
+    // resolved relations above are its evidence. Every graph fact below is
+    // derived from the restated table, so the role a file carries in the report
+    // is the role its package closure, its core, and its orphan state were
+    // computed under.
+    let vendored = vendored_javascript(
+        files,
+        dependencies,
+        &file_edges,
+        history,
+        VendorEntries {
+            package_roots,
+            manifest_names: manifests.names,
+            manifest_paths: manifests.paths,
+            index: &index,
+        },
+    );
+    let restated;
+    let files = if vendored.is_empty() {
+        files
+    } else {
+        restated = restate_vendored(files, &vendored);
+        &restated
+    };
+    for edge in &mut file_edges {
+        if vendored.contains(&edge.source()) {
+            *edge = edge.clone().in_context_role(SourceRole::Vendored);
+        }
+    }
+    for row in &mut external {
+        if vendored.contains(&row.file()) {
+            *row = row.clone().in_context_role(SourceRole::Vendored);
+        }
+    }
+    for row in &mut diagnostics {
+        if vendored.contains(&row.file()) {
+            *row = row.clone().in_context_role(SourceRole::Vendored);
+        }
+    }
+
     let parse_failure_files: Vec<_> = files
         .iter()
         .filter(|file| {
@@ -4305,44 +4563,6 @@ fn build_architecture(
         coverage.ambiguous_internal_uses(),
         configuration_failures,
     );
-
-    let diagnostics = diagnostic_values
-        .into_iter()
-        .map(
-            |((source, target, kind, reason, relation, role, trust), (references, locations))| {
-                ResolutionDiagnostic::new(source, locations[0], target, kind, reason)
-                    .with_evidence(relation, role, trust)
-                    .with_occurrences(references, locations)
-            },
-        )
-        .collect();
-
-    let file_edges: Vec<_> = edge_values
-        .into_iter()
-        .enumerate()
-        .map(
-            |(edge_index, ((source, target, relation, role, trust), (references, locations)))| {
-                DependencyEdge::new(
-                    DependencyEdgeId::from_index(edge_index),
-                    source,
-                    target,
-                    references,
-                    locations,
-                )
-                .with_relation(relation)
-                .with_evidence(role, trust)
-            },
-        )
-        .collect();
-    let external: Vec<_> = external_values
-        .into_iter()
-        .map(
-            |((file, target, relation, role, trust), (references, locations))| {
-                ExternalDependency::new(file, target, references)
-                    .with_evidence(locations, relation, role, trust)
-            },
-        )
-        .collect();
 
     let mut package_values: BTreeMap<(PackageId, PackageId), (u32, u32, Vec<DependencyEdgeId>)> =
         BTreeMap::new();
@@ -4501,9 +4721,12 @@ fn build_architecture(
         files,
         dependencies,
         &orphan_pairs,
-        package_roots,
-        manifest_names,
-        &index,
+        VendorEntries {
+            package_roots,
+            manifest_names: manifests.names,
+            manifest_paths: manifests.paths,
+            index: &index,
+        },
     );
     // Absence is proved against a wider graph than the cycle graph: every
     // `uses` and every `module_ownership` relation between two graph files, in
@@ -4607,6 +4830,7 @@ fn build_architecture(
         cycle_pairs: file_pairs,
         connections,
         graph_packages,
+        vendored,
     }
 }
 
@@ -4639,25 +4863,10 @@ fn derive_orphans(
     files: &[FileRecord],
     dependencies: &[SourceDependencies],
     file_pairs: &[(usize, usize)],
-    package_roots: &[PathBuf],
-    manifest_names: &[Option<String>],
-    index: &BTreeMap<PathBuf, FileId>,
+    entries: VendorEntries<'_>,
 ) -> Vec<OrphanFile> {
     let degrees = dependency_degree(files.len(), file_pairs);
-    let mut declared_entries = BTreeSet::new();
-    for (position, root) in package_roots.iter().enumerate() {
-        let fallback = root
-            .file_name()
-            .and_then(|name| name.to_str())
-            .unwrap_or_default();
-        let name = manifest_names
-            .get(position)
-            .and_then(Option::as_deref)
-            .unwrap_or(fallback);
-        if let Some(entry) = package_entry_file(root, name, index) {
-            declared_entries.insert(entry);
-        }
-    }
+    let declared_entries = declared_entry_files(entries);
     let mut analyzed = BTreeSet::new();
     for source in dependencies {
         analyzed.insert(source.file);
@@ -4677,6 +4886,134 @@ fn derive_orphans(
         })
         .collect();
     orphan_files(&candidates)
+}
+
+/// The tables that say which file each package presents as its entry point.
+#[derive(Clone, Copy)]
+struct VendorEntries<'a> {
+    package_roots: &'a [PathBuf],
+    manifest_names: &'a [Option<String>],
+    /// The paths each package's manifest names, in package order.
+    manifest_paths: &'a [Vec<String>],
+    index: &'a BTreeMap<PathBuf, FileId>,
+}
+
+/// Every file a package presents as its own entry point.
+///
+/// A declared entry is reached from outside the repository, so nothing inside
+/// it needs to import the file for it to be used. Two answers are joined: the
+/// conventional entry path of the package, and every path the package's own
+/// manifest names as something it publishes, installs, or runs.
+///
+/// Both the orphan table and the vendored rule read this one answer, so a
+/// package's entry point can never be an orphan in one and unowned in the
+/// other.
+fn declared_entry_files(entries: VendorEntries<'_>) -> BTreeSet<FileId> {
+    let mut declared = BTreeSet::new();
+    for (position, root) in entries.package_roots.iter().enumerate() {
+        let fallback = root
+            .file_name()
+            .and_then(|name| name.to_str())
+            .unwrap_or_default();
+        let name = entries
+            .manifest_names
+            .get(position)
+            .and_then(Option::as_deref)
+            .unwrap_or(fallback);
+        if let Some(entry) = package_entry_file(root, name, entries.index) {
+            declared.insert(entry);
+        }
+        let manifest_paths = entries
+            .manifest_paths
+            .get(position)
+            .map_or(&[][..], Vec::as_slice);
+        for path in manifest_paths {
+            let Some(cleaned) = clean_relative(&root.join(path)) else {
+                continue;
+            };
+            if let Some(file) = entries.index.get(&cleaned) {
+                declared.insert(*file);
+            }
+        }
+    }
+    declared
+}
+
+/// The JavaScript files this repository carries without having written them.
+///
+/// Every signal is an absence, and they must all hold at once: the file is a
+/// plain script rather than a module, nothing in the repository imports it, no
+/// package names it as something it publishes or runs, its own name is not a
+/// conventional entry name, and no commit in the streamed window touched it. A
+/// library dropped into a public directory fails none of them; source the team
+/// actually works on fails at least one.
+///
+/// Only the JavaScript a browser or a runtime loads as written can qualify.
+/// TypeScript and JSX compile from source the repository authored, so their
+/// spellings are never considered however cold or unimported they are.
+fn vendored_javascript(
+    files: &[FileRecord],
+    dependencies: &[SourceDependencies],
+    edges: &[DependencyEdge],
+    history: WindowedHistory,
+    entries: VendorEntries<'_>,
+) -> BTreeSet<FileId> {
+    if history == WindowedHistory::Absent {
+        return BTreeSet::new();
+    }
+    let scripts: BTreeSet<FileId> = dependencies
+        .iter()
+        .filter(|source| !source.module_syntax)
+        .map(|source| source.file)
+        .collect();
+    let candidates: Vec<_> = files
+        .iter()
+        .filter(|file| is_vendor_candidate(file) && scripts.contains(&file.id()))
+        .collect();
+    if candidates.is_empty() {
+        return BTreeSet::new();
+    }
+    let imported: BTreeSet<FileId> = edges
+        .iter()
+        .filter(|edge| edge.affects_verdict())
+        .map(DependencyEdge::target)
+        .collect();
+    let declared = declared_entry_files(entries);
+    candidates
+        .into_iter()
+        .map(FileRecord::id)
+        .filter(|file| !imported.contains(file) && !declared.contains(file))
+        .collect()
+}
+
+/// Whether the evidence rule may ever look at this file.
+///
+/// A file that already carries a role states what it is, and a file the window
+/// recorded a commit against is worked on, so neither is a vendored copy.
+/// Entry points and tool configuration are excluded for the same reason as each
+/// other: both are reached by name rather than by import, so having no importer
+/// is what they are supposed to look like.
+fn is_vendor_candidate(file: &FileRecord) -> bool {
+    let path = Path::new(file.path());
+    file.role() == SourceRole::Primary
+        && file.activity().is_none()
+        && !smackdebt_analysis::is_entry_filename(file.path())
+        && !is_tool_configuration_name(path)
+        && is_runtime_javascript_path(path)
+}
+
+/// Returns the file table with every vendored file restated under its role.
+fn restate_vendored(files: &[FileRecord], vendored: &BTreeSet<FileId>) -> Vec<FileRecord> {
+    files
+        .iter()
+        .map(|file| {
+            if vendored.contains(&file.id()) {
+                file.clone().in_context_role(SourceRole::Vendored)
+            } else {
+                file.clone()
+            }
+        })
+        .collect()
 }
 
 /// What a declared manifest name means inside this repository.
@@ -5960,7 +6297,7 @@ mod tests {
             let analysis = analyzer
                 .analyze(Path::new("src/work.js"), source.to_vec())
                 .unwrap();
-            let rated = rate_file(analysis, role, policy);
+            let rated = rate_file(analysis, role, policy, false);
             assert_eq!(rated.role, role);
             assert!(!rated.debt.is_empty());
             if role.affects_verdict() {
@@ -6029,6 +6366,7 @@ mod tests {
                 smackdebt_analysis::Thresholds::new(4, 7),
                 smackdebt_analysis::Thresholds::new(6, 9),
             ),
+            false,
         );
         assert_eq!(rated.health, HealthCounts::default());
         assert!(!rated.debt.is_empty());

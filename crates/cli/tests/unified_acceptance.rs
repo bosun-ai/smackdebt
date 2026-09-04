@@ -186,7 +186,8 @@ fn every_source_role_matches_the_public_fact_manifest() {
     let root = report["root"].as_u64().unwrap() as usize;
     let health = report["scopes"][root]["health"].as_u64().unwrap() as usize;
     assert_eq!(report["health"][health]["high"], facts["verdict_findings"]);
-    assert_eq!(report["findings"].as_array().unwrap().len(), 6);
+    // Every role keeps its finding, including the two that no verdict reads.
+    assert_eq!(report["findings"].as_array().unwrap().len(), 7);
     assert_golden("unified-source-roles.json", &result.stdout);
 }
 
@@ -2944,7 +2945,7 @@ fn executable_readme_examples_match_named_public_fixtures() {
     let readme =
         fs::read_to_string(Path::new(env!("CARGO_MANIFEST_DIR")).join("../../README.md")).unwrap();
     let examples = readme_examples(&readme);
-    assert_eq!(examples.len(), 16);
+    assert_eq!(examples.len(), 17);
     for example in examples {
         assert_readme_example(example);
     }
@@ -2969,6 +2970,7 @@ fn readme_example_repository(fixture: &str) -> GeneratedRepository {
         "generated-javascript" => generated_javascript_repository(),
         "comparison-trust-warning" => comparison_trust_warning_repository(),
         "worktree-change" => worktree_change_repository(),
+        "source-roles" => source_role_repository(),
         other => panic!("unknown README fixture {other}"),
     }
 }
@@ -3168,7 +3170,7 @@ fn composition_work_counts_are_visible_without_changing_report_bytes() {
         "source roles JSON",
         vec!["--json"],
         roles.path(),
-        [1, 14, 6, 0, 3, 6, 8],
+        [1, 16, 7, 0, 3, 7, 9],
     );
 
     let generated = generated_javascript_repository();
