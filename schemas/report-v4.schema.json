@@ -708,7 +708,8 @@
             "benchmark",
             "fixture",
             "generated",
-            "vendored"
+            "vendored",
+            "dormant"
           ]
         },
         "parse_outcome": {
@@ -789,7 +790,8 @@
             "benchmark",
             "fixture",
             "generated",
-            "vendored"
+            "vendored",
+            "dormant"
           ]
         },
         "trust": {
@@ -1200,7 +1202,8 @@
             "benchmark",
             "fixture",
             "generated",
-            "vendored"
+            "vendored",
+            "dormant"
           ]
         },
         "trust": {
@@ -1343,7 +1346,8 @@
             "benchmark",
             "fixture",
             "generated",
-            "vendored"
+            "vendored",
+            "dormant"
           ]
         },
         "trust": {
@@ -1426,7 +1430,8 @@
             "benchmark",
             "fixture",
             "generated",
-            "vendored"
+            "vendored",
+            "dormant"
           ]
         },
         "trust": {
@@ -1567,6 +1572,7 @@
             "fixture",
             "generated",
             "vendored",
+            "dormant",
             null
           ]
         },
@@ -1783,7 +1789,8 @@
             "benchmark",
             "fixture",
             "generated",
-            "vendored"
+            "vendored",
+            "dormant"
           ]
         },
         "trust": {
@@ -1835,7 +1842,8 @@
             "benchmark",
             "fixture",
             "generated",
-            "vendored"
+            "vendored",
+            "dormant"
           ]
         },
         "trust": {
@@ -1891,7 +1899,8 @@
             "benchmark",
             "fixture",
             "generated",
-            "vendored"
+            "vendored",
+            "dormant"
           ]
         },
         "left_trust": {
@@ -1909,7 +1918,8 @@
             "benchmark",
             "fixture",
             "generated",
-            "vendored"
+            "vendored",
+            "dormant"
           ]
         },
         "right_trust": {
@@ -1952,7 +1962,8 @@
             "benchmark",
             "fixture",
             "generated",
-            "vendored"
+            "vendored",
+            "dormant"
           ]
         },
         "trust": {
@@ -2594,7 +2605,8 @@
             "benchmark",
             "fixture",
             "generated",
-            "vendored"
+            "vendored",
+            "dormant"
           ]
         },
         "trust": {

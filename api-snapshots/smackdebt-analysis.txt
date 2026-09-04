@@ -225,6 +225,7 @@ pub smackdebt_analysis::SourceCoverageOutcome::Recovered
 pub smackdebt_analysis::SourceCoverageOutcome::Unsupported
 pub enum smackdebt_analysis::SourceRole
 pub smackdebt_analysis::SourceRole::Benchmark
+pub smackdebt_analysis::SourceRole::Dormant
 pub smackdebt_analysis::SourceRole::Example
 pub smackdebt_analysis::SourceRole::Fixture
 pub smackdebt_analysis::SourceRole::Generated

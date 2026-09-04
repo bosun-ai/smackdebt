@@ -217,14 +217,21 @@ pub enum SourceRole {
     Benchmark,
     Fixture,
     Generated,
-    /// Third-party source the repository carries but does not author.
+    /// Third-party source the repository carries but did not write.
     ///
-    /// Unlike [`Self::Generated`], vendored source is written by hand and reads
-    /// like any other file, so nothing in its own text names it. It is
-    /// recognized by what the repository does with it instead: a library name
-    /// no project invents, or a file no code imports and no recent commit
-    /// touches.
+    /// This is a claim about provenance, so only a name no project invents can
+    /// make it. Absence of use proves nothing about who wrote a file, and is
+    /// [`Self::Dormant`] instead.
     Vendored,
+    /// Source the repository is demonstrably not working on.
+    ///
+    /// Nothing imports it, no manifest runs it, and no commit inside the
+    /// history window touched it. That is a claim about attention, not about
+    /// authorship: the repository may well have written the file, and may well
+    /// load it by a path no static reference records. It is kept out of the
+    /// verdict because it is not what the team is working on, and kept in every
+    /// listing because it is still theirs.
+    Dormant,
 }
 
 impl SourceRole {

@@ -1002,8 +1002,9 @@ Inside a repository, that inspection reads source only from the selected file
 or directory subtree while keeping displayed paths repository-relative.
 
 Every selected file has one source role: primary, test, example, benchmark,
-fixture, generated, or vendored. Classification checks explicit `source_roles`
-configuration first, then language-owned generated markers. It next treats
+fixture, generated, vendored, or dormant. Classification checks explicit
+`source_roles` configuration first, then language-owned generated markers. It
+next treats
 `.min`, `.bundle`, and `-bundle` names as generated for `.js`, `.mjs`, and
 `.cjs` files. JavaScript, JSX, TypeScript, and TSX source is also generated when
 it is at least 65,536 bytes and averages at least 512 bytes per nonempty
@@ -1014,43 +1015,51 @@ Generic filenames and paths follow, then a Rust
 file whose every module declaration is test-scoped, and finally primary.
 Different matches at the same level are an
 invalid configuration and exit with status 2. Primary, test, example, and
-benchmark source affect default verdicts. Fixture, generated, and vendored
-source remain
+benchmark source affect default verdicts. Fixture, generated, vendored, and
+dormant source remain
 visible in JSON, `--all`, and explicit file inspection without affecting
 verdicts, default problems, root worst-offender selection, or navigation.
 Explicit configuration wins over generated evidence. Directory names alone do
-not assign the generated or vendored role, so authored source under `public`,
-`share`, or `assets` remains authored unless another rule matches it.
+not assign the generated, vendored, or dormant role, so authored source under
+`public`, `share`, or `assets` remains authored unless another rule matches it.
 
 <!-- smackdebt-example fixture=generated-javascript status=0 stderr=empty stdout=smackdebt_·_bundles/vendor.min.js|0_high|PROBLEMS|generated -->
 ```console
 smackdebt bundles/vendor.min.js --color never
 ```
 
-A `.js`, `.mjs`, or `.cjs` file is also vendored when the repository shows, all
-at once, that it neither wrote it nor works on it: the file declares no `import`
-and no `export` of its own, nothing in the repository imports it, no package
-manifest names it as something it publishes, installs, or runs, its name is not
-a conventional entry name such as `index.js` or a tool configuration name such
-as `*.config.js` or a dotfile, and no commit inside the history window touched
-it. Every one of those is an absence, so all of them must hold. The rule is
-skipped entirely when the history window holds no commits, because a window with
-nothing in it proves nothing about any file.
+Two rules move JavaScript out of the verdict, and they use two different words
+because they know two different things.
 
-The module test decides which files the rule may look at. A file that states its
-own imports and exports is one the dependency graph can speak about: nothing
-importing it makes it an orphan, which the report already says. A file that
-states neither is a script a page or a build tool loads by name, so no import
-could ever have named it — and that is the shape a vendored browser library
-arrives in. TypeScript and JSX spellings are never considered, however cold or
+**Vendored** is a claim about who wrote a file, so only a name makes it: the
+`jquery` family above. Nothing else is guessed at, because absence of use is no
+evidence of authorship.
+
+**Dormant** is a claim about attention, and it is made only from what was
+measured. A `.js`, `.mjs`, or `.cjs` file is dormant when all of these absences
+hold at once: the file declares no `import` and no `export` of its own, nothing
+in the repository imports it, no package manifest names it as something it
+publishes, installs, or runs, its name is not a conventional entry name such as
+`index.js` or a tool configuration name such as `*.config.js` or a dotfile, and
+no commit inside the history window touched it. The rule is skipped entirely
+when the history window holds no commits, because a window with nothing in it
+proves nothing about any file. Dormancy is measured rather than declared, so
+`[source_roles]` has no `dormant` key; to overrule it, name the file `primary`.
+
+The module test decides which files the dormancy rule may look at. A file that
+states its own imports and exports is one the dependency graph can speak about:
+nothing importing it makes it an orphan, which the report already says. A file
+that states neither is a script a page or a build tool loads by name, so no
+import could ever have named it, and having no importer is what it is supposed
+to look like. TypeScript and JSX spellings are never considered, however cold or
 unimported they are, because both compile from source the repository authored.
 
-The cost is stated rather than hidden: a plain script that the repository did
-write, that nothing imports, and that no one has touched inside the window reads
-as vendored too. Its findings stay in JSON, in `--all`, and in its own file
-report, so nothing is lost — but the default verdict stops counting it.
-Widening `--history` or naming the file under `[source_roles] primary` restores
-it.
+What dormancy does not say is who wrote the file. A page script the repository
+wrote years ago and has not opened since answers to every signal above, and is
+called dormant for exactly that reason — not because anyone decided it was
+third-party. Its findings stay in JSON, in `--all`, and in its own file report,
+so nothing is lost; only the default verdict stops counting it. Widening
+`--history` or naming the file under `[source_roles] primary` restores it.
 
 <!-- smackdebt-example fixture=source-roles status=0 stderr=empty stdout=smackdebt_·_share/jquery.plugin.js|0_high|PROBLEMS|vendored -->
 ```console

@@ -97,6 +97,13 @@ pub(super) fn analyze_codebase(request: &CodebaseRequest) -> Result<ProjectRepor
         &request.role_rules,
     );
 
+    // The roles history evidence is filed under. They are read here, before the
+    // dependency graph exists, so the dormancy rule below cannot have run yet -
+    // and it never needs to have. Dormancy requires that no commit inside the
+    // window touched the file, so a dormant file contributes no change, no
+    // churn row, and no coupling pair for a later role to correct. The two
+    // tables agree by construction rather than by being kept in step; the
+    // pinning test is `a_dormant_file_has_no_history_row_left_under_the_old_role`.
     let history_files = candidates
         .iter()
         .enumerate()
@@ -1963,12 +1970,22 @@ fn classify_source_role(
 /// the report already states. A script states nothing - a page or a build tool
 /// loads it by name - so no import could ever have named it and an empty fan-in
 /// is what such a file is supposed to look like. Only a script can therefore be
-/// read as a vendored copy.
+/// read as dormant.
 ///
-/// Only statement positions count, so the `module.exports` a UMD wrapper hides
-/// inside a function leaves the file the script it is. Only the JavaScript a
-/// runtime loads as written is read at all, because that is the only source the
-/// vendored rule can classify.
+/// The test reads the first word of each line, not every occurrence, so the
+/// `module.exports` a UMD wrapper indents inside a function leaves the file the
+/// script it is. That prefix reading is the whole of the rule: it is a cheap
+/// approximation of a statement position, not a parse, and the `export` opening
+/// a line inside a template literal counts too.
+///
+/// The two errors are not symmetric. Missing module syntax lets a module be
+/// called dormant, which is wrong about a file the team may be working on;
+/// seeing it where there is none only spares a file from a rule of absences.
+/// So the accepted follow set is generous - whitespace, a brace, a star, a
+/// parenthesis, either quote, a carriage return, or the end of the line, which
+/// is how a multi-line `import` opens. Only the JavaScript a runtime loads as
+/// written is read at all, because that is the only source the dormancy rule
+/// can classify.
 fn declares_module_syntax(path: &Path, source: &[u8]) -> bool {
     if !is_runtime_javascript_path(path) {
         return false;
@@ -1976,8 +1993,12 @@ fn declares_module_syntax(path: &Path, source: &[u8]) -> bool {
     source.split(|byte| *byte == b'\n').any(|line| {
         let line = line.trim_ascii_start();
         ["export", "import"].iter().any(|keyword| {
-            line.strip_prefix(keyword.as_bytes())
-                .is_some_and(|rest| matches!(rest.first(), Some(b' ' | b'\t' | b'{' | b'*' | b'(')))
+            line.strip_prefix(keyword.as_bytes()).is_some_and(|rest| {
+                matches!(
+                    rest.first(),
+                    None | Some(b' ' | b'\t' | b'\r' | b'{' | b'*' | b'(' | b'"' | b'\'')
+                )
+            })
         })
     })
 }
@@ -2911,7 +2932,7 @@ impl<'a> CodebaseReportBuilder<'a> {
         }
     }
 
-    /// Restates every file the architecture pass proved vendored.
+    /// Restates every file the architecture pass proved dormant.
     ///
     /// The role is settled after these tables were filled, so each one is
     /// brought to the answer the file would have carried had its role been
@@ -2919,26 +2940,32 @@ impl<'a> CodebaseReportBuilder<'a> {
     /// findings are re-evidenced so no verdict, card, or offender counts them,
     /// its size findings go with the verdict they were raised for, and the
     /// hotspot table stops seeing rated units. The findings themselves stay,
-    /// because a vendored file is still inspectable on its own.
-    fn restate_vendored_files(&mut self, vendored: &BTreeSet<FileId>) {
-        if vendored.is_empty() {
+    /// because a dormant file is still inspectable on its own.
+    ///
+    /// The churn and coupling tables are deliberately not restated. They were
+    /// filled while history streamed, before this role existed - and they hold
+    /// nothing to restate, because a file with any row in them was touched
+    /// inside the window and so can never be dormant. The pinning test is
+    /// `a_dormant_file_has_no_history_row_left_under_the_old_role`.
+    fn restate_dormant_files(&mut self, dormant: &BTreeSet<FileId>) {
+        if dormant.is_empty() {
             return;
         }
-        for file in vendored {
+        for file in dormant {
             let record = &mut self.files[file.index()];
-            *record = record.clone().in_context_role(SourceRole::Vendored);
+            *record = record.clone().in_context_role(SourceRole::Dormant);
             let debt = &mut self.file_debt[file.index()];
             *debt = FileDebt::new(*file, 0, Rating::Healthy, debt.touches());
         }
         for finding in &mut self.findings {
-            if vendored.contains(&finding.file()) {
+            if dormant.contains(&finding.file()) {
                 *finding = finding
                     .clone()
-                    .with_evidence(SourceRole::Vendored, finding.trust());
+                    .with_evidence(SourceRole::Dormant, finding.trust());
             }
         }
         self.size_findings
-            .retain(|finding| !vendored.contains(&finding.file()));
+            .retain(|finding| !dormant.contains(&finding.file()));
     }
 
     fn add_general_diagnostic(&mut self, kind: DiagnosticKind, message: impl Into<String>) {
@@ -2973,7 +3000,7 @@ impl<'a> CodebaseReportBuilder<'a> {
                 WindowedHistory::Streamed
             },
         );
-        self.restate_vendored_files(&architecture.vendored);
+        self.restate_dormant_files(&architecture.dormant);
         let architecture_findings_for_links = architecture.findings.clone();
         let explanation_pairs = architecture.explanation_pairs.clone();
         self.disclose_skipped_closures(&architecture.skipped_closures);
@@ -3557,9 +3584,10 @@ struct ArchitectureBuild {
     connections: ConnectionGraph,
     /// The package of every file that enters the file dependency graph.
     graph_packages: Vec<Option<PackageId>>,
-    /// The files the resolved relations proved this repository only carries,
-    /// which the caller restates in the tables it owns.
-    vendored: BTreeSet<FileId>,
+    /// The files the resolved relations and the streamed window together
+    /// proved nobody is working on, which the caller restates in the tables it
+    /// owns.
+    dormant: BTreeSet<FileId>,
 }
 
 #[derive(Clone)]
@@ -4477,46 +4505,29 @@ fn build_architecture(
         )
         .collect();
 
+    // Computed once, here, and read by both the dormancy rule below and the
+    // orphan table further down, so the two can never disagree about what a
+    // package owns.
+    let declared_entries = declared_entry_files(PackageEntries {
+        package_roots,
+        manifest_names: manifests.names,
+        manifest_paths: manifests.paths,
+        index: &index,
+    });
     // The last role this build settles, and the first point at which it can be:
-    // vendored source is recognized by what nothing does with it, so the
-    // resolved relations above are its evidence. Every graph fact below is
-    // derived from the restated table, so the role a file carries in the report
-    // is the role its package closure, its core, and its orphan state were
-    // computed under.
-    let vendored = vendored_javascript(
-        files,
-        dependencies,
-        &file_edges,
-        history,
-        VendorEntries {
-            package_roots,
-            manifest_names: manifests.names,
-            manifest_paths: manifests.paths,
-            index: &index,
-        },
-    );
+    // dormancy is recognized by what nothing does with a file, so the resolved
+    // relations above are its evidence. Every graph fact below is derived from
+    // the restated table, so the role a file carries in the report is the role
+    // its package closure, its core, and its orphan state were computed under.
+    let dormant = dormant_javascript(files, dependencies, &file_edges, history, &declared_entries);
     let restated;
-    let files = if vendored.is_empty() {
+    let files = if dormant.is_empty() {
         files
     } else {
-        restated = restate_vendored(files, &vendored);
+        restated = restate_dormant(files, &dormant);
         &restated
     };
-    for edge in &mut file_edges {
-        if vendored.contains(&edge.source()) {
-            *edge = edge.clone().in_context_role(SourceRole::Vendored);
-        }
-    }
-    for row in &mut external {
-        if vendored.contains(&row.file()) {
-            *row = row.clone().in_context_role(SourceRole::Vendored);
-        }
-    }
-    for row in &mut diagnostics {
-        if vendored.contains(&row.file()) {
-            *row = row.clone().in_context_role(SourceRole::Vendored);
-        }
-    }
+    restate_dormant_relations(&dormant, &mut file_edges, &mut external, &mut diagnostics);
 
     let parse_failure_files: Vec<_> = files
         .iter()
@@ -4717,17 +4728,7 @@ fn build_architecture(
         .filter(|edge| enters_cycle_graph(edge))
         .map(|edge| (edge.source().index(), edge.target().index()))
         .collect();
-    let orphans = derive_orphans(
-        files,
-        dependencies,
-        &orphan_pairs,
-        VendorEntries {
-            package_roots,
-            manifest_names: manifests.names,
-            manifest_paths: manifests.paths,
-            index: &index,
-        },
-    );
+    let orphans = derive_orphans(files, dependencies, &orphan_pairs, &declared_entries);
     // Absence is proved against a wider graph than the cycle graph: every
     // `uses` and every `module_ownership` relation between two graph files, in
     // both directions of travel. It is built here, beside the cycle graph it
@@ -4830,7 +4831,7 @@ fn build_architecture(
         cycle_pairs: file_pairs,
         connections,
         graph_packages,
-        vendored,
+        dormant,
     }
 }
 
@@ -4863,10 +4864,9 @@ fn derive_orphans(
     files: &[FileRecord],
     dependencies: &[SourceDependencies],
     file_pairs: &[(usize, usize)],
-    entries: VendorEntries<'_>,
+    declared_entries: &BTreeSet<FileId>,
 ) -> Vec<OrphanFile> {
     let degrees = dependency_degree(files.len(), file_pairs);
-    let declared_entries = declared_entry_files(entries);
     let mut analyzed = BTreeSet::new();
     for source in dependencies {
         analyzed.insert(source.file);
@@ -4890,7 +4890,7 @@ fn derive_orphans(
 
 /// The tables that say which file each package presents as its entry point.
 #[derive(Clone, Copy)]
-struct VendorEntries<'a> {
+struct PackageEntries<'a> {
     package_roots: &'a [PathBuf],
     manifest_names: &'a [Option<String>],
     /// The paths each package's manifest names, in package order.
@@ -4905,10 +4905,10 @@ struct VendorEntries<'a> {
 /// conventional entry path of the package, and every path the package's own
 /// manifest names as something it publishes, installs, or runs.
 ///
-/// Both the orphan table and the vendored rule read this one answer, so a
-/// package's entry point can never be an orphan in one and unowned in the
-/// other.
-fn declared_entry_files(entries: VendorEntries<'_>) -> BTreeSet<FileId> {
+/// Both the orphan table and the dormancy rule read this one answer, computed
+/// once per build, so a package's entry point can never be an orphan in one and
+/// unowned in the other.
+fn declared_entry_files(entries: PackageEntries<'_>) -> BTreeSet<FileId> {
     let mut declared = BTreeSet::new();
     for (position, root) in entries.package_roots.iter().enumerate() {
         let fallback = root
@@ -4939,24 +4939,28 @@ fn declared_entry_files(entries: VendorEntries<'_>) -> BTreeSet<FileId> {
     declared
 }
 
-/// The JavaScript files this repository carries without having written them.
+/// The JavaScript files this repository is demonstrably not working on.
 ///
 /// Every signal is an absence, and they must all hold at once: the file is a
 /// plain script rather than a module, nothing in the repository imports it, no
 /// package names it as something it publishes or runs, its own name is not a
-/// conventional entry name, and no commit in the streamed window touched it. A
-/// library dropped into a public directory fails none of them; source the team
-/// actually works on fails at least one.
+/// conventional entry name, and no commit in the streamed window touched it.
+///
+/// What that adds up to is inattention, not provenance. A jQuery-era library
+/// dropped into a public directory answers to it, and so does a page script the
+/// repository wrote years ago and has not opened since - and nothing here can
+/// tell those two apart, because no signal here looks at who wrote anything.
+/// The role states only what was measured: no one is working on this.
 ///
 /// Only the JavaScript a browser or a runtime loads as written can qualify.
 /// TypeScript and JSX compile from source the repository authored, so their
 /// spellings are never considered however cold or unimported they are.
-fn vendored_javascript(
+fn dormant_javascript(
     files: &[FileRecord],
     dependencies: &[SourceDependencies],
     edges: &[DependencyEdge],
     history: WindowedHistory,
-    entries: VendorEntries<'_>,
+    declared: &BTreeSet<FileId>,
 ) -> BTreeSet<FileId> {
     if history == WindowedHistory::Absent {
         return BTreeSet::new();
@@ -4968,7 +4972,7 @@ fn vendored_javascript(
         .collect();
     let candidates: Vec<_> = files
         .iter()
-        .filter(|file| is_vendor_candidate(file) && scripts.contains(&file.id()))
+        .filter(|file| is_dormancy_candidate(file) && scripts.contains(&file.id()))
         .collect();
     if candidates.is_empty() {
         return BTreeSet::new();
@@ -4978,7 +4982,6 @@ fn vendored_javascript(
         .filter(|edge| edge.affects_verdict())
         .map(DependencyEdge::target)
         .collect();
-    let declared = declared_entry_files(entries);
     candidates
         .into_iter()
         .map(FileRecord::id)
@@ -4989,11 +4992,11 @@ fn vendored_javascript(
 /// Whether the evidence rule may ever look at this file.
 ///
 /// A file that already carries a role states what it is, and a file the window
-/// recorded a commit against is worked on, so neither is a vendored copy.
-/// Entry points and tool configuration are excluded for the same reason as each
-/// other: both are reached by name rather than by import, so having no importer
-/// is what they are supposed to look like.
-fn is_vendor_candidate(file: &FileRecord) -> bool {
+/// recorded a commit against is worked on, so neither is dormant. Entry points
+/// and tool configuration are excluded for the same reason as each other: both
+/// are reached by name rather than by import, so having no importer is what
+/// they are supposed to look like.
+fn is_dormancy_candidate(file: &FileRecord) -> bool {
     let path = Path::new(file.path());
     file.role() == SourceRole::Primary
         && file.activity().is_none()
@@ -5002,13 +5005,48 @@ fn is_vendor_candidate(file: &FileRecord) -> bool {
         && is_runtime_javascript_path(path)
 }
 
-/// Returns the file table with every vendored file restated under its role.
-fn restate_vendored(files: &[FileRecord], vendored: &BTreeSet<FileId>) -> Vec<FileRecord> {
+/// Restates every relation written in a dormant file.
+///
+/// The relations themselves are untouched; only what they count as changes. A
+/// reference written in a file nobody is working on stops being evidence about
+/// the code that ships, so it shapes no package edge, no cycle, and no orphan
+/// pair - which is what the graph facts below are derived from.
+fn restate_dormant_relations(
+    dormant: &BTreeSet<FileId>,
+    file_edges: &mut [DependencyEdge],
+    external: &mut [ExternalDependency],
+    diagnostics: &mut [ResolutionDiagnostic],
+) {
+    if dormant.is_empty() {
+        return;
+    }
+    for edge in file_edges
+        .iter_mut()
+        .filter(|edge| dormant.contains(&edge.source()))
+    {
+        *edge = edge.clone().in_context_role(SourceRole::Dormant);
+    }
+    for row in external
+        .iter_mut()
+        .filter(|row| dormant.contains(&row.file()))
+    {
+        *row = row.clone().in_context_role(SourceRole::Dormant);
+    }
+    for row in diagnostics
+        .iter_mut()
+        .filter(|row| dormant.contains(&row.file()))
+    {
+        *row = row.clone().in_context_role(SourceRole::Dormant);
+    }
+}
+
+/// Returns the file table with every dormant file restated under its role.
+fn restate_dormant(files: &[FileRecord], dormant: &BTreeSet<FileId>) -> Vec<FileRecord> {
     files
         .iter()
         .map(|file| {
-            if vendored.contains(&file.id()) {
-                file.clone().in_context_role(SourceRole::Vendored)
+            if dormant.contains(&file.id()) {
+                file.clone().in_context_role(SourceRole::Dormant)
             } else {
                 file.clone()
             }
@@ -6183,6 +6221,84 @@ mod tests {
             Ok(SourceRole::Primary)
         );
     }
+
+    /// The guard that decides which files the dormancy rule may look at.
+    ///
+    /// Its two errors are not symmetric: missing module syntax lets a module be
+    /// called dormant, while seeing it where there is none only spares a file.
+    /// The table therefore leans on the spellings that could be missed.
+    #[test]
+    fn module_syntax_is_read_from_the_first_word_of_a_line() {
+        let script = Path::new("public/js/widget.js");
+        for (source, expected, why) in MODULE_SYNTAX_CASES {
+            assert_eq!(
+                declares_module_syntax(script, source.as_bytes()),
+                *expected,
+                "{why}: {source:?}"
+            );
+        }
+        assert!(
+            !declares_module_syntax(Path::new("src/widget.ts"), b"export const a = 1;\n"),
+            "only the JavaScript a runtime loads as written is read at all"
+        );
+    }
+
+    /// One source, the answer it must produce, and why that answer is right.
+    const MODULE_SYNTAX_CASES: &[(&str, bool, &str)] = &[
+        (
+            "function a() {}\nexport function b() {}\n",
+            true,
+            "an export anywhere in the file counts",
+        ),
+        (
+            "const a = 1;\nexport {a};\n",
+            true,
+            "a brace after the keyword counts",
+        ),
+        (
+            "import\"./x\"\n",
+            true,
+            "a double quote with no space counts",
+        ),
+        ("import'./x'\n", true, "a single quote with no space counts"),
+        (
+            "import {\n  thing,\n} from './x';\n",
+            true,
+            "a multi-line import counts",
+        ),
+        (
+            "import\n  { thing }\nfrom './x';\n",
+            true,
+            "the keyword ending its own line counts",
+        ),
+        ("export * from './x';\n", true, "a star counts"),
+        ("  export default 1;\n", true, "leading indent is trimmed"),
+        (
+            "export {a};\r\n",
+            true,
+            "a carriage return does not hide the keyword",
+        ),
+        (
+            "#!/usr/bin/env node\n(function () {\n  module.exports = 1;\n})();\n",
+            false,
+            "a UMD or CommonJS wrapper is still a script",
+        ),
+        (
+            "const x = require('./x');\nwindow.x = x;\n",
+            false,
+            "a plain require is not module syntax the graph reads here",
+        ),
+        (
+            "const exported = 1;\nconst important = 2;\n",
+            false,
+            "a longer word starting with the keyword is not the keyword",
+        ),
+        (
+            "// export function b() {}\n",
+            false,
+            "the keyword is not the first word of that line",
+        ),
+    ];
 
     #[test]
     fn generated_javascript_content_uses_exact_size_and_density_edges() {

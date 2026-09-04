@@ -65,6 +65,9 @@ impl SourceRoleRule {
             SourceRole::Fixture => "fixture",
             SourceRole::Generated => "generated",
             SourceRole::Vendored => "vendored",
+            // Dormancy is measured, never declared, so no configuration rule
+            // produces it and no pattern conflict can name it.
+            SourceRole::Dormant => "dormant",
         }
     }
 

@@ -771,7 +771,8 @@ const fn role_class(role: SourceRole) -> u8 {
         | SourceRole::Benchmark
         | SourceRole::Fixture
         | SourceRole::Generated
-        | SourceRole::Vendored => 1,
+        | SourceRole::Vendored
+        | SourceRole::Dormant => 1,
     }
 }
 

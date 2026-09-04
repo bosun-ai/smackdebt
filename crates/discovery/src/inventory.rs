@@ -74,6 +74,28 @@ impl ManifestKind {
         matches!(self, Self::Cargo | Self::Npm | Self::Python | Self::Gemspec)
     }
 
+    /// Whether this manifest kind names source files by path.
+    ///
+    /// Only npm manifests do among the recognized kinds, and it is the reason a
+    /// directory whose name is already known may still have to be read.
+    const fn declares_paths(self) -> bool {
+        matches!(self, Self::Npm)
+    }
+
+    /// Reads everything one recognized manifest states about itself.
+    ///
+    /// An npm manifest is parsed once and both answers are taken from that one
+    /// value, because the name and the declared paths live in the same object.
+    fn declared_facts(self, path: &Path, source: &str) -> (Option<String>, Vec<String>) {
+        if self == Self::Npm {
+            let Ok(manifest) = serde_json::from_str::<serde_json::Value>(source) else {
+                return (None, Vec::new());
+            };
+            return (npm_name(&manifest), npm_declared_paths(&manifest));
+        }
+        (self.declared_name(path, source), Vec::new())
+    }
+
     /// Reads the declared package name from an already-recognized manifest.
     fn declared_name(self, path: &Path, source: &str) -> Option<String> {
         let name = match self {
@@ -86,11 +108,7 @@ impl ManifestKind {
                     .and_then(toml::Value::as_str)
                     .map(str::to_owned)
             }
-            Self::Npm => serde_json::from_str::<serde_json::Value>(source)
-                .ok()?
-                .get("name")
-                .and_then(serde_json::Value::as_str)
-                .map(str::to_owned),
+            Self::Npm => npm_name(&serde_json::from_str::<serde_json::Value>(source).ok()?),
             Self::Python
                 if path
                     .file_name()
@@ -112,51 +130,6 @@ impl ManifestKind {
         (!name.is_empty()).then(|| name.to_owned())
     }
 
-    /// The source files this manifest names as its own, relative to its
-    /// directory.
-    ///
-    /// A file a package publishes, installs as a command, or runs as a script
-    /// is reached through the manifest, so nothing in the repository has to
-    /// import it. Only npm manifests are read: they are the one recognized
-    /// manifest kind that names JavaScript files by path.
-    ///
-    /// Script values are shell commands, so every whitespace-separated word
-    /// that spells a JavaScript file is taken and the rest of the command is
-    /// ignored. Naming one path too many only spares a file from a rule of
-    /// absences, so a loose read here can never invent a fact.
-    fn declared_paths(self, source: &str) -> Vec<String> {
-        if self != Self::Npm {
-            return Vec::new();
-        }
-        let Ok(manifest) = serde_json::from_str::<serde_json::Value>(source) else {
-            return Vec::new();
-        };
-        let mut paths = Vec::new();
-        for field in ["main", "module", "browser", "bin"] {
-            match manifest.get(field) {
-                Some(serde_json::Value::String(value)) => paths.push(value.clone()),
-                Some(serde_json::Value::Object(entries)) => paths.extend(
-                    entries
-                        .values()
-                        .filter_map(serde_json::Value::as_str)
-                        .map(str::to_owned),
-                ),
-                _ => {}
-            }
-        }
-        if let Some(serde_json::Value::Object(scripts)) = manifest.get("scripts") {
-            paths.extend(
-                scripts
-                    .values()
-                    .filter_map(serde_json::Value::as_str)
-                    .flat_map(str::split_whitespace)
-                    .filter(|word| is_runtime_javascript_name(&word.to_ascii_lowercase()))
-                    .map(str::to_owned),
-            );
-        }
-        paths
-    }
-
     fn for_file(path: &Path) -> Option<Self> {
         let name = path.file_name()?.to_str()?;
         match name {
@@ -173,6 +146,51 @@ impl ManifestKind {
             _ => None,
         }
     }
+}
+
+/// The package name an npm manifest declares.
+fn npm_name(manifest: &serde_json::Value) -> Option<String> {
+    manifest
+        .get("name")
+        .and_then(serde_json::Value::as_str)
+        .map(str::to_owned)
+}
+
+/// The source files an npm manifest names as its own, relative to its
+/// directory.
+///
+/// A file a package publishes, installs as a command, or runs as a script is
+/// reached through the manifest, so nothing in the repository has to import it.
+///
+/// Script values are shell commands, so every whitespace-separated word that
+/// spells a JavaScript file is taken and the rest of the command is ignored.
+/// Naming one path too many only spares a file from a rule of absences, so a
+/// loose read here can never invent a fact.
+fn npm_declared_paths(manifest: &serde_json::Value) -> Vec<String> {
+    let mut paths = Vec::new();
+    for field in ["main", "module", "browser", "bin"] {
+        match manifest.get(field) {
+            Some(serde_json::Value::String(value)) => paths.push(value.clone()),
+            Some(serde_json::Value::Object(entries)) => paths.extend(
+                entries
+                    .values()
+                    .filter_map(serde_json::Value::as_str)
+                    .map(str::to_owned),
+            ),
+            _ => {}
+        }
+    }
+    if let Some(serde_json::Value::Object(scripts)) = manifest.get("scripts") {
+        paths.extend(
+            scripts
+                .values()
+                .filter_map(serde_json::Value::as_str)
+                .flat_map(str::split_whitespace)
+                .filter(|word| is_runtime_javascript_name(&word.to_ascii_lowercase()))
+                .map(str::to_owned),
+        );
+    }
+    paths
 }
 
 /// The source, package, and configuration facts selected from a tree snapshot.
@@ -1022,19 +1040,23 @@ impl Walker {
     /// The first manifest kind of a directory that declares a usable name owns
     /// the package name.  An unreadable or nameless manifest is not an error.
     fn record_manifest_name(&mut self, parent: &Path, manifest: ManifestKind, absolute: &Path) {
+        let named = self.manifest_names.get(parent).is_some_and(Option::is_some);
+        if named && !manifest.declares_paths() {
+            return;
+        }
         let Ok(source) = fs::read_to_string(absolute) else {
             return;
         };
+        let (declared_name, declared_paths) = manifest.declared_facts(absolute, &source);
         let name = self.manifest_names.entry(parent.to_path_buf()).or_default();
         if name.is_none() {
-            *name = manifest.declared_name(absolute, &source);
+            *name = declared_name;
         }
-        let declared = manifest.declared_paths(&source);
-        if !declared.is_empty() {
+        if !declared_paths.is_empty() {
             self.manifest_paths
                 .entry(parent.to_path_buf())
                 .or_default()
-                .extend(declared);
+                .extend(declared_paths);
         }
     }
 
