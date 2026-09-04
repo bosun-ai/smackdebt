@@ -119,50 +119,42 @@ $ smackdebt crates/analysis
 
 smackdebt · crates/analysis
   Worn in the usual places.
-  4 of the repository's 20 high live here.
-4 high · 17 watch · 1,405 checked
+  3 of the repository's 18 high live here.
+  A typical change here touches 4 files.
+3 high · 17 watch · 1,585 checked
 worst: crates/analysis/src/evolution.rs — hot AND complex
 
 PROBLEMS
-  high hot and complex · crates/analysis/src/evolution.rs
-        crates/analysis/src/evolution.rs:59 · method · parameters 13
+  high change spreads far · crates/analysis/src/evolution.rs
   high everything depends on this · crates/analysis/src/report.rs
-        crates/analysis/src/report.rs:1631 · method · cognitive 18 · nesting 4
   high ArchitectureGraph::new · method · crates/analysis/src/architecture.rs:17
-        parameters 6
-  high compare_units · function · crates/analysis/src/comparison.rs:123
-        cognitive 56 · cyclomatic 25 · nesting 4
   high cycle_witness · function · crates/analysis/src/cycle_witness.rs:3
-        cognitive 34 · cyclomatic 15 · nesting 5
   high strongly_connected_components · function · crates/analysis/src/
         strongly_connected_components.rs:1
-        cognitive 30 · cyclomatic 15 · nesting 4
-  watch circular dependency · crates/analysis/src/change_coupling.rs
-        crates/analysis/src/change_coupling.rs
-        → crates/analysis/src/evolution.rs
-        → crates/analysis/src/change_coupling.rs
-  watch circular dependency · crates/analysis/src/comparison.rs
-        crates/analysis/src/comparison.rs
-        → crates/analysis/src/report.rs
-        → crates/analysis/src/comparison.rs
+  watch change spreads far · crates/analysis/src/comparison.rs
   watch GateSnapshot::from_report · method · crates/analysis/src/gate.rs:150
-        cognitive 15
-  watch packages change together · crates/analysis ↔ crates/cli
-        changed together in 33 of 98 commits · 34% · no direct dependency · linked via crates/output
-  watch one author · crates/analysis
-        one contributor made 57 of 60 commits
   watch OrphanCandidate<'a>::new · method · crates/analysis/src/orphan.rs:44
-        parameters 6
+  watch circular dependency · crates/analysis/src/change_coupling.rs
+  watch circular dependency · crates/analysis/src/comparison.rs
+  watch packages change together · crates/analysis ↔ crates/cli
+  watch one author · crates/analysis
+  watch one author · crates/analysis
 
-  next: smackdebt crates/analysis/src
+  next: smackdebt crates/analysis/src/evolution.rs
 ```
+
+This scope holds thirteen cards, which is past the last rung of the
+[one-screen budget](#the-one-screen-budget), so every card states its head and
+no evidence at all. `--top 6` below is the same scope with the budget spent the
+other way. The two `one author` cards are one package's primary source and its
+tests, which are separate contributor-concentration findings.
 
 A path inside a Git repository selects a scope of that repository's report
 rather than starting a smaller one: the repository is analyzed and the selection
 decides what is answered. Imports resolve against every file the repository
 holds, the dependency graph and history are the repository's, and the verdict
-frames the selected High count with the analysis-owned sentence `4 of the
-repository's 20 high live here.` It omits that sentence when the selection
+frames the selected High count with the analysis-owned sentence `3 of the
+repository's 18 high live here.` It omits that sentence when the selection
 contains the report's complete selected source inventory, because the
 denominator adds no information. The repository root itself prints no such
 sentence, and neither does a repository with no High debt. Selecting a path this
@@ -337,19 +329,20 @@ a coupling pair reads `<left> ↔ <right>` and a stable-dependency pair reads
 for the root package. The evidence follows on indented lines: a claimed
 finding's `path:line` with its measurements, a size finding's subject and
 measured value, `<n> files import this`, `imports <n> files`, `<n> rated units`,
-`<n> files in the cycle` — or, on the one cycle that is the repository's core,
-`9 of 86 files sit in one dependency cycle.` — `hot (<n> commits)`, `a change
+`<n> files in the cycle`, `<n> of <total> files sit in one dependency cycle.`
+on the one cycle that is the repository's core, `hot (<n> commits)`, `a change
 here reaches <n> files`, `<n> importers follow it`, a coupling pair's commit
 operands and dependency state, and a contributor concentration's counts. A
 co-change finding names the two files it is about, and its evidence line names
-the one the card's head does not. A `hidden_coupling` card heads `<left> ↔ <right>` and states
-`changed together in 6 of 9 commits · 67% · no dependency either way · 4
-directories away`, naming neither again. When such a finding lands on the card of
-a file that already carried debt, that card's head names one file, so the line
-names the other: `changed with data/store/lib/cache.js in 6 of 9 commits · 67% ·
-no dependency either way · 3 directories away`. A leaking interface's card is the
-same shape from the other side, stating `<follower> changed with it in 7 of 12
-commits · 58% · 3 directories away` for each importer that follows it.
+the one the card's head does not. A `hidden_coupling` card heads
+`<left> ↔ <right>` and states `changed together in 6 of 9 commits · 67% · no
+dependency either way · 4 directories away`, naming neither again. When such a
+finding lands on the card of a file that already carried debt, that card's head
+names one file, so the line names the other: `changed with
+data/store/lib/cache.js in 6 of 9 commits · 67% · no dependency either way · 3
+directories away`. A leaking interface's card is the same shape from the other
+side, stating `<follower> changed with it in 7 of 12 commits · 58% · 3
+directories away` for each importer that follows it.
 
 The pattern ids are the stable vocabulary for an integration; the words beside
 them are what a person reads:
@@ -447,9 +440,10 @@ row; `--top` is how you lift that cut.
 
 `--top N` selects the rung `N` selects, by the same rule the default applies to
 the scope's own card count, so a larger `N` buys breadth by spending evidence
-depth and a smaller one does the reverse. The package view above holds twelve
-cards and allows one evidence line each; the same scope at `--top 6` allows
-three, and a card with less evidence than that simply states what it has:
+depth and a smaller one does the reverse. The view of this scope above holds
+thirteen cards and therefore allows no evidence lines at all; the same scope at
+`--top 6` allows three, and a card with less evidence than that simply states
+what it has:
 
 ```console
 $ smackdebt --top 6 crates/analysis
@@ -714,14 +708,33 @@ graph number without saying where to act.
 | Sentence | Where it appears | What the numbers count |
 | --- | --- | --- |
 | `a change here can reach 5 of 12 packages` | the named package area | packages that transitively depend on this package, counting this package |
-| `a change here reaches 17 files` | the named file or cycle problem | files inside the package that transitively depend on the named source, excluding that source |
+| `a change here reaches 17 files` | the named file or cycle problem | files anywhere in the repository that transitively depend on the named source, excluding that source |
 | `9 of 86 files sit in one dependency cycle.` | the card of the cycle that is the core | members of the largest cycle out of the files the dependency graph is built over |
+
+Reach counts dependants across the whole repository, not only the named source's
+own package: a file that a second package imports is reached from the first one.
+Package reach is the exception in the other direction — it is a count of
+packages, and the area row states it for the widest package alone.
 
 The core is a superlative over the whole graph, so it belongs to exactly one
 card: the tangle whose own members are that cycle. Every other cycle states its
-own size instead, as `9 files in the cycle`. A core that no cycle card names —
-which happens only when its members span more than one package, because a cycle
-finding is raised per package — stays in JSON alone.
+own size instead, as `9 files in the cycle`. Two things therefore leave a
+material core stated nowhere in the terminal, and it stays a JSON fact in both:
+
+- **No card exists.** A cycle finding is raised per package, so a core whose
+  members span more than one package has no card to land on at any scope.
+- **The card exists but is not shown here.** Problem cards compete for the
+  [one-screen budget](#the-one-screen-budget), and the rung a scope lands on may
+  allow the card no evidence lines — or cut the card itself. A large
+  repository's root commonly hides its own core this way while a smaller scope,
+  or `--all`, states it. `--top` changes which rung applies rather than
+  guaranteeing the card: raising it past twenty-four buys breadth at the cost of
+  every evidence line.
+
+Neither case is counted as withheld. `graph_evidence.suppressed_core` counts one
+core only when an incomplete dependency graph made the superlative unsafe to
+state at all; a core the budget did not reach was decided, and JSON carries it
+in `core_component` whatever the terminal had room for.
 
 How far a *typical* change travels is measured from the scope's own commits
 rather than from the graph, so it needs no further subject and rides under the
@@ -742,16 +755,16 @@ states no typical change, because a per-file histogram would state sample noise
 as a fact, and a diff states none at all, because a diff answers about a change
 rather than about a tree.
 
-Every file count here counts the same population: the scope's primary, parsed
-files — the files the dependency graph is built over, which is what every other
-dependency number in the report counts too. A package's tests, examples,
-benchmarks, fixtures, and generated files are outside both halves of a fraction,
-so a package that holds 41 files may read `36`, and a package with a large test
-suite may read about half its file count. A fraction whose halves came from two
-populations would answer nothing, which is why the denominator is the graph
-rather than the directory listing. Typical change size is the exception: it is
-counted from commits rather than from the graph, so it counts whatever files a
-commit touched.
+Every graph count here counts files of one kind: primary, parsed files — the
+files the dependency graph is built over, which is what every other dependency
+number in the report counts too. Tests, examples, benchmarks, fixtures, and
+generated files are outside both halves of a fraction, so a package that holds
+41 files may read `36`, and a package with a large test suite may read about
+half its file count. A fraction whose halves came from two populations would
+answer nothing, which is why the denominator is the graph rather than the
+directory listing. Typical change size is the exception: it is counted from
+commits rather than from the graph, so it counts whatever files a commit
+touched.
 
 Two problem patterns come from the same family, joining what changed together
 with what depends on what:
@@ -1128,6 +1141,14 @@ carries differs by scope: the repository root closes over packages and reads
 widest area row states — while a package closes over its own files and reads
 `A change here can reach 17 of 36 files in this package.`, which is an aggregate
 no terminal row states, because a package-wide number names no file to look at.
+
+`verdict.core_size` is a repository-root member only: a sub-scope holds part of
+a graph and so states no superlative over the whole of it. The terminal is the
+other way round — the core rides the card of its cycle, and that card appears at
+every scope its member files belong to. So a report of one file inside the core
+carries the sentence in `problems` and a null `verdict.core_size`. A consumer
+that wants the core regardless of selection reads `core_component`, which names
+every member whatever scope was asked for.
 
 The `problems` table holds every card in problem-rank order, `detail` cards
 included, and a row's position is that card's identity. `pattern` is one of the
