@@ -182,6 +182,136 @@ fn anonymous_diff_matching_is_safe_and_worker_output_is_equal() {
     );
 }
 
+/// A Grape API edits one endpoint. Every block enclosing that endpoint is now
+/// written differently, so exact syntax alone loses the whole resource and one
+/// edit reads as several blocks added and several removed. The call chain each
+/// block hangs under follows them through the edit instead.
+#[test]
+fn a_ruby_dsl_edit_pairs_its_blocks_instead_of_counting_one_change_twice() {
+    let project = ruby_dsl_diff_fixture();
+    let terminal = smackdebt()
+        .current_dir(project.path())
+        .env("COLUMNS", "120")
+        .args(["diff", "HEAD", "--all", "--color", "never"])
+        .output()
+        .unwrap();
+    assert!(terminal.status.success());
+    let terminal = String::from_utf8(terminal.stdout).unwrap();
+    assert!(!terminal.contains("anonymous units"), "{terminal}");
+
+    let output = smackdebt()
+        .current_dir(project.path())
+        .args(["diff", "HEAD", "--json"])
+        .output()
+        .unwrap();
+    assert!(output.status.success());
+    let report: serde_json::Value = serde_json::from_slice(&output.stdout).unwrap();
+    validate_schema(&report);
+    assert_index_integrity(&report);
+    let comparisons = report["comparisons"].as_array().unwrap();
+    assert!(
+        comparisons
+            .iter()
+            .all(|value| value["kind"] != "added" && value["kind"] != "removed"),
+        "{comparisons:?}"
+    );
+    let changed: Vec<_> = comparisons
+        .iter()
+        .filter(|value| value["kind"] == "metric_changed" || value["kind"] == "regressed")
+        .collect();
+    assert_eq!(changed.len(), 1, "{comparisons:?}");
+    assert!(changed[0]["before"].is_object() && changed[0]["after"].is_object());
+    assert!(
+        report["diagnostics"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .all(|value| value["kind"] != "ambiguous_identity")
+    );
+}
+
+/// An anonymous unit was rewritten past recognition, so the matcher holds one
+/// unpaired unit on each side. The report states that, keeps both as machine
+/// record and `--all` context, and moves debt in neither direction on them.
+#[test]
+fn an_unpairable_anonymous_edit_is_stated_and_counted_in_no_direction() {
+    let project = unpairable_anonymous_fixture();
+    let terminal = |all: bool| {
+        let mut arguments = vec!["diff", "HEAD", "--color", "never"];
+        if all {
+            arguments.push("--all");
+        }
+        let output = smackdebt()
+            .current_dir(project.path())
+            .env("COLUMNS", "120")
+            .args(arguments)
+            .output()
+            .unwrap();
+        assert!(
+            output.status.success(),
+            "{}",
+            String::from_utf8_lossy(&output.stderr)
+        );
+        String::from_utf8(output.stdout).unwrap()
+    };
+    let default = terminal(false);
+    assert!(
+        default.contains("1 file has anonymous units that could not be matched safely."),
+        "{default}"
+    );
+    assert!(default.contains("No debt changed."), "{default}");
+    assert!(
+        default.contains("worse 0 · better 0 · changed 0"),
+        "{default}"
+    );
+    assert!(!default.contains("FINDINGS"), "{default}");
+    let all = terminal(true);
+    assert!(all.contains("handlers.js · closure"), "{all}");
+    assert!(!all.contains("  worse "), "{all}");
+    assert!(!all.contains("  better "), "{all}");
+
+    let output = smackdebt()
+        .current_dir(project.path())
+        .args(["diff", "HEAD", "--json"])
+        .output()
+        .unwrap();
+    assert!(output.status.success());
+    let report: serde_json::Value = serde_json::from_slice(&output.stdout).unwrap();
+    validate_schema(&report);
+    assert_index_integrity(&report);
+    let unpaired: Vec<_> = report["comparisons"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .filter(|value| value["kind"] == "added" || value["kind"] == "removed")
+        .collect();
+    assert_eq!(unpaired.len(), 2, "{unpaired:?}");
+    assert!(
+        unpaired
+            .iter()
+            .all(|value| value["participation"] == "context" && value["direction"] == "changed"),
+        "{unpaired:?}"
+    );
+    assert!(
+        unpaired
+            .iter()
+            .any(|value| value["ratings"]["after"] == "watch")
+            && unpaired
+                .iter()
+                .any(|value| value["ratings"]["before"] == "watch"),
+        "the rule has to bite on rated units: {unpaired:?}"
+    );
+    assert_eq!(
+        report["diagnostics"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .filter(|value| value["kind"] == "ambiguous_identity")
+            .count(),
+        1
+    );
+}
+
 #[test]
 fn repeated_declared_names_do_not_emit_an_anonymous_warning() {
     let project = named_duplicate_fixture();
@@ -4185,6 +4315,52 @@ fn anonymous_diff_fixture() -> tempfile::TempDir {
     )
     .unwrap();
     project
+}
+
+/// A Grape resource whose one edited endpoint sits inside three enclosing
+/// blocks, none of which declares a name.
+fn ruby_dsl_diff_fixture() -> tempfile::TempDir {
+    let project = tempfile::tempdir().unwrap();
+    fs::write(
+        project.path().join("api.rb"),
+        "class Api < Grape::API\n  resource :sessions do\n    desc \"Session auth\"\n    params do\n      requires :token, type: String\n    end\n    get do\n      session = Session.find_by(id: params[:id])\n      present session\n    end\n  end\nend\n",
+    )
+    .unwrap();
+    commit_fixture(project.path(), "test: grape base");
+    fs::write(
+        project.path().join("api.rb"),
+        "class Api < Grape::API\n  resource :sessions do\n    desc \"Session auth\"\n    params do\n      requires :token, type: String\n    end\n    get do\n      session = access.sessions.find_by(id: params[:id])\n      present session if session\n    end\n  end\nend\n",
+    )
+    .unwrap();
+    project
+}
+
+/// A rated closure inside an array literal, which binds to no name and hangs
+/// under no call, rewritten so that no evidence pairs the two versions.
+fn unpairable_anonymous_fixture() -> tempfile::TempDir {
+    let body = |call: &str| {
+        format!(
+            "export const handlers = [() => {{ if (a) {{ if (b) {{ if (c) {{ if (d) {{ {call}(); }} }} }} }} }}];\n"
+        )
+    };
+    let project = tempfile::tempdir().unwrap();
+    fs::write(
+        project.path().join("package.json"),
+        "{\"name\":\"unpairable\",\"private\":true}\n",
+    )
+    .unwrap();
+    fs::write(project.path().join("handlers.js"), body("work")).unwrap();
+    commit_fixture(project.path(), "test: unpairable base");
+    fs::write(project.path().join("handlers.js"), body("rework")).unwrap();
+    project
+}
+
+fn commit_fixture(path: &Path, message: &str) {
+    git(path, ["init", "-b", "main"]);
+    git(path, ["config", "user.name", "Smackdebt Test"]);
+    git(path, ["config", "user.email", "smackdebt@example.invalid"]);
+    git(path, ["add", "."]);
+    git(path, ["commit", "-m", message]);
 }
 
 fn named_duplicate_fixture() -> tempfile::TempDir {

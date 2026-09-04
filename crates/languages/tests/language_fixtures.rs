@@ -1979,6 +1979,111 @@ fn local_anchors_are_scoped_to_the_nearest_declared_unit() {
     }
 }
 
+/// A Grape resource, which names its blocks with nothing but the calls above
+/// them. Editing one endpoint leaves every enclosing block written differently,
+/// so exact syntax alone loses the whole resource; the call chain keeps it.
+const GRAPE_RESOURCE: &[u8] = b"class Api < Grape::API\n  resource :sessions do\n    desc \"Session auth\"\n    params do\n      requires :token, type: String\n    end\n    get do\n      session = Session.find_by(id: params[:id])\n      present session\n    end\n  end\nend\n";
+
+#[test]
+fn ruby_dsl_blocks_pair_through_an_edit_by_the_calls_above_them() {
+    let edited = b"class Api < Grape::API\n  resource :sessions do\n    desc \"Session auth\"\n    params do\n      requires :token, type: String\n    end\n    get do\n      session = access.sessions.find_by(id: params[:id])\n      present session if session\n    end\n  end\nend\n";
+    let mut analyzer = Analyzer::default();
+    let before = analyzer
+        .analyze(Path::new("api.rb"), GRAPE_RESOURCE.to_vec())
+        .unwrap();
+    let after = analyzer
+        .analyze(Path::new("api.rb"), edited.to_vec())
+        .unwrap();
+    let comparisons = compare_units(before.units(), after.units(), HealthPolicy::default());
+    assert!(
+        comparisons.iter().all(|value| matches!(
+            value.kind(),
+            ComparisonKind::Unchanged | ComparisonKind::MetricChanged
+        )),
+        "every block pairs: {comparisons:?}"
+    );
+    let changed: Vec<_> = comparisons
+        .iter()
+        .filter(|value| value.kind() == ComparisonKind::MetricChanged)
+        .collect();
+    assert_eq!(changed.len(), 1, "{comparisons:?}");
+    assert!(changed[0].before().is_some() && changed[0].after().is_some());
+    assert!(
+        comparisons
+            .iter()
+            .all(|value| !value.is_unpaired_anonymous()),
+        "{comparisons:?}"
+    );
+}
+
+/// Two `params` blocks under one resource answer to the same call chain. The
+/// chain cannot tell them apart, and their syntax can.
+#[test]
+fn ruby_siblings_sharing_a_call_chain_pair_by_their_syntax() {
+    let source = b"class Api < Grape::API\n  resource :snapshots do\n    params do\n      requires :task_run_id, type: String\n    end\n    get do\n      present snapshots\n    end\n    params do\n      requires :snapshot_id, type: String\n    end\n    post do\n      present created\n    end\n  end\nend\n";
+    let moved = b"class Api < Grape::API\n  # a comment that moves everything down\n  resource :snapshots do\n    params do\n      requires :task_run_id, type: String\n    end\n    get do\n      present snapshots\n    end\n    params do\n      requires :snapshot_id, type: String\n    end\n    post do\n      present created\n    end\n  end\nend\n";
+    let mut analyzer = Analyzer::default();
+    let before = analyzer
+        .analyze(Path::new("api.rb"), source.to_vec())
+        .unwrap();
+    let after = analyzer
+        .analyze(Path::new("api.rb"), moved.to_vec())
+        .unwrap();
+    let comparisons = compare_units(before.units(), after.units(), HealthPolicy::default());
+    assert!(
+        comparisons
+            .iter()
+            .all(|value| value.kind() == ComparisonKind::Unchanged),
+        "{comparisons:?}"
+    );
+}
+
+/// Sibling blocks that share a call chain *and* their syntax leave the matcher
+/// nothing to choose with, so it pairs neither and the file says so.
+#[test]
+fn ruby_identical_sibling_blocks_are_never_mispaired() {
+    let source = b"class Api < Grape::API\n  resource :sessions do\n    get do\n      present sessions\n    end\n    get do\n      present sessions\n    end\n  end\nend\n";
+    let edited = b"class Api < Grape::API\n  resource :sessions do\n    get do\n      present sessions\n    end\n    get do\n      present sessions if ready\n    end\n  end\nend\n";
+    let mut analyzer = Analyzer::default();
+    let before = analyzer
+        .analyze(Path::new("api.rb"), source.to_vec())
+        .unwrap();
+    let after = analyzer
+        .analyze(Path::new("api.rb"), edited.to_vec())
+        .unwrap();
+    let comparisons = compare_units(before.units(), after.units(), HealthPolicy::default());
+    let unclear: Vec<_> = comparisons
+        .iter()
+        .filter(|value| value.is_anonymous_ambiguity())
+        .collect();
+    assert_eq!(
+        unclear.len(),
+        2,
+        "both `get` blocks are unclear: {comparisons:?}"
+    );
+    assert!(
+        unclear
+            .iter()
+            .all(|value| value.before().is_none() || value.after().is_none()),
+        "no pairing is better than the wrong one: {comparisons:?}"
+    );
+    assert!(
+        unclear
+            .iter()
+            .all(|value| !value.affects_verdict() || value.kind() == ComparisonKind::Ambiguous),
+        "{comparisons:?}"
+    );
+    // The resource the two blocks sit in is still followed: its anchor names
+    // it even though its bytes changed with the endpoint inside it.
+    assert!(
+        comparisons
+            .iter()
+            .any(|value| value.identity().name() == "<closure 2>"
+                && value.kind() == ComparisonKind::Unchanged),
+        "{comparisons:?}"
+    );
+}
+
 const fn file<'a>(
     path: &'a str,
     source: &'a [u8],
