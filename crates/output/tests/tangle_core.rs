@@ -16,13 +16,26 @@ use smackdebt_output::{TerminalOptions, write_terminal};
 
 const ROOT: ScopeId = ScopeId::from_index(0);
 const PACKAGE: ScopeId = ScopeId::from_index(1);
-/// Files zero through four close the core; five and six close a smaller cycle.
-const CORE: [usize; 5] = [0, 1, 2, 3, 4];
-const KNOT: [usize; 2] = [5, 6];
-const FILES: usize = 10;
+/// The first thirty-four files close the core; the next two close a smaller
+/// cycle. The counts are chosen so the core's sentence is fifty-two columns
+/// wide with its indent, which is past the narrowest width this product
+/// supports: a fixture whose sentence happened to fit would prove nothing about
+/// the width the narrow test exists for.
+const CORE: usize = 34;
+const KNOT: usize = 2;
+const FILES: usize = 210;
 
-/// Ten files in one package holding two cycles, with the core the composition
-/// found joined on when `stated`, and one package left unread when `holed`.
+fn core() -> Vec<usize> {
+    (0..CORE).collect()
+}
+
+fn knot() -> Vec<usize> {
+    (CORE..CORE + KNOT).collect()
+}
+
+/// Two hundred and ten files in one package holding two cycles, with the core
+/// the composition found joined on when `stated`, and one package left unread
+/// when `holed`.
 ///
 /// The two cycles differ in size, so a card stating the core's words for the
 /// smaller one is a wrong claim rather than the same claim twice.
@@ -67,8 +80,9 @@ fn report(stated: bool, holed: bool) -> Report {
             })
             .collect()
     };
-    let core_witness = ring(&CORE, &mut edges);
-    let knot_witness = ring(&KNOT, &mut edges);
+    let (core, knot) = (core(), knot());
+    let core_witness = ring(&core, &mut edges);
+    let knot_witness = ring(&knot, &mut edges);
     let cycle = |index: usize, members: &[usize], witness: Vec<DependencyEdgeId>| {
         ArchitectureFinding::new(
             ArchitectureFindingId::from_index(index),
@@ -90,7 +104,7 @@ fn report(stated: bool, holed: bool) -> Report {
             Vec::new(),
             Vec::new(),
         ),
-        vec![cycle(0, &CORE, core_witness), cycle(1, &KNOT, knot_witness)],
+        vec![cycle(0, &core, core_witness), cycle(1, &knot, knot_witness)],
         Vec::new(),
     ));
     for index in 0..2 {
@@ -108,8 +122,8 @@ fn report(stated: bool, holed: bool) -> Report {
         builder.set_propagation(
             Vec::new(),
             Vec::new(),
-            CoreSize::from_counts(CORE.len() as u32, FILES as u32),
-            CORE.iter()
+            CoreSize::from_counts(CORE as u32, FILES as u32),
+            core.iter()
                 .map(|&member| FileId::from_index(member))
                 .collect(),
         );
@@ -127,16 +141,20 @@ fn render(report: &Report) -> String {
 /// the value, and the other cycle keeps its own size.
 #[test]
 fn the_largest_cycle_says_so_and_every_other_cycle_states_its_size() {
-    let terminal = render(&report(true, false));
+    let stated = report(true, false);
+    // A complete graph withholds nothing, so a stated core is never also a
+    // counted one: the two halves of the gate are read from the same report.
+    assert_eq!(stated.graph_evidence().suppressed_core(), 0);
+    let terminal = render(&stated);
     assert!(
-        terminal.contains("        5 of 10 files sit in one dependency cycle.\n"),
+        terminal.contains("        34 of 210 files sit in one dependency cycle.\n"),
         "{terminal}"
     );
     assert!(
         terminal.contains("        2 files in the cycle\n"),
         "{terminal}"
     );
-    assert!(!terminal.contains("5 files in the cycle"), "{terminal}");
+    assert!(!terminal.contains("34 files in the cycle"), "{terminal}");
     // The core is stated once, beside one subject, rather than on every card
     // whose cycle happens to be that size.
     assert_eq!(terminal.matches("sit in one dependency cycle").count(), 1);
@@ -152,7 +170,7 @@ fn a_report_without_a_core_states_only_the_sizes_of_its_cycles() {
         "{terminal}"
     );
     assert!(
-        terminal.contains("        5 files in the cycle\n"),
+        terminal.contains("        34 files in the cycle\n"),
         "{terminal}"
     );
     assert!(
@@ -174,15 +192,20 @@ fn an_incomplete_graph_withholds_the_core_it_counts_as_withheld() {
         "{terminal}"
     );
     assert!(
-        terminal.contains("        5 files in the cycle\n"),
+        terminal.contains("        34 files in the cycle\n"),
         "{terminal}"
     );
 }
 
 /// The card states the fact whole at fifty columns, because a core shortened
 /// into an ellipsis states nothing.
+///
+/// This sentence is fifty-two columns wide with its indent, so the width is
+/// genuinely exceeded and the renderer has to break it. Nothing may be lost
+/// across that break: the words of the sentence, in order, are what the two
+/// lines hold between them.
 #[test]
-fn a_narrow_terminal_states_the_whole_core() {
+fn a_narrow_terminal_breaks_the_core_without_losing_it() {
     let stated = report(true, false);
     let mut bytes = Vec::new();
     write_terminal(
@@ -193,11 +216,28 @@ fn a_narrow_terminal_states_the_whole_core() {
     )
     .unwrap();
     let terminal = String::from_utf8(bytes).unwrap();
+    assert!(!terminal.contains('…'), "{terminal}");
+    let sentence = "34 of 210 files sit in one dependency cycle.";
     assert!(
-        terminal.contains("        5 of 10 files sit in one dependency cycle.\n"),
+        !terminal.contains(sentence),
+        "the fixture must exceed fifty columns or this test proves nothing: {terminal}"
+    );
+    let broken: Vec<&str> = terminal
+        .lines()
+        .skip_while(|line| !line.contains("34 of 210"))
+        .take(2)
+        .collect();
+    assert_eq!(
+        broken
+            .iter()
+            .flat_map(|line| line.split_whitespace())
+            .collect::<Vec<_>>(),
+        sentence.split(' ').collect::<Vec<_>>(),
         "{terminal}"
     );
-    assert!(!terminal.contains('…'), "{terminal}");
+    for line in &broken {
+        assert!(line.chars().count() <= 50, "{line:?} in {terminal}");
+    }
 }
 
 /// The core is stated where a reader can act on it and nowhere else: the
