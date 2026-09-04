@@ -250,8 +250,8 @@ pub enum SourceTrust {
 impl ParseStatus {
     pub const fn trust(&self) -> SourceTrust {
         match self {
-            Self::Parsed => SourceTrust::Trusted,
-            Self::Recovered => SourceTrust::Advisory,
+            Self::Parsed | Self::Recovered(RecoveredFacts::Intact) => SourceTrust::Trusted,
+            Self::Recovered(RecoveredFacts::InDoubt) => SourceTrust::Advisory,
             Self::Failed => SourceTrust::Failed,
         }
     }
@@ -370,8 +370,23 @@ impl UnitIdentity {
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub enum ParseStatus {
     Parsed,
-    Recovered,
+    Recovered(RecoveredFacts),
     Failed,
+}
+
+/// What a recovered parse left of the facts the file was read for.
+///
+/// Recovery only threatens those facts when an error region sits on one.
+/// Errors elsewhere - stray tokens between declarations, syntax the grammar
+/// does not know outside every unit - leave each measured unit and each
+/// extracted reference exactly as written.
+#[derive(Clone, Copy, Debug, Eq, Hash, Ord, PartialEq, PartialOrd)]
+pub enum RecoveredFacts {
+    /// The file yielded facts and no error region sat on one.
+    Intact,
+    /// An error region sat on a measured unit or on a reference, or the parse
+    /// yielded no facts at all to place its errors against.
+    InDoubt,
 }
 
 /// A measured unit before health policy is applied.

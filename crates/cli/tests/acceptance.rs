@@ -3654,12 +3654,12 @@ fn problem_pattern_fixture() -> tempfile::TempDir {
         "export function plain(value) {\n  if (value) {\n    return 2;\n  }\n  return 0;\n}\n",
     )
     .unwrap();
-    // One file no grammar can parse cleanly, so its findings are advisory:
-    // they cannot move the verdict and their card is detail rather than
-    // default.
+    // One file whose recovery lands inside the function it measures, so its
+    // findings are advisory: they cannot move the verdict and their card is
+    // detail rather than default.
     fs::write(
         project.path().join("god/recovered.js"),
-        "export function recovered(value) {\n  if (value > 1) {\n    if (value > 2) {\n      if (value > 3) {\n        return 1;\n      }\n    }\n  }\n  return 0;\n}\n\nexport function unterminated(\n",
+        "export function recovered(value) {\n  if (value > 1) {\n    if (value > 2) {\n      if (value > 3) {\n        return 1;\n      }\n    }\n  }\n  return 0 unterminated(;\n}\n\n// The break above sits inside the measured function.\n",
     )
     .unwrap();
     // One file whose only debt is its length, so its card heads on its size

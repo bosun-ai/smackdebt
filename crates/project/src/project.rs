@@ -1627,7 +1627,7 @@ fn source_coverage(analysis: &FileAnalysis, role: SourceRole) -> Coverage {
     let outcome = match analysis.parse_status() {
         ParseStatus::Parsed if role.affects_verdict() => SourceCoverageOutcome::Clean,
         ParseStatus::Parsed => SourceCoverageOutcome::Context,
-        ParseStatus::Recovered => SourceCoverageOutcome::Recovered,
+        ParseStatus::Recovered(_) => SourceCoverageOutcome::Recovered,
         ParseStatus::Failed => SourceCoverageOutcome::Failed,
     };
     Coverage::classified(
@@ -1661,7 +1661,7 @@ fn add_diff_diagnostic(
             )
         }
         DiffSide::Analyzed { analysis, .. }
-            if matches!(analysis.parse_status(), ParseStatus::Recovered) =>
+            if matches!(analysis.parse_status(), ParseStatus::Recovered(_)) =>
         {
             (
                 DiagnosticKind::ParseFailure,
@@ -2714,7 +2714,7 @@ impl<'a> CodebaseReportBuilder<'a> {
                     trust: analysis.parse_status().trust(),
                     language: analysis.language(),
                 });
-                let recovered = matches!(analysis.parse_status(), ParseStatus::Recovered);
+                let recovered = matches!(analysis.parse_status(), ParseStatus::Recovered(_));
                 let failed = matches!(analysis.parse_status(), ParseStatus::Failed);
                 if failed {
                     self.add_diagnostic(
@@ -5989,7 +5989,7 @@ mod tests {
                 b"def broken(:\n    if yes:\n        if more:\n            pass\n".to_vec(),
             )
             .unwrap();
-        assert_eq!(analysis.parse_status(), &ParseStatus::Recovered);
+        assert_eq!(analysis.parse_status().trust(), SourceTrust::Advisory);
         let rated = rate_file(
             analysis,
             SourceRole::Primary,
@@ -7183,6 +7183,72 @@ mod tests {
             let target = &report.files()[edge.target().index()];
             assert_eq!(source.package(), target.package());
             assert!(target.path().ends_with("src/value.ts"));
+        }
+    }
+
+    /// A recovered parse whose errors sit beside every fact still discloses
+    /// itself, but it no longer costs its package the completeness that
+    /// reach, core, and leakage are published from.
+    #[test]
+    fn recovery_beside_every_fact_leaves_the_package_complete() {
+        let evidence = recovery_fixture("struct Broken {\n");
+        assert!(evidence.complete);
+        assert_eq!(evidence.parse_failures, 0);
+        assert_eq!(evidence.incomplete_packages, 0);
+        assert_eq!(evidence.unresolved_internal, 0);
+        assert!(evidence.disclosed);
+    }
+
+    #[test]
+    fn recovery_over_a_measured_unit_marks_the_package_incomplete() {
+        let evidence = recovery_fixture("fn late(value: i32) -> i32 { helper(value broken( }\n");
+        assert!(!evidence.complete);
+        assert_eq!(evidence.parse_failures, 1);
+        assert_eq!(evidence.incomplete_packages, 1);
+        assert!(evidence.disclosed);
+    }
+
+    struct RecoveryEvidence {
+        complete: bool,
+        parse_failures: u32,
+        incomplete_packages: usize,
+        unresolved_internal: u32,
+        disclosed: bool,
+    }
+
+    /// One package whose only Primary file recovers from `tail`.
+    fn recovery_fixture(tail: &str) -> RecoveryEvidence {
+        let root = tempfile::tempdir().unwrap();
+        fs::write(
+            root.path().join("Cargo.toml"),
+            "[package]\nname='recovery'\nversion='0.1.0'\n",
+        )
+        .unwrap();
+        fs::write(
+            root.path().join("helper.rs"),
+            "pub fn helper(value: i32) -> i32 {\n    value\n}\n",
+        )
+        .unwrap();
+        fs::write(
+            root.path().join("main.rs"),
+            format!(
+                "mod helper;\nuse crate::helper::helper;\n\nfn work(value: i32) -> i32 {{\n    helper(value)\n}}\n\n{tail}"
+            ),
+        )
+        .unwrap();
+
+        let result = analyze_codebase(&CodebaseRequest::new(root.path())).unwrap();
+        let report = result.report();
+        let evidence = report.graph_evidence();
+        RecoveryEvidence {
+            complete: evidence.is_complete(),
+            parse_failures: evidence.parse_failures(),
+            incomplete_packages: evidence.incomplete_packages().len(),
+            unresolved_internal: evidence.unresolved_internal(),
+            disclosed: report.diagnostics().iter().any(|diagnostic| {
+                diagnostic.kind() == DiagnosticKind::ParseFailure
+                    && diagnostic.message() == "parser recovered from syntax errors"
+            }),
         }
     }
 
@@ -8387,7 +8453,7 @@ mod tests {
 
         fs::write(
             repository_path.join("main.rs"),
-            "mod child;\nuse crate::child::work;\nfn main() { work(); }\nfn broken(\n",
+            "mod child;\nuse crate::child::work;\nfn main() { work(); broken( }\n",
         )
         .unwrap();
         let worktree =

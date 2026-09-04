@@ -1,5 +1,6 @@
 use smackdebt_analysis::{
-    FileAnalysis, Language, LocalUnitId, ParseStatus, SourceSpan, UnitFact, UnitIdentity, UnitKind,
+    FileAnalysis, Language, LocalUnitId, ParseStatus, RecoveredFacts, SourceSpan, UnitFact,
+    UnitIdentity, UnitKind,
 };
 use tree_sitter::{Node, Parser};
 
@@ -83,23 +84,24 @@ pub(super) fn analyze_vue(
         .ok_or_else(|| "tree-sitter returned no Vue syntax tree".to_owned())?;
     crate::analyzer::record_parser_time(started.elapsed());
     engine::reserve_unit_capacity::<Vue>(tree.root_node(), source, scratch)?;
-    let mut status = if tree.root_node().has_error() {
-        ParseStatus::Recovered
-    } else {
-        ParseStatus::Parsed
-    };
     let mut units = Vec::new();
     let mut dependencies = Vec::new();
     let mut template_added = false;
     let typescript_document = std::str::from_utf8(source)
         .is_ok_and(|text| text.contains("lang=\"ts") || text.contains("lang='ts"));
     let mut error = None;
+    // The document tree yields the template unit and hands every reference out
+    // of its script elements, so those two regions are the facts a document
+    // error can spoil.
+    let mut document_facts = Vec::new();
+    let mut script_facts = None;
     engine::walk(tree.root_node(), |node, _| {
         if error.is_some() {
             return false;
         }
         match node.kind() {
             "script_element" => {
+                document_facts.push(engine::node_bytes(node));
                 if let Some(raw) = named_child(node, "raw_text") {
                     let start = raw.start_byte();
                     let end = raw.end_byte();
@@ -130,8 +132,10 @@ pub(super) fn analyze_vue(
                             return false;
                         }
                     };
-                    if result.0 == ParseStatus::Recovered {
-                        status = ParseStatus::Recovered;
+                    if let ParseStatus::Recovered(facts) = result.0 {
+                        script_facts = Some(
+                            script_facts.map_or(facts, |seen: RecoveredFacts| seen.max(facts)),
+                        );
                     }
                     units.extend(result.1);
                     dependencies.extend(result.2);
@@ -139,6 +143,7 @@ pub(super) fn analyze_vue(
                 false
             }
             "template_element" if !template_added => {
+                document_facts.push(engine::node_bytes(node));
                 let index = units.len();
                 let measurements = match template_measurements(
                     node,
@@ -176,10 +181,25 @@ pub(super) fn analyze_vue(
     Ok(FileAnalysis::with_dependencies(
         Language::Vue,
         line_count(source),
-        status,
+        merged_status(
+            engine::document_status(tree.root_node(), &document_facts, scratch),
+            script_facts,
+        ),
         units,
         dependencies,
     ))
+}
+
+/// The document outcome once every script block has reported on its own facts.
+fn merged_status(document: ParseStatus, script_facts: Option<RecoveredFacts>) -> ParseStatus {
+    match (document, script_facts) {
+        (ParseStatus::Recovered(document), Some(script)) => {
+            ParseStatus::Recovered(document.max(script))
+        }
+        (ParseStatus::Recovered(document), None) => ParseStatus::Recovered(document),
+        (_, Some(script)) => ParseStatus::Recovered(script),
+        (document, None) => document,
+    }
 }
 
 fn named_child<'tree>(node: Node<'tree>, kind: &str) -> Option<Node<'tree>> {

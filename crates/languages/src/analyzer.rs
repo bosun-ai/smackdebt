@@ -177,7 +177,7 @@ impl Analyzer {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use smackdebt_analysis::{ParseStatus, UnitKind};
+    use smackdebt_analysis::{ParseStatus, RecoveredFacts, UnitKind};
 
     fn analyze(path: &str, source: &str) -> FileAnalysis {
         Analyzer::default()
@@ -285,7 +285,10 @@ mod tests {
     #[test]
     fn recovered_trees_still_return_visible_facts() {
         let result = analyze("x.py", "def broken(:\n    if yes:\n        pass\n");
-        assert_eq!(result.parse_status(), &ParseStatus::Recovered);
+        assert_eq!(
+            result.parse_status(),
+            &ParseStatus::Recovered(RecoveredFacts::InDoubt)
+        );
     }
 
     #[test]

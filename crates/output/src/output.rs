@@ -3105,10 +3105,10 @@ mod tests {
         FileRecord, FindingId, GraphEvidence, HealthCounts, HealthPolicy, HistoryAvailability,
         HistoryComparisonSuppression, HistoryComparisonSuppressionId, HistoryCoverage, Hotspot,
         KnowledgeConcentrationFinding, KnowledgeConcentrationFindingId, Measurements, PackageEdge,
-        PackageEdgeId, PackageGraphMeasurement, PackageId, PackageRecord, ParseStatus, Report,
-        ReportBuilder, ReportMode, Scope, ScopeId, SizePolicy, SourceCoverageOutcome, SourceRole,
-        SourceSpan, SourceTrust, StableDependencyEvidence, StableDependencyFinding,
-        StableDependencyFindingId, UnitIdentity, UnitKind,
+        PackageEdgeId, PackageGraphMeasurement, PackageId, PackageRecord, ParseStatus,
+        RecoveredFacts, Report, ReportBuilder, ReportMode, Scope, ScopeId, SizePolicy,
+        SourceCoverageOutcome, SourceRole, SourceSpan, SourceTrust, StableDependencyEvidence,
+        StableDependencyFinding, StableDependencyFindingId, UnitIdentity, UnitKind,
     };
 
     /// Every private-use codepoint, which may never reach a machine consumer.
@@ -3682,7 +3682,10 @@ mod tests {
         let mut record =
             FileRecord::new(file, scope, path, Coverage::new(1, 1, 0, 0, 10, 0), counts);
         if advisory {
-            record = record.with_source_state(SourceRole::Benchmark, ParseStatus::Recovered);
+            record = record.with_source_state(
+                SourceRole::Benchmark,
+                ParseStatus::Recovered(RecoveredFacts::InDoubt),
+            );
         }
         builder.add_file(record);
         builder.link_file(scope, file);
@@ -5040,7 +5043,10 @@ mod tests {
                 Coverage::new(1, 1, 0, 0, 4, 0),
                 HealthCounts::default(),
             )
-            .with_source_state(SourceRole::Benchmark, ParseStatus::Recovered),
+            .with_source_state(
+                SourceRole::Benchmark,
+                ParseStatus::Recovered(RecoveredFacts::InDoubt),
+            ),
         );
         builder.add_finding(
             Finding::new(

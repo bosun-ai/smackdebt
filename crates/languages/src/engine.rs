@@ -1,6 +1,6 @@
 use smackdebt_analysis::{
-    DependencySyntax, FileAnalysis, LocalUnitId, Measurements, ParseStatus, SourceSpan, UnitFact,
-    UnitIdentity, UnitMatchEvidence,
+    DependencySyntax, FileAnalysis, LocalUnitId, Measurements, ParseStatus, RecoveredFacts,
+    SourceSpan, UnitFact, UnitIdentity, UnitKind, UnitMatchEvidence,
 };
 use tree_sitter::{Node, Parser, Query, QueryCursor, StreamingIterator};
 
@@ -23,6 +23,8 @@ pub(super) struct Scratch {
     expression_nesting: Vec<u32>,
     unit_drafts: Vec<UnitDraft>,
     dependencies: Vec<DependencySyntax>,
+    fact_bytes: Vec<ByteRange>,
+    error_bytes: Vec<ByteRange>,
     queries: [Option<QueryState>; 11],
 }
 
@@ -35,8 +37,32 @@ impl Default for Scratch {
             expression_nesting: Vec::new(),
             unit_drafts: Vec::new(),
             dependencies: Vec::new(),
+            fact_bytes: Vec::new(),
+            error_bytes: Vec::new(),
             queries: std::array::from_fn(|_| None),
         }
+    }
+}
+
+/// Half-open source byte span of one syntax node.
+#[derive(Clone, Copy)]
+pub(super) struct ByteRange {
+    start: usize,
+    end: usize,
+}
+
+impl ByteRange {
+    /// The span a node occupies, widened so a zero-width `MISSING` node still
+    /// touches the code it was inserted into.
+    fn of(node: Node<'_>) -> Self {
+        Self {
+            start: node.start_byte(),
+            end: node.end_byte().max(node.start_byte() + 1),
+        }
+    }
+
+    const fn overlaps(self, other: Self) -> bool {
+        self.start < other.end && other.start < self.end
     }
 }
 
@@ -101,20 +127,68 @@ pub(super) fn analyze<L: Language>(
         .ok_or_else(|| "tree-sitter returned no syntax tree".to_owned())?;
     crate::analyzer::record_parser_time(started.elapsed());
     let root = tree.root_node();
-    let parse_status = if root.has_error() {
-        ParseStatus::Recovered
-    } else {
-        ParseStatus::Parsed
-    };
     reserve_unit_capacity::<L>(root, source, scratch)?;
     let (units, dependencies) = collect_units::<L>(root, source, 0, 0, scratch);
     Ok(FileAnalysis::with_dependencies(
         L::REPORT_LANGUAGE,
         line_count(source),
-        parse_status,
+        parse_status(root, scratch),
         units,
         dependencies,
     ))
+}
+
+/// The parse outcome for a tree whose facts were just collected into `scratch`.
+///
+/// Recovery only clouds the facts when an error region sits on one, so the
+/// recorded error spans decide what the recovery cost.
+pub(super) fn parse_status(root: Node<'_>, scratch: &Scratch) -> ParseStatus {
+    if !root.has_error() {
+        return ParseStatus::Parsed;
+    }
+    ParseStatus::Recovered(recovered_facts(&scratch.error_bytes, &scratch.fact_bytes))
+}
+
+fn recovered_facts(errors: &[ByteRange], facts: &[ByteRange]) -> RecoveredFacts {
+    // A parse that yielded nothing offers no ground to place its errors
+    // against: whatever the errors swallowed is exactly what is missing.
+    if facts.is_empty() {
+        return RecoveredFacts::InDoubt;
+    }
+    if errors
+        .iter()
+        .any(|error| facts.iter().any(|fact| error.overlaps(*fact)))
+    {
+        RecoveredFacts::InDoubt
+    } else {
+        RecoveredFacts::Intact
+    }
+}
+
+/// The outcome of a parse whose facts are assembled outside this engine, such
+/// as the Vue document tree that holds one template unit and hands every
+/// reference out of its script elements.
+pub(super) fn document_status(
+    root: Node<'_>,
+    facts: &[ByteRange],
+    scratch: &mut Scratch,
+) -> ParseStatus {
+    if !root.has_error() {
+        return ParseStatus::Parsed;
+    }
+    scratch.error_bytes.clear();
+    walk(root, |node, _| {
+        if node.is_error() || node.is_missing() {
+            scratch.error_bytes.push(ByteRange::of(node));
+            return false;
+        }
+        node.has_error()
+    });
+    ParseStatus::Recovered(recovered_facts(&scratch.error_bytes, facts))
+}
+
+pub(super) fn node_bytes(node: Node<'_>) -> ByteRange {
+    ByteRange::of(node)
 }
 
 pub(super) fn analyze_included<L: Language>(
@@ -133,14 +207,9 @@ pub(super) fn analyze_included<L: Language>(
         .ok_or_else(|| "tree-sitter returned no syntax tree".to_owned())?;
     crate::analyzer::record_parser_time(started.elapsed());
     let root = tree.root_node();
-    let status = if root.has_error() {
-        ParseStatus::Recovered
-    } else {
-        ParseStatus::Parsed
-    };
     reserve_unit_capacity::<L>(root, source, scratch)?;
     let (units, dependencies) = collect_units::<L>(root, source, line_offset, id_offset, scratch);
-    Ok((status, units, dependencies))
+    Ok((parse_status(root, scratch), units, dependencies))
 }
 
 pub(super) fn reserve_unit_capacity<L: Language>(
@@ -196,57 +265,41 @@ fn collect_units<L: Language>(
     scratch.unit_drafts.clear();
     scratch.dependencies.clear();
     scratch.unit_by_depth.clear();
+    scratch.fact_bytes.clear();
+    scratch.error_bytes.clear();
+    // Only a recovered parse has to answer what its errors touched, so clean
+    // files never pay for the spans.
+    let recovered = root.has_error();
     walk(root, |node, depth| {
         scratch.unit_by_depth.truncate(depth);
         let parent = scratch.unit_by_depth.last().copied().flatten();
         let classification = L::classify(node, source, true);
+        let carries_fact = classification.unit.is_some() || classification.dependency.is_some();
+        if recovered {
+            record_recovery_spans(node, carries_fact, scratch);
+        }
         if let Some(dependency) = classification.dependency {
             scratch
                 .dependencies
                 .push(offset_dependency(dependency, line_offset));
         }
-        let mut child_parent = parent;
-        if let Some(kind) = classification.unit {
-            let declared_identity = L::has_declared_identity(node, source);
-            let name = L::name(node, source);
-            let index = scratch.unit_drafts.len();
-            let measurements = measure::<L>(node, source, scratch);
-            let declared_container = enclosing_container::<L>(node, source);
-            let display_container = declared_container.clone().or_else(|| {
-                parent.map(|parent| scratch.unit_drafts[parent].identity.name().to_owned())
-            });
-            let identity = match display_container {
-                Some(container) => UnitIdentity::new(name, kind).in_container(container),
-                None => UnitIdentity::new(name, kind),
-            };
-            let enclosing_declared = nearest_declared_unit(parent, &scratch.unit_drafts).cloned();
-            let match_evidence = if declared_identity {
-                UnitMatchEvidence::declared()
-            } else if let Some(anchor) = L::match_anchor(node, source) {
-                UnitMatchEvidence::semantic(
-                    declared_container.as_deref(),
-                    enclosing_declared.as_ref(),
-                    kind,
-                    anchor,
-                )
-            } else {
-                source
-                    .get(node.start_byte()..node.end_byte())
-                    .map_or_else(UnitMatchEvidence::none, UnitMatchEvidence::exact_syntax)
-            };
-            scratch.unit_drafts.push(UnitDraft {
-                identity,
-                declared_identity,
-                match_evidence,
-                span: SourceSpan::new(
-                    node.start_position().row as u32 + 1 + line_offset,
-                    node.end_position().row as u32 + 1 + line_offset,
-                ),
-                measurements,
-                parent,
-            });
-            child_parent = Some(index);
-        }
+        let child_parent = match classification.unit {
+            Some(kind) => {
+                let draft = unit_draft::<L>(
+                    &UnitSite {
+                        node,
+                        source,
+                        kind,
+                        parent,
+                        line_offset,
+                    },
+                    scratch,
+                );
+                scratch.unit_drafts.push(draft);
+                Some(scratch.unit_drafts.len() - 1)
+            }
+            None => parent,
+        };
         scratch.unit_by_depth.push(child_parent);
         true
     });
@@ -272,6 +325,86 @@ fn collect_units<L: Language>(
     let mut dependencies = Vec::with_capacity(scratch.dependencies.len());
     dependencies.append(&mut scratch.dependencies);
     (units, dependencies)
+}
+
+/// Records the spans a recovered parse is judged by: where its errors sit and
+/// where it carried a fact out.
+fn record_recovery_spans(node: Node<'_>, carries_fact: bool, scratch: &mut Scratch) {
+    if node.is_error() || node.is_missing() {
+        scratch.error_bytes.push(ByteRange::of(node));
+    }
+    if carries_fact {
+        scratch.fact_bytes.push(ByteRange::of(node));
+    }
+}
+
+/// Where one unit sits in the document being collected.
+struct UnitSite<'tree, 'source> {
+    node: Node<'tree>,
+    source: &'source [u8],
+    kind: UnitKind,
+    parent: Option<usize>,
+    line_offset: u32,
+}
+
+fn unit_draft<L: Language>(site: &UnitSite<'_, '_>, scratch: &mut Scratch) -> UnitDraft {
+    let UnitSite {
+        node,
+        source,
+        kind,
+        parent,
+        line_offset,
+    } = *site;
+    let declared_identity = L::has_declared_identity(node, source);
+    let measurements = measure::<L>(node, source, scratch);
+    let declared_container = enclosing_container::<L>(node, source);
+    let display_container = declared_container
+        .clone()
+        .or_else(|| parent.map(|parent| scratch.unit_drafts[parent].identity.name().to_owned()));
+    let name = L::name(node, source);
+    let identity = match display_container {
+        Some(container) => UnitIdentity::new(name, kind).in_container(container),
+        None => UnitIdentity::new(name, kind),
+    };
+    let enclosing_declared = nearest_declared_unit(parent, &scratch.unit_drafts).cloned();
+    UnitDraft {
+        identity,
+        declared_identity,
+        match_evidence: match_evidence::<L>(
+            site,
+            declared_identity,
+            declared_container.as_deref(),
+            enclosing_declared.as_ref(),
+        ),
+        span: SourceSpan::new(
+            node.start_position().row as u32 + 1 + line_offset,
+            node.end_position().row as u32 + 1 + line_offset,
+        ),
+        measurements,
+        parent,
+    }
+}
+
+fn match_evidence<L: Language>(
+    site: &UnitSite<'_, '_>,
+    declared_identity: bool,
+    declared_container: Option<&str>,
+    enclosing_declared: Option<&UnitIdentity>,
+) -> UnitMatchEvidence {
+    if declared_identity {
+        return UnitMatchEvidence::declared();
+    }
+    if let Some(anchor) = L::match_anchor(site.node, site.source) {
+        return UnitMatchEvidence::semantic(
+            declared_container,
+            enclosing_declared,
+            site.kind,
+            anchor,
+        );
+    }
+    site.source
+        .get(site.node.start_byte()..site.node.end_byte())
+        .map_or_else(UnitMatchEvidence::none, UnitMatchEvidence::exact_syntax)
 }
 
 fn nearest_declared_unit(mut parent: Option<usize>, drafts: &[UnitDraft]) -> Option<&UnitIdentity> {

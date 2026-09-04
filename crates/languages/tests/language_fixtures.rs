@@ -2,8 +2,8 @@ use std::path::Path;
 
 use smackdebt_analysis::{
     ComparisonKind, DependencyIntent, DependencyKind, DependencyScope, DependencySyntax,
-    DependencySyntaxState, HealthPolicy, Language, ParseStatus, SourceSpan, StaticRelationKind,
-    UnitKind, compare_units,
+    DependencySyntaxState, HealthPolicy, Language, ParseStatus, RecoveredFacts, SourceSpan,
+    SourceTrust, StaticRelationKind, UnitKind, compare_units,
 };
 use smackdebt_languages::Analyzer;
 
@@ -1553,7 +1553,96 @@ fn parser_recovery_is_visible_for_each_grammar_family() {
         let result = analyzer
             .analyze(Path::new(path), source.as_bytes().to_vec())
             .unwrap();
-        assert_eq!(result.parse_status(), &ParseStatus::Recovered, "{path}");
+        assert!(
+            matches!(result.parse_status(), ParseStatus::Recovered(_)),
+            "{path}"
+        );
+    }
+}
+
+/// Recovery that never touches a measured unit or an extracted reference
+/// leaves both reading exactly as written, so the file stays trusted while the
+/// imperfect parse stays visible.
+#[test]
+fn recovery_beside_every_fact_keeps_a_file_trusted() {
+    let cases = [
+        (
+            "tail.js",
+            "import { helper } from './helper.js';\n\nexport function work(value) {\n  return helper(value);\n}\n\nexport function unterminated(\n",
+        ),
+        (
+            "tail.rs",
+            "use crate::helper;\n\nfn work(value: i32) -> i32 {\n    helper(value)\n}\n\nstruct Broken {\n",
+        ),
+        (
+            "tail.py",
+            "import helper\n\n\ndef work(value):\n    return helper(value)\n\n\n@\n",
+        ),
+        (
+            "tail.vue",
+            "<template>\n\t<div v-if=\"ready\">{{ label }}</div>\n</template>\n<script setup>\nimport { helper } from './helper.js';\nfunction save(value) { return helper(value); }\n</script>\n<div\n",
+        ),
+    ];
+    let mut analyzer = Analyzer::default();
+    for (path, source) in cases {
+        let result = analyzer
+            .analyze(Path::new(path), source.as_bytes().to_vec())
+            .unwrap();
+        assert_eq!(
+            result.parse_status(),
+            &ParseStatus::Recovered(RecoveredFacts::Intact),
+            "{path}"
+        );
+        assert_eq!(
+            result.parse_status().trust(),
+            SourceTrust::Trusted,
+            "{path}"
+        );
+        assert!(!result.units().is_empty(), "{path}");
+        assert!(!result.dependencies().is_empty(), "{path}");
+    }
+}
+
+/// Recovery that lands on a measured unit, on a reference, or that leaves no
+/// fact at all to vouch for keeps the file advisory.
+#[test]
+fn recovery_over_a_fact_or_over_everything_leaves_a_file_advisory() {
+    let cases = [
+        (
+            "body.js",
+            "import { helper } from './helper.js';\n\nexport function work(value) {\n  return helper(value broken(\n}\n",
+        ),
+        (
+            "body.rs",
+            "use crate::helper;\n\nfn work(value: i32) -> i32 {\n    helper(value broken(\n}\n",
+        ),
+        // The break sits on the import itself rather than on any unit.
+        (
+            "reference.rs",
+            "use crate::helper::;\n\nfn work(value: i32) -> i32 {\n    value\n}\n",
+        ),
+        // An unterminated attribute swallows the whole document, so no unit
+        // and no reference survives to be vouched for.
+        (
+            "collapsed.vue",
+            "<template>\n\t<div v-if=\"ready>{{ label }}</div>\n</template>\n<script setup>\nimport { helper } from './helper.js';\nfunction save(value) { return helper(value); }\n</script>\n",
+        ),
+    ];
+    let mut analyzer = Analyzer::default();
+    for (path, source) in cases {
+        let result = analyzer
+            .analyze(Path::new(path), source.as_bytes().to_vec())
+            .unwrap();
+        assert_eq!(
+            result.parse_status(),
+            &ParseStatus::Recovered(RecoveredFacts::InDoubt),
+            "{path}"
+        );
+        assert_eq!(
+            result.parse_status().trust(),
+            SourceTrust::Advisory,
+            "{path}"
+        );
     }
 }
 

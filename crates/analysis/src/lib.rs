@@ -124,8 +124,8 @@ pub use report::{
 pub use source::{
     CRATE_ROOT_CANDIDATE, DECLARING_FILE_CANDIDATE, DependencyIntent, DependencyKind,
     DependencyScope, DependencySyntax, DependencySyntaxState, FileAnalysis, Language, LocalUnitId,
-    PARENT_MODULE_CANDIDATE, ParseStatus, SourceRole, SourceSpan, SourceTrust, StaticRelationKind,
-    UnitFact, UnitIdentity, UnitKind, UnitMatchEvidence, is_symbolic_candidate,
+    PARENT_MODULE_CANDIDATE, ParseStatus, RecoveredFacts, SourceRole, SourceSpan, SourceTrust,
+    StaticRelationKind, UnitFact, UnitIdentity, UnitKind, UnitMatchEvidence, is_symbolic_candidate,
 };
 pub use verdict::{
     ChangeAmplification, CodebaseTier, CoreSize, CoverageQualifier, DENSITY_EVIDENCE_UNITS,

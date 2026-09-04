@@ -3766,7 +3766,15 @@ fn assert_index_integrity(report: &Value) {
         assert!((file["activity"].as_u64().unwrap() as usize) < activity);
         match file["parse_outcome"].as_str() {
             Some("parsed") => assert_eq!(file["trust"], "trusted"),
-            Some("recovered") => assert_eq!(file["trust"], "advisory"),
+            // Recovery only clouds a file when an error region sits on a
+            // measured unit or on a reference, so a recovered file reads as
+            // trusted or as advisory but never as failed.
+            Some("recovered") => assert!(
+                file["trust"] == "trusted" || file["trust"] == "advisory",
+                "file {} recovered but reads as {}",
+                file["id"],
+                file["trust"]
+            ),
             Some("failed") => assert_eq!(file["trust"], "failed"),
             None => {}
             Some(value) => panic!("unknown parse outcome {value}"),

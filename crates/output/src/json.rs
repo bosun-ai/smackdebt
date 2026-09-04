@@ -1203,7 +1203,7 @@ fn source_role_name(role: SourceRole) -> &'static str {
 fn parse_outcome_name(status: &ParseStatus) -> &'static str {
     match status {
         ParseStatus::Parsed => "parsed",
-        ParseStatus::Recovered => "recovered",
+        ParseStatus::Recovered(_) => "recovered",
         ParseStatus::Failed => "failed",
     }
 }
