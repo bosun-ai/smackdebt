@@ -116,6 +116,8 @@ struct RoleConfig {
     fixture: Vec<String>,
     #[serde(default)]
     generated: Vec<String>,
+    #[serde(default)]
+    vendored: Vec<String>,
 }
 
 #[derive(Debug, Deserialize)]
@@ -185,6 +187,7 @@ impl ProjectConfig {
             (SourceRoleRule::benchmark, &self.source_roles.benchmark),
             (SourceRoleRule::fixture, &self.source_roles.fixture),
             (SourceRoleRule::generated, &self.source_roles.generated),
+            (SourceRoleRule::vendored, &self.source_roles.vendored),
         ] {
             rules.extend(patterns.iter().cloned().map(make_rule));
         }

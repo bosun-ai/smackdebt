@@ -48,6 +48,10 @@ impl SourceRoleRule {
         Self::new(SourceRole::Generated, pattern)
     }
 
+    pub fn vendored(pattern: impl Into<String>) -> Self {
+        Self::new(SourceRole::Vendored, pattern)
+    }
+
     pub(super) const fn role(&self) -> SourceRole {
         self.role
     }
@@ -60,6 +64,7 @@ impl SourceRoleRule {
             SourceRole::Benchmark => "benchmark",
             SourceRole::Fixture => "fixture",
             SourceRole::Generated => "generated",
+            SourceRole::Vendored => "vendored",
         }
     }
 

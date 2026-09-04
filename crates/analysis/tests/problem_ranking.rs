@@ -76,6 +76,46 @@ fn high_non_primary_debt_still_leads_watch_primary_debt() {
     );
 }
 
+/// Every non-primary role yields to primary source at the same rating.
+///
+/// The two files are named so that path order alone would put the supporting
+/// file first, which leaves the role as the only thing that can decide.
+#[test]
+fn supporting_source_ranks_below_primary_source_of_the_same_rating() {
+    for role in [
+        SourceRole::Test,
+        SourceRole::Example,
+        SourceRole::Benchmark,
+        SourceRole::Fixture,
+        SourceRole::Generated,
+        SourceRole::Vendored,
+    ] {
+        let files = vec![file(0, "app/aaa/case.rs", 1), file(1, "app/src/work.rs", 1)];
+        let findings = vec![
+            high_finding(0, 0, "case", role),
+            high_finding(1, 1, "work", SourceRole::Primary),
+        ];
+        let packages = vec![PackageRecord::current(
+            PackageId::from_index(0),
+            ScopeId::from_index(0),
+            "app",
+        )];
+
+        let cards = cluster_problems(ProblemInput::new(&files, &findings).with_packages(&packages));
+
+        assert_eq!(
+            cards[0].anchor(),
+            &ProblemAnchor::File(FileId::from_index(1)),
+            "{role:?} outranked primary source of the same rating"
+        );
+        assert_eq!(
+            cards[1].anchor(),
+            &ProblemAnchor::File(FileId::from_index(0)),
+            "{role:?} left the table"
+        );
+    }
+}
+
 #[test]
 fn benchmark_god_file_remains_visible_below_primary_application_debt() {
     let files = vec![

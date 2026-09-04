@@ -707,7 +707,8 @@
             "example",
             "benchmark",
             "fixture",
-            "generated"
+            "generated",
+            "vendored"
           ]
         },
         "parse_outcome": {
@@ -787,7 +788,8 @@
             "example",
             "benchmark",
             "fixture",
-            "generated"
+            "generated",
+            "vendored"
           ]
         },
         "trust": {
@@ -1197,7 +1199,8 @@
             "example",
             "benchmark",
             "fixture",
-            "generated"
+            "generated",
+            "vendored"
           ]
         },
         "trust": {
@@ -1339,7 +1342,8 @@
             "example",
             "benchmark",
             "fixture",
-            "generated"
+            "generated",
+            "vendored"
           ]
         },
         "trust": {
@@ -1421,7 +1425,8 @@
             "example",
             "benchmark",
             "fixture",
-            "generated"
+            "generated",
+            "vendored"
           ]
         },
         "trust": {
@@ -1561,6 +1566,7 @@
             "benchmark",
             "fixture",
             "generated",
+            "vendored",
             null
           ]
         },
@@ -1776,7 +1782,8 @@
             "example",
             "benchmark",
             "fixture",
-            "generated"
+            "generated",
+            "vendored"
           ]
         },
         "trust": {
@@ -1827,7 +1834,8 @@
             "example",
             "benchmark",
             "fixture",
-            "generated"
+            "generated",
+            "vendored"
           ]
         },
         "trust": {
@@ -1882,7 +1890,8 @@
             "example",
             "benchmark",
             "fixture",
-            "generated"
+            "generated",
+            "vendored"
           ]
         },
         "left_trust": {
@@ -1899,7 +1908,8 @@
             "example",
             "benchmark",
             "fixture",
-            "generated"
+            "generated",
+            "vendored"
           ]
         },
         "right_trust": {
@@ -1941,7 +1951,8 @@
             "example",
             "benchmark",
             "fixture",
-            "generated"
+            "generated",
+            "vendored"
           ]
         },
         "trust": {
@@ -2582,7 +2593,8 @@
             "example",
             "benchmark",
             "fixture",
-            "generated"
+            "generated",
+            "vendored"
           ]
         },
         "trust": {

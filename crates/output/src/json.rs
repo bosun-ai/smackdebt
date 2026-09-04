@@ -1197,6 +1197,7 @@ fn source_role_name(role: SourceRole) -> &'static str {
         SourceRole::Benchmark => "benchmark",
         SourceRole::Fixture => "fixture",
         SourceRole::Generated => "generated",
+        SourceRole::Vendored => "vendored",
     }
 }
 

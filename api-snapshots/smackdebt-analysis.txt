@@ -230,6 +230,7 @@ pub smackdebt_analysis::SourceRole::Fixture
 pub smackdebt_analysis::SourceRole::Generated
 pub smackdebt_analysis::SourceRole::Primary
 pub smackdebt_analysis::SourceRole::Test
+pub smackdebt_analysis::SourceRole::Vendored
 impl smackdebt_analysis::SourceRole
 pub const fn smackdebt_analysis::SourceRole::affects_verdict(self) -> bool
 pub const fn smackdebt_analysis::SourceRole::demoted_by_test_scope(self) -> Self
@@ -425,6 +426,7 @@ pub const fn smackdebt_analysis::CouplingEvidence::right_trust(self) -> smackdeb
 pub struct smackdebt_analysis::Coverage
 impl smackdebt_analysis::Coverage
 pub const fn smackdebt_analysis::Coverage::analyzed_files(self) -> u32
+pub const fn smackdebt_analysis::Coverage::as_context(self) -> Self
 pub const fn smackdebt_analysis::Coverage::classified(u32, smackdebt_analysis::SourceCoverageOutcome, u32, u32) -> Self
 pub const fn smackdebt_analysis::Coverage::clean_files(self) -> u32
 pub fn smackdebt_analysis::Coverage::combine(self, Self) -> Self
@@ -495,6 +497,7 @@ impl smackdebt_analysis::DependencyEdge
 pub const fn smackdebt_analysis::DependencyEdge::affects_verdict(&self) -> bool
 pub const fn smackdebt_analysis::DependencyEdge::enters_verdict_graph(&self) -> bool
 pub const fn smackdebt_analysis::DependencyEdge::id(&self) -> smackdebt_analysis::DependencyEdgeId
+pub fn smackdebt_analysis::DependencyEdge::in_context_role(self, smackdebt_analysis::SourceRole) -> Self
 pub fn smackdebt_analysis::DependencyEdge::locations(&self) -> &[smackdebt_analysis::SourceSpan]
 pub fn smackdebt_analysis::DependencyEdge::new(smackdebt_analysis::DependencyEdgeId, smackdebt_analysis::FileId, smackdebt_analysis::FileId, u32, alloc::vec::Vec<smackdebt_analysis::SourceSpan>) -> Self
 pub const fn smackdebt_analysis::DependencyEdge::references(&self) -> u32
@@ -617,6 +620,7 @@ pub fn smackdebt_analysis::EvolutionaryReportFacts::with_file_coupling(self, all
 pub struct smackdebt_analysis::ExternalDependency
 impl smackdebt_analysis::ExternalDependency
 pub const fn smackdebt_analysis::ExternalDependency::file(&self) -> smackdebt_analysis::FileId
+pub fn smackdebt_analysis::ExternalDependency::in_context_role(self, smackdebt_analysis::SourceRole) -> Self
 pub fn smackdebt_analysis::ExternalDependency::locations(&self) -> &[smackdebt_analysis::SourceSpan]
 pub fn smackdebt_analysis::ExternalDependency::new(smackdebt_analysis::FileId, impl core::convert::Into<alloc::string::String>, u32) -> Self
 pub const fn smackdebt_analysis::ExternalDependency::references(&self) -> u32
@@ -686,6 +690,7 @@ pub const fn smackdebt_analysis::FileRecord::activity(&self) -> core::option::Op
 pub const fn smackdebt_analysis::FileRecord::coverage(&self) -> smackdebt_analysis::Coverage
 pub const fn smackdebt_analysis::FileRecord::health(&self) -> smackdebt_analysis::HealthCounts
 pub const fn smackdebt_analysis::FileRecord::id(&self) -> smackdebt_analysis::FileId
+pub fn smackdebt_analysis::FileRecord::in_context_role(self, smackdebt_analysis::SourceRole) -> Self
 pub const fn smackdebt_analysis::FileRecord::language(&self) -> core::option::Option<smackdebt_analysis::Language>
 pub fn smackdebt_analysis::FileRecord::new(smackdebt_analysis::FileId, smackdebt_analysis::ScopeId, impl core::convert::Into<alloc::string::String>, smackdebt_analysis::Coverage, smackdebt_analysis::HealthCounts) -> Self
 pub const fn smackdebt_analysis::FileRecord::package(&self) -> core::option::Option<smackdebt_analysis::PackageId>
@@ -1139,6 +1144,7 @@ pub fn smackdebt_analysis::ReportBuilder::with_capacity(smackdebt_analysis::Repo
 pub struct smackdebt_analysis::ResolutionDiagnostic
 impl smackdebt_analysis::ResolutionDiagnostic
 pub const fn smackdebt_analysis::ResolutionDiagnostic::file(&self) -> smackdebt_analysis::FileId
+pub fn smackdebt_analysis::ResolutionDiagnostic::in_context_role(self, smackdebt_analysis::SourceRole) -> Self
 pub const fn smackdebt_analysis::ResolutionDiagnostic::kind(&self) -> smackdebt_analysis::ResolutionIssueKind
 pub fn smackdebt_analysis::ResolutionDiagnostic::locations(&self) -> &[smackdebt_analysis::SourceSpan]
 pub fn smackdebt_analysis::ResolutionDiagnostic::new(smackdebt_analysis::FileId, smackdebt_analysis::SourceSpan, impl core::convert::Into<alloc::string::String>, smackdebt_analysis::ResolutionIssueKind, impl core::convert::Into<alloc::string::String>) -> Self

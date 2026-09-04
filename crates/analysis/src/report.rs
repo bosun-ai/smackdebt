@@ -220,6 +220,18 @@ impl Coverage {
         }
     }
 
+    /// Returns the same coverage with its cleanly analyzed files counted as
+    /// context instead.
+    ///
+    /// Only a clean outcome depends on the role: a recovered, failed, or
+    /// unsupported file reads the same whoever authored it.
+    #[must_use]
+    pub const fn as_context(mut self) -> Self {
+        self.context_files += self.clean_files;
+        self.clean_files = 0;
+        self
+    }
+
     /// Returns the same coverage carrying the selected and unsupported byte
     /// totals the walk measured, so shares never require another file read.
     #[must_use]
@@ -377,6 +389,23 @@ impl FileRecord {
     pub fn with_source_state(mut self, role: SourceRole, status: ParseStatus) -> Self {
         self.role = role;
         self.parse_status = Some(status);
+        self
+    }
+
+    /// Restates this file under a role no verdict reads.
+    ///
+    /// A role that is settled only after the dependency graph exists arrives
+    /// once the file's rated health and its clean coverage have already been
+    /// recorded. Both are the verdict's own view of the file, so both move with
+    /// the role: the health it contributed is dropped and its analyzed lines
+    /// become context, exactly as they would have been had the role been known
+    /// when the file was rated.
+    #[must_use]
+    pub fn in_context_role(mut self, role: SourceRole) -> Self {
+        debug_assert!(!role.affects_verdict(), "a context role holds no verdict");
+        self.role = role;
+        self.health = HealthCounts::default();
+        self.coverage = self.coverage.as_context();
         self
     }
     pub const fn role(&self) -> SourceRole {
@@ -741,7 +770,8 @@ const fn role_class(role: SourceRole) -> u8 {
         | SourceRole::Example
         | SourceRole::Benchmark
         | SourceRole::Fixture
-        | SourceRole::Generated => 1,
+        | SourceRole::Generated
+        | SourceRole::Vendored => 1,
     }
 }
 

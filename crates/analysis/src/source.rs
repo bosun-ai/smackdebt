@@ -217,6 +217,14 @@ pub enum SourceRole {
     Benchmark,
     Fixture,
     Generated,
+    /// Third-party source the repository carries but does not author.
+    ///
+    /// Unlike [`Self::Generated`], vendored source is written by hand and reads
+    /// like any other file, so nothing in its own text names it. It is
+    /// recognized by what the repository does with it instead: a library name
+    /// no project invents, or a file no code imports and no recent commit
+    /// touches.
+    Vendored,
 }
 
 impl SourceRole {

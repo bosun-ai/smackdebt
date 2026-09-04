@@ -120,6 +120,16 @@ impl DependencyEdge {
         self.trust = trust;
         self
     }
+    /// Restates this relation under a role settled after it was resolved.
+    ///
+    /// The relation itself is untouched; only what it counts as changes, so a
+    /// reference written in a file the repository merely carries stops being
+    /// evidence about the code that ships.
+    #[must_use]
+    pub fn in_context_role(mut self, role: SourceRole) -> Self {
+        self.role = role;
+        self
+    }
     pub fn with_relation(mut self, relation: StaticRelationKind) -> Self {
         self.relation = relation;
         self
@@ -1007,6 +1017,12 @@ impl ResolutionDiagnostic {
         self.trust = trust;
         self
     }
+    /// Restates this diagnostic under a role settled after resolution.
+    #[must_use]
+    pub fn in_context_role(mut self, role: SourceRole) -> Self {
+        self.role = role;
+        self
+    }
     pub const fn file(&self) -> FileId {
         self.file
     }
@@ -1078,6 +1094,12 @@ impl ExternalDependency {
         self.relation = relation;
         self.role = role;
         self.trust = trust;
+        self
+    }
+    /// Restates this external reference under a role settled after resolution.
+    #[must_use]
+    pub fn in_context_role(mut self, role: SourceRole) -> Self {
+        self.role = role;
         self
     }
     pub const fn file(&self) -> FileId {
