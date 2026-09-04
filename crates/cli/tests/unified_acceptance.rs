@@ -993,8 +993,14 @@ fn a_core_is_stated_only_when_the_largest_cycle_clears_both_floors() {
     let terminal = Invocation::new([] as [&str; 0]).run(repository.path());
     terminal.success();
     let text = String::from_utf8(terminal.stdout).unwrap();
-    assert!(!text.contains("sit in one dependency cycle"), "{text}");
-    assert!(text.contains("6 of 20 files are in this cycle"), "{text}");
+    // The core is a superlative over the whole graph, so it rests on the card
+    // of the cycle it names rather than on the anonymous verdict head.
+    let head = text.split("PROBLEMS").next().expect("a verdict head");
+    assert!(!head.contains("dependency cycle"), "{head}");
+    assert!(
+        text.contains("        6 of 20 files sit in one dependency cycle.\n"),
+        "{text}"
+    );
     assert!(
         text.contains("        a change here reaches 5 files"),
         "{text}"
@@ -1005,7 +1011,7 @@ fn a_core_is_stated_only_when_the_largest_cycle_clears_both_floors() {
     narrow.success();
     let narrow_text = String::from_utf8(narrow.stdout).unwrap();
     assert!(
-        narrow_text.contains("6 of 20 files are in this cycle"),
+        narrow_text.contains("        6 of 20 files sit in one dependency cycle.\n"),
         "the named cycle evidence fits fifty columns: {narrow_text}"
     );
 
@@ -1048,6 +1054,10 @@ fn a_core_is_stated_only_when_the_largest_cycle_clears_both_floors() {
     assert!(
         !small_text.contains("sit in one dependency cycle"),
         "{small_text}"
+    );
+    assert!(
+        small_text.contains("        3 files in the cycle\n"),
+        "a cycle that is no core still states its own size: {small_text}"
     );
 }
 

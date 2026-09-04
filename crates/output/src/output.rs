@@ -10,7 +10,7 @@ use std::path::{Path, PathBuf};
 use anstyle::{Ansi256Color, AnsiColor, Style};
 use smackdebt_analysis::{
     ArchitectureComparisonKind, ArchitectureFindingId, ChangeLeakageFindingId, CodebaseTier,
-    Comparison, ComparisonDirection, ComparisonKind, CouplingLink, CoverageQualifier,
+    Comparison, ComparisonDirection, ComparisonKind, CoreSize, CouplingLink, CoverageQualifier,
     DebtDiffSelection, DebtFamily, DependencyEdgeId, Diagnostic, DiagnosticKind, DiffTier,
     EvolutionaryFindingId, FileChangeCoupling, FileId, FileRecord, Finding, FindingId, Instability,
     KnowledgeConcentrationFindingId, Language, Measurements, PackageId, ProblemAnchor, ProblemCard,
@@ -822,14 +822,41 @@ fn problem_row(report: &Report, card: &ProblemCard, evidence: usize) -> Row {
     // render past the budget while the cards a scope shows and the evidence
     // each of them states still respect the rung.
     let anchored = anchored_file(card);
+    let core = card_core(report, card);
     let stacked = card
         .evidence()
         .iter()
         .take(evidence)
         .enumerate()
-        .flat_map(|(index, fact)| evidence_lines(report, *fact, headed && index == 0, anchored))
+        .flat_map(|(index, fact)| {
+            evidence_lines(report, *fact, headed && index == 0, anchored, core)
+        })
         .collect();
     Row::new(word, problem_head(report, card)).with_stacked(stacked)
+}
+
+/// The repository's core, when this card's own cycle is that core.
+///
+/// The core is the largest cycle of the whole file graph, so it belongs beside
+/// the cycle it names rather than in an anonymous verdict line. Cycles are the
+/// strongly connected components of one graph and therefore partition it: a
+/// card whose members are exactly the core's members is that cycle, and every
+/// other card is a different one, whatever its size.
+///
+/// The fact is a superlative over the whole graph, so a graph with a hole in it
+/// states no core anywhere — the same completeness gate the verdict's own core
+/// fact obeys, which is what keeps a stated core out of the suppressed count.
+fn card_core(report: &Report, card: &ProblemCard) -> Option<CoreSize> {
+    let ProblemAnchor::Files(files) = card.anchor() else {
+        return None;
+    };
+    if !report.graph_evidence().is_complete() {
+        return None;
+    }
+    let members = report.core_members();
+    (files.len() == members.len() && files.iter().all(|file| members.contains(file)))
+        .then(|| report.core_size())
+        .flatten()
 }
 
 /// The one file a card's head names, which only a file anchor gives it.
@@ -1079,11 +1106,15 @@ fn coverage_qualifier_lines(qualifier: &CoverageQualifier) -> [String; 2] {
 /// `anchored` is the one file the head names when the card has a file anchor,
 /// which a co-change line reads so that it states the end of its pair the head
 /// left out.
+///
+/// `core` is the repository's core when this card's cycle is it, which the
+/// member count reads so that the largest cycle says so where it is named.
 fn evidence_lines(
     report: &Report,
     fact: ProblemEvidence,
     headed: bool,
     anchored: Option<FileId>,
+    core: Option<CoreSize>,
 ) -> Vec<String> {
     match fact {
         ProblemEvidence::Finding(id) => finding_evidence(report, id, headed),
@@ -1093,26 +1124,24 @@ fn evidence_lines(
         ProblemEvidence::Coupling(id) => vec![coupling_evidence(report, id)],
         ProblemEvidence::Knowledge(id) => vec![knowledge_evidence(report, id)],
         ProblemEvidence::ChangeLeakage(id) => vec![leakage_evidence(report, id, anchored)],
-        ProblemEvidence::Members(value) => vec![member_evidence(report, value)],
+        ProblemEvidence::Members(value) => vec![member_evidence(core, value)],
         // The rest are integers the report already measured, so they need no
         // finding table to be stated.
         measured => counted_evidence(measured).into_iter().collect(),
     }
 }
 
-fn member_evidence(report: &Report, members: u32) -> String {
-    let core = report
-        .core_size()
-        .filter(|core| report.graph_evidence().is_complete() && core.core() == members);
+/// How large a cycle is, stated as the repository's core where this cycle is
+/// it.
+///
+/// The core says the same thing the member count says and frames it against
+/// the graph, so the two share one line rather than stacking two: the words are
+/// the ones analysis froze on the value, which is why the renderer picks
+/// between them instead of composing either.
+fn member_evidence(core: Option<CoreSize>, members: u32) -> String {
     core.map_or_else(
         || format!("{} in the cycle", counted_files(members)),
-        |core| {
-            format!(
-                "{} of {} are in this cycle",
-                members,
-                counted_files(core.files())
-            )
-        },
+        CoreSize::sentence,
     )
 }
 
@@ -3917,7 +3946,7 @@ mod tests {
             ),
         ] {
             assert_eq!(
-                evidence_lines(&report, fact, false, None),
+                evidence_lines(&report, fact, false, None, None),
                 vec![expected.to_owned()],
                 "{fact:?}"
             );
