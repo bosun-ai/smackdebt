@@ -56,9 +56,20 @@ pub const DECLARING_FILE_CANDIDATE: &str = ".";
 /// The candidate that names the module root of the declaring file's package.
 pub const CRATE_ROOT_CANDIDATE: &str = "crate";
 
+/// The candidate that names the file declaring the module enclosing the
+/// declaring file.
+///
+/// The enclosing module can live beside the declaring file's directory
+/// (`src/a.rs` for `src/a/b.rs`), a spelling no relative path from the
+/// declaring file expresses without knowing that directory's name.
+pub const PARENT_MODULE_CANDIDATE: &str = "super";
+
 /// Whether a candidate names a symbolic target rather than a repository path.
 pub fn is_symbolic_candidate(candidate: &str) -> bool {
-    matches!(candidate, DECLARING_FILE_CANDIDATE | CRATE_ROOT_CANDIDATE)
+    matches!(
+        candidate,
+        DECLARING_FILE_CANDIDATE | CRATE_ROOT_CANDIDATE | PARENT_MODULE_CANDIDATE
+    )
 }
 
 /// Why a dependency cannot safely produce path candidates.

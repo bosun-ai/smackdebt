@@ -4852,20 +4852,47 @@ fn resolve_symbolic_candidates(
 ) -> Vec<FileId> {
     let mut matches = Vec::new();
     for candidate in candidates {
-        if candidate == smackdebt_analysis::DECLARING_FILE_CANDIDATE {
-            matches.extend(index.get(source).copied());
-        } else if candidate == smackdebt_analysis::CRATE_ROOT_CANDIDATE
-            && let Some(root) = rust_source_root(source)
-        {
-            matches.extend(
-                index
-                    .get(&root.join("lib.rs"))
-                    .or_else(|| index.get(&root.join("main.rs")))
-                    .copied(),
-            );
-        }
+        let file = match candidate.as_str() {
+            smackdebt_analysis::DECLARING_FILE_CANDIDATE => index.get(source).copied(),
+            smackdebt_analysis::CRATE_ROOT_CANDIDATE => rust_crate_root_file(source, index),
+            smackdebt_analysis::PARENT_MODULE_CANDIDATE => rust_parent_module_file(source, index),
+            _ => None,
+        };
+        matches.extend(file);
     }
     matches
+}
+
+/// The file a Rust package presents as the root of its module tree.
+fn rust_crate_root_file(source: &Path, index: &BTreeMap<PathBuf, FileId>) -> Option<FileId> {
+    let root = rust_source_root(source)?;
+    index
+        .get(&root.join("lib.rs"))
+        .or_else(|| index.get(&root.join("main.rs")))
+        .copied()
+}
+
+/// The file declaring the module that declares a Rust file.
+///
+/// The enclosing module is the directory holding the file's own module
+/// directory, and Rust spells that module in three places: `a/mod.rs` inside
+/// it, `a.rs` beside it, and the crate root when the module is the source root
+/// itself.  The first spelling the repository holds is the answer.
+fn rust_parent_module_file(source: &Path, index: &BTreeMap<PathBuf, FileId>) -> Option<FileId> {
+    let directory = rust_module_directory(source)?;
+    let parent = directory.parent()?;
+    let name = parent.file_name()?.to_str()?;
+    let root = rust_source_root(source).filter(|root| root.as_path() == parent);
+    [
+        parent.join("mod.rs"),
+        parent.with_file_name(format!("{name}.rs")),
+    ]
+    .into_iter()
+    .chain(
+        root.into_iter()
+            .flat_map(|root| [root.join("lib.rs"), root.join("main.rs")]),
+    )
+    .find_map(|path| index.get(&path).copied())
 }
 
 /// The directory a Rust file's own modules live in.
@@ -5299,6 +5326,75 @@ mod tests {
             unresolved,
             ["crate::Missing"],
             "a symbolic candidate that matches nothing stays unresolved"
+        );
+    }
+
+    #[test]
+    fn a_super_rooted_item_resolves_to_the_file_declaring_the_parent_module() {
+        let root = tempfile::tempdir().unwrap();
+        for (path, source) in [
+            ("Cargo.toml", "[package]\nname='rooted'\nversion='0.1.0'\n"),
+            (
+                "src/lib.rs",
+                "mod builder;\nmod edge;\nmod widget;\npub struct Root;\n",
+            ),
+            // The parent module lives inside its own directory.
+            (
+                "src/builder/mod.rs",
+                "mod manifests;\npub struct DockerMode;\n",
+            ),
+            ("src/builder/manifests.rs", "use super::DockerMode;\n"),
+            // The parent module lives beside its directory, 2018 style.
+            ("src/widget.rs", "mod parts;\npub struct Frame;\n"),
+            (
+                "src/widget/parts.rs",
+                "use super::Frame;\nuse self::helper;\npub fn helper() -> u32 { 1 }\n",
+            ),
+            // The parent of a source-root module is the crate root.
+            ("src/edge.rs", "use super::Root;\n"),
+            // Nothing declares this file, so nothing can be named.
+            ("standalone/loose.rs", "use super::Nothing;\n"),
+        ] {
+            let file = root.path().join(path);
+            fs::create_dir_all(file.parent().unwrap()).unwrap();
+            fs::write(file, source).unwrap();
+        }
+
+        let result = analyze_codebase(&CodebaseRequest::new(root.path())).unwrap();
+        let report = result.report();
+        let edges: Vec<_> = report
+            .dependency_edges()
+            .iter()
+            .filter(|edge| edge.relation() == smackdebt_analysis::StaticRelationKind::Uses)
+            .map(|edge| {
+                (
+                    report.files()[edge.source().index()].path(),
+                    report.files()[edge.target().index()].path(),
+                )
+            })
+            .collect();
+        assert!(
+            edges.contains(&("src/builder/manifests.rs", "src/builder/mod.rs")),
+            "a directory module declares its children: {edges:?}"
+        );
+        assert!(
+            edges.contains(&("src/widget/parts.rs", "src/widget.rs")),
+            "a module file beside its directory declares its children: {edges:?}"
+        );
+        assert!(
+            edges.contains(&("src/edge.rs", "src/lib.rs")),
+            "the crate root declares the modules of the source root: {edges:?}"
+        );
+        let unresolved: Vec<_> = report
+            .resolution_diagnostics()
+            .iter()
+            .filter(|value| value.kind() == ResolutionIssueKind::Unresolved)
+            .map(ResolutionDiagnostic::target)
+            .collect();
+        assert_eq!(
+            unresolved,
+            ["super::Nothing"],
+            "a file no module declares keeps its absence: {edges:?}"
         );
     }
 

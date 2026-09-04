@@ -1212,6 +1212,63 @@ fn rust_super_inside_an_inline_module_targets_the_declaring_file() {
                     "../sibling/work/mod.rs".to_owned(),
                     "../sibling.rs".to_owned(),
                     "../sibling/mod.rs".to_owned(),
+                    "../mod.rs".to_owned(),
+                    "super".to_owned(),
+                ])
+            ),
+        ]
+    );
+}
+
+#[test]
+fn a_rooted_item_falls_back_to_the_module_its_root_names() {
+    let analysis = Analyzer::default()
+        .analyze(
+            Path::new("src/builder/manifests.rs"),
+            b"use super::DockerMode;\nuse super::*;\nuse self::helper;\nuse super::super::Far;\n"
+                .to_vec(),
+        )
+        .unwrap();
+    let states: Vec<_> = analysis
+        .dependencies()
+        .iter()
+        .map(|dependency| (dependency.target(), dependency.state().clone()))
+        .collect();
+    assert_eq!(
+        states,
+        [
+            // The item is declared by the parent module, which lives either in
+            // `../mod.rs` or beside this file's directory as `src/builder.rs`.
+            (
+                "super::DockerMode",
+                DependencySyntaxState::Candidates(vec![
+                    "../DockerMode.rs".to_owned(),
+                    "../DockerMode/mod.rs".to_owned(),
+                    "../mod.rs".to_owned(),
+                    "super".to_owned(),
+                ])
+            ),
+            (
+                "super::*",
+                DependencySyntaxState::Candidates(vec!["./mod.rs".to_owned(), "super".to_owned(),])
+            ),
+            // `self` names the declaring file, never a `mod.rs` of the module
+            // directory that file owns.
+            (
+                "self::helper",
+                DependencySyntaxState::Candidates(vec![
+                    "./helper.rs".to_owned(),
+                    "./helper/mod.rs".to_owned(),
+                    ".".to_owned(),
+                ])
+            ),
+            // A chain of several `super` segments normalizes to one level, so
+            // it is offered no parent module it could name wrongly.
+            (
+                "super::super::Far",
+                DependencySyntaxState::Candidates(vec![
+                    "../Far.rs".to_owned(),
+                    "../Far/mod.rs".to_owned(),
                 ])
             ),
         ]

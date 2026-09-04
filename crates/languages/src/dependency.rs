@@ -1,6 +1,6 @@
 use smackdebt_analysis::{
     CRATE_ROOT_CANDIDATE, DECLARING_FILE_CANDIDATE, DependencyKind, DependencySyntax,
-    DependencySyntaxState, SourceSpan, StaticRelationKind,
+    DependencySyntaxState, PARENT_MODULE_CANDIDATE, SourceSpan, StaticRelationKind,
 };
 use tree_sitter::Node;
 
@@ -247,14 +247,16 @@ fn resolved_path_reference(
     }
     // A glob import names the module itself, not a child of it.
     let path = target.strip_suffix("::*").unwrap_or(target);
+    let inline = inline_module_depth(node) > 0;
     if !is_module && path == root {
-        let value = match root {
-            "crate" => CRATE_ROOT_CANDIDATE,
-            "self" => DECLARING_FILE_CANDIDATE,
-            _ if inline_module_depth(node) > 0 => DECLARING_FILE_CANDIDATE,
-            _ => "./mod.rs",
+        let values = match root {
+            "crate" => vec![CRATE_ROOT_CANDIDATE.to_owned()],
+            "self" => vec![DECLARING_FILE_CANDIDATE.to_owned()],
+            // Inside an inline module `super` names the declaring file itself.
+            _ if inline => vec![DECLARING_FILE_CANDIDATE.to_owned()],
+            _ => vec!["./mod.rs".to_owned(), PARENT_MODULE_CANDIDATE.to_owned()],
         };
-        return candidates(node, kind, target, vec![value.to_owned()]).with_internal_intent();
+        return candidates(node, kind, target, values).with_internal_intent();
     }
     let (prefix, value) = if is_module || path.starts_with("self::") {
         ("./", path.trim_start_matches("self::"))
@@ -268,7 +270,10 @@ fn resolved_path_reference(
     if with_parent_candidates {
         let mut parent = normalized.as_str();
         while let Some((prefix, _)) = parent.rsplit_once('/') {
+            // An all-dots prefix is the path's own root, which owns no `.rs`
+            // file of its name and cannot be walked any further.
             if prefix.chars().all(|character| character == '.') {
+                values.extend(root_module_candidates(prefix, path, inline));
                 break;
             }
             values.push(format!("{prefix}.rs"));
@@ -278,7 +283,7 @@ fn resolved_path_reference(
     }
     if root == "crate" {
         values.push(CRATE_ROOT_CANDIDATE.to_owned());
-    } else if !is_module && inline_module_depth(node) > 0 {
+    } else if !is_module && inline {
         values.push(DECLARING_FILE_CANDIDATE.to_owned());
     }
     let dependency = candidates(node, kind, target, values).with_internal_intent();
@@ -286,6 +291,35 @@ fn resolved_path_reference(
         dependency.with_relation(StaticRelationKind::ModuleOwnership)
     } else {
         dependency
+    }
+}
+
+/// The candidates for the module a rooted path counts its segments from.
+///
+/// The root module owns no file named after it, so the walk that turns
+/// `crate::a::b::Item` into `a/b.rs` has nothing left to offer once it reaches
+/// `.` or `..`.  Both roots still name a file: `self` is the declaring file,
+/// and `super` is the module that declares it, which lives either in
+/// `../mod.rs` or beside the declaring file's own directory — a spelling only
+/// the resolver knows, so it is named symbolically.
+///
+/// A chain of several `super` segments normalizes to one `../` today, so the
+/// parent it would name is the wrong module; such a path keeps exactly the
+/// candidates it has always had.
+fn root_module_candidates(prefix: &str, path: &str, inline: bool) -> Vec<String> {
+    let single_super = path
+        .strip_prefix("super::")
+        .is_some_and(|rest| !rest.starts_with("super::"));
+    match prefix {
+        // Inside an inline module the declaring file is already the root, and
+        // the reference carries it as its own fallback.
+        _ if inline => Vec::new(),
+        "." => vec![DECLARING_FILE_CANDIDATE.to_owned()],
+        ".." if single_super => vec![
+            format!("{prefix}/mod.rs"),
+            PARENT_MODULE_CANDIDATE.to_owned(),
+        ],
+        _ => Vec::new(),
     }
 }
 

@@ -1339,6 +1339,7 @@ pub const smackdebt_analysis::MINIMUM_CONCENTRATION_COMMITS: u32
 pub const smackdebt_analysis::MINIMUM_CONCENTRATION_PERCENT: u32
 pub const smackdebt_analysis::MINIMUM_STABLE_DEPENDENCY_REFERENCES: u32
 pub const smackdebt_analysis::PACKAGE_REACH_FILES: u32
+pub const smackdebt_analysis::PARENT_MODULE_CANDIDATE: &str
 pub const smackdebt_analysis::PATH_PROBE_NODES: usize
 pub const smackdebt_analysis::REACH_CANDIDATE_LIMIT: usize
 pub const smackdebt_analysis::RETAINED_FILE_PAIR_LIMIT: usize
