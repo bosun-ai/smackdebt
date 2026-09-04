@@ -14,7 +14,7 @@ impl LanguageContract for Vue {
     const REPORT_LANGUAGE: Language = Language::Vue;
 
     fn grammar() -> tree_sitter::Language {
-        tree_sitter_vue_updated::language()
+        tree_sitter_vue_next::LANGUAGE.into()
     }
 
     fn unit_query() -> &'static str {

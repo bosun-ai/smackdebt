@@ -44,6 +44,10 @@ crates/discovery/src/inventory.rs	cognitive	0	1
 crates/discovery/src/inventory.rs	cyclomatic	0	1
 crates/discovery/src/inventory.rs	file_size	1	0
 crates/discovery/src/inventory.rs	nesting	0	1
+crates/git/src/repository.rs	cognitive	0	2
+crates/git/src/repository.rs	cyclomatic	0	3
+crates/git/src/repository.rs	file_size	1	0
+crates/git/src/repository.rs	parameters	0	1
 crates/languages/src/analyzer.rs	cognitive	0	1
 crates/languages/src/analyzer.rs	cyclomatic	0	4
 crates/languages/src/analyzer.rs	file_cycle	0	1

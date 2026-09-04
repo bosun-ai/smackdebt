@@ -1557,6 +1557,32 @@ fn parser_recovery_is_visible_for_each_grammar_family() {
     }
 }
 
+/// Valid code that a stale grammar could only recover from now parses cleanly,
+/// so it never spends a package's graph trust.
+#[test]
+fn grammar_constructs_that_only_a_stale_grammar_broke_parse_cleanly() {
+    let cases = [
+        // A binding named `raw` is an ordinary identifier next to the
+        // raw-pointer syntax that shares its spelling.
+        (
+            "raw.rs",
+            "fn read(raw: &str) -> &str {\n    take(&raw);\n    &raw[..1]\n}\n\nfn point(value: &mut u32) {\n    let _ = &raw mut *value;\n}\n",
+        ),
+        // `<component>` takes bound attributes and the self-closing form.
+        (
+            "component.vue",
+            "<template>\n\t<component :is=\"props.as\" :class=\"classes\" />\n\t<component is=\"div\">text</component>\n</template>\n<script setup>\nconst props = defineProps(['as']);\n</script>\n",
+        ),
+    ];
+    let mut analyzer = Analyzer::default();
+    for (path, source) in cases {
+        let result = analyzer
+            .analyze(Path::new(path), source.as_bytes().to_vec())
+            .unwrap();
+        assert_eq!(result.parse_status(), &ParseStatus::Parsed, "{path}");
+    }
+}
+
 #[test]
 fn boolean_operator_runs_and_statement_layout_follow_shared_rules() {
     let result = Analyzer::default()

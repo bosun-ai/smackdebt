@@ -17,7 +17,7 @@ tree-sitter-python.workspace = true
 tree-sitter-ruby.workspace = true
 tree-sitter-rust.workspace = true
 tree-sitter-typescript.workspace = true
-tree-sitter-vue-updated.workspace = true
+tree-sitter-vue-next.workspace = true
 
 [lints]
 workspace = true
