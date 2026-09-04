@@ -5,9 +5,7 @@ Smackdebt is a fast local CLI for answering two questions:
 - Where does a codebase carry the most costly debt?
 - Did the current worktree improve or worsen that debt compared with a Git ref?
 
-Read `README.md`, `ARCHITECTURE.md`, and the active change under
-`openspec/changes/` before implementation. OpenSpec is the source of truth for
-accepted behavior and implementation order.
+Read `README.md` and `ARCHITECTURE.md` before implementation.
 
 Output must be concise, useful, beautiful, and actionable. Avoid noise.
 
@@ -16,16 +14,13 @@ Output must be concise, useful, beautiful, and actionable. Avoid noise.
 ## Workflow
 
 - Use `rtk` as the prefix for shell commands.
-- Do not implement an OpenSpec change until its proposal, design, specs, and
-  tasks pass strict validation.
-- Work through the active change in dependency order and update task checkboxes
+- Work through changes in dependency order and update task checkboxes
   only after the related behavior and tests pass.
 - Keep each implementation change small enough to validate at its crate seam
   before running the complete workspace checks.
-- Update OpenSpec, architecture, product documentation, and acceptance examples
+- Update architecture, product documentation, and acceptance examples
   together when verified behavior changes.
-- Preserve unrelated work. Do not rewrite user changes or archived OpenSpec
-  history.
+- Preserve unrelated work. Do not rewrite user changes.
 
 ## Architecture
 
@@ -181,7 +176,6 @@ Run the focused crate checks while working, then the complete applicable gate:
 rtk cargo fmt --all -- --check
 rtk cargo clippy --workspace --all-targets --all-features -- -D warnings
 rtk cargo test --workspace --all-features
-rtk openspec validate --all --strict
 rtk git diff --check
 ```
 

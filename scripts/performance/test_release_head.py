@@ -81,7 +81,6 @@ class ReleaseHeadTests(unittest.TestCase):
             "benchmarks/evidence/one-file.runs.jsonl",
             "benchmarks/evidence/evolution-wide.runs.jsonl",
             "benchmarks/evidence/workload-reviews.json",
-            "openspec/changes/example/tasks.md",
         ]:
             with self.subTest(path=path):
                 self.assertTrue(release_head.evidence_path_is_allowed(path))
@@ -150,7 +149,7 @@ class ReleaseHeadTests(unittest.TestCase):
             source.write_text("fn private() {}\n", encoding="utf-8")
             self.assertEqual(
                 release_head.release_revision_problem(recorded, repository),
-                "release changes must use only approved evidence and task paths",
+                "release changes must use only approved evidence paths",
             )
 
         with tempfile.TemporaryDirectory() as directory:
@@ -163,7 +162,7 @@ class ReleaseHeadTests(unittest.TestCase):
             documentation.write_text("private\n", encoding="utf-8")
             self.assertEqual(
                 release_head.release_revision_problem(recorded, repository),
-                "release changes must use only approved evidence and task paths",
+                "release changes must use only approved evidence paths",
             )
 
     def test_release_revision_preserves_space_boundaries_in_git_paths(self):
@@ -171,7 +170,7 @@ class ReleaseHeadTests(unittest.TestCase):
             " benchmarks/evidence/one-file.metadata.json",
             "benchmarks/evidence/one-file.metadata.json ",
         ]
-        expected = "release changes must use only approved evidence and task paths"
+        expected = "release changes must use only approved evidence paths"
 
         for path in lookalikes:
             with self.subTest(kind="tracked", path=path):
@@ -241,7 +240,6 @@ class ReleaseHeadTests(unittest.TestCase):
             "benchmarks/evidence/private-profile.metadata.json",
             "benchmarks/evidence/private-profile.runs.jsonl",
             "benchmarks/evidence/private.txt",
-            "openspec/changes/example/notes/tasks.md",
         ]:
             with self.subTest(path=path), tempfile.TemporaryDirectory() as directory:
                 repository = Path(directory)
@@ -293,50 +291,6 @@ class ReleaseHeadTests(unittest.TestCase):
             )
             (repository / "README.md").write_text("changed\n", encoding="utf-8")
             self.assertIsNotNone(
-                release_head.release_revision_problem(recorded, repository)
-            )
-
-    def test_release_revision_requires_evidence_beside_optional_tasks(self):
-        with tempfile.TemporaryDirectory() as directory:
-            repository = Path(directory)
-            recorded = initialize_release_repository(repository)
-            task = repository / "openspec/changes/example/tasks.md"
-            task.parent.mkdir(parents=True, exist_ok=True)
-            task.write_text("- [x] done\n", encoding="utf-8")
-            self.assertIsNotNone(
-                release_head.release_revision_problem(recorded, repository)
-            )
-
-        with tempfile.TemporaryDirectory() as directory:
-            repository = Path(directory)
-            recorded = initialize_release_repository(repository)
-            tasks_only = commit_release_path(
-                repository,
-                "openspec/changes/example/tasks.md",
-                "- [x] done\n",
-                "update tasks",
-            )
-            self.assertIsNotNone(
-                release_head.release_revision_problem(
-                    recorded, repository, tasks_only
-                )
-            )
-
-        with tempfile.TemporaryDirectory() as directory:
-            repository = Path(directory)
-            recorded = initialize_release_repository(repository)
-            commit_release_path(
-                repository,
-                "benchmarks/evidence/workload-reviews.json",
-                "{}\n",
-                "record review",
-            )
-            task = repository / "openspec/changes/example/tasks.md"
-            task.parent.mkdir(parents=True, exist_ok=True)
-            task.write_text("- [x] done\n", encoding="utf-8")
-            git(repository, "add", task.relative_to(repository).as_posix())
-            git(repository, "commit", "--amend", "--no-edit", "-q")
-            self.assertIsNone(
                 release_head.release_revision_problem(recorded, repository)
             )
 

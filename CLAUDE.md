@@ -20,7 +20,7 @@ just fmt          # cargo fmt --all -- --check
 just lint         # clippy --workspace --all-targets --all-features -D warnings
 just test         # cargo test --workspace --all-features
 just check        # fmt + lint + test + architecture + performance-tests
-                  # + acceptance-evidence + gate, then openspec validate --strict, git diff --check
+                  # + acceptance-evidence + gate, then git diff --check
 ```
 
 Narrower loops:
@@ -59,15 +59,6 @@ just update-acceptance-snapshots
 API snapshots under `api-snapshots/` are checked by `just architecture`;
 regenerate via `python3 scripts/check-api-snapshots.py` variants only when a
 cross-crate surface change is intended.
-
-## OpenSpec is the source of truth
-
-Accepted behavior and implementation order live in `openspec/`:
-`openspec/specs/<capability>/` for accepted specs, `openspec/changes/<name>/`
-(proposal, design, specs, tasks) for in-flight work, `openspec/changes/archive/`
-for completed ones. Before implementing, read the active change; do not start
-until `openspec validate --all --strict` passes for it, and tick task
-checkboxes only after the behavior and its tests pass.
 
 ## Architecture in one pass
 

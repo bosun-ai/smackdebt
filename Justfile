@@ -58,7 +58,6 @@ release-evidence-check:
     python3 scripts/performance/check-workload-reviews.py --release-head
 
 check: fmt lint test architecture performance-tests acceptance-evidence gate
-    openspec validate --all --strict
     git diff --check
 
 release-baselines self mixed rust accept="":

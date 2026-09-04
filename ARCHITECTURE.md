@@ -37,7 +37,7 @@ flowchart TD
 Infrastructure crates do not depend on each other. Languages and discovery use
 analysis-owned values at their seams, but do not depend on another adapter.
 Project orchestration is the only place that composes filesystem, language, and
-Git behavior. Every crate is private until a separate release OpenSpec change
+Git behavior. Every crate is private until a separate release change
 approves publication.
 
 Workspace checks read Cargo metadata and reject dependency edges outside this

@@ -34,12 +34,7 @@ def evidence_path_is_allowed(value: str) -> bool:
             if path.name.endswith(suffix):
                 return path.name.removesuffix(suffix) in PUBLIC_PROFILES
         return False
-    return (
-        len(parts) == 4
-        and parts[:2] == ("openspec", "changes")
-        and bool(parts[2])
-        and parts[3] == "tasks.md"
-    )
+    return False
 
 
 def release_revision_problem(
@@ -76,7 +71,7 @@ def release_revision_problem(
 
 def _path_problem(paths: list[str]) -> str | None:
     if not paths or any(not evidence_path_is_allowed(path) for path in paths):
-        return "release changes must use only approved evidence and task paths"
+        return "release changes must use only approved evidence paths"
     if not any(
         path.startswith("benchmarks/baselines/")
         or path.startswith("benchmarks/evidence/")

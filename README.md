@@ -1269,8 +1269,7 @@ undecorated, and an explicit `--color` cannot be combined with `--json`.
 ## Design
 
 Read [ARCHITECTURE.md](ARCHITECTURE.md) for the domain model, data flow,
-aggregation rules, Git behavior, and language extension path. OpenSpec records
-each implementation change under [`openspec/changes`](openspec/changes).
+aggregation rules, Git behavior, and language extension path.
 
 ## Credits
 
