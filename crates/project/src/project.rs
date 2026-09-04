@@ -3708,18 +3708,20 @@ impl ReferenceTables {
 
     /// Records an internal reference that no repository file matched.
     ///
-    /// A target naming an extension the source languages never analyze is an
-    /// asset reference: the repository may well hold the file, but discovery
-    /// only inventories source, so no lookup could ever have matched it.
-    /// Calling that unresolved would claim a hole in the dependency graph the
-    /// code does not have, so it is disclosed under its own reason instead.
+    /// A reference looked for under a name whose extension the source
+    /// languages never analyze is an asset reference: the repository may well
+    /// hold the file, but discovery only inventories source, so no lookup
+    /// could ever have matched it. Calling that unresolved would claim a hole
+    /// in the dependency graph the code does not have, so it is disclosed
+    /// under its own reason instead.
     fn record_unmatched_internal(
         &mut self,
         source: FileId,
         reference: &DependencySyntax,
         dependencies: &SourceDependencies,
+        candidates: &[String],
     ) {
-        let (resolution, kind, reason) = if names_asset_target(reference.target()) {
+        let (resolution, kind, reason) = if candidates_name_an_asset(candidates) {
             (
                 RelationResolution::AssetReference,
                 ResolutionIssueKind::Asset,
@@ -4186,7 +4188,12 @@ fn build_architecture(
                         [] if reference.intent()
                             == smackdebt_analysis::DependencyIntent::Internal =>
                         {
-                            tables.record_unmatched_internal(source, reference, dependencies);
+                            tables.record_unmatched_internal(
+                                source,
+                                reference,
+                                dependencies,
+                                candidates,
+                            );
                         }
                         [] => {
                             let resolution = resolve_manifest_name(
@@ -4861,16 +4868,32 @@ fn strip_path_suffix(candidate: &str) -> &str {
         .map_or(candidate, |index| &candidate[..index])
 }
 
-/// Whether a target spells a file the source languages never analyze.
+/// Whether the paths a reference was looked for under spell a file the
+/// source languages never analyze.
 ///
-/// The question is asked of the written name alone, never of the filesystem:
-/// discovery walks once and inventories source only, so an extension it does
-/// not recognize could not have been indexed whether the file exists or not.
-/// A target without an extension keeps its silence, because a bare `./config`
-/// is an unwritten source path far more often than it is an asset.
-fn names_asset_target(target: &str) -> bool {
-    let path = Path::new(strip_path_suffix(target));
-    path.extension().is_some() && !is_source_path(path)
+/// The question is asked of the candidate spellings and never of the written
+/// target, because an extension only means what it looks like once a language
+/// has read its target as a path — and a language says so by handing that path
+/// back. Dotted module notation is read as a name instead, and arrives here
+/// already turned into paths: Python offers `../core.py` for `..core`, Java
+/// offers `app/Local.java` for `app.Local`. Judged on the written target those
+/// two would carry the extensions `core` and `Local`, and every broken module
+/// import in the repository would vanish under an asset row — the inverse of
+/// the false hole this classification exists to remove.
+///
+/// Nothing is read from the filesystem. Discovery walks once and inventories
+/// source only, so an extension it does not claim could never have been
+/// indexed whether the file is on disk or not. A spelling with no extension
+/// claims nothing, because a bare `./config` is an unwritten source path far
+/// more often than it is an asset.
+fn candidates_name_an_asset(candidates: &[String]) -> bool {
+    candidates
+        .iter()
+        .filter(|candidate| !smackdebt_analysis::is_symbolic_candidate(candidate))
+        .any(|candidate| {
+            let path = Path::new(strip_path_suffix(candidate));
+            path.extension().is_some() && !is_source_path(path)
+        })
 }
 
 fn runtime_source_spellings(candidate: &str) -> Vec<String> {
@@ -5548,6 +5571,135 @@ mod tests {
             [core],
             "importing an asset leaves its package complete"
         );
+    }
+
+    #[test]
+    fn an_asset_is_read_from_the_paths_a_reference_was_looked_for_under() {
+        // The spellings each language hands the resolver. A path language
+        // offers the written name plus the extensions it knows; a language
+        // that reads dotted module notation offers only the paths it derived
+        // from that name, and the written form never appears at all.
+        let path = |target: &str| {
+            let mut values = vec![target.to_owned()];
+            for extension in [".js", ".ts"] {
+                values.push(format!("{target}{extension}"));
+                values.push(format!("{target}/index{extension}"));
+            }
+            values
+        };
+        let module = |values: &[&str]| {
+            values
+                .iter()
+                .map(|value| (*value).to_owned())
+                .collect::<Vec<_>>()
+        };
+
+        for (target, candidates, asset, reading) in [
+            (
+                "./x.yaml?raw",
+                path("./x.yaml?raw"),
+                true,
+                "a query suffix is stripped before the extension is read",
+            ),
+            (
+                "./x.md",
+                path("./x.md"),
+                true,
+                "a plain unclaimed extension needs no suffix",
+            ),
+            (
+                "./capabilities",
+                path("./capabilities"),
+                false,
+                "a spelling that names no extension claims nothing",
+            ),
+            (
+                "./missing.ts",
+                path("./missing.ts"),
+                false,
+                "a source extension that matched nothing is still a hole",
+            ),
+            // `from ..core import thing`. Read as a path the target carries
+            // the extension `core`, so only the candidates show it is a module
+            // name and that the file it misses is a real hole.
+            (
+                "..core",
+                module(&["../core.py", "../core/__init__.py"]),
+                false,
+                "dotted module notation never reaches here as a path",
+            ),
+            (
+                ".missing.thing",
+                module(&["./missing/thing.py", "./missing/thing/__init__.py"]),
+                false,
+                "a dotted module chain is not a path either",
+            ),
+            // Pinned rather than preferred: an absent `./webpack.config.js`
+            // imported as `./webpack.config` reads as an asset, because
+            // `config` is an extension no language claims. The candidates
+            // cannot settle it — the literal spelling is one of them. It costs
+            // a reader nothing: the row keeps its target and its line in JSON,
+            // and is only held out of a count that would otherwise claim a
+            // broken graph on a guess.
+            (
+                "./webpack.config",
+                path("./webpack.config"),
+                true,
+                "an unclaimed extension on a written path reads as an asset",
+            ),
+        ] {
+            assert_eq!(
+                candidates_name_an_asset(&candidates),
+                asset,
+                "{target}: {reading}"
+            );
+        }
+    }
+
+    #[test]
+    fn a_python_relative_import_of_a_missing_module_is_still_a_hole() {
+        let root = tempfile::tempdir().unwrap();
+        for (path, source) in [
+            ("pyproject.toml", "[project]\nname='service'\n"),
+            ("src/__init__.py", "\n"),
+            ("src/api/__init__.py", "\n"),
+            // `..core` names the module `src/core`, which nothing declares.
+            // Read as a path it would carry the extension `core` and vanish
+            // under an asset row, taking the package's incompleteness with it.
+            (
+                "src/api/handler.py",
+                "from ..core import thing\n\n\ndef handle():\n    return thing\n",
+            ),
+        ] {
+            let file = root.path().join(path);
+            fs::create_dir_all(file.parent().unwrap()).unwrap();
+            fs::write(file, source).unwrap();
+        }
+
+        let result = analyze_codebase(&CodebaseRequest::new(root.path())).unwrap();
+        let report = result.report();
+        let rows: Vec<_> = report
+            .resolution_diagnostics()
+            .iter()
+            .map(|value| {
+                format!(
+                    "{} · {:?} · {}",
+                    value.target(),
+                    value.kind(),
+                    value.reason()
+                )
+            })
+            .collect();
+        assert_eq!(rows, ["..core · Unresolved · no repository file matches"]);
+        assert_eq!(report.dependency_coverage().unresolved_internal_uses(), 1);
+
+        let evidence = report.graph_evidence();
+        assert!(
+            !evidence.is_complete(),
+            "a missing Python module leaves the graph incomplete"
+        );
+        assert_eq!(evidence.unresolved_internal(), 1);
+        assert_eq!(evidence.incomplete_packages().len(), 1);
     }
 
     #[test]

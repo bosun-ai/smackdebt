@@ -590,9 +590,22 @@ discovered file, and reporting it as an import that could not be followed would
 claim a hole in the dependency graph the code does not have. Such a reference
 never enters that count, never appears in the terminal, and never marks its
 package incomplete; JSON keeps its row with `"kind": "asset"` and the reason
-`target is an asset`. The rule reads the written name and nothing else: a target
-with no extension, or with a source extension that matches no file, stays
-unresolved exactly as before.
+`target is an asset`. The rule reads the paths the reference was looked for
+under, not the name as written, so dotted module notation — Python's
+`from ..core import thing`, Java's `import app.Local` — is never mistaken for a
+file with the extension `core` or `Local`; a missing module stays a hole. A
+reference with no extension, or with a source extension that matches no file,
+stays unresolved exactly as before. Nothing on disk is consulted, so a name
+whose own stem carries a dot settles as an asset: an import written
+`./webpack.config`, for an absent `webpack.config.js`, is filed as an asset
+because `config` is an extension no language claims. Its row and its location
+are kept; only the count of holes declines to guess.
+
+`dependency_coverage` has no asset counter. Asset references are counted under
+`context_relations`, with the other relations that are real evidence but never
+enter the verdict graph, so the partition still totals every reference the parse
+found. To count assets alone, count the `resolution_diagnostics` rows whose
+`kind` is `asset`.
 
 A reference written against the name a package declares for itself resolves
 inside the repository. When no repository path matches a reference, Smackdebt

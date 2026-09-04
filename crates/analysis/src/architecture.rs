@@ -914,6 +914,13 @@ impl DependencyCoverage {
     pub const fn module_ownership_relations(self) -> u32 {
         self.module_ownership_relations
     }
+    /// Relations that are real evidence but never enter the verdict graph:
+    /// those read from an untrusted source or a role that does not affect the
+    /// verdict, plus every asset reference — an import of a file discovery
+    /// never inventories, which no lookup could have matched and which is
+    /// therefore not a hole. Assets have no counter of their own; a consumer
+    /// that wants them alone counts `resolution_diagnostics` rows whose kind
+    /// is `asset`.
     pub const fn context_relations(self) -> u32 {
         self.context_relations
     }
