@@ -2302,29 +2302,6 @@ mod tests {
         );
     }
 
-    /// The core names the largest cycle of the whole file dependency graph,
-    /// so an import that could not be followed anywhere leaves it unstated.
-    #[test]
-    fn an_incomplete_dependency_graph_states_no_core_size() {
-        let core_size = |incomplete: Vec<PackageId>| {
-            let mut fixture = ReportFixture::new(ReportMode::Codebase);
-            fixture.add_file("src/left.rs", HealthCounts::default());
-            fixture.builder.set_propagation(
-                Vec::new(),
-                Vec::new(),
-                CoreSize::from_counts(6, 10),
-                Vec::new(),
-            );
-            fixture
-                .builder
-                .set_graph_evidence(GraphEvidence::new(incomplete, 1, 0, 0, Vec::new()));
-            let report = fixture.finish();
-            report.verdict().unwrap().core_size()
-        };
-        assert!(core_size(Vec::new()).is_some());
-        assert!(core_size(vec![PackageId::from_index(0)]).is_none());
-    }
-
     #[test]
     fn a_scope_verdict_answers_about_that_scope_rather_than_the_repository() {
         let mut fixture = ReportFixture::new(ReportMode::Codebase);

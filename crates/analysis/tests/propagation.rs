@@ -6,7 +6,7 @@
 //! sees.
 
 use smackdebt_analysis::{
-    ArchitectureGraph, ArchitectureReportFacts, CoreSize, DependencyCoverage,
+    ArchitectureGraph, ArchitectureReportFacts, CoreSize, DependencyCoverage, GraphEvidence,
     PackageGraphMeasurement, PackageId, PackageRecord, PropagationReach, Report, ReportBuilder,
     ReportMode, Scope, ScopeId, ScopeKind, close_over_packages,
 };
@@ -23,6 +23,17 @@ fn packaged_report(
     sizes: &[usize],
     reach_in: &[u32],
     core: Option<CoreSize>,
+) -> Report {
+    packaged_report_with_evidence(names, sizes, reach_in, core, &[])
+}
+
+/// The same report, with the packages `incomplete` names left unread.
+fn packaged_report_with_evidence(
+    names: &[&str],
+    sizes: &[usize],
+    reach_in: &[u32],
+    core: Option<CoreSize>,
+    incomplete: &[usize],
 ) -> Report {
     let mut builder = ReportBuilder::new(ReportMode::Codebase);
     let directory = ScopeId::from_index(names.len() + 1);
@@ -69,6 +80,17 @@ fn packaged_report(
     ));
     let closures = close_over_packages(names.len(), &members, &edges);
     builder.set_propagation(closures.closures().to_vec(), Vec::new(), core, Vec::new());
+    builder.set_graph_evidence(GraphEvidence::new(
+        incomplete
+            .iter()
+            .copied()
+            .map(PackageId::from_index)
+            .collect(),
+        0,
+        0,
+        0,
+        Vec::new(),
+    ));
     builder.finish()
 }
 
@@ -125,6 +147,37 @@ fn the_propagation_facts_reach_the_root_and_a_package_scope_and_nothing_else() {
     // nothing, so the two answers are the same answer.
     let first = reach_of(&report, 1);
     assert_eq!(reach_of(&report, 1), first);
+}
+
+/// Each propagation fact is stated only where the graph it was closed over
+/// was read completely.
+///
+/// A package closure reads that package's own files, so its own imports
+/// decide it and a neighbour's unread import takes nothing from it. The
+/// repository's package figure closes over every package and the core names
+/// the largest cycle of the whole graph, so a single hole leaves both
+/// unstated.
+#[test]
+fn one_unread_package_withholds_its_own_reach_and_the_whole_graph_facts() {
+    let report = packaged_report_with_evidence(
+        &["app", "core", "web"],
+        &[20, 20, 0],
+        &[3, 1, 1],
+        CoreSize::from_counts(34, 210),
+        &[1],
+    );
+    let root = report.scope_verdict(ScopeId::from_index(0));
+    assert!(root.reach().is_none(), "the package figure reads them all");
+    assert!(root.core_size().is_none(), "the core reads the whole graph");
+    assert_eq!(
+        reach_of(&report, 1),
+        Some("A change here can reach 20 of 20 files in this package.".to_owned()),
+        "a package whose imports were all followed keeps its own fact"
+    );
+    assert!(
+        reach_of(&report, 2).is_none(),
+        "the package with the unread import states nothing"
+    );
 }
 
 /// A repository of one package is that package, and no consumer can select
