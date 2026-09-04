@@ -3012,8 +3012,7 @@ fn leakage_findings(
         .copied()
         .filter(|finding| {
             leakage_evidence_is_complete(
-                architecture,
-                finding.kind(),
+                &architecture.graph_evidence,
                 evolution.file_coupling()[finding.coupling().index()],
                 files,
             )
@@ -3023,24 +3022,31 @@ fn leakage_findings(
     (candidates, findings, suppressed)
 }
 
+/// Whether the code a leakage finding names was read completely enough to
+/// state it.
+///
+/// A finding is about two files, so the gate asks about their two packages,
+/// whichever rule decided it. A package every import of which resolved cannot
+/// be hiding the dependency that would explain a co-change inside it, and a
+/// package that could not be read might be.
+///
+/// The hidden-coupling rule proves its absence over the whole connection
+/// graph, so a hole in a third package could in principle carry a path the
+/// proof never saw. Withholding every finding because some unrelated corner of
+/// the repository could not be read states nothing at all, and the pair's own
+/// two packages are what a reader checks the claim against, so that is what
+/// this asks. The withheld findings are counted, so what the gate dropped
+/// stays visible.
 fn leakage_evidence_is_complete(
-    architecture: &ArchitectureBuild,
-    kind: smackdebt_analysis::ChangeLeakageKind,
+    evidence: &GraphEvidence,
     pair: smackdebt_analysis::FileChangeCoupling,
     files: &[FileRecord],
 ) -> bool {
-    match kind {
-        smackdebt_analysis::ChangeLeakageKind::HiddenCoupling => {
-            architecture.graph_evidence.is_complete()
-        }
-        smackdebt_analysis::ChangeLeakageKind::LeakyInterface => {
-            [pair.left(), pair.right()].into_iter().all(|file| {
-                files[file.index()]
-                    .package()
-                    .is_some_and(|package| architecture.graph_evidence.package_is_complete(package))
-            })
-        }
-    }
+    [pair.left(), pair.right()].into_iter().all(|file| {
+        files[file.index()]
+            .package()
+            .is_some_and(|package| evidence.package_is_complete(package))
+    })
 }
 
 fn fraction_direction(
@@ -3342,7 +3348,7 @@ fn leakage_comparisons(
     for key in current.symmetric_difference(&before) {
         let &(kind, coupling, _) = key;
         let pair = evidence.pairs[coupling.index()];
-        let (current_incomplete, base_incomplete) = evidence.incomplete_sides(kind, pair);
+        let (current_incomplete, base_incomplete) = evidence.incomplete_sides(pair);
         if current_incomplete || base_incomplete {
             suppression.record(current_incomplete, base_incomplete);
             continue;
@@ -3372,14 +3378,10 @@ struct LeakageComparisonEvidence<'a> {
 }
 
 impl LeakageComparisonEvidence<'_> {
-    fn incomplete_sides(
-        &self,
-        kind: smackdebt_analysis::ChangeLeakageKind,
-        pair: smackdebt_analysis::FileChangeCoupling,
-    ) -> (bool, bool) {
+    fn incomplete_sides(&self, pair: smackdebt_analysis::FileChangeCoupling) -> (bool, bool) {
         (
-            !leakage_evidence_is_complete(self.current, kind, pair, self.current_files),
-            !leakage_evidence_is_complete(self.base, kind, pair, self.base_files),
+            !leakage_evidence_is_complete(&self.current.graph_evidence, pair, self.current_files),
+            !leakage_evidence_is_complete(&self.base.graph_evidence, pair, self.base_files),
         )
     }
 }
@@ -7260,6 +7262,42 @@ mod tests {
                     && diagnostic.message() == "parser recovered from syntax errors"
             }),
         }
+    }
+
+    /// A leakage finding is about two files, so one unread package withholds
+    /// only the findings that name it.
+    #[test]
+    fn leakage_between_two_complete_packages_survives_a_third_incomplete_one() {
+        let file = |index: usize, package: usize| {
+            FileRecord::new(
+                FileId::from_index(index),
+                ScopeId::from_index(0),
+                "src/unit.js",
+                Coverage::default(),
+                HealthCounts::default(),
+            )
+            .with_package(PackageId::from_index(package))
+        };
+        let files = [file(0, 0), file(1, 1), file(2, 2)];
+        let evidence = GraphEvidence::new(vec![PackageId::from_index(2)], 0, 0, 0, Vec::new());
+        let pair = |left: usize, right: usize| {
+            smackdebt_analysis::FileChangeCoupling::new(
+                FileId::from_index(left),
+                FileId::from_index(right),
+                4,
+                5,
+                2,
+            )
+        };
+        let pairs = [pair(0, 1), pair(0, 2)];
+
+        assert!(leakage_evidence_is_complete(&evidence, pairs[0], &files));
+        assert!(!leakage_evidence_is_complete(&evidence, pairs[1], &files));
+        let suppressed = pairs
+            .into_iter()
+            .filter(|pair| !leakage_evidence_is_complete(&evidence, *pair, &files))
+            .count();
+        assert_eq!(suppressed, 1);
     }
 
     /// A file the file dependency graph never reads cannot leave a hole in it.
