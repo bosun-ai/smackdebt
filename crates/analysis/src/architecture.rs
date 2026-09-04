@@ -940,10 +940,18 @@ impl DependencyCoverage {
     }
 }
 
+/// What reading one reference against the repository concluded.
 #[derive(Clone, Copy, Debug, Eq, Hash, Ord, PartialEq, PartialOrd)]
 pub enum ResolutionIssueKind {
+    /// The target is dynamic, or no repository file carries the name.
     Unresolved,
+    /// Several repository files carry the name.
     Ambiguous,
+    /// The target names a file the source languages never analyze, such as a
+    /// YAML fixture or an image imported for its bytes. The reference is
+    /// disclosed rather than counted as a hole in the dependency graph,
+    /// because no analyzable file was ever there to reach.
+    Asset,
 }
 
 #[derive(Clone, Debug, Eq, PartialEq)]

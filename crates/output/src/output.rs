@@ -1922,11 +1922,14 @@ fn unmatched_import_rows(report: &Report, selected: &Scope) -> Vec<Row> {
         .resolution_diagnostics()
         .iter()
         .filter(|value| file_belongs_to_scope(report, value.file(), selected))
-        .map(|diagnostic| {
+        .filter_map(|diagnostic| {
             let source = report.files()[diagnostic.file().index()].path();
             let status = match diagnostic.kind() {
                 ResolutionIssueKind::Unresolved => "could not be matched",
                 ResolutionIssueKind::Ambiguous => "matched more than one file",
+                // An asset reference is not an import problem, so it explains
+                // nothing the grouped sentence above counted.
+                ResolutionIssueKind::Asset => return None,
             };
             let mut row = Row::new(
                 None,
@@ -1940,7 +1943,7 @@ fn unmatched_import_rows(report: &Report, selected: &Scope) -> Vec<Row> {
             for fact in evidence_facts(Some(diagnostic.role()), Some(diagnostic.trust())) {
                 row = row.with_fact(fact);
             }
-            row
+            Some(row)
         })
         .collect()
 }
@@ -2270,6 +2273,8 @@ fn resolution_warning(report: &Report, selected: &Scope) -> Option<Row> {
         match diagnostic.kind() {
             smackdebt_analysis::ResolutionIssueKind::Unresolved => unresolved += 1,
             smackdebt_analysis::ResolutionIssueKind::Ambiguous => ambiguous += 1,
+            // An import of an asset was followed exactly as far as it goes.
+            smackdebt_analysis::ResolutionIssueKind::Asset => {}
         }
     }
     let total = unresolved + ambiguous;

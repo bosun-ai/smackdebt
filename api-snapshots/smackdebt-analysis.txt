@@ -198,6 +198,7 @@ pub smackdebt_analysis::ReportMode::Codebase
 pub smackdebt_analysis::ReportMode::Diff
 pub enum smackdebt_analysis::ResolutionIssueKind
 pub smackdebt_analysis::ResolutionIssueKind::Ambiguous
+pub smackdebt_analysis::ResolutionIssueKind::Asset
 pub smackdebt_analysis::ResolutionIssueKind::Unresolved
 pub enum smackdebt_analysis::ScopeKind
 pub smackdebt_analysis::ScopeKind::Directory

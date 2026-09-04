@@ -1340,11 +1340,15 @@ fn unresolved_and_ambiguous_relations_reach_a_file_scope_and_all_only() {
     .unwrap();
     fs::write(project.path().join("app/choice.js"), "export default 1;\n").unwrap();
     fs::write(project.path().join("app/choice.ts"), "export default 2;\n").unwrap();
+    // An asset the repository really holds, imported for its bytes. Discovery
+    // never inventories it as source, so no lookup could match it and calling
+    // the import unfollowed would be false evidence.
+    fs::write(project.path().join("app/settings.yaml"), "name: app\n").unwrap();
     // A directory inside the package gives the third scope kind the rule names.
     fs::create_dir(project.path().join("app/inner")).unwrap();
     fs::write(
         project.path().join("app/inner/main.js"),
-        "import missing from './missing';\nexport function inner() { return missing; }\n",
+        "import missing from './missing';\nimport settings from '../settings.yaml?raw';\nexport function inner() { return missing + settings; }\n",
     )
     .unwrap();
     git(project.path(), ["init", "-b", "main"]);
@@ -1381,6 +1385,10 @@ fn unresolved_and_ambiguous_relations_reach_a_file_scope_and_all_only() {
         ] {
             assert!(!grouped.contains(row), "{grouped}");
         }
+        // The counts above are the whole point: the asset import beside the
+        // missing one is followed as far as an asset goes, so it neither joins
+        // the sentence nor names itself anywhere in the terminal.
+        assert!(!grouped.contains("settings.yaml"), "{grouped}");
     }
     // The same directory states its rows once `--all` is asked for.
     let detailed = String::from_utf8(run_in(
@@ -1392,6 +1400,25 @@ fn unresolved_and_ambiguous_relations_reach_a_file_scope_and_all_only() {
         detailed.contains("app/inner/main.js:1 → ./missing · could not be matched"),
         "{detailed}"
     );
+    assert!(!detailed.contains("settings.yaml"), "{detailed}");
+
+    // The machine report keeps the asset reference under its own reason, and
+    // the evidence the graph is judged on counts one hole, not two: only the
+    // import that named a source file nothing answers.
+    let json = run_in(project.path(), ["--json", "--jobs", "1"]);
+    let report: serde_json::Value = serde_json::from_slice(&json).unwrap();
+    validate_schema(&report);
+    let assets: Vec<_> = report["resolution_diagnostics"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .filter(|value| value["kind"] == "asset")
+        .collect();
+    assert_eq!(assets.len(), 1, "{}", report["resolution_diagnostics"]);
+    assert_eq!(assets[0]["target"], "../settings.yaml?raw");
+    assert_eq!(assets[0]["reason"], "target is an asset");
+    assert_eq!(report["graph_evidence"]["unresolved_internal"], 1);
+    assert_eq!(report["dependency_coverage"]["unresolved_internal_uses"], 1);
 
     for (case, arguments) in [
         vec!["app/main.js", "--color", "never"],

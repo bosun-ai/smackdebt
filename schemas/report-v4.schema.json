@@ -1385,7 +1385,8 @@
         "kind": {
           "enum": [
             "unresolved",
-            "ambiguous"
+            "ambiguous",
+            "asset"
           ]
         },
         "reason": {

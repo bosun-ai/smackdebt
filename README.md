@@ -573,13 +573,26 @@ them against discovered repository files:
 - `internal` references identify exactly one file in the repository;
 - `external` references name code outside the repository;
 - `unresolved` references are dynamic or malformed;
-- `ambiguous` references match several possible internal files.
+- `ambiguous` references match several possible internal files;
+- `asset` references name a file that is not source, such as a YAML fixture or
+  an image imported for its bytes.
 
 Smackdebt does not guess when identity is unclear. Unmatched and ambiguous
 references are counted in one grouped warning sentence, their per-reference
 detail appears under `--all` or when the selected scope is a file, and JSON
 retains their locations and reasons. At every other scope that grouped sentence
 is their whole terminal presence.
+
+An asset reference is not one of them. Smackdebt inventories source files only,
+so a relative import whose name carries an extension no source language claims —
+`./config.yaml?raw`, `./logo.svg`, `./theme.css` — could never have matched a
+discovered file, and reporting it as an import that could not be followed would
+claim a hole in the dependency graph the code does not have. Such a reference
+never enters that count, never appears in the terminal, and never marks its
+package incomplete; JSON keeps its row with `"kind": "asset"` and the reason
+`target is an asset`. The rule reads the written name and nothing else: a target
+with no extension, or with a source extension that matches no file, stays
+unresolved exactly as before.
 
 A reference written against the name a package declares for itself resolves
 inside the repository. When no repository path matches a reference, Smackdebt

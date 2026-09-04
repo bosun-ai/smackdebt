@@ -3466,6 +3466,8 @@ enum RelationResolution {
     AmbiguousInternal,
     External,
     UnresolvedPackage,
+    /// An internal reference to a file the source languages never analyze.
+    AssetReference,
 }
 
 #[derive(Default)]
@@ -3487,18 +3489,36 @@ impl DependencyPartitionCounts {
         trust: SourceTrust,
         resolution: RelationResolution,
     ) {
+        *self.partition(relation, role, trust, resolution) += 1;
+    }
+
+    /// The single partition one relation belongs to.
+    ///
+    /// Every relation lands in exactly one counter, so the partitions add up
+    /// to the references the parse found and none is counted twice.
+    fn partition(
+        &mut self,
+        relation: smackdebt_analysis::StaticRelationKind,
+        role: SourceRole,
+        trust: SourceTrust,
+        resolution: RelationResolution,
+    ) -> &mut u32 {
         if trust != SourceTrust::Trusted || !role.affects_verdict() {
-            self.context_relations += 1;
-        } else if relation == smackdebt_analysis::StaticRelationKind::ModuleOwnership {
-            self.module_ownership_relations += 1;
-        } else {
-            match resolution {
-                RelationResolution::ResolvedInternal => self.resolved_internal_uses += 1,
-                RelationResolution::UnresolvedInternal => self.unresolved_internal_uses += 1,
-                RelationResolution::AmbiguousInternal => self.ambiguous_internal_uses += 1,
-                RelationResolution::External => self.external_uses += 1,
-                RelationResolution::UnresolvedPackage => self.unresolved_package_uses += 1,
-            }
+            return &mut self.context_relations;
+        }
+        if relation == smackdebt_analysis::StaticRelationKind::ModuleOwnership {
+            return &mut self.module_ownership_relations;
+        }
+        match resolution {
+            RelationResolution::ResolvedInternal => &mut self.resolved_internal_uses,
+            RelationResolution::UnresolvedInternal => &mut self.unresolved_internal_uses,
+            RelationResolution::AmbiguousInternal => &mut self.ambiguous_internal_uses,
+            RelationResolution::External => &mut self.external_uses,
+            RelationResolution::UnresolvedPackage => &mut self.unresolved_package_uses,
+            // An asset reference explains the file it was written in without
+            // ever joining the verdict graph, so it stays in the partition
+            // that holds relations kept as context.
+            RelationResolution::AssetReference => &mut self.context_relations,
         }
     }
 
@@ -3684,6 +3704,35 @@ impl ReferenceTables {
             kind,
             reason,
         );
+    }
+
+    /// Records an internal reference that no repository file matched.
+    ///
+    /// A target naming an extension the source languages never analyze is an
+    /// asset reference: the repository may well hold the file, but discovery
+    /// only inventories source, so no lookup could ever have matched it.
+    /// Calling that unresolved would claim a hole in the dependency graph the
+    /// code does not have, so it is disclosed under its own reason instead.
+    fn record_unmatched_internal(
+        &mut self,
+        source: FileId,
+        reference: &DependencySyntax,
+        dependencies: &SourceDependencies,
+    ) {
+        let (resolution, kind, reason) = if names_asset_target(reference.target()) {
+            (
+                RelationResolution::AssetReference,
+                ResolutionIssueKind::Asset,
+                "target is an asset",
+            )
+        } else {
+            (
+                RelationResolution::UnresolvedInternal,
+                ResolutionIssueKind::Unresolved,
+                "no repository file matches",
+            )
+        };
+        self.record_diagnostic(source, reference, dependencies, resolution, kind, reason);
     }
 
     /// Records a reference no path candidate matched.
@@ -4137,14 +4186,7 @@ fn build_architecture(
                         [] if reference.intent()
                             == smackdebt_analysis::DependencyIntent::Internal =>
                         {
-                            tables.record_diagnostic(
-                                source,
-                                reference,
-                                dependencies,
-                                RelationResolution::UnresolvedInternal,
-                                ResolutionIssueKind::Unresolved,
-                                "no repository file matches",
-                            );
+                            tables.record_unmatched_internal(source, reference, dependencies);
                         }
                         [] => {
                             let resolution = resolve_manifest_name(
@@ -4819,6 +4861,18 @@ fn strip_path_suffix(candidate: &str) -> &str {
         .map_or(candidate, |index| &candidate[..index])
 }
 
+/// Whether a target spells a file the source languages never analyze.
+///
+/// The question is asked of the written name alone, never of the filesystem:
+/// discovery walks once and inventories source only, so an extension it does
+/// not recognize could not have been indexed whether the file exists or not.
+/// A target without an extension keeps its silence, because a bare `./config`
+/// is an unwritten source path far more often than it is an asset.
+fn names_asset_target(target: &str) -> bool {
+    let path = Path::new(strip_path_suffix(target));
+    path.extension().is_some() && !is_source_path(path)
+}
+
 fn runtime_source_spellings(candidate: &str) -> Vec<String> {
     let path = Path::new(candidate);
     let Some(extension) = path.extension().and_then(|value| value.to_str()) else {
@@ -5411,6 +5465,88 @@ mod tests {
             unresolved,
             ["super::super::*", "super::Nothing"],
             "a module the walk cannot name exactly keeps its absence: {edges:?}"
+        );
+    }
+
+    #[test]
+    fn an_import_of_a_non_source_file_is_an_asset_rather_than_a_hole() {
+        let root = tempfile::tempdir().unwrap();
+        for (path, source) in [
+            ("app/package.json", "{\"name\":\"app\"}\n"),
+            // Three assets an importer reads for their bytes: one carries a
+            // query suffix, one a fragment, one neither.
+            (
+                "app/main.ts",
+                "import raw from './config.yaml?raw';\nimport icon from './logo.svg#glyph';\nimport theme from './theme.css';\nimport helper from './helper';\nexport default [raw, icon, theme, helper];\n",
+            ),
+            ("app/helper.ts", "export default 1;\n"),
+            ("app/config.yaml", "name: fixture\n"),
+            ("app/logo.svg", "<svg />\n"),
+            ("app/theme.css", ".a { color: red; }\n"),
+            ("core/package.json", "{\"name\":\"core\"}\n"),
+            // The scope guard: a source extension that matches nothing, and a
+            // target that names no extension at all, are still holes.
+            (
+                "core/main.ts",
+                "import gone from './gone.ts';\nimport absent from './absent';\nexport default [gone, absent];\n",
+            ),
+        ] {
+            let file = root.path().join(path);
+            fs::create_dir_all(file.parent().unwrap()).unwrap();
+            fs::write(file, source).unwrap();
+        }
+
+        let result = analyze_codebase(&CodebaseRequest::new(root.path())).unwrap();
+        let report = result.report();
+        let rows: Vec<_> = report
+            .resolution_diagnostics()
+            .iter()
+            .map(|value| {
+                format!(
+                    "{} · {:?} · {}",
+                    value.target(),
+                    value.kind(),
+                    value.reason()
+                )
+            })
+            .collect();
+        assert_eq!(
+            rows,
+            [
+                "./config.yaml?raw · Asset · target is an asset",
+                "./logo.svg#glyph · Asset · target is an asset",
+                "./theme.css · Asset · target is an asset",
+                "./absent · Unresolved · no repository file matches",
+                "./gone.ts · Unresolved · no repository file matches",
+            ],
+            "an asset keeps its disclosure under its own reason"
+        );
+
+        let coverage = report.dependency_coverage();
+        assert_eq!(
+            coverage.unresolved_internal_uses(),
+            2,
+            "only the two holes are unresolved"
+        );
+        assert_eq!(
+            coverage.context_relations(),
+            3,
+            "the assets stay counted, outside the verdict graph"
+        );
+        assert_eq!(coverage.resolved_internal_uses(), 1);
+
+        let evidence = report.graph_evidence();
+        assert_eq!(evidence.unresolved_internal(), 2);
+        let core = report
+            .files()
+            .iter()
+            .find(|file| file.path() == "core/main.ts")
+            .and_then(smackdebt_analysis::FileRecord::package)
+            .expect("the hole belongs to a package");
+        assert_eq!(
+            evidence.incomplete_packages(),
+            [core],
+            "importing an asset leaves its package complete"
         );
     }
 

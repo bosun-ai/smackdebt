@@ -620,6 +620,7 @@ impl Serialize for ResolutionDiagnosticView<'_> {
         let kind = match self.0.kind() {
             smackdebt_analysis::ResolutionIssueKind::Unresolved => "unresolved",
             smackdebt_analysis::ResolutionIssueKind::Ambiguous => "ambiguous",
+            smackdebt_analysis::ResolutionIssueKind::Asset => "asset",
         };
         let mut map = serializer.serialize_map(Some(11))?;
         map.serialize_entry("file", &self.0.file().get())?;
