@@ -1,6 +1,6 @@
 smackdebt diff · repository root
   Debt increased.
-worse 1 (architecture) · better 0 · changed 0
+worse 1 · better 0 · changed 0
 worst: app/main.js — package dependency cycle
 
 AREAS
@@ -18,4 +18,4 @@ WARNINGS
   warning 2 imports could not be followed
         1 named nothing in the repository · 1 matched more than one file
 
-  inspect directories and files for more details
+  next: smackdebt diff main app

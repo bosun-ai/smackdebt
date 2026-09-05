@@ -11,7 +11,7 @@ use anstyle::{Ansi256Color, AnsiColor, Style};
 use smackdebt_analysis::{
     ArchitectureComparisonKind, ArchitectureFindingId, ChangeLeakageFindingId, CodebaseTier,
     Comparison, ComparisonDirection, ComparisonKind, CoreSize, CouplingLink, CoverageQualifier,
-    DebtDiffSelection, DebtFamily, DependencyEdgeId, Diagnostic, DiagnosticKind, DiffTier,
+    DebtDiffSelection, DependencyEdgeId, Diagnostic, DiagnosticKind, DiffTier,
     EvolutionaryFindingId, FileChangeCoupling, FileId, FileRecord, Finding, FindingId, Instability,
     KnowledgeConcentrationFindingId, Language, Measurements, PackageId, ProblemAnchor, ProblemCard,
     ProblemEvidence, ProblemPattern, ProblemVisibility, PropagationReach, Rating, Report,
@@ -367,6 +367,25 @@ impl DiffRowSelection {
     fn len(&self) -> usize {
         self.0.len()
     }
+
+    /// The highest-ranked row of the selection, in the one order every diff
+    /// section states its rows in.
+    fn top(&self) -> Option<&DiffRowKey> {
+        self.0.values().min()
+    }
+
+    /// Drops every row but the highest-ranked one.
+    fn keep_top(&mut self) {
+        let Some(top) = self
+            .0
+            .iter()
+            .min_by(|left, right| left.1.cmp(right.1))
+            .map(|(identity, _)| *identity)
+        else {
+            return;
+        };
+        self.0.retain(|identity, _| *identity == top);
+    }
 }
 
 impl Section {
@@ -454,14 +473,25 @@ impl Presentation {
         } else {
             Section::new("PROBLEMS")
         };
+        let no_debt = report.mode() == ReportMode::Diff
+            && verdict.diff_tier() == Some(DiffTier::NoDebtChange);
+        let trust = comparison_trust(report, selected, file_detail, &verdict);
+        // A diff that moved no debt states one witness for the count it printed
+        // and the comparison confidence behind it, and leaves the rest out.
+        let trust_only = no_debt && !all && trust.exists;
         let diff_rows = (!codebase).then(|| {
-            select_diff_rows(
+            let mut rows = select_diff_rows(
                 report,
                 selection,
                 all,
                 top,
                 verdict.diff_tier() == Some(DiffTier::Mixed),
-            )
+            );
+            // `--top` names its own number and keeps it.
+            if trust_only && top.is_none() {
+                rows.keep_top();
+            }
+            rows
         });
         let (findings, architecture, history) = if codebase {
             (
@@ -479,16 +509,21 @@ impl Presentation {
                     top,
                     selection,
                     diff_rows,
+                    witness_only: trust_only,
                 }
                 .section(),
                 diff_architecture_rows(report, selection, diff_rows),
-                history_rows(report, selected, detail, selection, diff_rows),
+                DiffHistoryRows {
+                    report,
+                    selected,
+                    detail,
+                    selection,
+                    diff_rows,
+                    witness_only: trust_only,
+                }
+                .section(),
             )
         };
-        let no_debt = report.mode() == ReportMode::Diff
-            && verdict.diff_tier() == Some(DiffTier::NoDebtChange);
-        let trust = comparison_trust(report, selected, file_detail, &verdict);
-        let trust_only = no_debt && !all && trust.exists;
         let verdict_only = no_debt && !trust.exists && findings.rows.is_empty();
         let (warnings, warning_detail) = if trust_only {
             comparison_trust_warning_rows(report, selected, file_detail, trust.history)
@@ -499,7 +534,11 @@ impl Presentation {
             ReportMode::Codebase => first_problem_path(report, displayed, selected, all)
                 .or_else(|| drill_path_from_visible(report, selected, areas.first()))
                 .map(|path| format!("smackdebt {}", path.to_string_lossy())),
-            ReportMode::Diff => None,
+            ReportMode::Diff => diff_next(
+                report,
+                selected,
+                diff_rows.as_ref().expect("diff rows were selected"),
+            ),
         };
 
         let mut area_section = Section::new("AREAS");
@@ -1588,6 +1627,9 @@ struct DiffFindingRows<'a> {
     top: Option<NonZeroUsize>,
     selection: &'a DebtDiffSelection,
     diff_rows: &'a DiffRowSelection,
+    /// Whether the view states the one movement behind its counts and nothing
+    /// beside it, which is what a no-debt diff has to say.
+    witness_only: bool,
 }
 
 impl DiffFindingRows<'_> {
@@ -1599,6 +1641,7 @@ impl DiffFindingRows<'_> {
             top,
             selection,
             diff_rows,
+            witness_only,
         } = self;
         let mut section = Section::new("FINDINGS");
         // Default output follows the debt-moving selection. Detail output adds
@@ -1610,7 +1653,7 @@ impl DiffFindingRows<'_> {
             .filter(|id| diff_rows.contains(DiffRowIdentity::Source(id.index())))
             .map(|id| &report.comparisons()[id.index()])
             .collect();
-        if all || displayed.kind() == ScopeKind::File {
+        if !witness_only && (all || displayed.kind() == ScopeKind::File) {
             let mut context = displayed
                 .comparisons()
                 .iter()
@@ -1984,19 +2027,97 @@ fn unmatched_import_rows(report: &Report, selected: &Scope) -> Vec<Row> {
         .collect()
 }
 
-fn current_history_rows(report: &Report, selected: &Scope, detail: bool) -> Section {
+/// Which packages a diff's standing history rows may name.
+///
+/// A diff answers one question — what this change did — so a row it states has
+/// to be about the change: the change touched the package, and the scope on
+/// screen contains it. A row failing either test is repository trivia here, and
+/// it stays in JSON, where a consumer reads the whole table anyway.
+struct HistoryRelevance(BTreeSet<PackageId>);
+
+impl HistoryRelevance {
+    /// No package at all, which is what a diff whose answer is that no debt
+    /// changed states: its one witness is the whole story there.
+    fn nothing() -> Self {
+        Self(BTreeSet::new())
+    }
+
+    /// The packages this change touched that the displayed scope contains.
+    ///
+    /// A diff measures the files it compared and carries every other file as
+    /// context, so a measured file is one this change touched. A scope below a
+    /// package contains no package, which is why a file view states no
+    /// package-level history.
+    fn change_relevant(report: &Report, selected: &Scope) -> Self {
+        Self(
+            report
+                .files()
+                .iter()
+                .filter(|file| file.coverage().selected_files() > 0)
+                .filter_map(FileRecord::package)
+                .filter(|package| package_within_scope(report, *package, selected))
+                .collect(),
+        )
+    }
+
+    fn states(&self, package: PackageId) -> bool {
+        self.0.contains(&package)
+    }
+
+    fn states_pair(&self, left: PackageId, right: PackageId) -> bool {
+        self.states(left) && self.states(right)
+    }
+}
+
+/// Whether a package lies inside `scope`, which a scope below the package does
+/// not: a file view names the file's own facts, not its package's.
+fn package_within_scope(report: &Report, package: PackageId, scope: &Scope) -> bool {
+    report
+        .packages()
+        .get(package.index())
+        .is_some_and(|record| scope_within(report, record.scope(), scope.id()))
+}
+
+fn current_history_rows(
+    report: &Report,
+    selected: &Scope,
+    detail: bool,
+    relevance: &HistoryRelevance,
+) -> Section {
     let mut section = Section::new("HISTORY");
-    let relevant_packages = report
+    let in_scope = report
         .files()
         .iter()
         .filter(|file| file_belongs_to_scope(report, file.id(), selected))
         .filter_map(FileRecord::package)
-        .collect::<std::collections::BTreeSet<_>>();
+        .collect::<BTreeSet<_>>();
+    section.rows = coupling_rows(report, selected, detail, relevance, &in_scope);
+    section
+        .rows
+        .extend(concentration_rows(report, relevance, &in_scope));
+    // The concise view states at most three actionable history rows; a path
+    // view and `--all` keep the relevant context they exist to show.
+    if !detail {
+        section.rows.truncate(3);
+    }
+    section
+}
 
+/// The pair rows one scope states: the findings it holds, then the strong
+/// coupling a code dependency already explains where detail was asked for.
+fn coupling_rows(
+    report: &Report,
+    selected: &Scope,
+    detail: bool,
+    relevance: &HistoryRelevance,
+    in_scope: &BTreeSet<PackageId>,
+) -> Vec<Row> {
+    let mut rows = Vec::new();
     let mut couplings = selected
         .evolutionary_findings()
         .iter()
         .map(|id| report.evolutionary_findings()[id.index()].coupling())
+        .filter(|pair| relevance.states_pair(pair.left(), pair.right()))
         .collect::<Vec<_>>();
     couplings.sort_by(|left, right| {
         Reverse(left.shared_commits())
@@ -2021,10 +2142,8 @@ fn current_history_rows(report: &Report, selected: &Scope, detail: bool) -> Sect
             .iter()
             .copied()
             .filter(|pair| qualifies_for_finding(*pair))
-            .filter(|pair| {
-                relevant_packages.contains(&pair.left())
-                    || relevant_packages.contains(&pair.right())
-            })
+            .filter(|pair| relevance.states_pair(pair.left(), pair.right()))
+            .filter(|pair| in_scope.contains(&pair.left()) || in_scope.contains(&pair.right()))
             .filter(|pair| !couplings.iter().any(|finding| same_pair(*finding, *pair)))
             .collect()
     } else {
@@ -2059,50 +2178,65 @@ fn current_history_rows(report: &Report, selected: &Scope, detail: bool) -> Sect
             }
             CouplingLink::None => row.with_fact("no code dependency"),
         };
-        section.rows.push(row);
+        rows.push(row);
     }
+    rows
+}
 
-    // One package states its concentration once, however many source roles
-    // contributed to it.
-    let mut stated = std::collections::BTreeSet::new();
+/// The concentration rows one scope states, each package once however many
+/// source roles contributed to it.
+fn concentration_rows(
+    report: &Report,
+    relevance: &HistoryRelevance,
+    in_scope: &BTreeSet<PackageId>,
+) -> Vec<Row> {
+    let mut rows = Vec::new();
+    let mut stated = BTreeSet::new();
     for finding in report.knowledge_concentration_findings() {
-        let concentration = finding.concentration();
-        if !relevant_packages.contains(&concentration.package())
-            || !stated.insert(concentration.package())
-        {
+        let package = finding.concentration().package();
+        if !relevance.states(package) || !in_scope.contains(&package) || !stated.insert(package) {
             continue;
         }
-        let package = package_name(report, concentration.package().index()).unwrap_or("?");
-        section.rows.push(Row::new(
+        let concentration = finding.concentration();
+        rows.push(Row::new(
             Some(Word::rating(finding.rating())),
             format!(
-                "one contributor made {} of {} commits to {package}",
+                "one contributor made {} of {} commits to {}",
                 Grouped(concentration.numerator() as usize),
-                Grouped(concentration.denominator() as usize)
+                Grouped(concentration.denominator() as usize),
+                package_name(report, package.index()).unwrap_or("?")
             ),
         ));
     }
-    // The concise view states at most three actionable history rows; a path
-    // view and `--all` keep the relevant context they exist to show.
-    if !detail {
-        section.rows.truncate(3);
-    }
-
-    section
+    rows
 }
 
-fn history_rows(
-    report: &Report,
-    selected: &Scope,
+/// The history one diff view states: the standing rows its own change is
+/// about, then the coupling that moved.
+struct DiffHistoryRows<'a> {
+    report: &'a Report,
+    selected: &'a Scope,
     detail: bool,
-    selection: &DebtDiffSelection,
-    diff_rows: &DiffRowSelection,
-) -> Section {
-    let mut section = current_history_rows(report, selected, detail);
-    if report.mode() == ReportMode::Diff {
-        append_evolutionary_comparisons(&mut section, report, selection, diff_rows);
+    selection: &'a DebtDiffSelection,
+    diff_rows: &'a DiffRowSelection,
+    /// Whether the view states its one witness and no standing history at all,
+    /// which is the whole answer a diff that moved no debt has.
+    witness_only: bool,
+}
+
+impl DiffHistoryRows<'_> {
+    fn section(self) -> Section {
+        let relevance = if self.witness_only {
+            HistoryRelevance::nothing()
+        } else {
+            HistoryRelevance::change_relevant(self.report, self.selected)
+        };
+        let mut section = current_history_rows(self.report, self.selected, self.detail, &relevance);
+        // A coupling that moved is what this change did, not standing history,
+        // so it is stated wherever the verdict counted it.
+        append_evolutionary_comparisons(&mut section, self.report, self.selection, self.diff_rows);
+        section
     }
-    section
 }
 
 fn append_evolutionary_comparisons(
@@ -2413,7 +2547,7 @@ impl<'a, W: Write> Renderer<'a, W> {
         // Codebase debt is one ranked section of named problems; a diff keeps
         // its three sections this round.
         let sections: &[&Section] = match (view.mode, view.trust_only) {
-            (ReportMode::Diff, true) => &[],
+            (ReportMode::Diff, true) => &[&view.findings, &view.architecture, &view.history],
             (ReportMode::Codebase, _) => &[&view.areas, &view.problems],
             (ReportMode::Diff, false) => &[
                 &view.areas,
@@ -2434,9 +2568,6 @@ impl<'a, W: Write> Renderer<'a, W> {
         if let Some(next) = &view.next {
             writeln!(self.writer)?;
             self.write_head(Some(Word::Next), next)?;
-        } else if view.mode == ReportMode::Diff {
-            writeln!(self.writer)?;
-            self.write_indented(2, "inspect directories and files for more details")?;
         }
         Ok(())
     }
@@ -2601,36 +2732,17 @@ fn verdict_counts(verdict: &Verdict, mode: ReportMode) -> String {
                 Grouped(counts.checked() as usize)
             )
         }
+        // Which family moved is what the sectioned rows below already say, so
+        // the counts state their words and their numbers only.
         ReportMode::Diff => {
-            let facts = verdict.facts();
-            let total = facts.total();
+            let total = verdict.facts().total();
             [
                 (Word::Worse, total.worse()),
                 (Word::Better, total.better()),
                 (Word::Changed, total.changed()),
             ]
             .into_iter()
-            .map(|(word, value)| {
-                let families: Vec<&str> = DebtFamily::ALL
-                    .into_iter()
-                    .filter(|family| match word {
-                        Word::Worse => facts.counts(*family).worse() > 0,
-                        Word::Better => facts.counts(*family).better() > 0,
-                        _ => facts.counts(*family).changed() > 0,
-                    })
-                    .map(DebtFamily::name)
-                    .collect();
-                if families.is_empty() {
-                    format!("{} {}", word.text(), Grouped(value as usize))
-                } else {
-                    format!(
-                        "{} {} ({})",
-                        word.text(),
-                        Grouped(value as usize),
-                        families.join(", ")
-                    )
-                }
-            })
+            .map(|(word, value)| format!("{} {}", word.text(), Grouped(value as usize)))
             .collect::<Vec<_>>()
             .join(" · ")
         }
@@ -2950,6 +3062,42 @@ pub(super) fn direction_name(direction: ComparisonDirection) -> &'static str {
         ComparisonDirection::Better => "better",
         ComparisonDirection::Changed => "changed",
     }
+}
+
+/// The command a diff points at next: the same ref, and the path its
+/// highest-ranked movement names.
+///
+/// A diff that moved nothing has nowhere to send a reader, and a file view is
+/// already as deep as a path goes, so both print no pointer at all rather than
+/// a command that repeats the one just run.
+fn diff_next(report: &Report, selected: &Scope, diff_rows: &DiffRowSelection) -> Option<String> {
+    if selected.kind() == ScopeKind::File {
+        return None;
+    }
+    let path = top_movement_path(diff_rows)?;
+    let reference = report.comparison_ref()?;
+    path_below(selected.name(), path).then(|| format!("smackdebt diff {reference} {path}"))
+}
+
+/// The path the highest-ranked visible movement names.
+///
+/// A movement about a pair names both sides; the first is the one a reader
+/// opens, exactly as a codebase problem card points at the first of its files.
+fn top_movement_path(diff_rows: &DiffRowSelection) -> Option<&str> {
+    let key = diff_rows.top()?;
+    let path = match &key.comparison_identity {
+        DiffComparisonIdentity::Source(_) => key.subject.as_str(),
+        DiffComparisonIdentity::Paths(paths) => paths.first()?.as_str(),
+    };
+    (!path.is_empty()).then_some(path)
+}
+
+/// Whether `path` lies strictly inside the scope named `scope`.
+fn path_below(scope: &str, path: &str) -> bool {
+    if scope == "." {
+        return path != ".";
+    }
+    path != scope && Path::new(path).starts_with(scope)
 }
 
 fn drill_path_from_visible(
@@ -3571,6 +3719,7 @@ mod tests {
             ));
             builder.link_evolutionary_comparison(root, EvolutionaryComparisonId::from_index(0));
             builder.link_evolutionary_comparison(root, EvolutionaryComparisonId::from_index(1));
+            builder.set_comparison_ref("main");
             builder.finish()
         }
     }
@@ -4825,7 +4974,8 @@ mod tests {
         );
             assert!(!graph.contains("HISTORY"), "{graph}");
             assert!(!graph.contains("changed together"), "{graph}");
-            assert!(graph.ends_with("  inspect directories and files for more details\n"));
+            // Nothing moved, so there is no movement to point at.
+            assert!(!graph.contains("next:"), "{graph}");
 
             let incomplete = HistoryCoverage::new(
                 HistoryAvailability::Incomplete,
@@ -4849,7 +4999,7 @@ mod tests {
                 "{history}"
             );
             assert!(!history.contains("FINDINGS"), "{history}");
-            assert!(history.ends_with("  inspect directories and files for more details\n"));
+            assert!(!history.contains("next:"), "{history}");
         }
 
         #[test]
@@ -4872,7 +5022,7 @@ mod tests {
                 terminal.contains("1 file has anonymous units that could not be matched safely."),
                 "{terminal}"
             );
-            assert!(terminal.ends_with("  inspect directories and files for more details\n"));
+            assert!(!terminal.contains("next:"), "{terminal}");
         }
     }
 
@@ -4914,7 +5064,13 @@ mod tests {
                 "  better a ↔ b no longer change together",
                 "  better c ↔ d no longer change together",
             );
-            assert!(all.ends_with("  inspect directories and files for more details\n"));
+            // The pointer names the highest-ranked movement's own path, which
+            // is the first package of the cycle the report opens on.
+            assert!(all.ends_with("\n  next: smackdebt diff main a\n"), "{all}");
+            assert!(
+                default.ends_with("\n  next: smackdebt diff main a\n"),
+                "{default}"
+            );
         }
     }
 
@@ -4948,7 +5104,7 @@ mod tests {
         let terminal = render(&report, TerminalOptions::new(100, false, false));
         assert!(terminal.contains("Debt increased."), "{terminal}");
         assert!(
-            terminal.contains("worse 1 (architecture) · better 0 · changed 0"),
+            terminal.contains("worse 1 · better 0 · changed 0"),
             "{terminal}"
         );
         assert!(

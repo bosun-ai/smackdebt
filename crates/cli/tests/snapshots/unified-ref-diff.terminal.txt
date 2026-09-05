@@ -1,6 +1,6 @@
 smackdebt diff · repository root
   Debt increased in some places and decreased in others.
-worse 4 (source, architecture) · better 4 (source, architecture, evolutionary) · changed 1 (source)
+worse 4 · better 4 · changed 1
 worst: c/main.js — package dependency cycle
 
 AREAS
@@ -37,7 +37,6 @@ ARCHITECTURE
         → a
 
 HISTORY
-  h ↔ i changed together in 4 of 5 commits · 80% · code dependency exists
   better h ↔ i no longer change together without a code dependency
 
-  inspect directories and files for more details
+  next: smackdebt diff main~1 b/main.js

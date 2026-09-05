@@ -1,6 +1,6 @@
 smackdebt diff · repository root
   Debt increased in some places and decreased in others.
-worse 4 (source, architecture) · better 4 (source, architecture, evolutionary) · changed 1 (source)
+worse 4 · better 4 · changed 1
 worst: c/main.js — package dependency cycle
 
 AREAS
@@ -21,4 +21,4 @@ FINDINGS
         c/main.js:2
         statements 2 → 3
 
-  inspect directories and files for more details
+  next: smackdebt diff main b/main.js

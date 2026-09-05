@@ -1755,10 +1755,7 @@ fn static_architecture_diff_snapshot_uses_unchanged_return_edges() {
     assert!(report["comparisons"].as_array().unwrap().is_empty());
     let text = String::from_utf8(terminal).unwrap();
     assert!(text.contains("Debt increased."), "{text}");
-    assert!(
-        text.contains("worse 1 (architecture) · better 0 · changed 0"),
-        "{text}"
-    );
+    assert!(text.contains("worse 1 · better 0 · changed 0"), "{text}");
     assert!(
         text.contains("worse package dependency cycle introduced"),
         "{text}"
@@ -2335,7 +2332,7 @@ fn diff_uses_history_as_context_and_can_explain_coupling() {
         "{default_terminal}"
     );
     assert!(
-        default_terminal.contains("worse 1 (architecture) · better 1 (evolutionary) · changed 0"),
+        default_terminal.contains("worse 1 · better 1 · changed 0"),
         "{default_terminal}"
     );
     assert!(
@@ -2356,11 +2353,14 @@ fn diff_uses_history_as_context_and_can_explain_coupling() {
         ],
     ))
     .unwrap();
+    // The change touched `b` alone, so the standing pair is not this change's
+    // history however much detail is asked for. It stays whole in JSON, which
+    // is where a consumer reads the repository's own coupling table.
     assert!(
-        detailed_terminal
-            .contains("a ↔ b changed together in 3 of 6 commits · 50% · code dependency exists"),
+        !detailed_terminal.contains("a ↔ b changed together"),
         "{detailed_terminal}"
     );
+    assert_eq!(report["change_coupling"][0]["shared_commits"], 3);
     assert!(
         detailed_terminal.contains("a ↔ b no longer change together without a code dependency")
     );
@@ -2756,10 +2756,10 @@ fn selected_diff_package_shows_only_relevant_evolution_context() {
     let text = String::from_utf8(terminal).unwrap();
     assert!(!text.contains("b · 4 commits"), "{text}");
     assert!(!text.contains("b/main.js · 4 commits"), "{text}");
-    assert!(
-        text.contains("a ↔ b changed together in 3 of 6 commits · 50% · code dependency exists"),
-        "{text}"
-    );
+    // A view of `b` cannot name what `a` did, so the standing pair leaves even
+    // this detail view; the coupling that moved is what the change did and
+    // stays wherever the verdict counted it.
+    assert!(!text.contains("a ↔ b changed together"), "{text}");
     assert!(text.contains("a ↔ b no longer change together without a code dependency"));
     assert!(!text.contains("c/main.js"));
     assert!(!text.contains("  c ·"));
@@ -2855,10 +2855,8 @@ fn changed_dependency_with_shallow_history_shows_only_the_relevant_trust_warning
     );
     assert!(!terminal.contains("HISTORY"), "{terminal}");
     assert!(!terminal.contains("changed together"), "{terminal}");
-    assert!(
-        terminal.ends_with("  inspect directories and files for more details\n"),
-        "{terminal}"
-    );
+    // Nothing moved, so the report has no path to point at.
+    assert!(!terminal.contains("next:"), "{terminal}");
 }
 
 /// A path-selected machine head answers the question the terminal answers for

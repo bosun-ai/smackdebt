@@ -349,10 +349,9 @@ fn assert_generated_diff_detail(repository: &Path) {
         all_text.contains("transitions/from-primary.js"),
         "{all_text}"
     );
-    assert!(
-        all_text.ends_with("  inspect directories and files for more details\n"),
-        "{all_text}"
-    );
+    // Every count is zero, so the detail rows are context and there is no
+    // movement to point at.
+    assert!(!all_text.contains("next:"), "{all_text}");
 
     let file = Invocation::new([
         "diff",
@@ -379,10 +378,8 @@ fn assert_generated_diff_detail(repository: &Path) {
         file_text.contains("transitions/from-generated.js"),
         "{file_text}"
     );
-    assert!(
-        file_text.ends_with("  inspect directories and files for more details\n"),
-        "{file_text}"
-    );
+    // A file view is already as deep as a path goes.
+    assert!(!file_text.contains("next:"), "{file_text}");
 
     let top_one = Invocation::new([
         "diff",
@@ -1851,11 +1848,12 @@ fn worktree_diff_reports_the_declared_mixed_change_outcomes_once() {
         Invocation::new(["diff", "main", "--all", "--history", "36500d"]).run(repository.path());
     terminal.success();
     let terminal_text = String::from_utf8_lossy(&terminal.stdout);
+    // The pointer names the same movement the first witness does, with the ref
+    // the run compared against.
     assert!(
-        terminal_text.ends_with("  inspect directories and files for more details\n"),
+        terminal_text.ends_with("\n  next: smackdebt diff main b/main.js\n"),
         "{terminal_text}"
     );
-    assert!(!terminal_text.contains("next:"), "{terminal_text}");
     let parallel_terminal = Invocation::new(["diff", "main", "--all", "--history", "36500d"])
         .automatic_workers()
         .run(repository.path());
