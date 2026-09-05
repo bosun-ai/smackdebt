@@ -6,6 +6,8 @@
 //! promised a row the view withheld. They live outside `src` so the words a
 //! diff states can grow without growing the one container the crate measures.
 
+use std::collections::BTreeSet;
+
 use smackdebt_analysis::{
     ChangeCoupling, Comparison, ComparisonId, ComparisonKind, ContributorConcentration, Coverage,
     Diagnostic, DiagnosticId, DiagnosticKind, EvolutionaryFinding, EvolutionaryFindingId,
@@ -158,6 +160,9 @@ fn diff(ambiguous: bool) -> Report {
                 .collect(),
         ),
     );
+    // A dependency explains the touched pair, so its row states the link arm a
+    // reader acts on differently from an unexplained one.
+    builder.set_explanation_pairs(BTreeSet::from([(BOW_PACKAGE, STERN_PACKAGE)]));
     for (finding, scopes) in [(0usize, [ROOT, BOW, STERN]), (1usize, [ROOT, BOW, QUIET])] {
         for scope in scopes {
             builder.link_evolutionary_finding(scope, EvolutionaryFindingId::from_index(finding));
@@ -201,6 +206,19 @@ fn a_scope_states_no_pair_reaching_outside_it() {
     let terminal = render(&diff(false), BOW);
     assert!(!terminal.contains("bow ↔ stern"), "{terminal}");
     assert!(!terminal.contains("bow ↔ quiet"), "{terminal}");
+}
+
+/// A stated pair carries its whole evidence: how many of how many commits, the
+/// share that is, and what the code says about the two packages.
+#[test]
+fn a_stated_pair_carries_its_counts_its_share_and_its_link() {
+    let terminal = render(&diff(false), ROOT);
+    assert!(
+        terminal.contains(
+            "  watch bow ↔ stern changed together in 23 of 76 commits · 30% · code dependency exists\n"
+        ),
+        "{terminal}"
+    );
 }
 
 /// A concentration row needs the change to have touched its package.

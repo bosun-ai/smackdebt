@@ -1603,6 +1603,12 @@ fn add_diff_result(
     } else if let DiffSide::Unsupported { role, .. } | DiffSide::Failed { role, .. } = selected {
         file = file.with_source_state(*role, ParseStatus::Failed);
     }
+    // A deleted file keeps its record, because its removed units and its before
+    // measurements are half of every comparison it appears in. The path is gone
+    // all the same, and the record says so.
+    if !result.change.current_exists() {
+        file = file.base_only();
+    }
     report.add_file(file);
     report.link_file(scope_id, file_id);
     add_diff_diagnostic(report, file_id, &result.current, "current");

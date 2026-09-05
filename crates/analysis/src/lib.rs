@@ -119,7 +119,7 @@ pub use report::{
     ComparisonId, Coverage, Diagnostic, DiagnosticId, DiagnosticKind, DiffCounts, FileActivity,
     FileId, FileRecord, Finding, FindingId, FindingRank, PackageId, PackagePresence, PackageRecord,
     PathId, Report, ReportBuilder, ReportMode, Scope, ScopeId, ScopeKind, SourceCoverageOutcome,
-    aggregate_comparisons, aggregate_scopes,
+    SourcePresence, aggregate_comparisons, aggregate_scopes,
 };
 pub use source::{
     CRATE_ROOT_CANDIDATE, DECLARING_FILE_CANDIDATE, DependencyIntent, DependencyKind,

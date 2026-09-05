@@ -13,11 +13,11 @@ use smackdebt_analysis::{
     Comparison, ComparisonDirection, ComparisonKind, CoreSize, CouplingLink, CoverageQualifier,
     DebtDiffSelection, DependencyEdgeId, Diagnostic, DiagnosticKind, DiffTier,
     EvolutionaryFindingId, FileChangeCoupling, FileId, FileRecord, Finding, FindingId, Instability,
-    KnowledgeConcentrationFindingId, Language, Measurements, PackageId, ProblemAnchor, ProblemCard,
-    ProblemEvidence, ProblemPattern, ProblemVisibility, PropagationReach, Rating, Report,
-    ReportMode, ResolutionIssueKind, Scope, ScopeId, ScopeKind, Signal, SizeFinding, SizeFindingId,
-    SourceRole, SourceTrust, StableDependencyFindingId, UnitIdentity, UnitKind, Verdict,
-    instability, qualifies_for_finding,
+    KnowledgeConcentrationFindingId, Language, Measurements, PackageId, PackagePresence,
+    PackageRecord, ProblemAnchor, ProblemCard, ProblemEvidence, ProblemPattern, ProblemVisibility,
+    PropagationReach, Rating, Report, ReportMode, ResolutionIssueKind, Scope, ScopeId, ScopeKind,
+    Signal, SizeFinding, SizeFindingId, SourcePresence, SourceRole, SourceTrust,
+    StableDependencyFindingId, UnitIdentity, UnitKind, Verdict, instability, qualifies_for_finding,
 };
 use unicode_width::{UnicodeWidthChar, UnicodeWidthStr};
 
@@ -368,20 +368,21 @@ impl DiffRowSelection {
         self.0.len()
     }
 
-    /// The highest-ranked row of the selection, in the one order every diff
-    /// section states its rows in.
-    fn top(&self) -> Option<&DiffRowKey> {
-        self.0.values().min()
+    /// The rows this view shows, in the one order every diff section states
+    /// them in.
+    fn ranked(&self) -> Vec<(DiffRowIdentity, &DiffRowKey)> {
+        let mut rows: Vec<_> = self
+            .0
+            .iter()
+            .map(|(identity, key)| (*identity, key))
+            .collect();
+        rows.sort_unstable_by(|left, right| left.1.cmp(right.1));
+        rows
     }
 
     /// Drops every row but the highest-ranked one.
     fn keep_top(&mut self) {
-        let Some(top) = self
-            .0
-            .iter()
-            .min_by(|left, right| left.1.cmp(right.1))
-            .map(|(identity, _)| *identity)
-        else {
+        let Some(top) = self.ranked().first().map(|(identity, _)| *identity) else {
             return;
         };
         self.0.retain(|identity, _| *identity == top);
@@ -419,7 +420,8 @@ struct Presentation {
     next: Option<String>,
     /// Whether a clean diff suppresses every section after the verdict.
     verdict_only: bool,
-    /// Whether a no-debt diff shows only comparison-confidence warnings.
+    /// Whether a no-debt diff is cut to the one movement behind its counts and
+    /// the comparison-confidence warnings that are the rest of its answer.
     trust_only: bool,
 }
 
@@ -2048,6 +2050,15 @@ impl HistoryRelevance {
     /// context, so a measured file is one this change touched. A scope below a
     /// package contains no package, which is why a file view states no
     /// package-level history.
+    ///
+    /// Read the predicate exactly: touched *by a source file, at its current
+    /// path*. Two omissions follow and both are deliberately conservative —
+    /// they drop a row rather than invent one. A file renamed out of a package
+    /// counts only against the package it landed in, so the package it left
+    /// looks untouched. And a package whose only change is a file no grammar
+    /// reads — a manifest, a lockfile, a template — is not touched at all,
+    /// because a diff compares source and those files never enter it. Both
+    /// rows stay whole in JSON.
     fn change_relevant(report: &Report, selected: &Scope) -> Self {
         Self(
             report
@@ -2085,16 +2096,8 @@ fn current_history_rows(
     relevance: &HistoryRelevance,
 ) -> Section {
     let mut section = Section::new("HISTORY");
-    let in_scope = report
-        .files()
-        .iter()
-        .filter(|file| file_belongs_to_scope(report, file.id(), selected))
-        .filter_map(FileRecord::package)
-        .collect::<BTreeSet<_>>();
-    section.rows = coupling_rows(report, selected, detail, relevance, &in_scope);
-    section
-        .rows
-        .extend(concentration_rows(report, relevance, &in_scope));
+    section.rows = coupling_rows(report, selected, detail, relevance);
+    section.rows.extend(concentration_rows(report, relevance));
     // The concise view states at most three actionable history rows; a path
     // view and `--all` keep the relevant context they exist to show.
     if !detail {
@@ -2105,12 +2108,16 @@ fn current_history_rows(
 
 /// The pair rows one scope states: the findings it holds, then the strong
 /// coupling a code dependency already explains where detail was asked for.
+///
+/// Relevance is the whole scope test here. A package it admits was reached
+/// through a measured file of that package, and a measured file lies under its
+/// own package's scope, so a separate "has a file in this scope" filter would
+/// only ever repeat the answer.
 fn coupling_rows(
     report: &Report,
     selected: &Scope,
     detail: bool,
     relevance: &HistoryRelevance,
-    in_scope: &BTreeSet<PackageId>,
 ) -> Vec<Row> {
     let mut rows = Vec::new();
     let mut couplings = selected
@@ -2143,7 +2150,6 @@ fn coupling_rows(
             .copied()
             .filter(|pair| qualifies_for_finding(*pair))
             .filter(|pair| relevance.states_pair(pair.left(), pair.right()))
-            .filter(|pair| in_scope.contains(&pair.left()) || in_scope.contains(&pair.right()))
             .filter(|pair| !couplings.iter().any(|finding| same_pair(*finding, *pair)))
             .collect()
     } else {
@@ -2185,16 +2191,12 @@ fn coupling_rows(
 
 /// The concentration rows one scope states, each package once however many
 /// source roles contributed to it.
-fn concentration_rows(
-    report: &Report,
-    relevance: &HistoryRelevance,
-    in_scope: &BTreeSet<PackageId>,
-) -> Vec<Row> {
+fn concentration_rows(report: &Report, relevance: &HistoryRelevance) -> Vec<Row> {
     let mut rows = Vec::new();
     let mut stated = BTreeSet::new();
     for finding in report.knowledge_concentration_findings() {
         let package = finding.concentration().package();
-        if !relevance.states(package) || !in_scope.contains(&package) || !stated.insert(package) {
+        if !relevance.states(package) || !stated.insert(package) {
             continue;
         }
         let concentration = finding.concentration();
@@ -3064,32 +3066,61 @@ pub(super) fn direction_name(direction: ComparisonDirection) -> &'static str {
     }
 }
 
-/// The command a diff points at next: the same ref, and the path its
+/// The command a diff points at next: the same ref, and a path its
 /// highest-ranked movement names.
 ///
-/// A diff that moved nothing has nowhere to send a reader, and a file view is
-/// already as deep as a path goes, so both print no pointer at all rather than
-/// a command that repeats the one just run.
+/// The pointer is a command a reader runs, so it may only name a path that is
+/// still there: a cleanup diff's best movement is a removal, and pointing at
+/// the deleted file would print a command that fails. Movements are walked in
+/// rank order and each one's paths in the order its row states them, so the
+/// pointer is the first surviving path below this scope. A diff that moved
+/// nothing, one whose movements all name gone or shallower paths, and a file
+/// view — already as deep as a path goes — print no pointer rather than a
+/// command that fails or repeats the one just run.
 fn diff_next(report: &Report, selected: &Scope, diff_rows: &DiffRowSelection) -> Option<String> {
     if selected.kind() == ScopeKind::File {
         return None;
     }
-    let path = top_movement_path(diff_rows)?;
     let reference = report.comparison_ref()?;
-    path_below(selected.name(), path).then(|| format!("smackdebt diff {reference} {path}"))
+    let gone = deleted_paths(report);
+    let path = diff_rows
+        .ranked()
+        .into_iter()
+        .flat_map(|(_, key)| movement_paths(key))
+        .find(|path| path_below(selected.name(), path) && !gone.contains(path))?;
+    Some(format!("smackdebt diff {reference} {path}"))
 }
 
-/// The path the highest-ranked visible movement names.
+/// The paths one movement names, in the order its row states them.
 ///
-/// A movement about a pair names both sides; the first is the one a reader
+/// A movement about a pair names both sides, and the first is the one a reader
 /// opens, exactly as a codebase problem card points at the first of its files.
-fn top_movement_path(diff_rows: &DiffRowSelection) -> Option<&str> {
-    let key = diff_rows.top()?;
-    let path = match &key.comparison_identity {
-        DiffComparisonIdentity::Source(_) => key.subject.as_str(),
-        DiffComparisonIdentity::Paths(paths) => paths.first()?.as_str(),
+fn movement_paths(key: &DiffRowKey) -> Vec<&str> {
+    let paths = match &key.comparison_identity {
+        DiffComparisonIdentity::Source(_) => vec![key.subject.as_str()],
+        DiffComparisonIdentity::Paths(paths) => paths.iter().map(String::as_str).collect(),
     };
-    (!path.is_empty()).then_some(path)
+    paths.into_iter().filter(|path| !path.is_empty()).collect()
+}
+
+/// The subject paths the change deleted.
+///
+/// Every path a movement names comes from the file or the package table, so a
+/// path missing from this set is one both tables still hold.
+fn deleted_paths(report: &Report) -> BTreeSet<&str> {
+    report
+        .files()
+        .iter()
+        .filter(|file| file.presence() == SourcePresence::BaseOnly)
+        .map(FileRecord::path)
+        .chain(
+            report
+                .packages()
+                .iter()
+                .filter(|package| package.presence() == PackagePresence::BaseOnly)
+                .map(PackageRecord::path),
+        )
+        .collect()
 }
 
 /// Whether `path` lies strictly inside the scope named `scope`.

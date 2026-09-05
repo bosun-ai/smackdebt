@@ -227,13 +227,17 @@ before and after evidence, and contributes to the diff answer.
 where the change touched both of its packages, and a contributor-concentration
 row where it touched that package; either way the displayed scope has to contain
 the subject, so `bow ↔ stern` leaves a view of `bow` and no package-level row
-survives a file view. The rows a diff leaves out stay whole in JSON, where the
-repository's own coupling and concentration tables are read.
+survives a file view. Since only the repository root contains both sides of a
+pair, a diff states pair rows at the root and nowhere below it. The rows a diff
+leaves out stay whole in JSON, where the repository's own coupling and
+concentration tables are read.
 
 `next:` closes a diff the way it closes a codebase report: it names the command
 that reaches the highest-ranked movement's own path, restating the ref the run
-compared against. A diff that moved nothing, and a view already at a file, print
-no pointer.
+compared against. The pointer is a command you run, so it names only a path the
+change left behind: a cleanup diff whose movements are all removals prints no
+pointer rather than a command that fails. A diff that moved nothing, and a view
+already at a file, print none either.
 
 The diff tiers are fixed in the same way:
 

@@ -320,6 +320,19 @@ pub struct FileRecord {
     package: Option<PackageId>,
     role: SourceRole,
     parse_status: Option<ParseStatus>,
+    presence: SourcePresence,
+}
+
+/// Whether a source path is still there after the change a report describes.
+///
+/// A codebase report describes one tree, so every file it holds is present. A
+/// diff keeps a deleted file's record — its removed units need somewhere to
+/// live and its measurements are half of every comparison — while the path
+/// itself is gone. `PackagePresence` says the same thing one level up.
+#[derive(Clone, Copy, Debug, Eq, Hash, Ord, PartialEq, PartialOrd)]
+pub enum SourcePresence {
+    Current,
+    BaseOnly,
 }
 
 impl FileRecord {
@@ -342,7 +355,20 @@ impl FileRecord {
             package: None,
             role: SourceRole::Primary,
             parse_status: None,
+            presence: SourcePresence::Current,
         }
+    }
+
+    /// Records that the change deleted this path, so nothing sends a reader to
+    /// a file that is no longer there.
+    #[must_use]
+    pub const fn base_only(mut self) -> Self {
+        self.presence = SourcePresence::BaseOnly;
+        self
+    }
+
+    pub const fn presence(&self) -> SourcePresence {
+        self.presence
     }
 
     pub fn with_language(mut self, language: Language) -> Self {
