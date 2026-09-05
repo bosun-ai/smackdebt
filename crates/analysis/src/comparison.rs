@@ -1,4 +1,4 @@
-use crate::health::{Measurements, Rating};
+use crate::health::{Measurements, Rating, is_rated};
 use crate::report::{ComparisonId, FileId};
 use crate::source::{SourceRole, SourceSpan, UnitIdentity};
 
@@ -195,10 +195,6 @@ const fn rated_direction(
         ComparisonKind::Removed if is_rated(before_rating) => ComparisonDirection::Better,
         _ => ComparisonDirection::Changed,
     }
-}
-
-const fn is_rated(rating: Option<Rating>) -> bool {
-    matches!(rating, Some(Rating::Watch | Rating::High))
 }
 
 const fn role_is_verdict_eligible(role: Option<SourceRole>) -> bool {

@@ -230,30 +230,32 @@ fn a_ruby_dsl_edit_pairs_its_blocks_instead_of_counting_one_change_twice() {
     );
 }
 
+fn diff_terminal(project: &Path, all: bool) -> String {
+    let mut arguments = vec!["diff", "HEAD", "--color", "never"];
+    if all {
+        arguments.push("--all");
+    }
+    let output = smackdebt()
+        .current_dir(project)
+        .env("COLUMNS", "120")
+        .args(arguments)
+        .output()
+        .unwrap();
+    assert!(
+        output.status.success(),
+        "{}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    String::from_utf8(output.stdout).unwrap()
+}
+
 /// An anonymous unit was rewritten past recognition, so the matcher holds one
 /// unpaired unit on each side. The report states that, keeps both as machine
 /// record and `--all` context, and moves debt in neither direction on them.
 #[test]
 fn an_unpairable_anonymous_edit_is_stated_and_counted_in_no_direction() {
     let project = unpairable_anonymous_fixture();
-    let terminal = |all: bool| {
-        let mut arguments = vec!["diff", "HEAD", "--color", "never"];
-        if all {
-            arguments.push("--all");
-        }
-        let output = smackdebt()
-            .current_dir(project.path())
-            .env("COLUMNS", "120")
-            .args(arguments)
-            .output()
-            .unwrap();
-        assert!(
-            output.status.success(),
-            "{}",
-            String::from_utf8_lossy(&output.stderr)
-        );
-        String::from_utf8(output.stdout).unwrap()
-    };
+    let terminal = |all: bool| diff_terminal(project.path(), all);
     let default = terminal(false);
     assert!(
         default.contains("1 file has anonymous units that could not be matched safely."),
@@ -301,6 +303,53 @@ fn an_unpairable_anonymous_edit_is_stated_and_counted_in_no_direction() {
                 .any(|value| value["ratings"]["before"] == "watch"),
         "the rule has to bite on rated units: {unpaired:?}"
     );
+    assert_eq!(
+        report["diagnostics"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .filter(|value| value["kind"] == "ambiguous_identity")
+            .count(),
+        1
+    );
+}
+
+/// The same broken pair, plus a block that is genuinely new. Withholding the
+/// pair must not swallow the addition with it: one unpaired removal answers
+/// for one unpaired addition, and the second addition is debt this diff added.
+#[test]
+fn a_genuinely_new_unit_beside_an_unpairable_one_still_increases_debt() {
+    let project = unpairable_beside_a_new_unit_fixture();
+    let default = diff_terminal(project.path(), false);
+    assert!(default.contains("Debt increased."), "{default}");
+    assert!(
+        default.contains("1 file has anonymous units that could not be matched safely."),
+        "{default}"
+    );
+
+    let output = smackdebt()
+        .current_dir(project.path())
+        .args(["diff", "HEAD", "--json"])
+        .output()
+        .unwrap();
+    assert!(output.status.success());
+    let report: serde_json::Value = serde_json::from_slice(&output.stdout).unwrap();
+    validate_schema(&report);
+    assert_index_integrity(&report);
+    let unpaired: Vec<_> = report["comparisons"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .filter(|value| value["kind"] == "added" || value["kind"] == "removed")
+        .collect();
+    assert_eq!(unpaired.len(), 3, "{unpaired:?}");
+    let counted: Vec<_> = unpaired
+        .iter()
+        .filter(|value| value["participation"] == "verdict")
+        .collect();
+    assert_eq!(counted.len(), 1, "{unpaired:?}");
+    assert_eq!(counted[0]["kind"], "added");
+    assert_eq!(counted[0]["direction"], "worse");
     assert_eq!(
         report["diagnostics"]
             .as_array()
@@ -4335,23 +4384,54 @@ fn ruby_dsl_diff_fixture() -> tempfile::TempDir {
     project
 }
 
-/// A rated closure inside an array literal, which binds to no name and hangs
-/// under no call, rewritten so that no evidence pairs the two versions.
+/// One rated closure inside an array literal, which binds to no name and hangs
+/// under no call. `watch` comes from four levels of nesting.
+fn unpairable_handler(call: &str) -> String {
+    format!("() => {{ if (a) {{ if (b) {{ if (c) {{ if (d) {{ {call}(); }} }} }} }} }}")
+}
+
+/// The one closure is rewritten so that no evidence pairs the two versions.
 fn unpairable_anonymous_fixture() -> tempfile::TempDir {
-    let body = |call: &str| {
+    let project = unpairable_project(&unpairable_handler("work"));
+    fs::write(
+        project.path().join("handlers.js"),
         format!(
-            "export const handlers = [() => {{ if (a) {{ if (b) {{ if (c) {{ if (d) {{ {call}(); }} }} }} }} }}];\n"
-        )
-    };
+            "export const handlers = [{}];\n",
+            unpairable_handler("rework")
+        ),
+    )
+    .unwrap();
+    project
+}
+
+/// The same rewrite, beside a second closure that is genuinely new.
+fn unpairable_beside_a_new_unit_fixture() -> tempfile::TempDir {
+    let project = unpairable_project(&unpairable_handler("work"));
+    fs::write(
+        project.path().join("handlers.js"),
+        format!(
+            "export const handlers = [{}, {}];\n",
+            unpairable_handler("rework"),
+            unpairable_handler("audit")
+        ),
+    )
+    .unwrap();
+    project
+}
+
+fn unpairable_project(handler: &str) -> tempfile::TempDir {
     let project = tempfile::tempdir().unwrap();
     fs::write(
         project.path().join("package.json"),
         "{\"name\":\"unpairable\",\"private\":true}\n",
     )
     .unwrap();
-    fs::write(project.path().join("handlers.js"), body("work")).unwrap();
+    fs::write(
+        project.path().join("handlers.js"),
+        format!("export const handlers = [{handler}];\n"),
+    )
+    .unwrap();
     commit_fixture(project.path(), "test: unpairable base");
-    fs::write(project.path().join("handlers.js"), body("rework")).unwrap();
     project
 }
 

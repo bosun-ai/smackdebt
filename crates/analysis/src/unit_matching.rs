@@ -2,9 +2,9 @@ use std::cmp::Ordering;
 use std::collections::BTreeMap;
 
 use crate::comparison::{Comparison, ComparisonKind};
-use crate::health::HealthPolicy;
+use crate::health::{HealthPolicy, Rating};
 use crate::report::ComparisonId;
-use crate::source::{SourceSpan, UnitFact, UnitFingerprint, UnitIdentity, UnitMatchKey};
+use crate::source::{SourceSpan, UnitFact, UnitFingerprint, UnitIdentity, UnitKind, UnitMatchKey};
 
 struct PendingComparison<'a> {
     identity: UnitIdentity,
@@ -25,13 +25,28 @@ struct Contest {
     after: Vec<usize>,
 }
 
+/// A class of unpaired unit whose members are interchangeable to the verdict.
+///
+/// Two unpaired units of the same kind and rating carry exactly the same
+/// verdict weight, so which of them the matcher lost track of changes nothing
+/// a report would say. That is what makes the pigeonhole count below exact
+/// rather than a guess.
+#[derive(Clone, Copy, Debug, Eq, Ord, PartialEq, PartialOrd)]
+struct Bucket {
+    kind: UnitKind,
+    rating: Rating,
+}
+
 struct MatchState<'a> {
     before: &'a [UnitFact],
     after: &'a [UnitFact],
     used_before: Vec<bool>,
     used_after: Vec<bool>,
     pending: Vec<PendingComparison<'a>>,
-    unclear_anonymous: bool,
+    /// Anonymous units a stated ambiguity swallowed, per side. They were not
+    /// paired either, so the pigeonhole count has to see them.
+    unclear_before: Vec<Bucket>,
+    unclear_after: Vec<Bucket>,
     policy: HealthPolicy,
 }
 
@@ -43,8 +58,16 @@ impl<'a> MatchState<'a> {
             used_before: vec![false; before.len()],
             used_after: vec![false; after.len()],
             pending: Vec::with_capacity(before.len() + after.len()),
-            unclear_anonymous: false,
+            unclear_before: Vec::new(),
+            unclear_after: Vec::new(),
             policy,
+        }
+    }
+
+    fn bucket(&self, unit: &UnitFact) -> Bucket {
+        Bucket {
+            kind: unit.identity().kind(),
+            rating: self.policy.assess(unit.measurements()).rating(),
         }
     }
 
@@ -84,7 +107,16 @@ impl<'a> MatchState<'a> {
 
     /// States one contest as the single ambiguity it is, and consumes it.
     fn state_ambiguity(&mut self, contest: &Contest, anonymous: bool) {
-        self.unclear_anonymous |= anonymous;
+        if anonymous {
+            for index in &contest.before {
+                let bucket = self.bucket(&self.before[*index]);
+                self.unclear_before.push(bucket);
+            }
+            for index in &contest.after {
+                let bucket = self.bucket(&self.after[*index]);
+                self.unclear_after.push(bucket);
+            }
+        }
         mark_used(&mut self.used_before, &contest.before);
         mark_used(&mut self.used_after, &contest.after);
         let representative = &self.after[contest.after[0]];
@@ -112,25 +144,36 @@ impl<'a> MatchState<'a> {
     /// Names the units no pass could pair, one comparison each.
     ///
     /// A file that ends with an anonymous unit unpaired on *both* sides cannot
-    /// say which of them is the other's edit. Those comparisons carry the
-    /// file's ambiguity so the report states it, and are withheld from the
-    /// verdict so one unfollowed edit cannot read as debt added on one side
-    /// and debt removed on the other. A stated anonymous ambiguity already
-    /// left units unpaired on both sides, so it puts the file in the same
-    /// position as a leftover on each side would.
+    /// say which of them is the other's edit, so every unpaired anonymous unit
+    /// there carries the file's ambiguity and the report states it.
+    ///
+    /// How much of that the verdict must then give up is a counting question,
+    /// not a judgement. Sort the unpaired anonymous units of each side into
+    /// buckets of one kind and one rating, whose members are interchangeable to
+    /// a verdict. Within a bucket holding `k` removals and `m` additions,
+    /// `min(k, m)` of each could be the same units rewritten, and the report
+    /// cannot tell which — so it withholds that many from each side. The
+    /// excess cannot be anything but genuinely new or genuinely gone, by the
+    /// pigeonhole principle, and every member of a bucket weighs the same, so
+    /// counting the excess is exact whichever members are left holding it.
+    ///
+    /// The buckets count the units a stated ambiguity swallowed too. Those were
+    /// never paired either, and a count that cannot see them would call a
+    /// leftover addition net-new while its removal sat inside an ambiguity.
     fn append_one_sided(&mut self) {
         let (before, after) = (self.before, self.after);
         let removed = unused(before, &self.used_before);
         let added = unused(after, &self.used_after);
-        let unpaired = self.unclear_anonymous
-            || (removed.iter().any(|unit| is_anonymous(unit))
-                && added.iter().any(|unit| is_anonymous(unit)));
+        let flagged = removed.iter().any(|unit| is_anonymous(unit))
+            && added.iter().any(|unit| is_anonymous(unit));
+        let mut budget = self.interchangeable(&removed, &added);
         let one_sided = removed
             .into_iter()
             .map(|unit| (unit, ComparisonKind::Removed))
             .chain(added.into_iter().map(|unit| (unit, ComparisonKind::Added)));
         for (unit, kind) in one_sided {
-            let anonymous = unpaired && is_anonymous(unit);
+            let anonymous = is_anonymous(unit);
+            let withheld = anonymous && budget.spend(kind, self.bucket(unit));
             let (before, after) = match kind {
                 ComparisonKind::Removed => (Some(unit), None),
                 _ => (None, Some(unit)),
@@ -141,10 +184,57 @@ impl<'a> MatchState<'a> {
                 before,
                 after,
                 span: unit.span(),
-                anonymous_ambiguity: anonymous,
-                unpaired_anonymous: anonymous,
+                anonymous_ambiguity: flagged && anonymous,
+                unpaired_anonymous: withheld,
             });
         }
+    }
+
+    /// How many unpaired units per bucket each side must give up, which is the
+    /// smaller of what the two sides hold there.
+    fn interchangeable(&self, removed: &[&UnitFact], added: &[&UnitFact]) -> Budget {
+        let tally = |units: &[&UnitFact], swallowed: &[Bucket]| {
+            let mut counts: BTreeMap<Bucket, usize> = BTreeMap::new();
+            for bucket in units
+                .iter()
+                .filter(|unit| is_anonymous(unit))
+                .map(|unit| self.bucket(unit))
+                .chain(swallowed.iter().copied())
+            {
+                *counts.entry(bucket).or_default() += 1;
+            }
+            counts
+        };
+        let removals = tally(removed, &self.unclear_before);
+        let additions = tally(added, &self.unclear_after);
+        let mut budget = BTreeMap::new();
+        for (bucket, count) in &removals {
+            let Some(paired) = additions.get(bucket).map(|other| *count.min(other)) else {
+                continue;
+            };
+            // Each side owes the same count and spends it from its own ledger,
+            // so neither can exhaust what the other has to give up.
+            budget.insert((ComparisonKind::Removed, *bucket), paired);
+            budget.insert((ComparisonKind::Added, *bucket), paired);
+        }
+        Budget(budget)
+    }
+}
+
+/// The per-bucket withholding each side still owes, spent as the one-sided
+/// comparisons are written out.
+struct Budget(BTreeMap<(ComparisonKind, Bucket), usize>);
+
+impl Budget {
+    fn spend(&mut self, kind: ComparisonKind, bucket: Bucket) -> bool {
+        let Some(left) = self.0.get_mut(&(kind, bucket)) else {
+            return false;
+        };
+        if *left == 0 {
+            return false;
+        }
+        *left -= 1;
+        true
     }
 }
 

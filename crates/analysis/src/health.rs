@@ -128,6 +128,14 @@ impl Rating {
     }
 }
 
+/// Whether a side of a comparison exists and is rated debt.
+///
+/// A one-sided comparison only moves a verdict while the side it has is rated:
+/// the healthy units a refactor adds or deletes are changes, not debt.
+pub(crate) const fn is_rated(rating: Option<Rating>) -> bool {
+    matches!(rating, Some(Rating::Watch | Rating::High))
+}
+
 /// One threshold result stored without allocation.
 #[derive(Clone, Copy, Debug, Eq, Hash, PartialEq)]
 pub struct SignalAssessment {

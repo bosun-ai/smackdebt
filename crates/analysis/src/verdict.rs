@@ -6,7 +6,7 @@ use crate::architecture::{
 use crate::change_amplification::{AMPLIFICATION_MIN_COMMITS, AMPLIFICATION_MIN_MEDIAN};
 use crate::comparison::{Comparison, ComparisonKind};
 use crate::evolution::{EvolutionaryComparison, EvolutionaryComparisonId};
-use crate::health::{HealthCounts, Rating};
+use crate::health::{HealthCounts, is_rated};
 use crate::propagation::{
     CORE_SIZE_FILES, CORE_SIZE_PERCENT, PACKAGE_REACH_FILES, ROOT_REACH_PACKAGES,
     ROOT_REACH_REACHED,
@@ -1002,16 +1002,12 @@ fn moves_debt(comparison: &Comparison) -> bool {
     }
 }
 
-const fn is_rated(rating: Option<Rating>) -> bool {
-    matches!(rating, Some(Rating::Watch | Rating::High))
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
     use crate::comparison::ComparisonDirection;
     use crate::evolution::{ChangeCoupling, EvolutionaryComparisonKind};
-    use crate::health::Measurements;
+    use crate::health::{Measurements, Rating};
     use crate::report::{FileId, PackageId};
     use crate::source::{UnitIdentity, UnitKind};
 
