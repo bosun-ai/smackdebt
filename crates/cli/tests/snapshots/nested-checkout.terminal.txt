@@ -4,4 +4,4 @@ smackdebt · repository root
 
 WARNINGS
   warning History is unavailable.
-  warning 2 nested repositories were not analyzed.
+  warning 2 nested repositories were not analyzed

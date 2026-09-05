@@ -119,7 +119,7 @@ fn anonymous_diff_matching_is_safe_and_worker_output_is_equal() {
     assert_eq!(serial_terminal, automatic_terminal);
     let text = String::from_utf8(serial_terminal).unwrap();
     assert_eq!(
-        text.matches("1 file has anonymous units that could not be matched safely.")
+        text.matches("1 file has anonymous units that could not be matched safely")
             .count(),
         1,
         "{text}"
@@ -258,7 +258,7 @@ fn an_unpairable_anonymous_edit_is_stated_and_counted_in_no_direction() {
     let terminal = |all: bool| diff_terminal(project.path(), all);
     let default = terminal(false);
     assert!(
-        default.contains("1 file has anonymous units that could not be matched safely."),
+        default.contains("1 file has anonymous units that could not be matched safely"),
         "{default}"
     );
     assert!(default.contains("No debt changed."), "{default}");
@@ -323,7 +323,7 @@ fn a_genuinely_new_unit_beside_an_unpairable_one_still_increases_debt() {
     let default = diff_terminal(project.path(), false);
     assert!(default.contains("Debt increased."), "{default}");
     assert!(
-        default.contains("1 file has anonymous units that could not be matched safely."),
+        default.contains("1 file has anonymous units that could not be matched safely"),
         "{default}"
     );
 
@@ -917,7 +917,7 @@ fn nested_git_checkouts_are_pruned_and_disclosed() {
     );
     let text = String::from_utf8(terminal).unwrap();
     assert!(
-        text.contains("2 nested repositories were not analyzed."),
+        text.contains("2 nested repositories were not analyzed"),
         "{text}"
     );
 
@@ -1139,7 +1139,7 @@ fn modified_astro_diff_retains_coverage_and_counts_one_unsupported_file() {
     ))
     .unwrap();
     assert!(
-        diff_terminal.contains("warning 1 source file uses an unsupported language."),
+        diff_terminal.contains("warning 1 source file uses an unsupported language"),
         "{diff_terminal}"
     );
     assert!(!diff_terminal.contains("2 source files"), "{diff_terminal}");
@@ -1814,9 +1814,7 @@ fn diff_discloses_current_graph_suppression_without_reporting_reach_movement() {
     assert_eq!(report["summary"]["debt_diff"]["total"], 0);
     assert!(terminal.contains("No debt changed."), "{terminal}");
     assert!(
-        terminal.contains(
-            "1 architecture comparison hidden because dependency data is incomplete after the change."
-        ),
+        terminal.contains("1 dependency comparison withheld after the change"),
         "{terminal}"
     );
     assert!(!terminal.contains("change reach"), "{terminal}");
@@ -2107,7 +2105,7 @@ fn every_problem_pattern_reaches_a_committed_terminal_and_machine_view() {
     );
     // A grouped sentence agrees with its count in its verb and its object.
     assert!(
-        text.contains("  warning 2 source files use unsupported languages.\n"),
+        text.contains("  warning 2 source files use unsupported languages\n"),
         "{text}"
     );
     // A warning detail row names its file once: the row states the path and
@@ -2143,15 +2141,28 @@ fn every_problem_pattern_reaches_a_committed_terminal_and_machine_view() {
         ["--jobs", "1", "--color", "never", "--history", "36500d"],
     ))
     .unwrap();
+    // A warning may still name one of those files: a file the parser recovered
+    // from is a disclosure about what was read, not a card about its debt, and
+    // the grouped sentence names the first path a reader should open.
+    let cards: Vec<&str> = default_view
+        .lines()
+        .skip_while(|line| *line != "PROBLEMS")
+        .take_while(|line| *line != "WARNINGS")
+        .collect();
     for detail in ["god/recovered.js", "god/long.js"] {
-        assert!(!default_view.contains(detail), "{detail}: {default_view}");
+        assert!(
+            !cards.iter().any(|line| line.contains(detail)),
+            "{detail}: {default_view}"
+        );
     }
     assert!(
         default_view.contains("  high does too much · god/god.js\n"),
         "{default_view}"
     );
-    // Every rated unit total reaches a reader with a noun that agrees.
-    assert!(text.contains(" rated units\n"), "{text}");
+    // Every measured-unit total reaches a reader in words it can act on, with
+    // a noun that agrees with its own count.
+    assert!(text.contains(" functions measured\n"), "{text}");
+    assert!(!text.contains("rated unit"), "{text}");
 }
 
 #[test]

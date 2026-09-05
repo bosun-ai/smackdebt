@@ -153,6 +153,30 @@ fn a_narrow_terminal_states_the_whole_typical_change() {
     assert!(!terminal.contains('…'), "{terminal}");
 }
 
+/// A scope that checked nothing states no share of the repository's High debt.
+///
+/// `0 of the repository's 2 high live here.` under `Nothing was checked.` is an
+/// unmeasured zero dressed as a measured fraction: the scope holds no rated
+/// unit for a share to be a share of. The counts beside it already say so, and
+/// JSON keeps the fact for a consumer that reads both.
+#[test]
+fn a_scope_that_checked_nothing_states_no_share_of_the_repository() {
+    let terminal = render(&report(true), DIRECTORY);
+    assert!(terminal.contains("Nothing was checked."), "{terminal}");
+    assert!(
+        terminal.contains("0 high · 0 watch · 0 checked"),
+        "{terminal}"
+    );
+    assert!(!terminal.contains("live here."), "{terminal}");
+    // A scope that checked something keeps its share, so the absence above is
+    // the zero and not the drop of a fact.
+    let measured = render(&report(true), PACKAGE);
+    assert!(
+        measured.contains("1 of the repository's 2 high live here."),
+        "{measured}"
+    );
+}
+
 /// The fact is stated only: it moves no tier, no count, and no worst offender.
 #[test]
 fn a_typical_change_moves_no_tier_no_count_and_no_offender() {

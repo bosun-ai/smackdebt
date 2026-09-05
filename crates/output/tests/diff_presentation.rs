@@ -304,7 +304,9 @@ fn a_no_debt_diff_states_the_movement_its_count_promised() {
         "{terminal}"
     );
     assert!(
-        terminal.contains("1 file has anonymous units that could not be matched safely."),
+        terminal.contains(
+            "1 file has anonymous units that could not be matched safely · bow/src/mini.ts"
+        ),
         "{terminal}"
     );
     // One witness, and the standing history stays out of an answer that is

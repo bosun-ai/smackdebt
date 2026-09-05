@@ -979,8 +979,31 @@ const fn set_pattern_name(pattern: ProblemPattern) -> Option<&'static str> {
 fn problem_head(report: &Report, card: &ProblemCard) -> String {
     let anchor = anchor_label(report, card);
     match pattern_name(card) {
-        Some(name) => format!("{name} · {anchor}"),
+        Some(name) => format!("{name} · {}{anchor}", head_role(report, card)),
         None => measured_head(report, card, &anchor),
+    }
+}
+
+/// The role word a card's head carries before its anchor, when the head would
+/// otherwise be indistinguishable from another card's.
+///
+/// One package can concentrate its primary source on one author and its tests
+/// on another, which are two findings about two bodies of code. Both are
+/// anchored on the package, so without the role both heads read `one author ·
+/// crates/analysis` and a reader sees one card printed twice. The role is
+/// stated in the same place a finding row states it — before the anchor — and
+/// `primary` stays silent there for the same reason it stays silent on a
+/// finding row: it is the default a reader assumes.
+fn head_role(report: &Report, card: &ProblemCard) -> String {
+    let Some(ProblemEvidence::Knowledge(id)) = card.evidence().first() else {
+        return String::new();
+    };
+    let Some(finding) = report.knowledge_concentration_findings().get(id.index()) else {
+        return String::new();
+    };
+    match finding.concentration().role() {
+        SourceRole::Primary => String::new(),
+        role => format!("{} · ", history_role_name(role)),
     }
 }
 
@@ -1126,8 +1149,12 @@ fn stated_verdict_facts(verdict: &Verdict) -> Vec<String> {
         facts.extend(coverage_qualifier_lines(qualifier));
     }
     // A sub-scope answers about itself; the share states what fraction of the
-    // whole that is.
-    if let Some(share) = verdict.share() {
+    // whole that is. A scope that checked nothing measured no fraction: its
+    // zero is the absence of a measurement, and stacking `0 of the
+    // repository's 18 high live here.` under `Nothing was checked.` frames
+    // that absence as a measured share of none. The fact stays in JSON, where
+    // the counts beside it say the same thing.
+    if let Some(share) = verdict.share().filter(|_| verdict.counts().checked() > 0) {
         facts.push(share.sentence());
     }
     // How much a typical change to this scope touches is a fact about the
@@ -1189,7 +1216,7 @@ fn evidence_lines(
 fn member_evidence(core: Option<CoreSize>, members: u32) -> String {
     core.map_or_else(
         || format!("{} in the cycle", counted_files(members)),
-        CoreSize::sentence,
+        CoreSize::fragment,
     )
 }
 
@@ -1207,8 +1234,16 @@ fn counted_evidence(fact: ProblemEvidence) -> Option<String> {
             "hot ({})",
             Counted::new(value as usize, "commit", "commits")
         ),
+        // A card states how much of the file was measured, which is the same
+        // count the verdict labels `checked`. "Rated units" named it in the
+        // vocabulary of the policy that produced it; a reader wants the thing
+        // that was measured, and the README already glosses a unit as a
+        // function, method, or closure.
         ProblemEvidence::RatedUnits(value) => {
-            Counted::new(value as usize, "rated unit", "rated units").to_string()
+            format!(
+                "{} measured",
+                Counted::new(value as usize, "function", "functions")
+            )
         }
         ProblemEvidence::Members(value) => format!("{} in the cycle", counted_files(value)),
         ProblemEvidence::ReachIn(value) => {
@@ -2285,10 +2320,11 @@ fn append_evolutionary_comparisons(
 fn warning_rows(report: &Report, selected: &Scope, file_detail: bool) -> (Section, Vec<String>) {
     let mut section = Section::new("WARNINGS");
     let mut warnings: Vec<Row> = Vec::new();
-    let warning = |text: String| Row::new(Some(Word::Warning), text);
     warnings.extend(history_warnings(report));
-    warnings.extend(graph_evidence_warning(report).map(warning));
-    warnings.extend(resolution_warning(report, selected));
+    warnings.extend(graph_evidence_warning(report));
+    // Every per-file row below is printed under the same flag, so a grouped
+    // sentence names one path exactly where no list follows it.
+    warnings.extend(resolution_warning(report, selected, file_detail));
     warnings.extend(diagnostic_warnings(report, selected, file_detail));
     section.rows = warnings;
     if file_detail {
@@ -2323,13 +2359,14 @@ fn comparison_trust_warning_rows(
     if history_relevant {
         section.rows.extend(history_warnings(report));
     }
-    section
-        .rows
-        .extend(graph_evidence_warning(report).map(|text| Row::new(Some(Word::Warning), text)));
+    section.rows.extend(graph_evidence_warning(report));
+    // A comparison report prints no per-file rows at any flag, so its grouped
+    // sentences always carry the path themselves.
     section.rows.extend(diagnostic_warnings_for(
         report,
         selected,
         include_context,
+        false,
         &[
             DiagnosticKind::UnsupportedLanguage,
             DiagnosticKind::UnreadableFile,
@@ -2385,6 +2422,7 @@ fn diagnostic_warnings(report: &Report, selected: &Scope, include_context: bool)
         report,
         selected,
         include_context,
+        include_context,
         &[
             DiagnosticKind::NestedRepository,
             DiagnosticKind::UnsupportedLanguage,
@@ -2398,10 +2436,14 @@ fn diagnostic_warnings(report: &Report, selected: &Scope, include_context: bool)
     )
 }
 
+/// `listed` says that the per-file rows for these diagnostics follow this
+/// section, which is the one case where naming a path inline repeats a line the
+/// reader is about to read anyway.
 fn diagnostic_warnings_for(
     report: &Report,
     selected: &Scope,
     include_context: bool,
+    listed: bool,
     kinds: &[DiagnosticKind],
 ) -> Vec<Row> {
     let mut warnings = Vec::new();
@@ -2425,18 +2467,41 @@ fn diagnostic_warnings_for(
             }
         }
         if count > 0 {
-            warnings.push(Row::new(
-                Some(Word::Warning),
-                diagnostic_summary(kind, count),
-            ));
+            let mut row = Row::new(Some(Word::Warning), diagnostic_summary(kind, count));
+            // A grouped count says how much was lost and nothing about where to
+            // look. One path is the whole difference between a disclosure and a
+            // move, and the rest are one `--all` away.
+            if let Some(path) = files
+                .iter()
+                .next()
+                .filter(|_| !listed)
+                .and_then(|file| report.files().get(file.index()))
+                .map(FileRecord::path)
+            {
+                row = row.with_fact(first_offender(count, path));
+            }
+            warnings.push(row);
         }
     }
     warnings
 }
 
-fn resolution_warning(report: &Report, selected: &Scope) -> Option<Row> {
+/// The one path a reader opens first, named beside the count it belongs to.
+///
+/// A count of one already names its whole subject, so `first` would promise a
+/// second file that does not exist.
+fn first_offender(count: usize, path: &str) -> String {
+    if count == 1 {
+        path.to_owned()
+    } else {
+        format!("first {path}")
+    }
+}
+
+fn resolution_warning(report: &Report, selected: &Scope, listed: bool) -> Option<Row> {
     let mut unresolved = 0usize;
     let mut ambiguous = 0usize;
+    let mut first: Option<&str> = None;
     for diagnostic in report
         .resolution_diagnostics()
         .iter()
@@ -2446,8 +2511,10 @@ fn resolution_warning(report: &Report, selected: &Scope) -> Option<Row> {
             smackdebt_analysis::ResolutionIssueKind::Unresolved => unresolved += 1,
             smackdebt_analysis::ResolutionIssueKind::Ambiguous => ambiguous += 1,
             // An import of an asset was followed exactly as far as it goes.
-            smackdebt_analysis::ResolutionIssueKind::Asset => {}
+            smackdebt_analysis::ResolutionIssueKind::Asset => continue,
         }
+        let path = report.files()[diagnostic.file().index()].path();
+        first.get_or_insert(path);
     }
     let total = unresolved + ambiguous;
     if total == 0 {
@@ -2468,14 +2535,63 @@ fn resolution_warning(report: &Report, selected: &Scope) -> Option<Row> {
     if ambiguous > 0 {
         row = row.with_fact(format!("{ambiguous} matched more than one file"));
     }
+    // A file scope lists every unfollowed import below; every scope above it
+    // states this sentence alone, so the sentence names one file to open.
+    if let Some(path) = first.filter(|_| !listed) {
+        row = row.with_fact(first_offender(total, &format!("in {path}")));
+    }
     Some(row)
 }
 
-fn graph_evidence_warning(report: &Report) -> Option<String> {
-    report.diff_graph_evidence().map_or_else(
+fn graph_evidence_warning(report: &Report) -> Option<Row> {
+    let hidden = report.diff_graph_evidence().map_or_else(
         || codebase_graph_evidence_warning(report.graph_evidence()),
         diff_graph_evidence_warning,
-    )
+    )?;
+    let mut row = Row::new(Some(Word::Warning), hidden);
+    // What was withheld is a disclosure; where the graph has its hole, and the
+    // one command that shows the imports and parses behind it, are the move.
+    for fact in incomplete_graph_facts(report) {
+        row = row.with_fact(fact);
+    }
+    Some(row)
+}
+
+/// Where the dependency graph has a hole, and the command that shows why.
+///
+/// The packages are the ones whose imports or parses left the graph unable to
+/// answer, in the order analysis holds them. `--all` is what turns the grouped
+/// counts inside that package into the per-import and per-file rows that say
+/// which name went unmatched.
+fn incomplete_graph_facts(report: &Report) -> Vec<String> {
+    // A diff holds two graphs. The working tree is the one a reader can open,
+    // so it answers first and the base answers only for a hole that healed.
+    let sides = match report.diff_graph_evidence() {
+        Some(diff) => vec![diff.current(), diff.base()],
+        None => vec![report.graph_evidence()],
+    };
+    let Some(incomplete) = sides
+        .into_iter()
+        .find_map(|evidence| evidence.incomplete_packages().first().copied())
+    else {
+        return Vec::new();
+    };
+    let Some(package) = report.packages().get(incomplete.index()) else {
+        return Vec::new();
+    };
+    let path = package.path();
+    let command = if path == "." {
+        "smackdebt --all".to_owned()
+    } else {
+        format!("smackdebt --all {path}")
+    };
+    vec![
+        format!(
+            "dependency data is incomplete in {}",
+            terminal_path(package.path())
+        ),
+        format!("run {command} to see why"),
+    ]
 }
 
 fn codebase_graph_evidence_warning(evidence: &smackdebt_analysis::GraphEvidence) -> Option<String> {
@@ -2483,8 +2599,8 @@ fn codebase_graph_evidence_warning(evidence: &smackdebt_analysis::GraphEvidence)
         evidence.suppressed_reach() + evidence.suppressed_core() + evidence.suppressed_leakage();
     (hidden > 0).then(|| {
         format!(
-            "{} hidden because dependency data is incomplete.",
-            Counted::new(hidden as usize, "architecture fact", "architecture facts")
+            "{} withheld",
+            Counted::new(hidden as usize, "dependency fact", "dependency facts")
         )
     })
 }
@@ -2502,11 +2618,11 @@ fn diff_graph_evidence_warning(evidence: &smackdebt_analysis::DiffGraphEvidence)
     };
     (hidden > 0).then(|| {
         format!(
-            "{} hidden because dependency data is incomplete{side}.",
+            "{} withheld{side}",
             Counted::new(
                 hidden as usize,
-                "architecture comparison",
-                "architecture comparisons"
+                "dependency comparison",
+                "dependency comparisons"
             )
         )
     })
@@ -2814,35 +2930,36 @@ fn first_char_len(value: &str) -> usize {
 /// A count moves the verb and the object together — one file uses *an
 /// unsupported language* and three files use *unsupported languages* — so the
 /// whole predicate is chosen at once rather than assembled from parts.
+///
+/// None of them takes a full stop: a grouped warning is a counted fragment
+/// that carries `·`-joined facts after it, the same shape the unfollowed
+/// imports and the withheld dependency facts take. A full stop before a `·`
+/// would close a sentence the row then keeps writing.
 const fn diagnostic_predicate(kind: DiagnosticKind) -> (&'static str, &'static str) {
     match kind {
-        DiagnosticKind::NestedRepository => ("was not analyzed.", "were not analyzed."),
-        DiagnosticKind::UnsupportedLanguage => (
-            "uses an unsupported language.",
-            "use unsupported languages.",
-        ),
-        DiagnosticKind::UnreadableFile => ("could not be read.", "could not be read."),
-        DiagnosticKind::OversizedFile => ("is too large to inspect.", "are too large to inspect."),
-        DiagnosticKind::ParseFailure => {
-            ("could not be fully parsed.", "could not be fully parsed.")
+        DiagnosticKind::NestedRepository => ("was not analyzed", "were not analyzed"),
+        DiagnosticKind::UnsupportedLanguage => {
+            ("uses an unsupported language", "use unsupported languages")
         }
+        DiagnosticKind::UnreadableFile => ("could not be read", "could not be read"),
+        DiagnosticKind::OversizedFile => ("is too large to inspect", "are too large to inspect"),
+        DiagnosticKind::ParseFailure => ("could not be fully parsed", "could not be fully parsed"),
         DiagnosticKind::AmbiguousIdentity => (
-            "has anonymous units that could not be matched safely.",
-            "have anonymous units that could not be matched safely.",
+            "has anonymous units that could not be matched safely",
+            "have anonymous units that could not be matched safely",
         ),
-        DiagnosticKind::UnsafeReference => (
-            "contains an unsafe reference.",
-            "contain unsafe references.",
-        ),
+        DiagnosticKind::UnsafeReference => {
+            ("contains an unsafe reference", "contain unsafe references")
+        }
         // A skipped closure is a machine-report disclosure about an optional
         // descriptive fact, so the grouped warning list never carries it. The
         // wording exists so the vocabulary stays complete and correct if it
         // ever does.
         DiagnosticKind::PropagationSkipped => (
-            "has more files than one closure may reach over.",
-            "have more files than one closure may reach over.",
+            "has more files than one closure may reach over",
+            "have more files than one closure may reach over",
         ),
-        DiagnosticKind::Other => ("could not be analyzed.", "could not be analyzed."),
+        DiagnosticKind::Other => ("could not be analyzed", "could not be analyzed"),
     }
 }
 
@@ -4094,8 +4211,8 @@ mod tests {
         let report = every_pattern_report();
         let detailed = render(&report, TerminalOptions::new(120, true, false));
         for fact in [
-            "        3 rated units",
-            "        1 rated unit",
+            "        3 functions measured",
+            "        1 function measured",
             "        9 files import this",
             "        file · 520 lines",
             "        hot (14 commits)",
@@ -4120,8 +4237,8 @@ mod tests {
             (ProblemEvidence::FanIn(2), "2 files import this"),
             (ProblemEvidence::FanOut(1), "imports 1 file"),
             (ProblemEvidence::FanOut(3), "imports 3 files"),
-            (ProblemEvidence::RatedUnits(1), "1 rated unit"),
-            (ProblemEvidence::RatedUnits(4), "4 rated units"),
+            (ProblemEvidence::RatedUnits(1), "1 function measured"),
+            (ProblemEvidence::RatedUnits(4), "4 functions measured"),
             (ProblemEvidence::Members(1), "1 file in the cycle"),
             (ProblemEvidence::Members(5), "5 files in the cycle"),
             // Clustering carries a touch count only for a hotspot, so heat is
@@ -4171,43 +4288,43 @@ mod tests {
         for (kind, singular, plural) in [
             (
                 DiagnosticKind::NestedRepository,
-                "1 nested repository was not analyzed.",
-                "3 nested repositories were not analyzed.",
+                "1 nested repository was not analyzed",
+                "3 nested repositories were not analyzed",
             ),
             (
                 DiagnosticKind::UnsupportedLanguage,
-                "1 source file uses an unsupported language.",
-                "3 source files use unsupported languages.",
+                "1 source file uses an unsupported language",
+                "3 source files use unsupported languages",
             ),
             (
                 DiagnosticKind::UnreadableFile,
-                "1 source file could not be read.",
-                "3 source files could not be read.",
+                "1 source file could not be read",
+                "3 source files could not be read",
             ),
             (
                 DiagnosticKind::OversizedFile,
-                "1 source file is too large to inspect.",
-                "3 source files are too large to inspect.",
+                "1 source file is too large to inspect",
+                "3 source files are too large to inspect",
             ),
             (
                 DiagnosticKind::ParseFailure,
-                "1 source file could not be fully parsed.",
-                "3 source files could not be fully parsed.",
+                "1 source file could not be fully parsed",
+                "3 source files could not be fully parsed",
             ),
             (
                 DiagnosticKind::AmbiguousIdentity,
-                "1 file has anonymous units that could not be matched safely.",
-                "3 files have anonymous units that could not be matched safely.",
+                "1 file has anonymous units that could not be matched safely",
+                "3 files have anonymous units that could not be matched safely",
             ),
             (
                 DiagnosticKind::UnsafeReference,
-                "1 source file contains an unsafe reference.",
-                "3 source files contain unsafe references.",
+                "1 source file contains an unsafe reference",
+                "3 source files contain unsafe references",
             ),
             (
                 DiagnosticKind::Other,
-                "1 source file could not be analyzed.",
-                "3 source files could not be analyzed.",
+                "1 source file could not be analyzed",
+                "3 source files could not be analyzed",
             ),
         ] {
             assert_eq!(diagnostic_summary(kind, 1), singular, "{kind:?}");
@@ -4998,11 +5115,9 @@ mod tests {
                 no_debt_diff_with_context(HistoryCoverage::default(), false, true, true, false);
             let graph = render(&graph_report, TerminalOptions::default());
             assert!(
-            graph.contains(
-                "warning 1 architecture comparison hidden because dependency data is incomplete after the change."
-            ),
-            "{graph}"
-        );
+                graph.contains("warning 1 dependency comparison withheld after the change"),
+                "{graph}"
+            );
             assert!(!graph.contains("HISTORY"), "{graph}");
             assert!(!graph.contains("changed together"), "{graph}");
             // Nothing moved, so there is no movement to point at.
@@ -5050,7 +5165,7 @@ mod tests {
                 no_debt_diff_with_context(HistoryCoverage::default(), false, false, false, true);
             let terminal = render(&report, TerminalOptions::new(100, true, true));
             assert!(
-                terminal.contains("1 file has anonymous units that could not be matched safely."),
+                terminal.contains("1 file has anonymous units that could not be matched safely\n"),
                 "{terminal}"
             );
             assert!(!terminal.contains("next:"), "{terminal}");

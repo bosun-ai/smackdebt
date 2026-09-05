@@ -6,4 +6,4 @@ smackdebt · repository root
 
 WARNINGS
   warning History is unavailable.
-  warning 1 source file uses an unsupported language.
+  warning 1 source file uses an unsupported language · main.go

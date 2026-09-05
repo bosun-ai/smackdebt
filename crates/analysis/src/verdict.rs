@@ -345,8 +345,18 @@ impl CoreSize {
 
     /// The exact sentence every consumer prints for this core.
     pub fn sentence(self) -> String {
+        format!("{}.", self.fragment())
+    }
+
+    /// The same fact without its full stop, which is what a card states.
+    ///
+    /// A card stacks lowercase fragments — `a change here reaches 11 files`,
+    /// `2 files in the cycle` — and a closed sentence among them reads as a
+    /// different kind of claim than the ones around it. A verdict-level
+    /// statement is a sentence and keeps the stop.
+    pub fn fragment(self) -> String {
         format!(
-            "{} of {} files sit in one dependency cycle.",
+            "{} of {} files sit in one dependency cycle",
             self.core, self.files
         )
     }
@@ -1183,6 +1193,12 @@ mod tests {
         assert_eq!(
             core.sentence(),
             "34 of 210 files sit in one dependency cycle."
+        );
+        // The two forms are one fact: the fragment a card stacks, and the
+        // sentence a verdict-level statement closes.
+        assert_eq!(
+            core.fragment(),
+            "34 of 210 files sit in one dependency cycle"
         );
     }
 

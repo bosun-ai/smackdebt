@@ -937,12 +937,12 @@ smackdebt diff main a --color never --jobs 1 --history 36500d
 smackdebt diff main new/untracked.js --color never --jobs 1 --history 36500d
 ```
 
-<!-- smackdebt-example fixture=comparison-trust-warning status=0 stderr=empty stdout=No_debt_changed.|Not_all_source_was_checked.|0_of_1_source_files_were_analyzed.|WARNINGS|1_source_file_uses_an_unsupported_language. -->
+<!-- smackdebt-example fixture=comparison-trust-warning status=0 stderr=empty stdout=No_debt_changed.|Not_all_source_was_checked.|0_of_1_source_files_were_analyzed.|WARNINGS|1_source_file_uses_an_unsupported_language -->
 ```console
 smackdebt diff main --color never --jobs 1 --history 36500d
 ```
 
-<!-- smackdebt-example fixture=comparison-trust-warning status=0 stderr=empty stdout=smackdebt_·_page.astro|Not_all_source_was_checked.|0_of_1_source_files_were_analyzed.|1_source_file_uses_an_unsupported_language. -->
+<!-- smackdebt-example fixture=comparison-trust-warning status=0 stderr=empty stdout=smackdebt_·_page.astro|Not_all_source_was_checked.|0_of_1_source_files_were_analyzed.|1_source_file_uses_an_unsupported_language -->
 ```console
 smackdebt page.astro --color never --jobs 1 --history 36500d
 ```
@@ -962,7 +962,7 @@ smackdebt docs --color never
 smackdebt README.txt --color never
 ```
 
-<!-- smackdebt-example fixture=generated-javascript status=0 stderr=empty stdout=No_debt_changed.|1_file_has_anonymous_units_that_could_not_be_matched_safely. -->
+<!-- smackdebt-example fixture=generated-javascript status=0 stderr=empty stdout=No_debt_changed.|1_file_has_anonymous_units_that_could_not_be_matched_safely -->
 ```console
 smackdebt diff HEAD~1 bundles/collision.bundle.js --color never --jobs 1 --history 36500d
 ```

@@ -422,6 +422,7 @@ pub struct smackdebt_analysis::CoreSize
 impl smackdebt_analysis::CoreSize
 pub const fn smackdebt_analysis::CoreSize::core(self) -> u32
 pub const fn smackdebt_analysis::CoreSize::files(self) -> u32
+pub fn smackdebt_analysis::CoreSize::fragment(self) -> alloc::string::String
 pub const fn smackdebt_analysis::CoreSize::from_counts(u32, u32) -> core::option::Option<Self>
 pub fn smackdebt_analysis::CoreSize::sentence(self) -> alloc::string::String
 pub struct smackdebt_analysis::CouplingEvidence

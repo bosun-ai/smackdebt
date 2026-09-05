@@ -18,7 +18,8 @@ PROBLEMS
 
 WARNINGS
   warning History is unavailable.
-  warning 1 architecture fact hidden because dependency data is incomplete.
+  warning 1 dependency fact withheld
+        dependency data is incomplete in app · run smackdebt --all app to see why
   warning 2 imports could not be followed
         1 named nothing in the repository · 1 matched more than one file
   app/main.js:2 → ./choice · matched more than one file

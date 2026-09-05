@@ -14,8 +14,9 @@ ARCHITECTURE
         → app
 
 WARNINGS
-  warning 1 architecture comparison hidden because dependency data is incomplete on both sides.
+  warning 1 dependency comparison withheld on both sides
+        dependency data is incomplete in app · run smackdebt --all app to see why
   warning 2 imports could not be followed
-        1 named nothing in the repository · 1 matched more than one file
+        1 named nothing in the repository · 1 matched more than one file · first in app/main.js
 
   next: smackdebt diff main app

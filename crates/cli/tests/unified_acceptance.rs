@@ -995,8 +995,10 @@ fn a_core_is_stated_only_when_the_largest_cycle_clears_both_floors() {
     // of the cycle it names rather than on the anonymous verdict head.
     let head = text.split("PROBLEMS").next().expect("a verdict head");
     assert!(!head.contains("dependency cycle"), "{head}");
+    // The card states the fact as the fragment its neighbouring lines are; the
+    // machine report above states it as the sentence it owns.
     assert!(
-        text.contains("        6 of 20 files sit in one dependency cycle.\n"),
+        text.contains("        6 of 20 files sit in one dependency cycle\n"),
         "{text}"
     );
     assert!(
@@ -1009,7 +1011,7 @@ fn a_core_is_stated_only_when_the_largest_cycle_clears_both_floors() {
     narrow.success();
     let narrow_text = String::from_utf8(narrow.stdout).unwrap();
     assert!(
-        narrow_text.contains("        6 of 20 files sit in one dependency cycle.\n"),
+        narrow_text.contains("        6 of 20 files sit in one dependency cycle\n"),
         "the named cycle evidence fits fifty columns: {narrow_text}"
     );
 
@@ -1439,7 +1441,7 @@ fn the_leakage_fixture_states_both_kinds_and_every_absence() {
         [
             "  high hot and complex · app/interface.js",
             "        app/interface.js:1 · function · cognitive 6",
-            "        1 rated unit",
+            "        1 function measured",
             "        web/src/follower.js changed with it in 7 of 12 commits · 58% · 3 directories away",
             // The claimed hidden finding names the partner, because this card's
             // head names one file and nothing else on the card would.

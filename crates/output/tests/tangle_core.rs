@@ -17,9 +17,9 @@ use smackdebt_output::{TerminalOptions, write_terminal};
 const ROOT: ScopeId = ScopeId::from_index(0);
 const PACKAGE: ScopeId = ScopeId::from_index(1);
 /// The first thirty-four files close the core; the next two close a smaller
-/// cycle. The counts are chosen so the core's sentence is fifty-two columns
+/// cycle. The counts are chosen so the core's card line is fifty-one columns
 /// wide with its indent, which is past the narrowest width this product
-/// supports: a fixture whose sentence happened to fit would prove nothing about
+/// supports: a fixture whose line happened to fit would prove nothing about
 /// the width the narrow test exists for.
 const CORE: usize = 34;
 const KNOT: usize = 2;
@@ -147,7 +147,7 @@ fn the_largest_cycle_says_so_and_every_other_cycle_states_its_size() {
     assert_eq!(stated.graph_evidence().suppressed_core(), 0);
     let terminal = render(&stated);
     assert!(
-        terminal.contains("        34 of 210 files sit in one dependency cycle.\n"),
+        terminal.contains("        34 of 210 files sit in one dependency cycle\n"),
         "{terminal}"
     );
     assert!(
@@ -158,6 +158,23 @@ fn the_largest_cycle_says_so_and_every_other_cycle_states_its_size() {
     // The core is stated once, beside one subject, rather than on every card
     // whose cycle happens to be that size.
     assert_eq!(terminal.matches("sit in one dependency cycle").count(), 1);
+}
+
+/// The card states the core as a fragment, because every line it stacks is
+/// one: a closed sentence among lowercase fragments reads as a different kind
+/// of claim than the lines around it. The sentence analysis owns keeps its
+/// stop for the consumers that state it as a sentence.
+#[test]
+fn the_card_states_the_core_in_the_fragment_style_its_neighbours_use() {
+    let stated = report(true, false);
+    let terminal = render(&stated);
+    assert!(
+        !terminal.contains("sit in one dependency cycle."),
+        "{terminal}"
+    );
+    let core = CoreSize::from_counts(CORE as u32, FILES as u32).expect("a material core");
+    assert_eq!(core.sentence(), format!("{}.", core.fragment()));
+    assert!(terminal.contains(&core.fragment()), "{terminal}");
 }
 
 /// A report whose composition found no material core states two cycle sizes
@@ -200,9 +217,9 @@ fn an_incomplete_graph_withholds_the_core_it_counts_as_withheld() {
 /// The card states the fact whole at fifty columns, because a core shortened
 /// into an ellipsis states nothing.
 ///
-/// This sentence is fifty-two columns wide with its indent, so the width is
+/// This line is fifty-one columns wide with its indent, so the width is
 /// genuinely exceeded and the renderer has to break it. Nothing may be lost
-/// across that break: the words of the sentence, in order, are what the two
+/// across that break: the words of the fact, in order, are what the two
 /// lines hold between them.
 #[test]
 fn a_narrow_terminal_breaks_the_core_without_losing_it() {
@@ -217,9 +234,9 @@ fn a_narrow_terminal_breaks_the_core_without_losing_it() {
     .unwrap();
     let terminal = String::from_utf8(bytes).unwrap();
     assert!(!terminal.contains('…'), "{terminal}");
-    let sentence = "34 of 210 files sit in one dependency cycle.";
+    let fact = "34 of 210 files sit in one dependency cycle";
     assert!(
-        !terminal.contains(sentence),
+        !terminal.contains(fact),
         "the fixture must exceed fifty columns or this test proves nothing: {terminal}"
     );
     let broken: Vec<&str> = terminal
@@ -232,7 +249,7 @@ fn a_narrow_terminal_breaks_the_core_without_losing_it() {
             .iter()
             .flat_map(|line| line.split_whitespace())
             .collect::<Vec<_>>(),
-        sentence.split(' ').collect::<Vec<_>>(),
+        fact.split(' ').collect::<Vec<_>>(),
         "{terminal}"
     );
     for line in &broken {
