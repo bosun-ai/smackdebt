@@ -32,49 +32,50 @@ $ smackdebt
 
 smackdebt · repository root
   Worn in the usual places.
-20 high · 63 watch · 3,305 checked
+18 high · 63 watch · 4,366 checked
 worst: crates/project/src/project.rs — hot AND complex
 
 AREAS
-  scripts · 5 high · 10 watch
-  crates/analysis · 4 high · 17 watch
+  scripts · 5 high · 8 watch
   crates/cli · 4 high · 3 watch
+  crates/analysis · 3 high · 17 watch · a change here can reach 6 of 12 packages
   crates/languages · 3 high · 9 watch
-  crates/project · 2 high · 21 watch
+  crates/project · 2 high · 19 watch
 
 PROBLEMS
   high does too much · crates/project/src/project.rs
   high hot and complex · crates/languages/src/dependency.rs
-  high hot and complex · crates/output/src/output.rs
-  high hot and complex · crates/cli/tests/unified_acceptance.rs
-  high hot and complex · crates/analysis/src/evolution.rs
+  high change spreads far · crates/analysis/src/evolution.rs
   high hot and complex · crates/cli/src/app.rs
-  high hot and complex · crates/cli/tests/acceptance.rs
-  high hot and complex · crates/languages/tests/language_fixtures.rs
   high everything depends on this · crates/analysis/src/report.rs
+  high HistoryParser::accept · method · crates/git/src/repository.rs:674
   high hot and complex · scripts/performance/review-workloads.py
   high ArchitectureGraph::new · method · crates/analysis/src/architecture.rs:17
-  high generic_source_roles · function · crates/discovery/src/inventory.rs:228
-  high compare_units · function · crates/analysis/src/comparison.rs:123
+  high Presentation::new · method · crates/output/src/output.rs:447
+  high generic_source_roles · function · crates/discovery/src/inventory.rs:521
+  high hot and complex · scripts/performance/check-report.py
   high generate · function · scripts/performance/workload.py:262
-  high main · function · scripts/performance/check-report.py:156
   high validate · function · scripts/performance/check-workload-reviews.py:71
   high cycle_witness · function · crates/analysis/src/cycle_witness.rs:3
   high violations · function · scripts/check-entry-modules.py:30
   high strongly_connected_components · function · crates/analysis/src/
         strongly_connected_components.rs:1
   high glob_matches · function · crates/discovery/src/glob.rs:6
-  watch vue.rs · closure · crates/languages/src/vue.rs:97
-  watch language_slot · function · crates/languages/src/engine.rs:168
-  watch CodebaseRequest::with_thresholds · method · crates/project/src/requests.rs:165
-  watch circular dependency · crates/analysis/src/change_coupling.rs
+  high hot and complex · crates/cli/tests/unified_acceptance.rs
+  high hot and complex · crates/cli/tests/acceptance.rs
+  high hot and complex · crates/languages/tests/language_fixtures.rs
+  watch depends on many files · crates/languages/src/analyzer.rs
+  watch vue.rs · closure · crates/languages/src/vue.rs:98
+  watch language_slot · function · crates/languages/src/engine.rs:253
+  watch CodebaseRequest::with_thresholds · method · crates/project/src/requests.rs:173
 
 WARNINGS
   warning 3 imports could not be followed
-        2 named nothing in the repository · 1 matched more than one file
-  warning 1 source file could not be fully parsed.
+        2 named nothing in the repository
+        1 matched more than one file
+        first in crates/cli/tests/acceptance.rs
 
-  next: smackdebt scripts
+  next: smackdebt crates/project/src/project.rs
 ```
 
 The report opens with a verdict block: the selected scope, the sentence for its
@@ -100,10 +101,16 @@ function that changes often rises to the top and says `hot (n commits)`. A
 complex function in quiet code still appears as debt, but does not outrank
 active risks just because it is large.
 
-`AREAS` appears when debt spans several child paths and shows at most five. The
-first path is the next useful place to inspect, and `next:` names the exact
-command. `PROBLEMS` is the debt itself, worst first. Empty `AREAS`, `PROBLEMS`,
-and `WARNINGS` sections stay out of the way.
+`AREAS` appears when debt spans several child paths and shows at most five, and
+its first path is a useful place to look. `next:` names the exact command for
+the one place to look first: the worst problem's own path where the view states
+one, and otherwise the first area. `PROBLEMS` is the debt itself, worst first.
+`WARNINGS` states what the run could not read, one grouped count per kind, and
+each count names the first path to open — or, where a dependency fact was
+withheld, the package whose graph has the hole and the command that shows why.
+The per-file rows behind those counts are detail that `--all` and a selected
+file print in their place. Empty `AREAS`, `PROBLEMS`, and `WARNINGS` sections
+stay out of the way.
 
 `PROBLEMS` names problems instead of listing measurements. One card groups the
 findings the report already produced around one file, one cycle, one package, or
@@ -121,7 +128,7 @@ smackdebt · crates/analysis
   Worn in the usual places.
   3 of the repository's 18 high live here.
   A typical change here touches 4 files.
-3 high · 17 watch · 1,585 checked
+3 high · 17 watch · 1,638 checked
 worst: crates/analysis/src/evolution.rs — hot AND complex
 
 PROBLEMS
@@ -138,7 +145,7 @@ PROBLEMS
   watch circular dependency · crates/analysis/src/comparison.rs
   watch packages change together · crates/analysis ↔ crates/cli
   watch one author · crates/analysis
-  watch one author · crates/analysis
+  watch one author · test · crates/analysis
 
   next: smackdebt crates/analysis/src/evolution.rs
 ```
@@ -146,8 +153,10 @@ PROBLEMS
 This scope holds thirteen cards, which is past the last rung of the
 [one-screen budget](#the-one-screen-budget), so every card states its head and
 no evidence at all. `--top 6` below is the same scope with the budget spent the
-other way. The two `one author` cards are one package's primary source and its
-tests, which are separate contributor-concentration findings.
+other way. The two `one author` cards are separate contributor-concentration
+findings — one for the package's primary source, one for its tests — and the
+second names its role, because a head stating neither would print the same line
+twice.
 
 A path inside a Git repository selects a scope of that repository's report
 rather than starting a smaller one: the repository is analyzed and the selection
@@ -157,8 +166,11 @@ frames the selected High count with the analysis-owned sentence `3 of the
 repository's 18 high live here.` It omits that sentence when the selection
 contains the report's complete selected source inventory, because the
 denominator adds no information. The repository root itself prints no such
-sentence, and neither does a repository with no High debt. Selecting a path this
-way costs a whole-repository run.
+sentence, and neither does a repository with no High debt. A scope that checked
+nothing prints no share either: `0 of the repository's 18 high live here.` under
+`Nothing was checked.` would frame an unmeasured zero as a measured fraction.
+The machine report keeps `verdict.share` in every case, beside the counts that
+say which case it is. Selecting a path this way costs a whole-repository run.
 
 A file or directory outside any Git repository has no repository to be a scope
 of, so it is inspected on its own and its verdict states no share.
@@ -342,23 +354,26 @@ anchor is its repository-relative path, written `path:line` when the card heads
 on a finding with a span; a cycle is anchored on the first step of its witness;
 a coupling pair reads `<left> ↔ <right>` and a stable-dependency pair reads
 `<source> → <target>`; a package is named by its path, written `repository root`
-for the root package. The evidence follows on indented lines: a claimed
-finding's `path:line` with its measurements, a size finding's subject and
-measured value, `<n> files import this`, `imports <n> files`, `<n> rated units`,
-`<n> files in the cycle`, `<n> of <total> files sit in one dependency cycle.`
-on the one cycle that is the repository's core, `hot (<n> commits)`, `a change
-here reaches <n> files`, `<n> importers follow it`, a coupling pair's commit
-operands and dependency state, and a contributor concentration's counts. A
-co-change finding names the two files it is about, and its evidence line names
-the one the card's head does not. A `hidden_coupling` card heads
-`<left> ↔ <right>` and states `changed together in 6 of 9 commits · 67% · no
-dependency either way · 4 directories away`, naming neither again. When such a
-finding lands on the card of a file that already carried debt, that card's head
-names one file, so the line names the other: `changed with
-data/store/lib/cache.js in 6 of 9 commits · 67% · no dependency either way · 3
-directories away`. A leaking interface's card is the same shape from the other
-side, stating `<follower> changed with it in 7 of 12 commits · 58% · 3
-directories away` for each importer that follows it.
+for the root package. A card whose head would otherwise repeat another card's
+carries the source role it is about, so `one author · test · crates/analysis`
+is the package's tests and `one author · crates/analysis` is its primary
+source. The evidence follows on indented lines: a claimed finding's `path:line`
+with its measurements, a size finding's subject and measured value, `<n> files
+import this`, `imports <n> files`, `<n> functions measured` for the functions,
+methods, and closures the file holds, `<n> files in the cycle`, `<n> of <total>
+files sit in one dependency cycle` on the one cycle that is the repository's
+core, `hot (<n> commits)`, `a change here reaches <n> files`, `<n> importers
+follow it`, a coupling pair's commit operands and dependency state, and a
+contributor concentration's counts. A co-change finding names the two files it
+is about, and its evidence line names the one the card's head does not. A
+`hidden_coupling` card heads `<left> ↔ <right>` and states `changed together in
+6 of 9 commits · 67% · no dependency either way · 4 directories away`, naming
+neither again. When such a finding lands on the card of a file that already
+carried debt, that card's head names one file, so the line names the other:
+`changed with data/store/lib/cache.js in 6 of 9 commits · 67% · no dependency
+either way · 3 directories away`. A leaking interface's card is the same shape
+from the other side, stating `<follower> changed with it in 7 of 12 commits ·
+58% · 3 directories away` for each importer that follows it.
 
 The pattern ids are the stable vocabulary for an integration; the words beside
 them are what a person reads:
@@ -366,7 +381,7 @@ them are what a person reads:
 | Pattern | The terminal prints | What it needs |
 | --- | --- | --- |
 | `god_file` | `does too much` | a file that both concentrates rated debt — three High findings, or one High finding among at least six units rated Watch or High — and is broad, meaning it carries a size finding or imports at least ten files |
-| `hub` | `everything depends on this`, `depends on many files`, or `change spreads far` | a file whose imports in or out reach eight and, when its package's median is not zero, reach four times that median, or whose reach alone reaches eight; the words state which direction fired. A file that carries debt of its own also needs co-change proof — it is a hotspot in the window, or a change-leakage finding names it — and is otherwise named by that debt instead |
+| `hub` | `everything depends on this`, `depends on many files`, or `change spreads far` | a file whose imports in or out reach eight and, when its package's median is not zero, reach four times that median, or whose reach alone reaches eight; the words state which direction fired. A file holding a finding that can move a verdict also needs co-change proof — it is a hotspot in the window, or a change-leakage finding names it — and is otherwise named by that finding instead |
 | `tangle` | `circular dependency` | one rated dependency cycle: High across packages, Watch inside one package |
 | `hot_mess` | `hot and complex` | a file that carries High debt and is a hotspot in the selected window, five touches by default |
 | `shotgun_pair` | `packages change together` | two packages that keep changing together with no code dependency explaining it |
@@ -405,11 +420,13 @@ and breadth alone means a file is large. A `hub` compares a file against the
 median of its own package, so the same file is the same problem at every
 selected scope. A degree on its own is a shape rather than a problem — a view
 imports many components and an error module is imported everywhere because that
-is what each is for — so a file that carries debt keeps its `hub` card only
-where co-change says the degree costs something, and is otherwise named by the
-debt it holds. A file with no debt of its own keeps a `detail` `hub` card
-whatever its history, so a degree stays inspectable under `--all` and in JSON.
-The two co-change patterns share their three thresholds and are explained in
+is what each is for — so a file holding a finding that can move a verdict keeps
+its `hub` card only where co-change says the degree costs something, and is
+otherwise named by that finding. Advisory and non-primary debt does not count
+here: a file whose findings all stay out of the verdict is treated as a file
+with no debt of its own. Whether the resulting card is then shown by default is
+the visibility rule below, not this one. The two co-change patterns share their
+three thresholds and are explained in
 [Read how far a change reaches](#read-how-far-a-change-reaches).
 
 Every card is either a `default` card or a `detail` card. A card is `default`
@@ -468,31 +485,31 @@ smackdebt · crates/analysis
   Worn in the usual places.
   3 of the repository's 18 high live here.
   A typical change here touches 4 files.
-3 high · 17 watch · 1,585 checked
+3 high · 17 watch · 1,638 checked
 worst: crates/analysis/src/evolution.rs — hot AND complex
 
 PROBLEMS
   high change spreads far · crates/analysis/src/evolution.rs
         crates/analysis/src/evolution.rs:60 · method · parameters 13
-        a change here reaches 14 files
+        a change here reaches 15 files
         file · 1,848 lines
   high everything depends on this · crates/analysis/src/report.rs
-        crates/analysis/src/report.rs:1904 · function · cognitive 23 · cyclomatic 15
-        11 files import this
+        crates/analysis/src/report.rs:1961 · function · cognitive 23 · cyclomatic 15
+        12 files import this
         imports 13 files
   high ArchitectureGraph::new · method · crates/analysis/src/architecture.rs:17
         parameters 6
-        file · 1,172 lines
-        hot (10 commits)
+        file · 1,194 lines
+        hot (11 commits)
   high cycle_witness · function · crates/analysis/src/cycle_witness.rs:3
         cognitive 34 · cyclomatic 15 · nesting 5
   high strongly_connected_components · function · crates/analysis/src/
         strongly_connected_components.rs:1
         cognitive 30 · cyclomatic 15 · nesting 4
   watch change spreads far · crates/analysis/src/comparison.rs
-        crates/analysis/src/comparison.rs:52 · method · parameters 7
-        a change here reaches 11 files
-        hot (5 commits)
+        crates/analysis/src/comparison.rs:50 · method · parameters 7
+        a change here reaches 12 files
+        hot (7 commits)
 
   next: smackdebt crates/analysis/src/evolution.rs
 ```
@@ -513,6 +530,7 @@ $ smackdebt crates/analysis/src/change_coupling.rs
 
 smackdebt · crates/analysis/src/change_coupling.rs
   Clean. Ship it.
+  0 of the repository's 18 high live here.
 0 high · 0 watch · 22 checked
 
 PROBLEMS
@@ -521,12 +539,20 @@ PROBLEMS
         → crates/analysis/src/evolution.rs
         → crates/analysis/src/change_coupling.rs
         2 files in the cycle
-        a change here reaches 14 files
-        hot (13 commits)
+        a change here reaches 15 files
+        hot (14 commits)
   watch packages change together · crates/analysis ↔ crates/cli
-        changed together in 33 of 98 commits · 34% · no direct dependency · linked via crates/output
+        changed together in 46 of 130 commits · 35% · no direct dependency · linked via crates/
+        output
   watch one author · crates/analysis
-        one contributor made 57 of 60 commits
+        one contributor made 80 of 83 commits
+  watch one author · test · crates/analysis
+        one contributor made 17 of 17 commits
+  change spreads far · crates/analysis/src/change_coupling.rs
+        a change here reaches 15 files
+        hot (6 commits)
+
+  next: smackdebt crates/analysis/src/change_coupling.rs
 ```
 
 The verdict counts rate units: `0 high · 0 watch · 22 checked` counts the
@@ -725,7 +751,13 @@ graph number without saying where to act.
 | --- | --- | --- |
 | `a change here can reach 5 of 12 packages` | the named package area | packages that transitively depend on this package, counting this package |
 | `a change here reaches 17 files` | the named file or cycle problem | files anywhere in the repository that transitively depend on the named source, excluding that source |
-| `9 of 86 files sit in one dependency cycle.` | the card of the cycle that is the core | members of the largest cycle out of the files the dependency graph is built over |
+| `9 of 86 files sit in one dependency cycle` | the card of the cycle that is the core | members of the largest cycle out of the files the dependency graph is built over |
+
+Every one of these is a fragment on the card that carries it, because a card
+stacks fragments and a closed sentence among them reads as a different kind of
+claim. The machine report states the core as the sentence it owns,
+`9 of 86 files sit in one dependency cycle.`, which is the same fact with its
+stop.
 
 Reach counts dependants across the whole repository, not only the named source's
 own package: a file that a second package imports is reached from the first one.
@@ -1020,24 +1052,22 @@ or directory subtree while keeping displayed paths repository-relative.
 Every selected file has one source role: primary, test, example, benchmark,
 fixture, generated, vendored, or dormant. Classification checks explicit
 `source_roles` configuration first, then language-owned generated markers. It
-next treats
-`.min`, `.bundle`, and `-bundle` names as generated for `.js`, `.mjs`, and
-`.cjs` files. JavaScript, JSX, TypeScript, and TSX source is also generated when
-it is at least 65,536 bytes and averages at least 512 bytes per nonempty
-physical line. That content check uses the source already read for analysis;
-Vue documents do not use it. A `.js`, `.mjs`, or `.cjs` file whose name begins
-with `jquery` is vendored, which is the one library family named outright.
-Generic filenames and paths follow, then a Rust
-file whose every module declaration is test-scoped, and finally primary.
-Different matches at the same level are an
-invalid configuration and exit with status 2. Primary, test, example, and
-benchmark source affect default verdicts. Fixture, generated, vendored, and
-dormant source remain
-visible in JSON, `--all`, and explicit file inspection without affecting
-verdicts, default problems, root worst-offender selection, or navigation.
-Explicit configuration wins over generated evidence. Directory names alone do
-not assign the generated, vendored, or dormant role, so authored source under
-`public`, `share`, or `assets` remains authored unless another rule matches it.
+next treats `.min`, `.bundle`, and `-bundle` names as generated for `.js`,
+`.mjs`, and `.cjs` files. JavaScript, JSX, TypeScript, and TSX source is also
+generated when it is at least 65,536 bytes and averages at least 512 bytes per
+nonempty physical line. That content check uses the source already read for
+analysis; Vue documents do not use it. A `.js`, `.mjs`, or `.cjs` file whose
+name begins with `jquery` is vendored, which is the one library family named
+outright. Generic filenames and paths follow, then a Rust file whose every
+module declaration is test-scoped, and finally primary. Different matches at
+the same level are an invalid configuration and exit with status 2. Primary,
+test, example, and benchmark source affect default verdicts. Fixture,
+generated, vendored, and dormant source remain visible in JSON, `--all`, and
+explicit file inspection without affecting verdicts, default problems, root
+worst-offender selection, or navigation. Explicit configuration wins over
+generated evidence. Directory names alone do not assign the generated,
+vendored, or dormant role, so authored source under `public`, `share`, or
+`assets` remains authored unless another rule matches it.
 
 <!-- smackdebt-example fixture=generated-javascript status=0 stderr=empty stdout=smackdebt_·_bundles/vendor.min.js|0_high|PROBLEMS|generated -->
 ```console

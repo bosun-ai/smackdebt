@@ -2879,8 +2879,13 @@ fn readme_console_examples_use_the_simple_terminal_vocabulary() {
         "| `bus_risk` | `one author` |",
         "| `unstable_dependency` | `depends on less stable code` |",
         "| `measured` |",
-        "changed together in 33 of 98 commits · 34% · no direct dependency · linked via crates/output",
-        "one contributor made 57 of 60 commits",
+        // The pair line is longer than a hundred columns at this scope, so the
+        // required string stops where the renderer breaks it.
+        "changed together in 46 of 130 commits · 35% · no direct dependency · linked via crates/",
+        "one contributor made 80 of 83 commits",
+        // One package, two bodies of code: the role is what tells the two
+        // cards apart.
+        "one author · test · crates/analysis",
         // The analysis-owned facts, each documented where it is stated: the
         // typical change under a verdict head, the core on its cycle's card,
         // the reach aggregates in the machine report.
@@ -2888,15 +2893,15 @@ fn readme_console_examples_use_the_simple_terminal_vocabulary() {
         "A change here can reach 17 of 36 files in this package.",
         "9 of 86 files sit in one dependency cycle.",
         "A typical change here touches 4 files.",
-        "a change here reaches 14 files",
+        "a change here reaches 15 files",
         "3 importers follow it",
         "instability 1/4 → 2/3",
-        "hot (10 commits)",
+        "hot (11 commits)",
         "2 files in the cycle",
         "imports 13 files",
-        "11 files import this",
+        "12 files import this",
         "GraphEditor.vue · closure",
-        "next: smackdebt scripts",
+        "next: smackdebt crates/project/src/project.rs",
         "worse 0 · better 0 · changed 0",
         "Not all source was checked.",
         "<analyzed> of <selected> source files were analyzed.",
