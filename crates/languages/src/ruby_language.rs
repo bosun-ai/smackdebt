@@ -118,9 +118,16 @@ impl Language for Ruby {
 /// give a block no name of its own, so the calls above it are the only stable
 /// thing about it: `resource :sessions do … get do … end … end` says which
 /// `get` this is, and keeps saying it after the block's body is edited or the
-/// whole group moves down the file. Each link names its call's method and its
-/// first argument as written, so `describe`/`context`/`it` chains read exactly
-/// as they always have and every other DSL call now reads the same way.
+/// whole group moves down the file.
+///
+/// A link names all three things a call says about the block it carries: what
+/// it is called on, what it is called, and what it is called with. A method
+/// name alone does not identify anything — `SETTINGS.each` and `ROUTES.each`
+/// are both `each` and iterate different worlds — so a chain that is one bare
+/// method name and nothing else is no anchor at all, and the block falls back
+/// to its exact syntax and, failing that, to being named unpairable. A name
+/// that says nothing must not be allowed to pair two unrelated blocks; the
+/// digest at least fails honestly.
 ///
 /// A link the chain cannot name is left out rather than guessed at, and a
 /// chain shared by sibling blocks is not an answer — the matcher settles those
@@ -140,14 +147,29 @@ fn ruby_call_chain_anchor(node: Node<'_>, source: &[u8]) -> Option<String> {
         }
         current = value.parent();
     }
-    if links.is_empty() {
-        return None;
+    match links.as_slice() {
+        [] => return None,
+        [only] if !only.names_more_than_a_method => return None,
+        _ => {}
     }
     links.reverse();
-    Some(links.join("/"))
+    Some(
+        links
+            .into_iter()
+            .map(|link| link.text)
+            .collect::<Vec<_>>()
+            .join("/"),
+    )
 }
 
-fn ruby_call_link(call: Node<'_>, source: &[u8]) -> Option<String> {
+/// One call in a block's chain, and whether it said anything beyond its method
+/// name — a bare `each` names no block, a bare `describe "x"` names one.
+struct CallLink {
+    text: String,
+    names_more_than_a_method: bool,
+}
+
+fn ruby_call_link(call: Node<'_>, source: &[u8]) -> Option<CallLink> {
     if call.kind() != "call" {
         return None;
     }
@@ -158,8 +180,44 @@ fn ruby_call_link(call: Node<'_>, source: &[u8]) -> Option<String> {
     if method.is_empty() {
         return None;
     }
-    let argument = call
-        .child_by_field_name("arguments")
+    let receiver = ruby_call_receiver(call, source);
+    let argument = ruby_call_argument(call, source);
+    let called = match receiver {
+        Some(receiver) => format!("{receiver}.{method}"),
+        None => method.to_owned(),
+    };
+    Some(CallLink {
+        text: match argument {
+            Some(argument) => format!("call:{called}:{argument}"),
+            None => format!("call:{called}"),
+        },
+        names_more_than_a_method: receiver.is_some() || argument.is_some(),
+    })
+}
+
+/// The receiver, while it is a plain name. A computed receiver names nothing
+/// stable — and can run to any length — so the link leaves it out.
+fn ruby_call_receiver<'a>(call: Node<'_>, source: &'a [u8]) -> Option<&'a str> {
+    call.child_by_field_name("receiver")
+        .filter(|node| {
+            matches!(
+                node.kind(),
+                "identifier"
+                    | "constant"
+                    | "scope_resolution"
+                    | "self"
+                    | "instance_variable"
+                    | "class_variable"
+                    | "global_variable"
+            )
+        })
+        .and_then(|node| node.utf8_text(source).ok())
+        .map(str::trim)
+        .filter(|text| !text.is_empty())
+}
+
+fn ruby_call_argument<'a>(call: Node<'_>, source: &'a [u8]) -> Option<&'a str> {
+    call.child_by_field_name("arguments")
         .and_then(|value| value.named_child(0))
         .or_else(|| {
             let mut cursor = call.walk();
@@ -168,11 +226,7 @@ fn ruby_call_link(call: Node<'_>, source: &[u8]) -> Option<String> {
         })
         .and_then(|value| value.utf8_text(source).ok())
         .map(str::trim)
-        .filter(|text| !text.is_empty());
-    Some(match argument {
-        Some(argument) => format!("call:{method}:{argument}"),
-        None => format!("call:{method}"),
-    })
+        .filter(|text| !text.is_empty())
 }
 
 fn ruby_binding_anchor(node: Node<'_>, source: &[u8]) -> Option<String> {

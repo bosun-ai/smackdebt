@@ -2052,25 +2052,30 @@ fn ruby_identical_sibling_blocks_are_never_mispaired() {
         .analyze(Path::new("api.rb"), edited.to_vec())
         .unwrap();
     let comparisons = compare_units(before.units(), after.units(), HealthPolicy::default());
-    let unclear: Vec<_> = comparisons
+    let endpoints: Vec<_> = comparisons
         .iter()
-        .filter(|value| value.is_anonymous_ambiguity())
+        .filter(|value| value.identity().name() != "<closure 2>")
         .collect();
-    assert_eq!(
-        unclear.len(),
-        2,
-        "both `get` blocks are unclear: {comparisons:?}"
-    );
     assert!(
-        unclear
+        endpoints
             .iter()
             .all(|value| value.before().is_none() || value.after().is_none()),
         "no pairing is better than the wrong one: {comparisons:?}"
     );
     assert!(
-        unclear
+        comparisons
             .iter()
-            .all(|value| !value.affects_verdict() || value.kind() == ComparisonKind::Ambiguous),
+            .any(|value| value.is_anonymous_ambiguity()),
+        "the file says it could not tell the two apart: {comparisons:?}"
+    );
+    // The removal that would answer for the leftover addition sits inside the
+    // stated ambiguity, so the addition is withheld rather than counted. The
+    // ambiguity itself is a kind no verdict reads.
+    assert!(
+        endpoints
+            .iter()
+            .all(|value| value.kind() == ComparisonKind::Ambiguous
+                || value.is_unpaired_anonymous() && !value.affects_verdict()),
         "{comparisons:?}"
     );
     // The resource the two blocks sit in is still followed: its anchor names
@@ -2080,6 +2085,61 @@ fn ruby_identical_sibling_blocks_are_never_mispaired() {
             .iter()
             .any(|value| value.identity().name() == "<closure 2>"
                 && value.kind() == ComparisonKind::Unchanged),
+        "{comparisons:?}"
+    );
+}
+
+/// Two blocks that share only the word `each` iterate different worlds. An
+/// anchor built from the method name alone would pair them, and the report
+/// would then read a deleted complex block and an unrelated simple one as one
+/// unit that got better by ten points of complexity it never had.
+#[test]
+fn ruby_blocks_over_different_receivers_are_not_the_same_block() {
+    let source = b"class Config\n  SETTINGS.each do |setting|\n    if setting.enabled?\n      if setting.scoped?\n        if setting.strict?\n          if setting.ready?\n            apply(setting)\n          end\n        end\n      end\n    end\n  end\nend\n";
+    let replaced = b"class Config\n  ROUTES.each do |route|\n    draw(route)\n  end\nend\n";
+    let mut analyzer = Analyzer::default();
+    let before = analyzer
+        .analyze(Path::new("config.rb"), source.to_vec())
+        .unwrap();
+    let after = analyzer
+        .analyze(Path::new("config.rb"), replaced.to_vec())
+        .unwrap();
+    assert_eq!(before.units()[0].measurements().max_nesting(), 4);
+    let comparisons = compare_units(before.units(), after.units(), HealthPolicy::default());
+    assert!(
+        comparisons
+            .iter()
+            .all(|value| value.before().is_none() || value.after().is_none()),
+        "no measurement movement may be invented between them: {comparisons:?}"
+    );
+    assert_eq!(comparisons.len(), 2, "{comparisons:?}");
+    assert!(
+        comparisons
+            .iter()
+            .all(|value| value.is_anonymous_ambiguity()),
+        "the file cannot follow either block and says so: {comparisons:?}"
+    );
+}
+
+/// A receiverless call with no argument names nothing at all, so it is not an
+/// anchor: the block falls back to its syntax and, failing that, to being
+/// named unpairable.
+#[test]
+fn ruby_bare_call_blocks_fall_back_to_their_syntax() {
+    let source = b"class Job\n  around do\n    perform\n  end\nend\n";
+    let replaced = b"class Job\n  around do\n    perform_later\n  end\nend\n";
+    let mut analyzer = Analyzer::default();
+    let before = analyzer
+        .analyze(Path::new("job.rb"), source.to_vec())
+        .unwrap();
+    let after = analyzer
+        .analyze(Path::new("job.rb"), replaced.to_vec())
+        .unwrap();
+    let comparisons = compare_units(before.units(), after.units(), HealthPolicy::default());
+    assert!(
+        comparisons
+            .iter()
+            .all(|value| value.is_anonymous_ambiguity() && !value.affects_verdict()),
         "{comparisons:?}"
     );
 }
