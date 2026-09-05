@@ -488,7 +488,7 @@ pub(super) fn analyze_diff(request: &DiffRequest) -> Result<ProjectReport, Proje
                 role: *role,
                 trust: analysis.parse_status().trust(),
                 language: analysis.language(),
-                // A diff never classifies vendored source, so the fact that
+                // A diff never classifies dormant source, so the fact that
                 // rule reads is not carried across the object boundary.
                 module_syntax: false,
             });
@@ -652,7 +652,7 @@ pub(super) fn analyze_diff(request: &DiffRequest) -> Result<ProjectReport, Proje
             },
         },
         // A diff answers what two trees say about the changed units. Neither
-        // tree carries the per-file window activity the vendored rule reads, so
+        // tree carries the per-file window activity the dormancy rule reads, so
         // the rule stands down and both sides keep the roles their names and
         // markers state.
         WindowedHistory::Absent,
