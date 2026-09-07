@@ -133,6 +133,13 @@ pub(crate) struct DiffAnalysisPolicy {
     pub(crate) health: HealthPolicy,
     pub(crate) roles: Vec<SourceRoleRule>,
 }
+/// One worker's analysis session: its reusable parser and the work counters
+/// it reports into.
+pub(crate) struct DiffWorker<'a> {
+    pub(crate) analyzer: &'a mut Analyzer,
+    pub(crate) work: &'a AnalysisWork,
+}
+
 pub(crate) fn analyze_diff_inputs(
     changes: Vec<SelectedChange>,
     objects: DiffObjects,
@@ -140,19 +147,19 @@ pub(crate) fn analyze_diff_inputs(
     width: usize,
     work: AnalysisWork,
 ) -> Result<Vec<DiffResult>, ProjectError> {
-    let DiffObjects {
-        root: root_path,
-        base,
-        reader: mut batch,
-    } = objects;
+    let mut objects = objects;
     if changes.len() <= 1 {
         let mut analyzer = Analyzer::default();
         let results = changes
             .into_iter()
             .enumerate()
             .map(|(index, change)| {
-                let input = read_diff_input(index, change, &root_path, &base, &mut batch, &work);
-                analyze_diff_input(input, policy.health, &policy.roles, &mut analyzer, &work)
+                let input = read_diff_input(index, change, &mut objects, &work);
+                let mut worker = DiffWorker {
+                    analyzer: &mut analyzer,
+                    work: &work,
+                };
+                analyze_diff_input(input, &policy, &mut worker)
             })
             .collect::<Vec<_>>();
         if let Some((path, roles)) = results.iter().find_map(diff_role_conflict) {
@@ -172,8 +179,7 @@ pub(crate) fn analyze_diff_inputs(
     std::thread::scope(|threads| {
         let producer = threads.spawn(move || {
             for (index, change) in changes.into_iter().enumerate() {
-                let input =
-                    read_diff_input(index, change, &root_path, &base, &mut batch, &producer_work);
+                let input = read_diff_input(index, change, &mut objects, &producer_work);
                 if input_tx.send(input).is_err() {
                     break;
                 }
@@ -193,14 +199,12 @@ pub(crate) fn analyze_diff_inputs(
                             receiver.recv()
                         };
                         let Ok(input) = input else { break };
+                        let mut worker = DiffWorker {
+                            analyzer: &mut analyzer,
+                            work: &worker_work,
+                        };
                         if result_tx
-                            .send(analyze_diff_input(
-                                input,
-                                policy.health,
-                                policy.roles.as_slice(),
-                                &mut analyzer,
-                                &worker_work,
-                            ))
+                            .send(analyze_diff_input(input, &policy, &mut worker))
                             .is_err()
                         {
                             break;
@@ -230,15 +234,13 @@ pub(crate) fn diff_role_conflict(result: &DiffResult) -> Option<(PathBuf, String
 pub(crate) fn read_diff_input(
     index: usize,
     change: SelectedChange,
-    root_path: &Path,
-    base: &str,
-    batch: &mut smackdebt_git::ObjectReader,
+    objects: &mut DiffObjects,
     work: &AnalysisWork,
 ) -> DiffInput {
     let current = if !change.current_exists() {
         InputSide::missing()
     } else {
-        match safe_worktree_path(root_path, change.current_path())
+        match safe_worktree_path(&objects.root, change.current_path())
             .and_then(|path| fs::read(path).map_err(|error| error.to_string()))
         {
             Ok(bytes) => {
@@ -253,7 +255,7 @@ pub(crate) fn read_diff_input(
     let before = if !change.base_exists() {
         InputSide::missing()
     } else {
-        match batch.read_path(base, change.base_path()) {
+        match objects.reader.read_path(&objects.base, change.base_path()) {
             Ok(bytes) => InputSide::bytes(bytes),
             Err(error) => InputSide::failed(format!("could not read base file: {error}")),
         }
@@ -267,34 +269,22 @@ pub(crate) fn read_diff_input(
 }
 pub(crate) fn analyze_diff_input(
     input: DiffInput,
-    policy: HealthPolicy,
-    role_rules: &[SourceRoleRule],
-    analyzer: &mut Analyzer,
-    work: &AnalysisWork,
+    policy: &DiffAnalysisPolicy,
+    worker: &mut DiffWorker<'_>,
 ) -> DiffResult {
     let file_id = FileId::from_index(input.index);
     let current = analyze_diff_side(
-        analyzer,
+        worker,
         file_id,
         input.change.current_path(),
         input.current,
         policy,
-        role_rules,
-        work,
     );
     let before_path = input.change.base_path();
-    let before = analyze_diff_side(
-        analyzer,
-        file_id,
-        before_path,
-        input.before,
-        policy,
-        role_rules,
-        work,
-    );
-    work.record_algorithm_pass();
+    let before = analyze_diff_side(worker, file_id, before_path, input.before, policy);
+    worker.work.record_algorithm_pass();
     let mut comparisons = match (diff_units(&before), diff_units(&current)) {
-        (Some(before), Some(current)) => compare_units(before, current, policy),
+        (Some(before), Some(current)) => compare_units(before, current, policy.health),
         _ => Vec::new(),
     };
     comparisons
@@ -319,16 +309,14 @@ pub(crate) fn diff_units(side: &DiffSide) -> Option<&[smackdebt_analysis::UnitFa
     }
 }
 pub(crate) fn analyze_diff_side(
-    analyzer: &mut Analyzer,
+    worker: &mut DiffWorker<'_>,
     file: FileId,
     path: &Path,
     input: InputSide,
-    policy: HealthPolicy,
-    role_rules: &[SourceRoleRule],
-    work: &AnalysisWork,
+    policy: &DiffAnalysisPolicy,
 ) -> DiffSide {
     if let Some(error) = input.error {
-        return role_for_unavailable_source(path, role_rules).map_or_else(
+        return role_for_unavailable_source(path, &policy.roles).map_or_else(
             |roles| DiffSide::RoleConflict {
                 path: path.to_path_buf(),
                 roles,
@@ -344,7 +332,7 @@ pub(crate) fn analyze_diff_side(
         return DiffSide::Missing;
     };
     let size_bytes = bytes.len() as u64;
-    let role = match classify_source_role(path, &bytes, role_rules) {
+    let role = match classify_source_role(path, &bytes, &policy.roles) {
         Ok(role) => role,
         Err(roles) => {
             return DiffSide::RoleConflict {
@@ -353,9 +341,9 @@ pub(crate) fn analyze_diff_side(
             };
         }
     };
-    match analyze_bytes(analyzer, file, path, bytes, work) {
+    match analyze_bytes(worker.analyzer, file, path, bytes, worker.work) {
         Ok(analysis) => {
-            let health = rated_health(&analysis, role, policy);
+            let health = rated_health(&analysis, role, policy.health);
             DiffSide::Analyzed {
                 analysis,
                 health,
