@@ -3,6 +3,7 @@ path	signal	high	watch
 crates/analysis/src/architecture.rs	file_size	1	0
 crates/analysis/src/architecture.rs	parameters	0	3
 crates/analysis/src/change_coupling.rs	file_cycle	0	1
+crates/analysis/src/change_leakage.rs	file_size	0	1
 crates/analysis/src/comparison.rs	file_cycle	0	1
 crates/analysis/src/comparison.rs	parameters	0	1
 crates/analysis/src/cycle_witness.rs	cognitive	1	0
