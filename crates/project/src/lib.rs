@@ -2,8 +2,11 @@
 
 #[cfg(feature = "evidence-stats")]
 mod evidence;
+mod manifest_names;
+mod paths;
 mod project;
 mod requests;
+mod work;
 
 #[cfg(feature = "evidence-stats")]
 pub use evidence::{
