@@ -8822,6 +8822,162 @@ mod tests {
         );
     }
 
+    /// An unchanged file in an unsupported language keeps its language and
+    /// failed parse on both sides of a diff, so neither graph side claims a
+    /// completeness it does not have.
+    #[test]
+    fn an_unchanged_unsupported_file_is_counted_by_both_diff_sides() {
+        let root = tempfile::tempdir().unwrap();
+        let repository_path = root.path();
+        git(repository_path, ["init", "-q"]);
+        git(
+            repository_path,
+            ["config", "user.email", "test@example.invalid"],
+        );
+        git(repository_path, ["config", "user.name", "Smackdebt Test"]);
+        fs::write(
+            repository_path.join("page.astro"),
+            "---\nconst title = 'page';\n---\n",
+        )
+        .unwrap();
+        fs::write(
+            repository_path.join("work.rs"),
+            "pub fn work() -> i32 { 1 }\n",
+        )
+        .unwrap();
+        git(repository_path, ["add", "."]);
+        git(repository_path, ["commit", "-qm", "base"]);
+        fs::write(
+            repository_path.join("work.rs"),
+            "pub fn work() -> i32 { 2 }\n",
+        )
+        .unwrap();
+
+        let result =
+            analyze_diff(&DiffRequest::new(repository_path).with_reference("HEAD")).unwrap();
+        let report = result.report();
+        let page = report
+            .files()
+            .iter()
+            .find(|file| file.path() == "page.astro")
+            .expect("an unchanged unsupported file stays in the file table");
+        assert_eq!(page.language(), Some(Language::Astro));
+        assert_eq!(page.role(), SourceRole::Primary);
+        assert_ne!(page.trust(), SourceTrust::Trusted);
+        let evidence = report
+            .diff_graph_evidence()
+            .expect("a diff states both graph sides");
+        assert_eq!(
+            evidence.current().parse_failures(),
+            1,
+            "the current side counts the unsupported file as its one parse failure"
+        );
+        assert_eq!(
+            evidence.base().parse_failures(),
+            1,
+            "the base side states the same failure for the same unchanged file"
+        );
+    }
+
+    /// A diff without a reference compares against the default branch, so the
+    /// everyday `smackdebt diff` answers without the user naming anything.
+    #[test]
+    fn a_diff_without_a_reference_compares_against_the_default_branch() {
+        let root = tempfile::tempdir().unwrap();
+        let repository_path = root.path();
+        git(repository_path, ["init", "-q", "-b", "master"]);
+        git(
+            repository_path,
+            ["config", "user.email", "test@example.invalid"],
+        );
+        git(repository_path, ["config", "user.name", "Smackdebt Test"]);
+        fs::write(
+            repository_path.join("work.rs"),
+            "pub fn work() -> i32 { 1 }\n",
+        )
+        .unwrap();
+        git(repository_path, ["add", "."]);
+        git(repository_path, ["commit", "-qm", "base"]);
+        git(repository_path, ["checkout", "-q", "-b", "feature"]);
+        fs::write(
+            repository_path.join("work.rs"),
+            "pub fn work() -> i32 { 2 }\n",
+        )
+        .unwrap();
+
+        let result = analyze_diff(&DiffRequest::new(repository_path)).unwrap();
+        assert_eq!(
+            result.report().comparison_ref(),
+            Some("master"),
+            "the report names the branch it answered against"
+        );
+        assert!(
+            result
+                .report()
+                .files()
+                .iter()
+                .any(|file| file.path() == "work.rs"),
+            "the worktree change against the default branch is the diff's subject"
+        );
+    }
+
+    /// Without a recognizable default branch the diff stops and asks, rather
+    /// than comparing against something the user never chose.
+    #[test]
+    fn a_diff_with_no_default_branch_reports_the_missing_reference() {
+        let root = tempfile::tempdir().unwrap();
+        let repository_path = root.path();
+        git(repository_path, ["init", "-q", "-b", "trunk"]);
+        git(
+            repository_path,
+            ["config", "user.email", "test@example.invalid"],
+        );
+        git(repository_path, ["config", "user.name", "Smackdebt Test"]);
+        fs::write(
+            repository_path.join("work.rs"),
+            "pub fn work() -> i32 { 1 }\n",
+        )
+        .unwrap();
+        git(repository_path, ["add", "."]);
+        git(repository_path, ["commit", "-qm", "base"]);
+
+        let error = analyze_diff(&DiffRequest::new(repository_path)).unwrap_err();
+        assert!(matches!(error, ProjectError::MissingReference));
+    }
+
+    /// A diff scoped to a non-source file or a source-free directory fails
+    /// with the same exact errors the codebase flow states, carrying the path
+    /// the user typed.
+    #[test]
+    fn a_diff_scoped_to_a_non_source_target_fails_like_the_codebase_flow() {
+        let root = tempfile::tempdir().unwrap();
+        let repository_path = root.path();
+        git(repository_path, ["init", "-q"]);
+        git(
+            repository_path,
+            ["config", "user.email", "test@example.invalid"],
+        );
+        git(repository_path, ["config", "user.name", "Smackdebt Test"]);
+        fs::write(
+            repository_path.join("work.rs"),
+            "pub fn work() -> i32 { 1 }\n",
+        )
+        .unwrap();
+        fs::write(repository_path.join("README.txt"), "notes\n").unwrap();
+        fs::create_dir_all(repository_path.join("docs")).unwrap();
+        fs::write(repository_path.join("docs/notes.txt"), "notes\n").unwrap();
+        git(repository_path, ["add", "."]);
+        git(repository_path, ["commit", "-qm", "base"]);
+
+        let target = repository_path.join("README.txt");
+        let error = analyze_diff(&DiffRequest::new(&target).with_reference("HEAD")).unwrap_err();
+        assert!(matches!(error, ProjectError::NotSourceFile(path) if path == target));
+
+        let target = repository_path.join("docs");
+        let error = analyze_diff(&DiffRequest::new(&target).with_reference("HEAD")).unwrap_err();
+        assert!(matches!(error, ProjectError::NoSourceFiles(path) if path == target));
+    }
+
     #[test]
     fn a_real_diff_answers_from_moved_debt_and_never_from_healthy_additions() {
         let root = tempfile::tempdir().unwrap();

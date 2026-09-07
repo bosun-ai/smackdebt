@@ -97,6 +97,30 @@ fn diff_reports_metric_changes_from_the_worktree() {
     assert!(!report["comparisons"].as_array().unwrap().is_empty());
 }
 
+/// A repository with no recognizable default branch cannot pick one for the
+/// user, so the bare `diff` states the one fixable value on standard error.
+#[test]
+fn a_diff_with_no_comparison_branch_names_the_fix() {
+    let project = tempfile::tempdir().unwrap();
+    git(project.path(), ["init", "-b", "trunk"]);
+    fs::write(project.path().join("work.rs"), "pub fn work() {}\n").unwrap();
+    commit_as(
+        project.path(),
+        "Smackdebt Test",
+        "smackdebt@example.invalid",
+        "base",
+    );
+    smackdebt()
+        .current_dir(project.path())
+        .arg("diff")
+        .assert()
+        .code(1)
+        .stdout("")
+        .stderr(
+            "smackdebt: no comparison branch was found; pass one, for example `smackdebt diff main`\n",
+        );
+}
+
 #[test]
 fn anonymous_diff_matching_is_safe_and_worker_output_is_equal() {
     let project = anonymous_diff_fixture();
@@ -523,6 +547,25 @@ fn a_clean_gate_states_zero_totals_and_succeeds() {
             "GATE  {}\n\n0 regressions · 0 improvements\n",
             baseline.display()
         ))
+        .stderr("");
+}
+
+/// The bare `gate` reads the working directory and names its baseline with
+/// the same relative path a checked-in pipeline would commit.
+#[test]
+fn a_gate_without_a_path_reads_the_working_directory() {
+    let project = gate_fixture();
+    fs::write(
+        project.path().join(".smackdebt-baseline.tsv"),
+        format!("{GATE_BASELINE_HEADERS}work.js\tcognitive\t1\t0\n"),
+    )
+    .unwrap();
+    smackdebt()
+        .current_dir(project.path())
+        .args(["gate", "--jobs", "1"])
+        .assert()
+        .code(0)
+        .stdout("GATE  .smackdebt-baseline.tsv\n\n0 regressions · 0 improvements\n")
         .stderr("");
 }
 
