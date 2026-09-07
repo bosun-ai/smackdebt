@@ -6,7 +6,7 @@ use std::path::PathBuf;
 use crate::requests::SourceRoleRule;
 use smackdebt_analysis::{
     Coverage, DependencySyntax, FileAnalysis, HealthAssessment, HealthCounts, HealthPolicy,
-    Language, ParseStatus, Rating, SourceCoverageOutcome, SourceRole,
+    Language, ParseStatus, Rating, SourceCoverageOutcome, SourceRole, UnitFact,
 };
 
 pub(crate) fn source_coverage(analysis: &FileAnalysis, role: SourceRole) -> Coverage {
@@ -49,40 +49,67 @@ pub(crate) struct RatedFile {
     pub(crate) max_rating: Rating,
     pub(crate) container_statements: Vec<(String, u32)>,
 }
+/// The verdict accounting one file's rated units accumulate.
+///
+/// Container totals accumulate while units are rated, so no healthy unit is
+/// retained to compute container size later.
+struct UnitAccounting {
+    health: HealthCounts,
+    max_rating: Rating,
+    container_statements: Vec<(String, u32)>,
+}
+
+impl UnitAccounting {
+    fn new() -> Self {
+        Self {
+            health: HealthCounts::default(),
+            max_rating: Rating::Healthy,
+            container_statements: Vec::new(),
+        }
+    }
+
+    fn add(&mut self, unit: &UnitFact, rating: Rating) {
+        self.health.add_rating(rating);
+        if rating > self.max_rating {
+            self.max_rating = rating;
+        }
+        self.add_container(unit);
+    }
+
+    fn add_container(&mut self, unit: &UnitFact) {
+        let Some(container) = unit.identity().container() else {
+            return;
+        };
+        let statements = unit.measurements().logical_lines();
+        match self
+            .container_statements
+            .iter_mut()
+            .find(|(name, _)| name == container)
+        {
+            Some(total) => total.1 += statements,
+            None => self
+                .container_statements
+                .push((container.to_owned(), statements)),
+        }
+    }
+}
+
 pub(crate) fn rate_file(
     analysis: FileAnalysis,
     role: SourceRole,
     policy: HealthPolicy,
     module_syntax: bool,
 ) -> RatedFile {
-    let mut health = HealthCounts::default();
     let mut debt = Vec::new();
-    let mut max_rating = Rating::Healthy;
-    // Container totals accumulate while units are rated, so no healthy unit is
-    // retained to compute container size later.
-    let mut container_statements: Vec<(String, u32)> = Vec::new();
+    let mut accounting = UnitAccounting::new();
     let signals_verdict = verdict_eligible(&analysis, role);
     for (index, unit) in analysis.units().iter().enumerate() {
         let assessment = policy.assess(unit.measurements());
         if assessment.rating() != Rating::Healthy {
             debt.push((index, assessment));
         }
-        if !signals_verdict {
-            continue;
-        }
-        health.add_rating(assessment.rating());
-        if assessment.rating() > max_rating {
-            max_rating = assessment.rating();
-        }
-        if let Some(container) = unit.identity().container() {
-            let statements = unit.measurements().logical_lines();
-            match container_statements
-                .iter_mut()
-                .find(|(name, _)| name == container)
-            {
-                Some(total) => total.1 += statements,
-                None => container_statements.push((container.to_owned(), statements)),
-            }
+        if signals_verdict {
+            accounting.add(unit, assessment.rating());
         }
     }
     let rated_units = if signals_verdict {
@@ -94,12 +121,12 @@ pub(crate) fn rate_file(
         analysis,
         role,
         module_syntax,
-        health,
+        health: accounting.health,
         debt,
         signals_verdict,
         rated_units,
-        max_rating,
-        container_statements,
+        max_rating: accounting.max_rating,
+        container_statements: accounting.container_statements,
     }
 }
 pub(crate) enum FileResult {
