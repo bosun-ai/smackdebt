@@ -1,49 +1,50 @@
 //! Repository use cases. This crate is the only place that composes discovery,
 //! parsers, Git, health policy, and parallel execution.
 
-use std::borrow::Cow;
 use std::collections::{BTreeMap, BTreeSet, HashMap};
 use std::fs;
 use std::path::{Path, PathBuf};
 use std::sync::atomic::Ordering;
 use std::sync::{Arc, Mutex, mpsc};
 
-use rayon::prelude::*;
 use smackdebt_analysis::{
     ArchitectureComparison, ArchitectureComparisonId, ArchitectureFinding, ArchitectureFindingId,
     ArchitectureFindingKind, ArchitectureGraph, ArchitectureReportFacts, ChangeGraph,
-    ChangeLeakageFinding, Comparison, ComparisonId, ConnectionGraph, ContributorId, CoreSize,
-    Coverage, DependencyCoverage, DependencyEdge, DependencyEdgeId, DependencySyntax,
-    DependencySyntaxState, Diagnostic, DiagnosticId, DiagnosticKind, DirectoryTree,
-    EvolutionAccumulator, ExternalDependency, FileActivity, FileAnalysis, FileDebt, FileId,
-    FileReach, FileRecord, Finding, FindingId, GraphConfigurationFailure, GraphEvidence,
-    HealthCounts, HealthPolicy, HistoryAvailability, HistoryChangeCounts, HistoryChangeFact,
-    HistoryCommitFact, HistoryCoverage, HistoryWindow, HotspotPolicy, Language, ModuleDeclaration,
-    OrphanCandidate, OrphanFile, PackageClosure, PackageContainment, PackageEdge, PackageEdgeId,
-    PackageFileReach, PackageGraphMeasurement, PackageId, PackageRecord, ParseStatus, Rating,
-    Report, ReportBuilder as AnalysisReportBuilder, ReportMode, ResolutionDiagnostic,
-    ResolutionIssueKind, Scope, ScopeId, ScopeKind, SizeFinding, SizePolicy, SourceCoverageOutcome,
-    SourceRole, SourceTrust, StableDependencyFinding, Thresholds, change_leakage,
-    close_over_packages, compare_architecture, compare_units, cycle_witness, dependency_degree,
-    enters_connection_graph, enters_file_graph, file_reaches, graph_file_count, orphan_files,
-    reach_in_counts, stable_dependency_findings, strongly_connected_components,
-    test_declared_files,
+    ChangeLeakageFinding, Comparison, ComparisonId, ConnectionGraph, CoreSize, Coverage,
+    DependencyCoverage, DependencyEdge, DependencyEdgeId, DependencySyntax, DependencySyntaxState,
+    Diagnostic, DiagnosticId, DiagnosticKind, DirectoryTree, ExternalDependency, FileActivity,
+    FileAnalysis, FileDebt, FileId, FileReach, FileRecord, Finding, FindingId,
+    GraphConfigurationFailure, GraphEvidence, HealthCounts, HealthPolicy, HistoryAvailability,
+    HotspotPolicy, Language, ModuleDeclaration, OrphanCandidate, OrphanFile, PackageClosure,
+    PackageContainment, PackageEdge, PackageEdgeId, PackageFileReach, PackageGraphMeasurement,
+    PackageId, PackageRecord, ParseStatus, Rating, Report, ReportBuilder as AnalysisReportBuilder,
+    ReportMode, ResolutionDiagnostic, ResolutionIssueKind, Scope, ScopeId, ScopeKind, SizeFinding,
+    SizePolicy, SourceCoverageOutcome, SourceRole, SourceTrust, StableDependencyFinding,
+    Thresholds, change_leakage, close_over_packages, compare_architecture, compare_units,
+    cycle_witness, dependency_degree, enters_connection_graph, enters_file_graph, file_reaches,
+    graph_file_count, orphan_files, reach_in_counts, stable_dependency_findings,
+    strongly_connected_components, test_declared_files,
 };
 use smackdebt_discovery::{
     DiscoveredFile, Inventory, SnapshotInventory, discover_snapshot, is_runtime_javascript_path,
     is_source_path, is_tool_configuration_name,
 };
-use smackdebt_git::{Change, ContributorIdentity, GitRepository, ObjectReader};
+use smackdebt_git::{Change, GitRepository, ObjectReader};
 use smackdebt_languages::{AnalysisError as LanguageError, Analyzer};
 
 use crate::candidates::{candidates_name_an_asset, resolve_candidates};
+#[cfg(test)]
+use crate::history_stream::failed_history_availability;
+use crate::history_stream::{EvolutionInput, history_directory_paths, load_evolution};
 use crate::manifest_names::{
     ManifestNameIndex, ManifestNameMatch, declared_manifest_name, manifest_names_for,
     manifest_paths_for, package_entry_file,
 };
 use crate::paths::{clean_relative, package_of, report_package_path};
+#[cfg(test)]
+use crate::rating::rate_file;
 use crate::rating::{
-    FileResult, file_result_role, rate_file, rated_health, source_coverage, verdict_eligible,
+    FileResult, file_result_role, rated_health, source_coverage, verdict_eligible,
 };
 use crate::requests::{
     CodebaseRequest, DEFAULT_HISTORY_DAYS, DiffRequest, ExecutionWidth, ProjectError,
@@ -53,13 +54,13 @@ use crate::resolution_config::{
     ResolutionRules, load_base_resolution_aliases, load_resolution_aliases,
 };
 #[cfg(test)]
+use crate::roles::declares_module_syntax;
+#[cfg(test)]
 use crate::roles::has_generated_javascript_content;
-use crate::roles::{
-    classify_source_role, declares_module_syntax, matching_role_rules, role_for_unavailable_source,
-};
+use crate::roles::{classify_source_role, matching_role_rules, role_for_unavailable_source};
+use crate::source_units::{analyze_bytes, analyze_current_files};
 use crate::work::AnalysisWork;
 
-const PARALLEL_FILE_CUTOVER: usize = 100;
 const RETAINED_RELATION_LOCATIONS: usize = 3;
 
 impl CodebaseRequest {
@@ -2434,118 +2435,6 @@ fn safe_worktree_path(root: &Path, relative: &Path) -> Result<PathBuf, String> {
     Ok(path)
 }
 
-fn analyze_current_files(
-    inventory: &Inventory,
-    candidates: &[&DiscoveredFile],
-    width: ExecutionWidth,
-    policy: HealthPolicy,
-    role_rules: &[SourceRoleRule],
-    work: &AnalysisWork,
-) -> Result<Vec<FileResult>, ProjectError> {
-    let analyze = |analyzer: &mut Analyzer, (index, file): (usize, &&DiscoveredFile)| {
-        let path = file.path().as_path();
-        let language = Analyzer::language(path);
-        if matches!(
-            language,
-            Language::Astro | Language::Kotlin | Language::Unknown
-        ) {
-            return match role_for_unavailable_source(path, role_rules) {
-                Ok(role) => FileResult::Unsupported { language, role },
-                Err(roles) => FileResult::RoleConflict {
-                    path: path.to_path_buf(),
-                    roles,
-                },
-            };
-        }
-        let Some(absolute) = inventory.absolute_path(file.path()) else {
-            return match role_for_unavailable_source(path, role_rules) {
-                Ok(role) => FileResult::Failed {
-                    message: "source path escaped the selected root".to_owned(),
-                    role,
-                    language,
-                },
-                Err(roles) => FileResult::RoleConflict {
-                    path: path.to_path_buf(),
-                    roles,
-                },
-            };
-        };
-        match fs::read(&absolute) {
-            Ok(source) => {
-                work.source_reads.fetch_add(1, Ordering::Relaxed);
-                #[cfg(feature = "evidence-stats")]
-                crate::evidence::record_source_read();
-                let role = match classify_source_role(path, &source, role_rules) {
-                    Ok(role) => role,
-                    Err(roles) => {
-                        return FileResult::RoleConflict {
-                            path: path.to_path_buf(),
-                            roles,
-                        };
-                    }
-                };
-                let module_syntax = declares_module_syntax(path, &source);
-                match analyze_bytes(analyzer, FileId::from_index(index), path, source, work) {
-                    Ok(value) => {
-                        FileResult::Analyzed(rate_file(value, role, policy, module_syntax))
-                    }
-                    Err(LanguageError::Unsupported(language)) => {
-                        FileResult::Unsupported { language, role }
-                    }
-                    Err(error) => FileResult::Failed {
-                        message: error.to_string(),
-                        role,
-                        language,
-                    },
-                }
-            }
-            Err(error) => match role_for_unavailable_source(path, role_rules) {
-                Ok(role) => FileResult::Failed {
-                    message: error.to_string(),
-                    role,
-                    language,
-                },
-                Err(roles) => FileResult::RoleConflict {
-                    path: path.to_path_buf(),
-                    roles,
-                },
-            },
-        }
-    };
-
-    if candidates.len() < PARALLEL_FILE_CUTOVER || width.threads() == 1 {
-        let mut analyzer = Analyzer::default();
-        let results = candidates
-            .iter()
-            .enumerate()
-            .map(|entry| analyze(&mut analyzer, entry))
-            .collect::<Vec<_>>();
-        return role_results(results);
-    }
-    let pool = rayon::ThreadPoolBuilder::new()
-        .num_threads(width.threads())
-        .build()?;
-    let results = pool.install(|| {
-        candidates
-            .par_iter()
-            .enumerate()
-            .map_init(Analyzer::default, analyze)
-            .collect()
-    });
-    role_results(results)
-}
-
-fn role_results(results: Vec<FileResult>) -> Result<Vec<FileResult>, ProjectError> {
-    if let Some((path, roles)) = results.iter().find_map(|result| match result {
-        FileResult::RoleConflict { path, roles } => Some((path.clone(), roles.clone())),
-        _ => None,
-    }) {
-        Err(ProjectError::SourceRoleConflict { path, roles })
-    } else {
-        Ok(results)
-    }
-}
-
 /// The module declarations one side of an analysis states.
 ///
 /// A declaration is a `module_ownership` relation, so this reads the same
@@ -2611,278 +2500,6 @@ fn test_declared_demotions<P: AsRef<Path>>(
                 .is_none()
         })
         .collect()
-}
-
-fn analyze_bytes(
-    analyzer: &mut Analyzer,
-    file: FileId,
-    path: &Path,
-    source: Vec<u8>,
-    work: &AnalysisWork,
-) -> Result<FileAnalysis, LanguageError> {
-    let _ = file;
-    let result = analyzer.analyze(path, source);
-    if !matches!(result, Err(LanguageError::Unsupported(_))) {
-        work.record_parser_visit();
-        work.record_algorithm_pass();
-    }
-    result
-}
-
-struct EvolutionInput {
-    accumulator: EvolutionAccumulator,
-    coverage: HistoryCoverage,
-}
-
-struct LoadedEvolution {
-    evolution: EvolutionInput,
-    activity: HashMap<PathBuf, u32>,
-    processes: usize,
-    diagnostic: Option<String>,
-}
-
-#[derive(Clone, Copy, Debug, Eq, PartialEq)]
-enum HistoryAlias {
-    Resolved(FileId, PackageId, SourceRole, SourceTrust),
-    Unusable,
-}
-
-/// The repository-relative path of every file history can name, each placed at
-/// its own [`FileId`].
-///
-/// [`DirectoryTree`] reads a file's identity from the position it holds in the
-/// sequence the tree is built from, so the paths are placed by index rather
-/// than pushed in iteration order. The diff flow builds its tree from this list
-/// and assembles it by filtering the report's files, so pushing them in order
-/// would shift every directory lookup and every distance that follows from it,
-/// with no wrong-looking value to notice. A position no history file claims
-/// holds the empty path, which the tree files under the repository root and no
-/// signal ever asks about.
-///
-/// The codebase flow does not use this: it builds its tree over the unfiltered
-/// candidate walk, so every file has a real directory there and the scope join
-/// can read the same tree.
-fn history_directory_paths(
-    files: &[(PathBuf, FileId, PackageId, SourceRole, SourceTrust)],
-) -> Vec<Cow<'_, str>> {
-    let count = files
-        .iter()
-        .map(|(_, file, _, _, _)| file.index() + 1)
-        .max()
-        .unwrap_or_default();
-    let mut paths = vec![Cow::Borrowed(""); count];
-    for (path, file, _, _, _) in files {
-        paths[file.index()] = path.to_string_lossy();
-    }
-    paths
-}
-
-/// Streams history once, fanning every commit out to the evolution signals.
-///
-/// The directory tree is borrowed rather than built here: the caller owns the
-/// one tree of its report, so the same tree that answers a pair's distance also
-/// answers a scope's directory when the report is composed.
-fn load_evolution(
-    inventory_root: &Path,
-    history_days: u32,
-    files: &[(PathBuf, FileId, PackageId, SourceRole, SourceTrust)],
-    directories: &DirectoryTree,
-) -> LoadedEvolution {
-    let Ok(repository) = GitRepository::discover(inventory_root) else {
-        return LoadedEvolution {
-            evolution: EvolutionInput {
-                accumulator: EvolutionAccumulator::default(),
-                coverage: HistoryCoverage::unavailable("not a Git repository"),
-            },
-            activity: HashMap::new(),
-            processes: 0,
-            diagnostic: Some("Git history unavailable: not a Git repository".to_owned()),
-        };
-    };
-    let relative_root = inventory_root
-        .strip_prefix(repository.root())
-        .unwrap_or(Path::new(""));
-    let mut aliases: HashMap<PathBuf, HistoryAlias> = files
-        .iter()
-        .map(|(path, file, package, role, trust)| {
-            (
-                path.clone(),
-                HistoryAlias::Resolved(*file, *package, *role, *trust),
-            )
-        })
-        .collect();
-    let file_paths: HashMap<FileId, PathBuf> = files
-        .iter()
-        .map(|(path, file, _, _, _)| (*file, path.clone()))
-        .collect();
-    let mut contributors = HashMap::<ContributorIdentity, ContributorId>::new();
-    let mut accumulator = EvolutionAccumulator::default();
-    for (_, file, package, role, trust) in files {
-        accumulator.register_source(*file, *package, *role, *trust);
-    }
-    let mut activity = HashMap::<PathBuf, u32>::new();
-    let mut textual_changes = 0u32;
-    let mut uncounted_changes = 0u32;
-    let mut eligible_commits = 0u32;
-    let mut mapped_eligible_changes = 0u32;
-    let mut context_changes = 0u32;
-    let mut excluded_changes = 0u32;
-    let mut rename_gaps = 0u32;
-    let mut streamed_commits = 0u32;
-    let mut window_excluded_commits = 0u32;
-    let now = std::time::SystemTime::now()
-        .duration_since(std::time::UNIX_EPOCH)
-        .map_or(i64::MIN, |duration| duration.as_secs() as i64);
-    let window = HistoryWindow::of_days(history_days, now);
-    let history = repository.stream_history(Some(window.cutoff()), |commit| {
-        streamed_commits += 1;
-        // The window filter runs inside the streamed history process on landed
-        // dates, so out-of-window history is never streamed. This defensive
-        // boundary check compares the same landed instant and keeps any
-        // straggler from becoming a fact; it counts boundary rejects only.
-        if !window.includes(commit.timestamp()) {
-            window_excluded_commits += 1;
-            return Ok(());
-        }
-        let next_contributor = ContributorId::from_index(contributors.len());
-        let contributor = *contributors
-            .entry(commit.contributor().clone())
-            .or_insert(next_contributor);
-        let mut changes = Vec::new();
-        let mut contains_eligible_source = false;
-        for change in commit.changes() {
-            let path = change
-                .path()
-                .strip_prefix(relative_root)
-                .unwrap_or(change.path());
-            let identity = aliases.get(path).copied();
-            let Some(HistoryAlias::Resolved(file, package, role, trust)) = identity else {
-                excluded_changes += 1;
-                continue;
-            };
-            if let Some(previous) = change.previous_path() {
-                let previous = previous
-                    .strip_prefix(relative_root)
-                    .unwrap_or(previous)
-                    .to_path_buf();
-                match aliases.get(&previous) {
-                    Some(HistoryAlias::Resolved(existing_file, existing_package, _, _))
-                        if (*existing_file, *existing_package) != (file, package) =>
-                    {
-                        rename_gaps += 1;
-                        aliases.insert(previous, HistoryAlias::Unusable);
-                    }
-                    Some(HistoryAlias::Unusable) => {}
-                    _ => {
-                        aliases
-                            .insert(previous, HistoryAlias::Resolved(file, package, role, trust));
-                    }
-                }
-            }
-            if change.added_lines().is_some() && change.deleted_lines().is_some() {
-                textual_changes += 1;
-            } else {
-                uncounted_changes += 1;
-            }
-            if let Some(path) = file_paths.get(&file) {
-                *activity.entry(path.clone()).or_default() += 1;
-            }
-            if role.affects_verdict() && trust == SourceTrust::Trusted {
-                mapped_eligible_changes += 1;
-                contains_eligible_source = true;
-            } else {
-                context_changes += 1;
-            }
-            changes.push(
-                HistoryChangeFact::new(file, package, change.added_lines(), change.deleted_lines())
-                    .with_source_evidence(role, trust),
-            );
-        }
-        if !changes.is_empty() {
-            accumulator.accept(HistoryCommitFact::new(contributor, changes), directories);
-        }
-        eligible_commits += u32::from(contains_eligible_source);
-        Ok(())
-    });
-    let process_count = repository.git_processes();
-    match history {
-        Ok(summary) => LoadedEvolution {
-            evolution: EvolutionInput {
-                accumulator,
-                coverage: HistoryCoverage::new(
-                    if summary.is_shallow() {
-                        HistoryAvailability::Incomplete
-                    } else {
-                        HistoryAvailability::Complete
-                    },
-                    summary.revision().map(str::to_owned),
-                    summary.commits(),
-                    eligible_commits,
-                    summary
-                        .is_shallow()
-                        .then(|| "repository history is shallow".to_owned()),
-                )
-                .with_changes(HistoryChangeCounts {
-                    mapped_eligible: mapped_eligible_changes,
-                    context: context_changes,
-                    textual: textual_changes,
-                    uncounted: uncounted_changes,
-                    excluded: excluded_changes,
-                    rename_gaps,
-                })
-                .with_timestamps(summary.newest_timestamp(), summary.oldest_timestamp())
-                .with_window(window.days(), window_excluded_commits),
-            },
-            activity,
-            processes: process_count,
-            diagnostic: None,
-        },
-        Err(error) => {
-            let reason = error.to_string();
-            let availability = failed_history_availability(&error, streamed_commits);
-            let incomplete = availability == HistoryAvailability::Incomplete;
-            let label = if incomplete {
-                "incomplete"
-            } else {
-                "unavailable"
-            };
-            LoadedEvolution {
-                evolution: EvolutionInput {
-                    accumulator,
-                    coverage: HistoryCoverage::new(
-                        availability,
-                        None,
-                        streamed_commits,
-                        eligible_commits,
-                        Some(reason.clone()),
-                    )
-                    .with_changes(HistoryChangeCounts {
-                        mapped_eligible: mapped_eligible_changes,
-                        context: context_changes,
-                        textual: textual_changes,
-                        uncounted: uncounted_changes,
-                        excluded: excluded_changes,
-                        rename_gaps,
-                    })
-                    .with_window(window.days(), window_excluded_commits),
-                },
-                activity,
-                processes: process_count,
-                diagnostic: Some(format!("Git history {label}: {reason}")),
-            }
-        }
-    }
-}
-
-fn failed_history_availability(
-    error: &smackdebt_git::GitError,
-    streamed_commits: u32,
-) -> HistoryAvailability {
-    if matches!(error, smackdebt_git::GitError::InvalidOutput(_)) || streamed_commits > 0 {
-        HistoryAvailability::Incomplete
-    } else {
-        HistoryAvailability::Unavailable
-    }
 }
 
 /// Reclassifies every file the build compiles only when `test` is set.

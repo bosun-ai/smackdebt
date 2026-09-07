@@ -3,6 +3,7 @@
 mod candidates;
 #[cfg(feature = "evidence-stats")]
 mod evidence;
+mod history_stream;
 mod manifest_names;
 mod paths;
 mod project;
@@ -11,6 +12,7 @@ mod requests;
 mod resolution_config;
 mod roles;
 mod rust_layout;
+mod source_units;
 mod work;
 
 #[cfg(feature = "evidence-stats")]
