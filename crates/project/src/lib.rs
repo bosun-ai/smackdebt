@@ -1,13 +1,18 @@
 #![forbid(unsafe_code)]
 
 mod candidates;
+mod cycle_findings;
+mod dependencies;
+mod dormancy;
 #[cfg(feature = "evidence-stats")]
 mod evidence;
 mod history_stream;
 mod manifest_names;
+mod package_graph;
 mod paths;
 mod project;
 mod rating;
+mod reference_tables;
 mod requests;
 mod resolution_config;
 mod roles;
