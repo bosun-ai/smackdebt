@@ -224,8 +224,7 @@ impl<'a> CodebaseReportBuilder<'a> {
         };
         let file_id = spot.file;
         let size_bytes = spot.size_bytes;
-        let path = spot.path.clone();
-        let touches = self.activity.get(Path::new(&path)).copied();
+        let touches = self.activity.get(Path::new(&spot.path)).copied();
         let mut health = HealthCounts::default();
         let mut rated_units = 0;
         let mut max_rating = Rating::Healthy;
@@ -240,7 +239,7 @@ impl<'a> CodebaseReportBuilder<'a> {
                 self.add_diagnostic(
                     file_id,
                     DiagnosticKind::UnsupportedLanguage,
-                    format!("{path} uses an unsupported language"),
+                    format!("{} uses an unsupported language", spot.path),
                     0,
                 );
                 (
@@ -257,7 +256,7 @@ impl<'a> CodebaseReportBuilder<'a> {
                 self.add_diagnostic(
                     file_id,
                     DiagnosticKind::UnreadableFile,
-                    format!("{path}: {message}"),
+                    format!("{}: {message}", spot.path),
                     0,
                 );
                 (
@@ -268,7 +267,7 @@ impl<'a> CodebaseReportBuilder<'a> {
             }
             FileResult::RoleConflict { .. } => unreachable!("role conflicts stop composition"),
         };
-        let mut file = FileRecord::new(file_id, scope_id, path, coverage, health);
+        let mut file = FileRecord::new(file_id, scope_id, spot.path, coverage, health);
         file = file.with_package(self.package_ids[index]);
         if let Some((language, role, status)) = language {
             file = file.with_language(language).with_source_state(role, status);

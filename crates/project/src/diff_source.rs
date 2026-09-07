@@ -146,16 +146,16 @@ pub(crate) fn analyze_diff_inputs(
     let mut objects = objects;
     if changes.len() <= 1 {
         let mut analyzer = Analyzer::default();
+        let mut session = AnalysisSession {
+            analyzer: &mut analyzer,
+            work: &work,
+        };
         let results = changes
             .into_iter()
             .enumerate()
             .map(|(index, change)| {
-                let input = read_diff_input(index, change, &mut objects, &work);
-                let mut worker = AnalysisSession {
-                    analyzer: &mut analyzer,
-                    work: &work,
-                };
-                analyze_diff_input(input, &policy, &mut worker)
+                let input = read_diff_input(index, change, &mut objects, session.work);
+                analyze_diff_input(input, &policy, &mut session)
             })
             .collect::<Vec<_>>();
         if let Some((path, roles)) = results.iter().find_map(diff_role_conflict) {
@@ -189,18 +189,18 @@ pub(crate) fn analyze_diff_inputs(
                 let policy = Arc::clone(&policy);
                 scope.spawn(move |_| {
                     let mut analyzer = Analyzer::default();
+                    let mut session = AnalysisSession {
+                        analyzer: &mut analyzer,
+                        work: &worker_work,
+                    };
                     loop {
                         let input = {
                             let receiver = input_rx.lock().expect("diff input queue poisoned");
                             receiver.recv()
                         };
                         let Ok(input) = input else { break };
-                        let mut worker = AnalysisSession {
-                            analyzer: &mut analyzer,
-                            work: &worker_work,
-                        };
                         if result_tx
-                            .send(analyze_diff_input(input, &policy, &mut worker))
+                            .send(analyze_diff_input(input, &policy, &mut session))
                             .is_err()
                         {
                             break;

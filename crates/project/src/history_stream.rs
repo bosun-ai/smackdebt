@@ -152,7 +152,7 @@ impl HistoryAccumulation<'_> {
     /// two identities claim it.
     fn track_rename(&mut self, change: &HistoryChange, resolved: HistoryAlias) {
         let HistoryAlias::Resolved(file, package, role, trust) = resolved else {
-            return;
+            unreachable!("only resolved identities reach rename tracking");
         };
         let Some(previous) = change.previous_path() else {
             return;
