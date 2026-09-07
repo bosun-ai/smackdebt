@@ -55,51 +55,75 @@ pub struct HistoryCoverage {
     declined_pairs: u32,
 }
 
+/// How one history stream's mapped changes were classified, on both axes.
+///
+/// Every mapped change is classified exactly once as eligible or context,
+/// and exactly once as textual or uncounted, so the two axes always sum to
+/// the same total.
+#[derive(Clone, Copy, Debug, Default, Eq, PartialEq)]
+pub struct HistoryChangeCounts {
+    pub mapped_eligible: u32,
+    pub context: u32,
+    pub textual: u32,
+    pub uncounted: u32,
+    pub excluded: u32,
+    pub rename_gaps: u32,
+}
+
 impl HistoryCoverage {
-    #[allow(clippy::too_many_arguments)]
     pub fn new(
         availability: HistoryAvailability,
         revision: Option<String>,
         commits: u32,
         eligible_commits: u32,
-        mapped_eligible_changes: u32,
-        context_changes: u32,
-        newest_timestamp: Option<i64>,
-        oldest_timestamp: Option<i64>,
-        textual_changes: u32,
-        uncounted_changes: u32,
-        excluded_changes: u32,
-        rename_gaps: u32,
         reason: Option<String>,
     ) -> Self {
         assert!(
             eligible_commits <= commits,
             "eligible history commits cannot exceed streamed commits"
         );
-        assert_eq!(
-            u64::from(textual_changes) + u64::from(uncounted_changes),
-            u64::from(mapped_eligible_changes) + u64::from(context_changes),
-            "mapped history changes must be classified once as textual or uncounted"
-        );
         Self {
             availability,
             revision,
             commits,
             eligible_commits,
-            mapped_eligible_changes,
-            context_changes,
-            newest_timestamp,
-            oldest_timestamp,
-            textual_changes,
-            uncounted_changes,
-            excluded_changes,
-            rename_gaps,
+            mapped_eligible_changes: 0,
+            context_changes: 0,
+            newest_timestamp: None,
+            oldest_timestamp: None,
+            textual_changes: 0,
+            uncounted_changes: 0,
+            excluded_changes: 0,
+            rename_gaps: 0,
             reason,
             window_days: None,
             window_excluded_commits: 0,
             bulk_commits: 0,
             declined_pairs: 0,
         }
+    }
+
+    /// Records how the stream's mapped changes were classified.
+    pub fn with_changes(mut self, counts: HistoryChangeCounts) -> Self {
+        assert_eq!(
+            u64::from(counts.textual) + u64::from(counts.uncounted),
+            u64::from(counts.mapped_eligible) + u64::from(counts.context),
+            "mapped history changes must be classified once as textual or uncounted"
+        );
+        self.mapped_eligible_changes = counts.mapped_eligible;
+        self.context_changes = counts.context;
+        self.textual_changes = counts.textual;
+        self.uncounted_changes = counts.uncounted;
+        self.excluded_changes = counts.excluded;
+        self.rename_gaps = counts.rename_gaps;
+        self
+    }
+
+    /// Records the newest and oldest instants the stream visited.
+    pub fn with_timestamps(mut self, newest: Option<i64>, oldest: Option<i64>) -> Self {
+        self.newest_timestamp = newest;
+        self.oldest_timestamp = oldest;
+        self
     }
     /// Records the selected window and the boundary rejects the defensive
     /// in-process check excluded. The stream itself is windowed, so streamed
@@ -136,14 +160,6 @@ impl HistoryCoverage {
         Self::new(
             HistoryAvailability::Unavailable,
             None,
-            0,
-            0,
-            0,
-            0,
-            None,
-            None,
-            0,
-            0,
             0,
             0,
             Some(reason.into()),
@@ -564,16 +580,16 @@ mod tests {
             None,
             windowed.len() as u32,
             windowed.len() as u32,
-            3,
-            0,
-            None,
-            None,
-            0,
-            3,
-            0,
-            0,
             None,
         )
+        .with_changes(HistoryChangeCounts {
+            mapped_eligible: 3,
+            context: 0,
+            textual: 0,
+            uncounted: 3,
+            excluded: 0,
+            rename_gaps: 0,
+        })
         .with_window(window.days(), 0);
         assert_eq!(coverage.window_days(), Some(1));
         assert_eq!(coverage.window_excluded_commits(), 0);
@@ -583,22 +599,16 @@ mod tests {
 
     #[test]
     fn coverage_retains_boundary_rejects_from_the_defensive_window_check() {
-        let coverage = HistoryCoverage::new(
-            HistoryAvailability::Complete,
-            None,
-            2,
-            1,
-            1,
-            0,
-            None,
-            None,
-            1,
-            0,
-            0,
-            0,
-            None,
-        )
-        .with_window(Some(90), 1);
+        let coverage = HistoryCoverage::new(HistoryAvailability::Complete, None, 2, 1, None)
+            .with_changes(HistoryChangeCounts {
+                mapped_eligible: 1,
+                context: 0,
+                textual: 1,
+                uncounted: 0,
+                excluded: 0,
+                rename_gaps: 0,
+            })
+            .with_window(Some(90), 1);
         assert_eq!(coverage.window_days(), Some(90));
         assert_eq!(coverage.window_excluded_commits(), 1);
     }
@@ -615,16 +625,16 @@ mod tests {
                 None,
                 3,
                 3,
-                6,
-                0,
-                None,
-                None,
-                6,
-                0,
-                0,
-                0,
                 Some("history is shallow".to_owned()),
-            ),
+            )
+            .with_changes(HistoryChangeCounts {
+                mapped_eligible: 6,
+                context: 0,
+                textual: 6,
+                uncounted: 0,
+                excluded: 0,
+                rename_gaps: 0,
+            }),
             2,
             2,
             &crate::PackageContainment::default(),
@@ -678,20 +688,15 @@ mod tests {
     fn rename_gaps_withhold_changed_explanation_comparisons() {
         let pair = (PackageId::from_index(0), PackageId::from_index(1));
         let (facts, _) = qualifying_pair_accumulator().finish(
-            HistoryCoverage::new(
-                HistoryAvailability::Complete,
-                None,
-                3,
-                3,
-                6,
-                0,
-                None,
-                None,
-                6,
-                0,
-                0,
-                1,
-                None,
+            HistoryCoverage::new(HistoryAvailability::Complete, None, 3, 3, None).with_changes(
+                HistoryChangeCounts {
+                    mapped_eligible: 6,
+                    context: 0,
+                    textual: 6,
+                    uncounted: 0,
+                    excluded: 0,
+                    rename_gaps: 1,
+                },
             ),
             2,
             2,
@@ -764,20 +769,15 @@ mod tests {
 
         let changes = (6 + files) as u32;
         let (report, _) = accumulator.finish(
-            HistoryCoverage::new(
-                HistoryAvailability::Complete,
-                None,
-                4,
-                4,
-                changes,
-                0,
-                None,
-                None,
-                changes,
-                0,
-                0,
-                0,
-                None,
+            HistoryCoverage::new(HistoryAvailability::Complete, None, 4, 4, None).with_changes(
+                HistoryChangeCounts {
+                    mapped_eligible: changes,
+                    context: 0,
+                    textual: changes,
+                    uncounted: 0,
+                    excluded: 0,
+                    rename_gaps: 0,
+                },
             ),
             files,
             2,
@@ -846,20 +846,15 @@ mod tests {
             accumulator
         };
         let coverage = |availability| {
-            HistoryCoverage::new(
-                availability,
-                None,
-                10,
-                10,
-                10,
-                0,
-                None,
-                None,
-                10,
-                0,
-                0,
-                0,
-                None,
+            HistoryCoverage::new(availability, None, 10, 10, None).with_changes(
+                HistoryChangeCounts {
+                    mapped_eligible: 10,
+                    context: 0,
+                    textual: 10,
+                    uncounted: 0,
+                    excluded: 0,
+                    rename_gaps: 0,
+                },
             )
         };
         let finish = |availability| {
@@ -1051,20 +1046,15 @@ mod tests {
             );
         }
         let (report, _) = accumulator.finish(
-            HistoryCoverage::new(
-                HistoryAvailability::Complete,
-                None,
-                3,
-                3,
-                3,
-                3,
-                None,
-                None,
-                6,
-                0,
-                0,
-                0,
-                None,
+            HistoryCoverage::new(HistoryAvailability::Complete, None, 3, 3, None).with_changes(
+                HistoryChangeCounts {
+                    mapped_eligible: 3,
+                    context: 3,
+                    textual: 6,
+                    uncounted: 0,
+                    excluded: 0,
+                    rename_gaps: 0,
+                },
             ),
             2,
             2,
@@ -1095,16 +1085,16 @@ mod tests {
                 None,
                 3,
                 3,
-                6,
-                0,
-                None,
-                None,
-                6,
-                0,
-                0,
-                0,
                 Some("repository history is shallow".to_owned()),
-            ),
+            )
+            .with_changes(HistoryChangeCounts {
+                mapped_eligible: 6,
+                context: 0,
+                textual: 6,
+                uncounted: 0,
+                excluded: 0,
+                rename_gaps: 0,
+            }),
             2,
             2,
             &crate::PackageContainment::default(),
@@ -1144,20 +1134,15 @@ mod tests {
             );
         }
         let (report, _) = accumulator.finish(
-            HistoryCoverage::new(
-                HistoryAvailability::Complete,
-                None,
-                3,
-                0,
-                0,
-                6,
-                None,
-                None,
-                6,
-                0,
-                0,
-                0,
-                None,
+            HistoryCoverage::new(HistoryAvailability::Complete, None, 3, 0, None).with_changes(
+                HistoryChangeCounts {
+                    mapped_eligible: 0,
+                    context: 6,
+                    textual: 6,
+                    uncounted: 0,
+                    excluded: 0,
+                    rename_gaps: 0,
+                },
             ),
             2,
             2,
@@ -1201,20 +1186,15 @@ mod tests {
             );
         }
         let (report, _) = accumulator.finish(
-            HistoryCoverage::new(
-                HistoryAvailability::Complete,
-                None,
-                5,
-                3,
-                6,
-                2,
-                None,
-                None,
-                8,
-                0,
-                0,
-                0,
-                None,
+            HistoryCoverage::new(HistoryAvailability::Complete, None, 5, 3, None).with_changes(
+                HistoryChangeCounts {
+                    mapped_eligible: 6,
+                    context: 2,
+                    textual: 8,
+                    uncounted: 0,
+                    excluded: 0,
+                    rename_gaps: 0,
+                },
             ),
             3,
             2,

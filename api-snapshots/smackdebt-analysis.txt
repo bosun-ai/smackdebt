@@ -806,6 +806,13 @@ pub const fn smackdebt_analysis::HealthPolicy::new(smackdebt_analysis::Threshold
 pub const fn smackdebt_analysis::HealthPolicy::parameters(self) -> smackdebt_analysis::Thresholds
 impl core::default::Default for smackdebt_analysis::HealthPolicy
 pub fn smackdebt_analysis::HealthPolicy::default() -> Self
+pub struct smackdebt_analysis::HistoryChangeCounts
+pub smackdebt_analysis::HistoryChangeCounts::context: u32
+pub smackdebt_analysis::HistoryChangeCounts::excluded: u32
+pub smackdebt_analysis::HistoryChangeCounts::mapped_eligible: u32
+pub smackdebt_analysis::HistoryChangeCounts::rename_gaps: u32
+pub smackdebt_analysis::HistoryChangeCounts::textual: u32
+pub smackdebt_analysis::HistoryChangeCounts::uncounted: u32
 pub struct smackdebt_analysis::HistoryChangeFact
 impl smackdebt_analysis::HistoryChangeFact
 pub const fn smackdebt_analysis::HistoryChangeFact::added_lines(self) -> core::option::Option<u32>
@@ -845,7 +852,7 @@ pub const fn smackdebt_analysis::HistoryCoverage::eligible_commits(&self) -> u32
 pub const fn smackdebt_analysis::HistoryCoverage::excluded_changes(&self) -> u32
 pub const fn smackdebt_analysis::HistoryCoverage::mapped_changes(&self) -> u32
 pub const fn smackdebt_analysis::HistoryCoverage::mapped_eligible_changes(&self) -> u32
-pub fn smackdebt_analysis::HistoryCoverage::new(smackdebt_analysis::HistoryAvailability, core::option::Option<alloc::string::String>, u32, u32, u32, u32, core::option::Option<i64>, core::option::Option<i64>, u32, u32, u32, u32, core::option::Option<alloc::string::String>) -> Self
+pub fn smackdebt_analysis::HistoryCoverage::new(smackdebt_analysis::HistoryAvailability, core::option::Option<alloc::string::String>, u32, u32, core::option::Option<alloc::string::String>) -> Self
 pub const fn smackdebt_analysis::HistoryCoverage::newest_timestamp(&self) -> core::option::Option<i64>
 pub const fn smackdebt_analysis::HistoryCoverage::observed_changes(&self) -> u32
 pub const fn smackdebt_analysis::HistoryCoverage::oldest_timestamp(&self) -> core::option::Option<i64>
@@ -858,6 +865,8 @@ pub const fn smackdebt_analysis::HistoryCoverage::uncounted_changes(&self) -> u3
 pub const fn smackdebt_analysis::HistoryCoverage::window_days(&self) -> core::option::Option<u32>
 pub const fn smackdebt_analysis::HistoryCoverage::window_excluded_commits(&self) -> u32
 pub fn smackdebt_analysis::HistoryCoverage::with_change_graph(self, u32, u32) -> Self
+pub fn smackdebt_analysis::HistoryCoverage::with_changes(self, smackdebt_analysis::HistoryChangeCounts) -> Self
+pub fn smackdebt_analysis::HistoryCoverage::with_timestamps(self, core::option::Option<i64>, core::option::Option<i64>) -> Self
 pub fn smackdebt_analysis::HistoryCoverage::with_window(self, core::option::Option<u32>, u32) -> Self
 impl core::default::Default for smackdebt_analysis::HistoryCoverage
 pub fn smackdebt_analysis::HistoryCoverage::default() -> Self

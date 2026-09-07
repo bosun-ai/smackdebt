@@ -3437,12 +3437,13 @@ mod tests {
         EvolutionaryComparisonKind, EvolutionaryFinding, EvolutionaryFindingId,
         EvolutionaryReportFacts, FileActivity, FileChangeCoupling, FileChangeCouplingId, FileId,
         FileRecord, FindingId, GraphEvidence, HealthCounts, HealthPolicy, HistoryAvailability,
-        HistoryComparisonSuppression, HistoryComparisonSuppressionId, HistoryCoverage, Hotspot,
-        KnowledgeConcentrationFinding, KnowledgeConcentrationFindingId, Measurements, PackageEdge,
-        PackageEdgeId, PackageGraphMeasurement, PackageId, PackageRecord, ParseStatus,
-        RecoveredFacts, Report, ReportBuilder, ReportMode, Scope, ScopeId, SizePolicy,
-        SourceCoverageOutcome, SourceRole, SourceSpan, SourceTrust, StableDependencyEvidence,
-        StableDependencyFinding, StableDependencyFindingId, UnitIdentity, UnitKind,
+        HistoryChangeCounts, HistoryComparisonSuppression, HistoryComparisonSuppressionId,
+        HistoryCoverage, Hotspot, KnowledgeConcentrationFinding, KnowledgeConcentrationFindingId,
+        Measurements, PackageEdge, PackageEdgeId, PackageGraphMeasurement, PackageId,
+        PackageRecord, ParseStatus, RecoveredFacts, Report, ReportBuilder, ReportMode, Scope,
+        ScopeId, SizePolicy, SourceCoverageOutcome, SourceRole, SourceSpan, SourceTrust,
+        StableDependencyEvidence, StableDependencyFinding, StableDependencyFindingId, UnitIdentity,
+        UnitKind,
     };
 
     /// Every private-use codepoint, which may never reach a machine consumer.
@@ -5123,21 +5124,16 @@ mod tests {
             // Nothing moved, so there is no movement to point at.
             assert!(!graph.contains("next:"), "{graph}");
 
-            let incomplete = HistoryCoverage::new(
-                HistoryAvailability::Incomplete,
-                None,
-                1,
-                1,
-                1,
-                0,
-                None,
-                None,
-                1,
-                0,
-                0,
-                0,
-                None,
-            );
+            let incomplete =
+                HistoryCoverage::new(HistoryAvailability::Incomplete, None, 1, 1, None)
+                    .with_changes(HistoryChangeCounts {
+                        mapped_eligible: 1,
+                        context: 0,
+                        textual: 1,
+                        uncounted: 0,
+                        excluded: 0,
+                        rename_gaps: 0,
+                    });
             let history_report = no_debt_diff_with_context(incomplete, true, false, false, false);
             let history = render(&history_report, TerminalOptions::default());
             assert!(

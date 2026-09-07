@@ -12,9 +12,9 @@ use smackdebt_analysis::{
     ChangeCoupling, Comparison, ComparisonId, ComparisonKind, ContributorConcentration, Coverage,
     Diagnostic, DiagnosticId, DiagnosticKind, EvolutionaryFinding, EvolutionaryFindingId,
     EvolutionaryReportFacts, FileId, FileRecord, HealthCounts, HistoryAvailability,
-    HistoryCoverage, KnowledgeConcentrationFinding, KnowledgeConcentrationFindingId, Measurements,
-    PackageId, PackageRecord, Rating, Report, ReportBuilder, ReportMode, Scope, ScopeId, ScopeKind,
-    SourceSpan, UnitIdentity, UnitKind,
+    HistoryChangeCounts, HistoryCoverage, KnowledgeConcentrationFinding,
+    KnowledgeConcentrationFindingId, Measurements, PackageId, PackageRecord, Rating, Report,
+    ReportBuilder, ReportMode, Scope, ScopeId, ScopeKind, SourceSpan, UnitIdentity, UnitKind,
 };
 use smackdebt_output::{TerminalOptions, write_terminal};
 
@@ -122,20 +122,15 @@ fn diff(ambiguous: bool) -> Report {
         EvolutionaryReportFacts::new(
             // Complete history, so no coverage warning competes with the rows
             // these read.
-            HistoryCoverage::new(
-                HistoryAvailability::Complete,
-                None,
-                80,
-                80,
-                160,
-                0,
-                None,
-                None,
-                160,
-                0,
-                0,
-                0,
-                None,
+            HistoryCoverage::new(HistoryAvailability::Complete, None, 80, 80, None).with_changes(
+                HistoryChangeCounts {
+                    mapped_eligible: 160,
+                    context: 0,
+                    textual: 160,
+                    uncounted: 0,
+                    excluded: 0,
+                    rename_gaps: 0,
+                },
             ),
             Vec::new(),
             Vec::new(),
