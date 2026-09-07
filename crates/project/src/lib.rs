@@ -1,5 +1,6 @@
 #![forbid(unsafe_code)]
 
+mod candidates;
 #[cfg(feature = "evidence-stats")]
 mod evidence;
 mod manifest_names;
@@ -7,7 +8,9 @@ mod paths;
 mod project;
 mod rating;
 mod requests;
+mod resolution_config;
 mod roles;
+mod rust_layout;
 mod work;
 
 #[cfg(feature = "evidence-stats")]
