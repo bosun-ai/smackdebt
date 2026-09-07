@@ -14,7 +14,7 @@ use smackdebt_git::GitRepository;
 
 use crate::dependencies::{DiffTables, SourceDependencies};
 use crate::diff_changes::DiffPackages;
-use crate::diff_findings::{DiffIndexes, add_diff_result};
+use crate::diff_findings::{DiffIndexes, DiffSpot, add_diff_result};
 use crate::diff_graphs::{ArchitectureLinks, DiffArchitectures};
 use crate::diff_impact::{DiffImpact, ImpactComparisons};
 use crate::diff_source::{DiffResult, DiffSide, DiffUnchanged};
@@ -97,9 +97,11 @@ pub(crate) fn record_changed_files(
             builder,
             result,
             &mut indexes,
-            scope_id,
-            package,
-            is_selected,
+            DiffSpot {
+                scope: scope_id,
+                package,
+                selected: is_selected,
+            },
             policy,
         );
     }

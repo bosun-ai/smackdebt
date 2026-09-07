@@ -40,68 +40,77 @@ pub(crate) fn retained_comparison(
     }
     retained
 }
-pub(crate) fn add_diff_result(
-    report: &mut AnalysisReportBuilder,
-    result: DiffResult,
-    indexes: &mut DiffIndexes,
-    scope_id: ScopeId,
-    package: PackageId,
-    included_in_code_diff: bool,
-    policy: HealthPolicy,
-) {
-    let file_id = FileId::from_index(result.index);
-    let before_role = result.before.role();
-    let current_role = result.current.role();
-    let mut has_ambiguous_identity = false;
-    let mut ambiguity_affects_verdict = false;
+/// Where one changed file sits in the report and whether the change
+/// selected it.
+#[derive(Clone, Copy)]
+pub(crate) struct DiffSpot {
+    pub(crate) scope: ScopeId,
+    pub(crate) package: PackageId,
+    pub(crate) selected: bool,
+}
 
-    for comparison in result.comparisons.iter().filter(|_| included_in_code_diff) {
-        let comparison_id = ComparisonId::from_index(indexes.comparison);
-        let retained = retained_comparison(
-            comparison,
-            comparison_id,
-            file_id,
-            (before_role, current_role),
-        );
-        if retained.is_anonymous_ambiguity() {
-            has_ambiguous_identity = true;
-            ambiguity_affects_verdict |= retained.source_moves_debt();
+/// One changed file's landing context while its rows are added.
+struct ResultSink<'a> {
+    report: &'a mut AnalysisReportBuilder,
+    indexes: &'a mut DiffIndexes,
+    file: FileId,
+    spot: DiffSpot,
+}
+
+impl ResultSink<'_> {
+    /// Retains the file's comparisons, and one ambiguity diagnostic when
+    /// anonymous units could not be matched safely.
+    fn add_comparisons(
+        &mut self,
+        comparisons: &[Comparison],
+        roles: (Option<SourceRole>, Option<SourceRole>),
+    ) {
+        let mut has_ambiguous_identity = false;
+        let mut ambiguity_affects_verdict = false;
+        for comparison in comparisons.iter().filter(|_| self.spot.selected) {
+            let comparison_id = ComparisonId::from_index(self.indexes.comparison);
+            let retained = retained_comparison(comparison, comparison_id, self.file, roles);
+            if retained.is_anonymous_ambiguity() {
+                has_ambiguous_identity = true;
+                ambiguity_affects_verdict |= retained.source_moves_debt();
+            }
+            self.report.add_comparison(retained);
+            self.report.link_comparison(self.spot.scope, comparison_id);
+            self.indexes.comparison += 1;
         }
-        report.add_comparison(retained);
-        report.link_comparison(scope_id, comparison_id);
-        indexes.comparison += 1;
-    }
-    if has_ambiguous_identity {
-        let mut diagnostic = Diagnostic::new(
-            DiagnosticId::from_index(report.diagnostic_count()),
-            Some(file_id),
-            DiagnosticKind::AmbiguousIdentity,
-            "anonymous units could not be matched safely",
-            0,
-        );
-        if !ambiguity_affects_verdict {
-            diagnostic = diagnostic.as_context();
+        if has_ambiguous_identity {
+            let mut diagnostic = Diagnostic::new(
+                DiagnosticId::from_index(self.report.diagnostic_count()),
+                Some(self.file),
+                DiagnosticKind::AmbiguousIdentity,
+                "anonymous units could not be matched safely",
+                0,
+            );
+            if !ambiguity_affects_verdict {
+                diagnostic = diagnostic.as_context();
+            }
+            self.report.add_diagnostic(diagnostic);
         }
-        report.add_diagnostic(diagnostic);
     }
 
-    let selected = match &result.current {
-        DiffSide::Missing => &result.before,
-        current => current,
-    };
-    if let DiffSide::Analyzed { analysis, role, .. } = selected
-        && !verdict_eligible(analysis, *role)
-    {
+    /// Retains the advisory findings of a side the verdict never reads.
+    fn add_advisory_findings(&mut self, selected: &DiffSide, policy: HealthPolicy) {
+        let DiffSide::Analyzed { analysis, role, .. } = selected else {
+            return;
+        };
+        if verdict_eligible(analysis, *role) {
+            return;
+        }
         for unit in analysis.units() {
             let assessment = policy.assess(unit.measurements());
             if assessment.rating() == Rating::Healthy {
                 continue;
             }
-            let id = FindingId::from_index(indexes.finding);
-            report.add_finding(
+            let id = FindingId::from_index(self.indexes.finding);
+            self.report.add_finding(
                 Finding::new(
                     id,
-                    file_id,
+                    self.file,
                     unit.identity().clone(),
                     unit.span(),
                     unit.measurements(),
@@ -109,40 +118,69 @@ pub(crate) fn add_diff_result(
                 )
                 .with_evidence(*role, analysis.parse_status().trust()),
             );
-            report.link_finding(scope_id, id);
-            indexes.finding += 1;
+            self.report.link_finding(self.spot.scope, id);
+            self.indexes.finding += 1;
         }
     }
-    let (coverage, health, language) = if included_in_code_diff {
-        diff_side_summary(selected)
-    } else {
-        let (_, _, language) = diff_side_summary(selected);
-        (Coverage::default(), HealthCounts::default(), language)
+
+    /// Adds the file record the selected side settles.
+    fn add_file(&mut self, result: &DiffResult, selected: &DiffSide) {
+        let (coverage, health, language) = if self.spot.selected {
+            diff_side_summary(selected)
+        } else {
+            let (_, _, language) = diff_side_summary(selected);
+            (Coverage::default(), HealthCounts::default(), language)
+        };
+        let mut file = FileRecord::new(
+            self.file,
+            self.spot.scope,
+            result.change.current_path().to_string_lossy(),
+            coverage,
+            health,
+        )
+        .with_package(self.spot.package);
+        if let Some(language) = language {
+            file = file.with_language(language);
+        }
+        if let DiffSide::Analyzed { analysis, role, .. } = selected {
+            file = file.with_source_state(*role, analysis.parse_status().clone());
+        } else if let DiffSide::Unsupported { role, .. } | DiffSide::Failed { role, .. } = selected
+        {
+            file = file.with_source_state(*role, ParseStatus::Failed);
+        }
+        // A deleted file keeps its record, because its removed units and its
+        // before measurements are half of every comparison it appears in. The
+        // path is gone all the same, and the record says so.
+        if !result.change.current_exists() {
+            file = file.base_only();
+        }
+        self.report.add_file(file);
+        self.report.link_file(self.spot.scope, self.file);
+    }
+}
+
+pub(crate) fn add_diff_result(
+    report: &mut AnalysisReportBuilder,
+    result: DiffResult,
+    indexes: &mut DiffIndexes,
+    spot: DiffSpot,
+    policy: HealthPolicy,
+) {
+    let file_id = FileId::from_index(result.index);
+    let roles = (result.before.role(), result.current.role());
+    let mut sink = ResultSink {
+        report,
+        indexes,
+        file: file_id,
+        spot,
     };
-    let mut file = FileRecord::new(
-        file_id,
-        scope_id,
-        result.change.current_path().to_string_lossy(),
-        coverage,
-        health,
-    )
-    .with_package(package);
-    if let Some(language) = language {
-        file = file.with_language(language);
-    }
-    if let DiffSide::Analyzed { analysis, role, .. } = selected {
-        file = file.with_source_state(*role, analysis.parse_status().clone());
-    } else if let DiffSide::Unsupported { role, .. } | DiffSide::Failed { role, .. } = selected {
-        file = file.with_source_state(*role, ParseStatus::Failed);
-    }
-    // A deleted file keeps its record, because its removed units and its before
-    // measurements are half of every comparison it appears in. The path is gone
-    // all the same, and the record says so.
-    if !result.change.current_exists() {
-        file = file.base_only();
-    }
-    report.add_file(file);
-    report.link_file(scope_id, file_id);
+    sink.add_comparisons(&result.comparisons, roles);
+    let selected = match &result.current {
+        DiffSide::Missing => &result.before,
+        current => current,
+    };
+    sink.add_advisory_findings(selected, policy);
+    sink.add_file(&result, selected);
     add_diff_diagnostic(report, file_id, &result.current, "current");
     add_diff_diagnostic(report, file_id, &result.before, "base");
 }
