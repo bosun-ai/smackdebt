@@ -29,11 +29,11 @@ use smackdebt_analysis::{
     stable_dependency_findings, strongly_connected_components, test_declared_files,
 };
 use smackdebt_discovery::{
-    DiscoveredFile, Inventory, discover_snapshot, generic_source_roles, glob_matches,
-    has_generated_javascript_name, has_vendored_javascript_name, is_runtime_javascript_path,
-    is_source_path, is_tool_configuration_name,
+    DiscoveredFile, Inventory, SnapshotInventory, discover_snapshot, generic_source_roles,
+    glob_matches, has_generated_javascript_name, has_vendored_javascript_name,
+    is_runtime_javascript_path, is_source_path, is_tool_configuration_name,
 };
-use smackdebt_git::{Change, ContributorIdentity, GitRepository};
+use smackdebt_git::{Change, ContributorIdentity, GitRepository, ObjectReader};
 use smackdebt_languages::{AnalysisError as LanguageError, Analyzer};
 
 use crate::requests::{
@@ -199,340 +199,207 @@ pub(super) fn analyze_codebase(request: &CodebaseRequest) -> Result<ProjectRepor
 /// Compares changed source units with the selected ref.
 pub(super) fn analyze_diff(request: &DiffRequest) -> Result<ProjectReport, ProjectError> {
     let repository = GitRepository::discover(&request.path)?;
-    let reference = match &request.reference {
-        Some(reference) => reference.clone(),
-        None => repository
-            .default_ref()?
-            .ok_or(ProjectError::MissingReference)?,
-    };
-    let base = repository
-        .merge_base(&reference, "HEAD")
-        .map_err(|error| match error {
-            // Git reports an unknown ref through a failed command, so the
-            // failure is restated as the fixable value the user supplied.
-            smackdebt_git::GitError::Command { .. } | smackdebt_git::GitError::MissingObject(_) => {
-                ProjectError::UnknownReference(reference.clone())
-            }
-            other => ProjectError::Git(other),
-        })?;
-    let changed = repository.changes_from(&base)?;
-    let inventory =
-        Inventory::discover_sources(repository.root(), Vec::new()).map_err(|source| {
-            ProjectError::Inspect {
-                path: repository.root().to_path_buf(),
-                source,
-            }
-        })?;
-    #[cfg(feature = "evidence-stats")]
-    crate::evidence::record_inventory(inventory.visited_entries());
+    let (reference, base) = resolve_diff_refs(&repository, request.reference.as_deref())?;
+    let changes = repository.changes_from(&base)?;
+    let inventory = discover_current_tree(&repository)?;
     let aliases = load_resolution_aliases(repository.root(), &inventory);
-
-    let path_filter = (!request.automatic_scope)
-        .then(|| diff_filter(repository.root(), &request.path))
-        .flatten();
-    if !request.automatic_scope && request.path.is_file() && !is_source_path(&request.path) {
-        return Err(ProjectError::NotSourceFile(request.path.clone()));
-    }
+    let path_filter = diff_selection_filter(request, repository.root())?;
     let work = AnalysisWork::default();
-    let width = request.width.threads().min(changed.len().max(1));
+    let width = request.width.threads().min(changes.len().max(1));
     let mut batch = repository.object_reader(width * 2)?;
-    let base_tree_files = batch.tree_files(&base)?;
-    let mut base_metadata: BTreeMap<PathBuf, Result<Vec<u8>, String>> = BTreeMap::new();
-    let base_inventory = discover_snapshot(repository.root(), &base_tree_files, |path| {
-        if let Some(source) = base_metadata.get(path) {
-            return source.clone().map_err(std::io::Error::other);
-        }
-        let source = batch
-            .read_path(&base, path)
-            .map_err(|error| error.to_string());
-        base_metadata.insert(path.to_path_buf(), source.clone());
-        source.map_err(std::io::Error::other)
-    })
-    .map_err(|source| ProjectError::Inspect {
-        path: repository.root().to_path_buf(),
-        source,
-    })?;
-    if !request.automatic_scope {
-        let includes = |path: &Path| {
-            path_filter
-                .as_ref()
-                .is_some_and(|selected| path.starts_with(selected))
-        };
-        let has_selected_source = inventory
-            .source_files()
-            .any(|file| includes(file.path().as_path()))
-            || base_inventory
-                .source_paths()
-                .iter()
-                .any(|path| includes(path));
-        if !has_selected_source {
-            return Err(ProjectError::NoSourceFiles(request.path.clone()));
-        }
-    }
-    let current_sources = inventory
-        .source_files()
-        .map(|file| file.path().as_path().to_path_buf())
-        .collect::<BTreeSet<_>>();
-    let base_sources = base_inventory
-        .source_paths()
-        .iter()
-        .cloned()
-        .collect::<BTreeSet<_>>();
-    let changed_paths = changed
-        .iter()
-        .flat_map(|change| {
-            [
-                change.current_path().to_path_buf(),
-                change.base_path().to_path_buf(),
-            ]
-        })
-        .collect::<BTreeSet<_>>();
-    let mut changed = changed
-        .into_iter()
-        .filter_map(|change| SelectedChange::from_git(change, &current_sources, &base_sources))
-        .collect::<Vec<_>>();
-    for path in current_sources.symmetric_difference(&base_sources) {
-        if !changed_paths.contains(path.as_path()) {
-            changed.push(SelectedChange::from_snapshot(
-                path.clone(),
-                current_sources.contains(path),
-                base_sources.contains(path),
-            ));
-        }
-    }
-    changed.sort_by(|left, right| left.current_path().cmp(right.current_path()));
-    let all_changed = changed.clone();
-    changed.retain(|entry| Analyzer::language(entry.current_path()) != Language::Unknown);
-    let selected_paths: std::collections::BTreeSet<_> = changed
-        .iter()
-        .filter(|entry| {
-            path_filter
-                .as_ref()
-                .is_none_or(|path| entry.current_path().starts_with(path))
-        })
-        .map(|entry| entry.current_path().to_path_buf())
-        .collect();
+    let base_inventory = discover_base_tree(&repository, &mut batch, &base)?;
+    require_selected_source(request, &inventory, &base_inventory, path_filter.as_deref())?;
+    let DiffChangeSet {
+        changed,
+        all_changed,
+        selected_paths,
+    } = select_diff_changes(&inventory, &base_inventory, changes, path_filter.as_deref());
     let selected_count = selected_paths.len();
-    let changed_count = changed.len();
-    let current_package_roots: Vec<_> = inventory
-        .packages()
-        .iter()
-        .map(|package| package.root().as_path().to_path_buf())
-        .collect();
-    let width = request.width.threads().min(changed_count.max(1));
-    let before_package_roots = base_inventory
-        .packages()
-        .iter()
-        .map(|(root, _)| root.clone())
-        .collect::<Vec<_>>();
-    let mut resolution_config_candidates: Vec<_> = inventory
-        .packages()
-        .iter()
-        .filter_map(|package| package.resolution_config())
-        .map(|path| path.as_path().to_path_buf())
-        .collect();
-    resolution_config_candidates.extend(base_inventory.resolution_configs().iter().cloned());
-    for change in &all_changed {
-        for path in [change.current_path(), change.base_path()] {
-            if matches!(
-                path.file_name().and_then(|name| name.to_str()),
-                Some("tsconfig.json" | "jsconfig.json")
-            ) {
-                resolution_config_candidates.push(path.to_path_buf());
-            }
-        }
-    }
-    resolution_config_candidates.sort();
-    resolution_config_candidates.dedup();
+    let packages = DiffPackages::of(&inventory, &base_inventory, &all_changed);
     let before_aliases = load_base_resolution_aliases(
         &mut batch,
         &base,
-        &before_package_roots,
-        &resolution_config_candidates,
+        &packages.before_roots,
+        &packages.resolution_configs,
     );
-    let mut base_only_roots = before_package_roots.clone();
-    base_only_roots.retain(|root| !current_package_roots.contains(root));
-    base_only_roots.sort();
-    base_only_roots.dedup();
-    let mut package_roots = current_package_roots.clone();
-    package_roots.extend(base_only_roots.iter().cloned());
-    let before_manifest_names = package_roots
-        .iter()
-        .map(|root| {
-            base_inventory
-                .packages()
-                .iter()
-                .find(|(candidate, _)| candidate == root)
-                .and_then(|(_, name)| name.clone())
-        })
-        .collect::<Vec<_>>();
-    let mut hierarchy = HierarchyBuilder::new(".".to_owned(), &package_roots);
-    let package_records: Vec<_> = package_roots
-        .iter()
-        .enumerate()
-        .map(|(index, root)| {
-            let id = PackageId::from_index(index);
-            let scope = hierarchy.package_scopes[index];
-            let path = report_package_path(root);
-            let record = if index < current_package_roots.len() {
-                PackageRecord::current(id, scope, path)
-            } else {
-                PackageRecord::base_only(id, scope, path)
-            };
-            record.with_manifest_name(declared_manifest_name(&inventory, root))
-        })
-        .collect();
-    let changed_paths_for_hierarchy: std::collections::BTreeSet<_> = changed
-        .iter()
-        .map(|entry| entry.current_path().to_path_buf())
-        .collect();
-    for entry in &changed {
-        let package_root = nearest_package_root(entry.current_path(), &package_roots);
-        let package_index = package_roots
-            .iter()
-            .position(|root| root == &package_root)
-            .unwrap_or(0);
-        hierarchy.add_file(entry.current_path(), package_index);
-    }
-    for file in inventory
-        .source_files()
-        .filter(|file| Analyzer::language(file.path().as_path()) != Language::Unknown)
-    {
-        if changed_paths_for_hierarchy.contains(file.path().as_path()) {
-            continue;
-        }
-        let package_root = nearest_package_root(file.path().as_path(), &package_roots);
-        let package_index = package_roots
-            .iter()
-            .position(|root| root == &package_root)
-            .unwrap_or(0);
-        hierarchy.add_file(file.path().as_path(), package_index);
-    }
-    let file_scopes = hierarchy.file_scopes.clone();
-    let mut results = analyze_diff_inputs(
-        changed,
-        repository.root().to_path_buf(),
+    let DiffHierarchy {
+        scopes: hierarchy_scopes,
+        file_scopes,
+        packages: package_records,
+    } = build_diff_hierarchy(&inventory, &changed, &packages);
+    let objects = DiffObjects {
+        root: repository.root().to_path_buf(),
         base,
-        batch,
-        DiffAnalysisPolicy {
-            health: request.policy,
-            roles: request.role_rules.clone(),
-        },
-        width,
-        work.clone(),
-    )?;
-    let changed_paths: std::collections::BTreeSet<_> = results
-        .iter()
-        .filter(|result| result.change.current_exists())
-        .map(|result| result.change.current_path().to_path_buf())
-        .collect();
-    let unchanged_candidates: Vec<_> = inventory
-        .source_files()
-        .filter(|file| {
-            !changed_paths.contains(file.path().as_path())
-                && Analyzer::language(file.path().as_path()) != Language::Unknown
-        })
-        .collect();
-    let mut unchanged = analyze_current_files(
-        &inventory,
-        &unchanged_candidates,
-        request.width,
-        request.policy,
+        reader: batch,
+    };
+    let (mut results, mut unchanged) =
+        analyze_diff_files(request, &inventory, changed, objects, &work)?;
+    let side_aliases = DiffAliases {
+        current: &aliases,
+        before: &before_aliases,
+    };
+    demote_diff_roles(
+        &mut results,
+        &mut unchanged,
+        side_aliases,
         &request.role_rules,
-        &work,
-    )?;
-    let mut before_unchanged_roles = unchanged.iter().map(file_result_role).collect::<Vec<_>>();
-    for side in [DiffSideSelector::Current, DiffSideSelector::Before] {
-        let side_aliases = match side {
-            DiffSideSelector::Current => &aliases,
-            DiffSideSelector::Before => &before_aliases,
-        };
-        demote_test_declared_diff_roles(
-            side,
-            changed_count,
-            &mut results,
-            &unchanged_candidates,
-            &mut unchanged,
-            &mut before_unchanged_roles,
-            DiffRolePolicy {
-                aliases: side_aliases,
-                rules: &request.role_rules,
-            },
-        );
-    }
-    let root = ScopeId::from_index(0);
-    let mut builder = AnalysisReportBuilder::with_capacity(
-        ReportMode::Diff,
-        selected_count * 2 + 2,
-        selected_count,
-        0,
-        selected_count * 2,
-        selected_count,
     );
-    for scope in hierarchy.scopes {
-        builder.add_scope(scope);
+    let root = ScopeId::from_index(0);
+    let mut builder = new_diff_builder(hierarchy_scopes, selected_count);
+    let placement = DiffPlacement {
+        packages: &packages,
+        file_scopes: &file_scopes,
+        selected_paths: &selected_paths,
+    };
+    let mut tables = DiffTables::with_capacity(selected_count);
+    record_changed_files(
+        &mut builder,
+        results,
+        &placement,
+        &mut tables,
+        request.policy,
+    );
+    record_unchanged_files(&mut builder, unchanged, &placement, &mut tables);
+    let architectures =
+        build_diff_architectures(&work, &tables, &packages, side_aliases, &inventory);
+    let mut architecture_comparisons = compare_diff_architecture(&architectures, &tables, &work);
+    attribute_comparison_files(&mut architecture_comparisons, &architectures);
+    let architecture_links =
+        ArchitectureLinks::of(&architecture_comparisons, &architectures.current);
+    work.record_algorithm_pass();
+    let (evolution, evolution_links) =
+        stream_diff_evolution(request, &repository, &builder, &packages, &architectures);
+    let impact = compare_diff_impact(&architectures, &tables, &packages, &evolution.facts);
+    let impact_comparisons = set_diff_architecture_facts(
+        &mut builder,
+        architectures,
+        architecture_comparisons,
+        impact,
+    );
+    set_diff_history_facts(&mut builder, evolution, reference);
+    link_evolution_scopes(&mut builder, root, &package_records, &evolution_links);
+    link_propagation_scopes(
+        &mut builder,
+        root,
+        &package_records,
+        &impact_comparisons.propagation,
+    );
+    link_file_comparison_scopes(
+        &mut builder,
+        root,
+        &impact_comparisons.core,
+        &impact_comparisons.leakage,
+    );
+    link_architecture_scopes(&mut builder, root, &package_records, &architecture_links);
+    builder.set_packages(package_records);
+    let report = builder.finish();
+    let selected_scope = diff_selected_scope(&report, request, path_filter.as_deref(), root)?;
+    Ok(ProjectReport {
+        report,
+        selected_scope,
+        stats: WorkStats {
+            inventory_walks: 1,
+            inventory_visits: inventory.visited_entries(),
+            source_reads: work.source_reads.load(Ordering::Relaxed),
+            git_processes: repository.git_processes(),
+        },
+    })
+}
+
+/// One tree's file and dependency tables, as an architecture build reads
+/// them.
+struct SideTables {
+    files: Vec<FileRecord>,
+    dependencies: Vec<SourceDependencies>,
+}
+
+/// Both trees' tables, filled in the same file order.
+struct DiffTables {
+    current: SideTables,
+    before: SideTables,
+}
+
+impl DiffTables {
+    fn with_capacity(selected_count: usize) -> Self {
+        Self {
+            current: SideTables {
+                files: Vec::with_capacity(selected_count),
+                dependencies: Vec::new(),
+            },
+            before: SideTables {
+                files: Vec::with_capacity(selected_count),
+                dependencies: Vec::new(),
+            },
+        }
     }
-    builder.set_root(root);
+}
+
+/// Where a diff's files sit: the shared package positions, the scope every
+/// path was given, and the paths the request selected.
+#[derive(Clone, Copy)]
+struct DiffPlacement<'a> {
+    packages: &'a DiffPackages,
+    file_scopes: &'a BTreeMap<PathBuf, ScopeId>,
+    selected_paths: &'a BTreeSet<PathBuf>,
+}
+
+impl DiffPlacement<'_> {
+    fn scope_of(&self, path: &Path) -> ScopeId {
+        self.file_scopes
+            .get(path)
+            .copied()
+            .expect("diff hierarchy contains every analyzable file")
+    }
+}
+
+/// Adds every changed file's records and comparisons to the report.
+fn record_changed_files(
+    builder: &mut AnalysisReportBuilder,
+    results: Vec<DiffResult>,
+    placement: &DiffPlacement<'_>,
+    tables: &mut DiffTables,
+    policy: HealthPolicy,
+) {
     let mut indexes = DiffIndexes::default();
-    let mut current_dependencies = Vec::new();
-    let mut before_dependencies = Vec::new();
-    let mut current_files = Vec::with_capacity(selected_count);
-    let mut before_files = Vec::with_capacity(selected_count);
     for result in results {
         let file_id = FileId::from_index(result.index);
-        if let DiffSide::Analyzed { analysis, role, .. } = &result.current {
-            current_dependencies.push(SourceDependencies {
-                file: file_id,
-                path: result.change.current_path().to_path_buf(),
-                references: analysis.dependencies().to_vec(),
-                role: *role,
-                trust: analysis.parse_status().trust(),
-                language: analysis.language(),
-                // A diff never classifies dormant source, so the fact that
-                // rule reads is not carried across the object boundary.
-                module_syntax: false,
-            });
-        }
-        if let DiffSide::Analyzed { analysis, role, .. } = &result.before {
-            before_dependencies.push(SourceDependencies {
-                file: file_id,
-                path: result.change.base_path().to_path_buf(),
-                references: analysis.dependencies().to_vec(),
-                role: *role,
-                trust: analysis.parse_status().trust(),
-                language: analysis.language(),
-                module_syntax: false,
-            });
-        }
-        let is_selected = selected_paths.contains(result.change.current_path());
-        let scope_id = file_scopes
-            .get(result.change.current_path())
-            .copied()
-            .expect("diff hierarchy contains every changed file");
-        let package_root = nearest_package_root(result.change.current_path(), &package_roots);
-        let package = PackageId::from_index(
-            package_roots
-                .iter()
-                .position(|root| root == &package_root)
-                .unwrap_or(0),
+        tables
+            .current
+            .dependencies
+            .extend(changed_side_dependencies(
+                file_id,
+                result.change.current_path(),
+                &result.current,
+            ));
+        tables.before.dependencies.extend(changed_side_dependencies(
+            file_id,
+            result.change.base_path(),
+            &result.before,
+        ));
+        let is_selected = placement
+            .selected_paths
+            .contains(result.change.current_path());
+        let scope_id = placement.scope_of(result.change.current_path());
+        let package = package_of(
+            result.change.current_path(),
+            &placement.packages.roots,
+            &placement.packages.roots,
         );
         let before_package = result.change.base_exists().then(|| {
-            let root = nearest_package_root(result.change.base_path(), &before_package_roots);
-            PackageId::from_index(
-                package_roots
-                    .iter()
-                    .position(|candidate| candidate == &root)
-                    .unwrap_or(0),
+            package_of(
+                result.change.base_path(),
+                &placement.packages.before_roots,
+                &placement.packages.roots,
             )
         });
-        current_files.push(diff_side_file_record(
+        tables.current.files.push(diff_side_file_record(
             file_id,
             scope_id,
             result.change.current_path(),
             result.change.current_exists().then_some(package),
             &result.current,
         ));
-        before_files.push(diff_side_file_record(
+        tables.before.files.push(diff_side_file_record(
             file_id,
             scope_id,
             result.change.base_path(),
@@ -540,112 +407,95 @@ pub(super) fn analyze_diff(request: &DiffRequest) -> Result<ProjectReport, Proje
             &result.before,
         ));
         add_diff_result(
-            &mut builder,
+            builder,
             result,
             &mut indexes,
             scope_id,
             package,
             is_selected,
-            request.policy,
+            policy,
         );
     }
-    for (offset, (file, result)) in unchanged_candidates.iter().zip(unchanged).enumerate() {
-        let file_id = FileId::from_index(changed_count + offset);
-        let package_root = nearest_package_root(file.path().as_path(), &package_roots);
-        let package_index = package_roots
-            .iter()
-            .position(|root| root == &package_root)
-            .unwrap_or(0);
-        let package = PackageId::from_index(package_index);
-        let package_scope = file_scopes[file.path().as_path()];
-        let mut record = FileRecord::new(
-            file_id,
-            package_scope,
-            file.path().to_string(),
-            Coverage::default(),
-            HealthCounts::default(),
-        )
-        .with_package(package);
-        match &result {
-            FileResult::Analyzed(rated) => {
-                record = record.with_language(rated.analysis.language());
-                record =
-                    record.with_source_state(rated.role, rated.analysis.parse_status().clone());
-                let dependencies = SourceDependencies {
-                    file: file_id,
-                    path: file.path().as_path().to_path_buf(),
-                    references: rated.analysis.dependencies().to_vec(),
-                    role: rated.role,
-                    trust: rated.analysis.parse_status().trust(),
-                    language: rated.analysis.language(),
-                    module_syntax: rated.module_syntax,
-                };
-                current_dependencies.push(dependencies.clone());
-                before_dependencies.push(SourceDependencies {
-                    role: before_unchanged_roles[offset],
-                    ..dependencies
-                });
-            }
-            FileResult::Unsupported { language, role } => {
-                record = record
-                    .with_language(*language)
-                    .with_source_state(*role, ParseStatus::Failed);
-            }
-            FileResult::Failed { role, language, .. } => {
-                record = record
-                    .with_language(*language)
-                    .with_source_state(*role, ParseStatus::Failed);
-            }
-            FileResult::RoleConflict { .. } => unreachable!("role conflicts stop composition"),
+}
+
+/// Adds every unchanged file's records for both sides.
+fn record_unchanged_files(
+    builder: &mut AnalysisReportBuilder,
+    unchanged: DiffUnchanged<'_>,
+    placement: &DiffPlacement<'_>,
+    tables: &mut DiffTables,
+) {
+    for (offset, (file, result)) in unchanged
+        .candidates
+        .iter()
+        .zip(unchanged.results)
+        .enumerate()
+    {
+        let file_id = FileId::from_index(unchanged.first_file_index + offset);
+        let package = package_of(
+            file.path().as_path(),
+            &placement.packages.roots,
+            &placement.packages.roots,
+        );
+        let package_scope = placement.scope_of(file.path().as_path());
+        if let Some(dependencies) = unchanged_dependencies(file_id, file.path().as_path(), &result)
+        {
+            tables.before.dependencies.push(SourceDependencies {
+                role: unchanged.before_roles[offset],
+                ..dependencies.clone()
+            });
+            tables.current.dependencies.push(dependencies);
         }
-        current_files.push(record.clone());
+        let record = unchanged_side_record(
+            unchanged_base_record(file_id, package_scope, file.path().to_string(), package),
+            &result,
+            file_result_role(&result),
+        );
+        tables.current.files.push(record.clone());
         builder.add_file(record);
-        let before_package_root =
-            nearest_package_root(file.path().as_path(), &before_package_roots);
-        let before_package = PackageId::from_index(
-            package_roots
-                .iter()
-                .position(|root| root == &before_package_root)
-                .unwrap_or(0),
+        let before_package = package_of(
+            file.path().as_path(),
+            &placement.packages.before_roots,
+            &placement.packages.roots,
         );
-        let mut before_record = FileRecord::new(
-            file_id,
-            package_scope,
-            file.path().to_string(),
-            Coverage::default(),
-            HealthCounts::default(),
-        )
-        .with_package(before_package);
-        match &result {
-            FileResult::Analyzed(rated) => {
-                before_record = before_record
-                    .with_language(rated.analysis.language())
-                    .with_source_state(
-                        before_unchanged_roles[offset],
-                        rated.analysis.parse_status().clone(),
-                    );
-            }
-            FileResult::Unsupported { language, role }
-            | FileResult::Failed { language, role, .. } => {
-                before_record = before_record.with_language(*language).with_source_state(
-                    before_unchanged_roles.get(offset).copied().unwrap_or(*role),
-                    ParseStatus::Failed,
-                );
-            }
-            FileResult::RoleConflict { .. } => unreachable!("role conflicts stop composition"),
-        }
-        before_files.push(before_record);
+        tables.before.files.push(unchanged_side_record(
+            unchanged_base_record(
+                file_id,
+                package_scope,
+                file.path().to_string(),
+                before_package,
+            ),
+            &result,
+            unchanged.before_roles[offset],
+        ));
     }
-    let current_manifest_names = manifest_names_for(&inventory, &package_roots);
-    let current_manifest_paths = manifest_paths_for(&inventory, &package_roots);
-    let current_architecture = build_architecture(
-        &work,
-        &current_files,
-        &current_dependencies,
-        &aliases,
+}
+
+/// Both trees' architecture builds.
+struct DiffArchitectures {
+    current: ArchitectureBuild,
+    before: ArchitectureBuild,
+}
+
+/// Builds the architecture graph each tree states over the shared package
+/// positions.
+fn build_diff_architectures(
+    work: &AnalysisWork,
+    tables: &DiffTables,
+    packages: &DiffPackages,
+    aliases: DiffAliases<'_>,
+    inventory: &Inventory,
+) -> DiffArchitectures {
+    let current_manifest_names = manifest_names_for(inventory, &packages.roots);
+    let current_manifest_paths = manifest_paths_for(inventory, &packages.roots);
+    let current = build_architecture(
+        work,
+        &tables.current.files,
+        &tables.current.dependencies,
+        aliases.current,
         PackageTables {
-            side_roots: &current_package_roots,
-            roots: &package_roots,
+            side_roots: &packages.current_roots,
+            roots: &packages.roots,
             manifests: ManifestFacts {
                 names: &current_manifest_names,
                 paths: &current_manifest_paths,
@@ -657,16 +507,16 @@ pub(super) fn analyze_diff(request: &DiffRequest) -> Result<ProjectReport, Proje
         // markers state.
         WindowedHistory::Absent,
     );
-    let before_architecture = build_architecture(
-        &work,
-        &before_files,
-        &before_dependencies,
-        &before_aliases,
+    let before = build_architecture(
+        work,
+        &tables.before.files,
+        &tables.before.dependencies,
+        aliases.before,
         PackageTables {
-            side_roots: &before_package_roots,
-            roots: &package_roots,
+            side_roots: &packages.before_roots,
+            roots: &packages.roots,
             manifests: ManifestFacts {
-                names: &before_manifest_names,
+                names: &packages.before_manifest_names,
                 // The base tree is read from Git objects, which the walk never
                 // opens, so no manifest of that tree was read.
                 paths: &[],
@@ -674,24 +524,35 @@ pub(super) fn analyze_diff(request: &DiffRequest) -> Result<ProjectReport, Proje
         },
         WindowedHistory::Absent,
     );
-    let before_edges: Vec<_> = before_architecture
+    DiffArchitectures { current, before }
+}
+
+/// The cycle and relation comparisons the two graphs disagree on.
+fn compare_diff_architecture(
+    architectures: &DiffArchitectures,
+    tables: &DiffTables,
+    work: &AnalysisWork,
+) -> Vec<ArchitectureComparison> {
+    let before_edges: Vec<_> = architectures
+        .before
         .package_edges
         .iter()
         .map(|edge| (edge.source(), edge.target()))
         .collect();
-    let current_edges: Vec<_> = current_architecture
+    let current_edges: Vec<_> = architectures
+        .current
         .package_edges
         .iter()
         .map(|edge| (edge.source(), edge.target()))
         .collect();
     work.record_algorithm_pass();
-    let mut architecture_comparisons = compare_architecture(
+    let mut comparisons = compare_architecture(
         &before_edges,
         &current_edges,
-        &before_architecture.cycles,
-        &current_architecture.cycles,
+        &architectures.before.cycles,
+        &architectures.current.cycles,
     );
-    architecture_comparisons.retain(|comparison| {
+    comparisons.retain(|comparison| {
         matches!(
             comparison.kind(),
             smackdebt_analysis::ArchitectureComparisonKind::CycleIntroduced
@@ -699,63 +560,130 @@ pub(super) fn analyze_diff(request: &DiffRequest) -> Result<ProjectReport, Proje
         )
     });
     append_relation_comparisons(
-        &mut architecture_comparisons,
-        &before_architecture.file_edges,
-        &current_architecture.file_edges,
-        &before_files,
-        &current_files,
+        &mut comparisons,
+        &architectures.before.file_edges,
+        &architectures.current.file_edges,
+        &tables.before.files,
+        &tables.current.files,
     );
-    for comparison in &mut architecture_comparisons {
+    comparisons
+}
+
+/// Attaches the file evidence each comparison's explaining side holds.
+fn attribute_comparison_files(
+    comparisons: &mut [ArchitectureComparison],
+    architectures: &DiffArchitectures,
+) {
+    for comparison in comparisons.iter_mut() {
         if comparison.relation().is_some() {
             continue;
         }
-        let source = if comparison.kind()
-            == smackdebt_analysis::ArchitectureComparisonKind::CycleRemoved
-            || comparison.kind() == smackdebt_analysis::ArchitectureComparisonKind::EdgeRemoved
-        {
-            &before_architecture
-        } else {
-            &current_architecture
-        };
-        let files: std::collections::BTreeSet<_> = match comparison.kind() {
-            smackdebt_analysis::ArchitectureComparisonKind::EdgeAdded
-            | smackdebt_analysis::ArchitectureComparisonKind::EdgeRemoved => source
-                .package_edges
-                .iter()
-                .filter(|edge| comparison.packages() == [edge.source(), edge.target()])
-                .flat_map(|edge| {
-                    edge.file_edges().iter().flat_map(|id| {
-                        let edge = &source.file_edges[id.index()];
-                        [edge.source(), edge.target()]
-                    })
+        let source = comparison_explaining_side(architectures, comparison.kind());
+        let files = comparison_files(source, comparison);
+        *comparison = comparison.clone().with_files(files);
+    }
+}
+
+/// The side whose graph explains one comparison kind: removals answer from
+/// the base tree, everything else from the current tree.
+fn comparison_explaining_side<'a>(
+    architectures: &'a DiffArchitectures,
+    kind: smackdebt_analysis::ArchitectureComparisonKind,
+) -> &'a ArchitectureBuild {
+    if kind == smackdebt_analysis::ArchitectureComparisonKind::CycleRemoved
+        || kind == smackdebt_analysis::ArchitectureComparisonKind::EdgeRemoved
+    {
+        &architectures.before
+    } else {
+        &architectures.current
+    }
+}
+
+/// The distinct files one comparison's explaining side attributes to it.
+fn comparison_files(
+    source: &ArchitectureBuild,
+    comparison: &ArchitectureComparison,
+) -> Vec<FileId> {
+    let files: BTreeSet<_> = match comparison.kind() {
+        smackdebt_analysis::ArchitectureComparisonKind::EdgeAdded
+        | smackdebt_analysis::ArchitectureComparisonKind::EdgeRemoved => source
+            .package_edges
+            .iter()
+            .filter(|edge| comparison.packages() == [edge.source(), edge.target()])
+            .flat_map(|edge| {
+                edge.file_edges().iter().flat_map(|id| {
+                    let edge = &source.file_edges[id.index()];
+                    [edge.source(), edge.target()]
                 })
+            })
+            .collect(),
+        _ => source
+            .findings
+            .iter()
+            .filter(|finding| {
+                finding.kind() == ArchitectureFindingKind::PackageCycle
+                    && finding
+                        .packages()
+                        .iter()
+                        .any(|package| comparison.packages().contains(package))
+            })
+            .flat_map(|finding| finding.files().iter().copied())
+            .collect(),
+    };
+    files.into_iter().collect()
+}
+
+/// The architecture rows the scope links restate, taken because the report
+/// facts consume the originals.
+struct ArchitectureLinks {
+    comparison_ids: Vec<ArchitectureComparisonId>,
+    comparisons: Vec<ArchitectureComparison>,
+    finding_ids: Vec<ArchitectureFindingId>,
+    findings: Vec<ArchitectureFinding>,
+}
+
+impl ArchitectureLinks {
+    fn of(comparisons: &[ArchitectureComparison], current: &ArchitectureBuild) -> Self {
+        Self {
+            comparison_ids: comparisons
+                .iter()
+                .map(|comparison| comparison.id())
                 .collect(),
-            _ => source
+            comparisons: comparisons.to_vec(),
+            finding_ids: current
                 .findings
                 .iter()
-                .filter(|finding| {
-                    finding.kind() == ArchitectureFindingKind::PackageCycle
-                        && finding
-                            .packages()
-                            .iter()
-                            .any(|package| comparison.packages().contains(package))
-                })
-                .flat_map(|finding| finding.files().iter().copied())
+                .map(|finding| finding.id())
                 .collect(),
-        };
-        *comparison = comparison.clone().with_files(files.into_iter().collect());
+            findings: current.findings.clone(),
+        }
     }
-    let architecture_comparison_ids: Vec<_> = architecture_comparisons
-        .iter()
-        .map(|comparison| comparison.id())
-        .collect();
-    let architecture_comparisons_for_links = architecture_comparisons.clone();
-    let architecture_finding_ids: Vec<_> = current_architecture
-        .findings
-        .iter()
-        .map(|finding| finding.id())
-        .collect();
-    let architecture_findings_for_links = current_architecture.findings.clone();
+}
+
+/// What the streamed history window states about the diff.
+struct DiffEvolution {
+    facts: smackdebt_analysis::EvolutionaryReportFacts,
+    diagnostic: Option<String>,
+    explanation_pairs: BTreeSet<(PackageId, PackageId)>,
+}
+
+/// The history rows every scope restates, taken before the facts are handed
+/// on.
+struct EvolutionLinks {
+    findings: Vec<smackdebt_analysis::EvolutionaryFinding>,
+    comparisons: Vec<smackdebt_analysis::EvolutionaryComparison>,
+    suppressions: Vec<smackdebt_analysis::HistoryComparisonSuppression>,
+}
+
+/// Streams the history window and settles the evolutionary facts a diff
+/// states.
+fn stream_diff_evolution(
+    request: &DiffRequest,
+    repository: &GitRepository,
+    builder: &AnalysisReportBuilder,
+    packages: &DiffPackages,
+    architectures: &DiffArchitectures,
+) -> (DiffEvolution, EvolutionLinks) {
     let history_files = builder
         .files()
         .iter()
@@ -782,12 +710,12 @@ pub(super) fn analyze_diff(request: &DiffRequest) -> Result<ProjectReport, Proje
         &history_files,
         &directories,
     );
-    let history_diagnostic = history.diagnostic.clone();
-    let current_explanation_pairs = current_architecture.explanation_pairs.clone();
-    let before_explanation_pairs = before_architecture.explanation_pairs.clone();
-    work.record_algorithm_pass();
+    let diagnostic = history.diagnostic.clone();
+    let current_explanation_pairs = architectures.current.explanation_pairs.clone();
+    let before_explanation_pairs = architectures.before.explanation_pairs.clone();
     let containment = PackageContainment::from_paths(
-        &package_roots
+        &packages
+            .roots
             .iter()
             .map(|root| report_package_path(root))
             .collect::<Vec<_>>(),
@@ -795,74 +723,136 @@ pub(super) fn analyze_diff(request: &DiffRequest) -> Result<ProjectReport, Proje
     // A diff answers about a change rather than about a tree, so the
     // amplification the same stream accumulated is dropped here rather than
     // joined onto a scope.
-    let (evolution, _) = history.evolution.accumulator.finish(
+    let (facts, _) = history.evolution.accumulator.finish(
         history.evolution.coverage,
         builder.files().len(),
-        package_roots.len(),
+        packages.roots.len(),
         &containment,
         &current_explanation_pairs,
         Some(&before_explanation_pairs),
     );
-    let evolutionary_findings = evolution.findings().to_vec();
-    let evolutionary_comparisons = evolution.comparisons().to_vec();
-    let history_comparison_suppressions = evolution.comparison_suppressions().to_vec();
-    let (current_leakage_candidates, current_leakage, suppressed_leakage) =
-        leakage_findings(&current_architecture, &evolution, &current_files);
-    let (before_leakage_candidates, _, _) =
-        leakage_findings(&before_architecture, &evolution, &before_files);
-    let (propagation_comparisons, propagation_suppression) = propagation_comparisons(
-        &current_architecture,
-        &before_architecture,
-        &current_package_roots,
-        &before_package_roots,
-        &package_roots,
-    );
-    let (core_comparisons, core_suppression) =
-        core_comparisons(&current_architecture, &before_architecture);
-    let leakage_comparison_evidence = LeakageComparisonEvidence {
-        pairs: evolution.file_coupling(),
-        current: &current_architecture,
-        base: &before_architecture,
-        current_files: &current_files,
-        base_files: &before_files,
+    let links = EvolutionLinks {
+        findings: facts.findings().to_vec(),
+        comparisons: facts.comparisons().to_vec(),
+        suppressions: facts.comparison_suppressions().to_vec(),
     };
-    let (change_leakage_comparisons, leakage_suppression) = leakage_comparisons(
+    (
+        DiffEvolution {
+            facts,
+            diagnostic,
+            explanation_pairs: current_explanation_pairs,
+        },
+        links,
+    )
+}
+
+/// The impact comparisons, which both the report facts and the scope links
+/// read.
+#[derive(Clone)]
+struct ImpactComparisons {
+    propagation: Vec<smackdebt_analysis::PropagationComparison>,
+    core: Vec<smackdebt_analysis::CoreComparison>,
+    leakage: Vec<smackdebt_analysis::ChangeLeakageComparison>,
+}
+
+/// The impact verdict of one diff, and the evidence each comparison stood
+/// down on.
+struct DiffImpact {
+    leakage_findings: Vec<ChangeLeakageFinding>,
+    suppressed_leakage: u32,
+    comparisons: ImpactComparisons,
+    propagation_suppression: smackdebt_analysis::ComparisonSuppression,
+    core_suppression: smackdebt_analysis::ComparisonSuppression,
+    leakage_suppression: smackdebt_analysis::ComparisonSuppression,
+}
+
+/// Compares how far change travels in the two graphs: propagation, the core,
+/// and change leakage.
+fn compare_diff_impact(
+    architectures: &DiffArchitectures,
+    tables: &DiffTables,
+    packages: &DiffPackages,
+    evolution: &smackdebt_analysis::EvolutionaryReportFacts,
+) -> DiffImpact {
+    let (current_leakage_candidates, current_leakage, suppressed_leakage) =
+        leakage_findings(&architectures.current, evolution, &tables.current.files);
+    let (before_leakage_candidates, _, _) =
+        leakage_findings(&architectures.before, evolution, &tables.before.files);
+    let (propagation, propagation_suppression) = propagation_comparisons(
+        &architectures.current,
+        &architectures.before,
+        &packages.current_roots,
+        &packages.before_roots,
+        &packages.roots,
+    );
+    let (core, core_suppression) = core_comparisons(&architectures.current, &architectures.before);
+    let evidence = LeakageComparisonEvidence {
+        pairs: evolution.file_coupling(),
+        current: &architectures.current,
+        base: &architectures.before,
+        current_files: &tables.current.files,
+        base_files: &tables.before.files,
+    };
+    let (leakage, leakage_suppression) = leakage_comparisons(
         &current_leakage_candidates,
         &before_leakage_candidates,
-        &leakage_comparison_evidence,
+        &evidence,
     );
+    DiffImpact {
+        leakage_findings: current_leakage,
+        suppressed_leakage,
+        comparisons: ImpactComparisons {
+            propagation,
+            core,
+            leakage,
+        },
+        propagation_suppression,
+        core_suppression,
+        leakage_suppression,
+    }
+}
+
+/// Hands the current tree's architecture facts and both sides' evidence to
+/// the report, returning the impact comparisons the scope links restate.
+fn set_diff_architecture_facts(
+    builder: &mut AnalysisReportBuilder,
+    architectures: DiffArchitectures,
+    comparisons: Vec<ArchitectureComparison>,
+    impact: DiffImpact,
+) -> ImpactComparisons {
+    let DiffArchitectures { current, before } = architectures;
     let current_graph_evidence =
-        current_architecture
+        current
             .graph_evidence
             .clone()
-            .with_suppressed(0, 0, suppressed_leakage);
-    let current_closures = current_architecture.package_closures.clone();
-    let current_file_reach = current_architecture.file_reach.clone();
-    let current_core_size = current_architecture.core_size;
-    let current_core_members = if current_architecture.core_size.is_some() {
-        current_architecture.core_members.clone()
+            .with_suppressed(0, 0, impact.suppressed_leakage);
+    let current_closures = current.package_closures.clone();
+    let current_file_reach = current.file_reach.clone();
+    let current_core_size = current.core_size;
+    let current_core_members = if current.core_size.is_some() {
+        current.core_members.clone()
     } else {
         Vec::new()
     };
     builder.set_architecture(ArchitectureReportFacts::new(
         ArchitectureGraph::new(
-            current_architecture.coverage,
-            current_architecture.file_edges,
-            current_architecture.package_edges,
-            current_architecture.external,
-            current_architecture.diagnostics,
-            current_architecture.measurements,
+            current.coverage,
+            current.file_edges,
+            current.package_edges,
+            current.external,
+            current.diagnostics,
+            current.measurements,
         ),
-        current_architecture.findings,
-        architecture_comparisons,
+        current.findings,
+        comparisons,
     ));
     builder.set_graph_evidence(current_graph_evidence);
     builder.set_diff_graph_evidence(smackdebt_analysis::DiffGraphEvidence::new(
-        current_architecture.graph_evidence.clone(),
-        before_architecture.graph_evidence.clone(),
-        propagation_suppression,
-        core_suppression,
-        leakage_suppression,
+        current.graph_evidence.clone(),
+        before.graph_evidence.clone(),
+        impact.propagation_suppression,
+        impact.core_suppression,
+        impact.leakage_suppression,
     ));
     builder.set_propagation(
         current_closures,
@@ -870,62 +860,82 @@ pub(super) fn analyze_diff(request: &DiffRequest) -> Result<ProjectReport, Proje
         current_core_size,
         current_core_members,
     );
-    builder.set_change_leakage_findings(current_leakage);
+    builder.set_change_leakage_findings(impact.leakage_findings);
     builder.set_impact_comparisons(
-        propagation_comparisons.clone(),
-        core_comparisons.clone(),
-        change_leakage_comparisons.clone(),
+        impact.comparisons.propagation.clone(),
+        impact.comparisons.core.clone(),
+        impact.comparisons.leakage.clone(),
     );
-    builder.set_comparison_ref(reference.clone());
-    builder.set_evolution(evolution);
-    builder.set_explanation_pairs(current_explanation_pairs);
-    if let Some(message) = history_diagnostic {
+    impact.comparisons
+}
+
+/// Hands the comparison reference and the streamed history facts to the
+/// report.
+fn set_diff_history_facts(
+    builder: &mut AnalysisReportBuilder,
+    evolution: DiffEvolution,
+    reference: String,
+) {
+    builder.set_comparison_ref(reference);
+    builder.set_evolution(evolution.facts);
+    builder.set_explanation_pairs(evolution.explanation_pairs);
+    if let Some(message) = evolution.diagnostic {
         let id = DiagnosticId::from_index(builder.diagnostic_count());
         builder.add_diagnostic(Diagnostic::new(id, None, DiagnosticKind::Other, message, 0));
     }
-    for finding in evolutionary_findings {
+}
+
+/// Links every history row to the root and the package pair it names.
+fn link_evolution_scopes(
+    builder: &mut AnalysisReportBuilder,
+    root: ScopeId,
+    packages: &[PackageRecord],
+    links: &EvolutionLinks,
+) {
+    for finding in &links.findings {
         let pair = finding.coupling();
         builder.link_evolutionary_finding(root, finding.id());
-        builder
-            .link_evolutionary_finding(package_records[pair.left().index()].scope(), finding.id());
-        builder
-            .link_evolutionary_finding(package_records[pair.right().index()].scope(), finding.id());
+        builder.link_evolutionary_finding(packages[pair.left().index()].scope(), finding.id());
+        builder.link_evolutionary_finding(packages[pair.right().index()].scope(), finding.id());
     }
-    for comparison in evolutionary_comparisons {
+    for comparison in &links.comparisons {
         builder.link_evolutionary_comparison(root, comparison.id());
         let pair = comparison.coupling();
-        builder.link_evolutionary_comparison(
-            package_records[pair.left().index()].scope(),
-            comparison.id(),
-        );
-        builder.link_evolutionary_comparison(
-            package_records[pair.right().index()].scope(),
-            comparison.id(),
-        );
+        builder
+            .link_evolutionary_comparison(packages[pair.left().index()].scope(), comparison.id());
+        builder
+            .link_evolutionary_comparison(packages[pair.right().index()].scope(), comparison.id());
     }
-    for suppression in history_comparison_suppressions {
+    for suppression in &links.suppressions {
         builder.link_history_comparison_suppression(root, suppression.id());
         builder.link_history_comparison_suppression(
-            package_records[suppression.left().index()].scope(),
+            packages[suppression.left().index()].scope(),
             suppression.id(),
         );
         builder.link_history_comparison_suppression(
-            package_records[suppression.right().index()].scope(),
+            packages[suppression.right().index()].scope(),
             suppression.id(),
         );
     }
-    for comparison in &propagation_comparisons {
+}
+
+/// Links each propagation comparison to the scopes of its subject.
+fn link_propagation_scopes(
+    builder: &mut AnalysisReportBuilder,
+    root: ScopeId,
+    packages: &[PackageRecord],
+    comparisons: &[smackdebt_analysis::PropagationComparison],
+) {
+    for comparison in comparisons {
         builder.link_propagation_comparison(root, comparison.id());
         match comparison.subject() {
             smackdebt_analysis::PropagationSubject::Package { source } => {
-                builder.link_propagation_comparison(
-                    package_records[source.index()].scope(),
-                    comparison.id(),
-                );
+                builder
+                    .link_propagation_comparison(packages[source.index()].scope(), comparison.id());
             }
             smackdebt_analysis::PropagationSubject::File { package, source } => {
                 builder.link_propagation_comparison(
-                    package_records[package.index()].scope(),
+                    packages[package.index()].scope(),
                     comparison.id(),
                 );
                 if let Some(scope) = builder.files().get(source.index()).map(FileRecord::scope) {
@@ -934,7 +944,16 @@ pub(super) fn analyze_diff(request: &DiffRequest) -> Result<ProjectReport, Proje
             }
         }
     }
-    for comparison in &core_comparisons {
+}
+
+/// Links core and change-leakage comparisons to their file anchors.
+fn link_file_comparison_scopes(
+    builder: &mut AnalysisReportBuilder,
+    root: ScopeId,
+    core: &[smackdebt_analysis::CoreComparison],
+    leakage: &[smackdebt_analysis::ChangeLeakageComparison],
+) {
+    for comparison in core {
         builder.link_core_comparison(root, comparison.id());
         if let Some(scope) = builder
             .files()
@@ -944,7 +963,7 @@ pub(super) fn analyze_diff(request: &DiffRequest) -> Result<ProjectReport, Proje
             builder.link_core_comparison(scope, comparison.id());
         }
     }
-    for comparison in &change_leakage_comparisons {
+    for comparison in leakage {
         builder.link_change_leakage_comparison(root, comparison.id());
         for file in [comparison.left(), comparison.right()] {
             if let Some(scope) = builder.files().get(file.index()).map(FileRecord::scope) {
@@ -952,31 +971,48 @@ pub(super) fn analyze_diff(request: &DiffRequest) -> Result<ProjectReport, Proje
             }
         }
     }
-    for id in architecture_comparison_ids {
-        builder.link_architecture_comparison(root, id);
-        let comparison = &architecture_comparisons_for_links[id.index()];
+}
+
+/// Links architecture rows to the root, their packages, and their files.
+fn link_architecture_scopes(
+    builder: &mut AnalysisReportBuilder,
+    root: ScopeId,
+    packages: &[PackageRecord],
+    links: &ArchitectureLinks,
+) {
+    for id in &links.comparison_ids {
+        builder.link_architecture_comparison(root, *id);
+        let comparison = &links.comparisons[id.index()];
         for package in comparison.packages() {
-            builder.link_architecture_comparison(package_records[package.index()].scope(), id);
+            builder.link_architecture_comparison(packages[package.index()].scope(), *id);
         }
         for file in comparison.files() {
             let scope = builder.files()[file.index()].scope();
-            builder.link_architecture_comparison(scope, id);
+            builder.link_architecture_comparison(scope, *id);
         }
     }
-    for id in architecture_finding_ids {
-        builder.link_architecture_finding(root, id);
-        let finding = &architecture_findings_for_links[id.index()];
+    for id in &links.finding_ids {
+        builder.link_architecture_finding(root, *id);
+        let finding = &links.findings[id.index()];
         for package in finding.packages() {
-            builder.link_architecture_finding(package_records[package.index()].scope(), id);
+            builder.link_architecture_finding(packages[package.index()].scope(), *id);
         }
         for file in finding.files() {
             let scope = builder.files()[file.index()].scope();
-            builder.link_architecture_finding(scope, id);
+            builder.link_architecture_finding(scope, *id);
         }
     }
-    builder.set_packages(package_records);
-    let report = builder.finish();
-    let selected_scope = path_filter.as_ref().and_then(|path| {
+}
+
+/// Resolves the scope an explicit path selection names in the finished
+/// report.
+fn diff_selected_scope(
+    report: &Report,
+    request: &DiffRequest,
+    path_filter: Option<&Path>,
+    root: ScopeId,
+) -> Result<Option<ScopeId>, ProjectError> {
+    let selected = path_filter.and_then(|path| {
         let name = if path.as_os_str().is_empty() {
             ".".to_owned()
         } else {
@@ -988,21 +1024,441 @@ pub(super) fn analyze_diff(request: &DiffRequest) -> Result<ProjectReport, Proje
             .find(|scope| scope.name() == name)
             .map(Scope::id)
     });
-    let selected_scope = if request.automatic_scope {
-        Some(root)
+    if request.automatic_scope {
+        Ok(Some(root))
     } else {
-        Some(selected_scope.ok_or_else(|| ProjectError::NoSourceFiles(request.path.clone()))?)
+        Ok(Some(selected.ok_or_else(|| {
+            ProjectError::NoSourceFiles(request.path.clone())
+        })?))
+    }
+}
+
+/// Resolves the reference a diff answers against and the merge base the
+/// changes are stated from.
+fn resolve_diff_refs(
+    repository: &GitRepository,
+    requested: Option<&str>,
+) -> Result<(String, String), ProjectError> {
+    let reference = match requested {
+        Some(reference) => reference.to_owned(),
+        None => repository
+            .default_ref()?
+            .ok_or(ProjectError::MissingReference)?,
     };
-    Ok(ProjectReport {
-        report,
-        selected_scope,
-        stats: WorkStats {
-            inventory_walks: 1,
-            inventory_visits: inventory.visited_entries(),
-            source_reads: work.source_reads.load(Ordering::Relaxed),
-            git_processes: repository.git_processes(),
-        },
+    let base = repository
+        .merge_base(&reference, "HEAD")
+        .map_err(|error| match error {
+            // Git reports an unknown ref through a failed command, so the
+            // failure is restated as the fixable value the user supplied.
+            smackdebt_git::GitError::Command { .. } | smackdebt_git::GitError::MissingObject(_) => {
+                ProjectError::UnknownReference(reference.clone())
+            }
+            other => ProjectError::Git(other),
+        })?;
+    Ok((reference, base))
+}
+
+/// The one ignore-aware walk of the current tree.
+fn discover_current_tree(repository: &GitRepository) -> Result<Inventory, ProjectError> {
+    let inventory =
+        Inventory::discover_sources(repository.root(), Vec::new()).map_err(|source| {
+            ProjectError::Inspect {
+                path: repository.root().to_path_buf(),
+                source,
+            }
+        })?;
+    #[cfg(feature = "evidence-stats")]
+    crate::evidence::record_inventory(inventory.visited_entries());
+    Ok(inventory)
+}
+
+/// The path filter an explicit diff scope selects, refused when it points at
+/// a file no language claims.
+fn diff_selection_filter(
+    request: &DiffRequest,
+    root: &Path,
+) -> Result<Option<PathBuf>, ProjectError> {
+    let path_filter = (!request.automatic_scope)
+        .then(|| diff_filter(root, &request.path))
+        .flatten();
+    if !request.automatic_scope && request.path.is_file() && !is_source_path(&request.path) {
+        return Err(ProjectError::NotSourceFile(request.path.clone()));
+    }
+    Ok(path_filter)
+}
+
+/// The base tree's inventory, read through the batched object reader.
+fn discover_base_tree(
+    repository: &GitRepository,
+    batch: &mut ObjectReader,
+    base: &str,
+) -> Result<SnapshotInventory, ProjectError> {
+    let base_tree_files = batch.tree_files(base)?;
+    let mut base_metadata: BTreeMap<PathBuf, Result<Vec<u8>, String>> = BTreeMap::new();
+    discover_snapshot(repository.root(), &base_tree_files, |path| {
+        if let Some(source) = base_metadata.get(path) {
+            return source.clone().map_err(std::io::Error::other);
+        }
+        let source = batch
+            .read_path(base, path)
+            .map_err(|error| error.to_string());
+        base_metadata.insert(path.to_path_buf(), source.clone());
+        source.map_err(std::io::Error::other)
     })
+    .map_err(|source| ProjectError::Inspect {
+        path: repository.root().to_path_buf(),
+        source,
+    })
+}
+
+/// Fails an explicit scope that selects no source in either tree.
+fn require_selected_source(
+    request: &DiffRequest,
+    inventory: &Inventory,
+    base_inventory: &SnapshotInventory,
+    path_filter: Option<&Path>,
+) -> Result<(), ProjectError> {
+    if request.automatic_scope {
+        return Ok(());
+    }
+    let includes = |path: &Path| path_filter.is_some_and(|selected| path.starts_with(selected));
+    let has_selected_source = inventory
+        .source_files()
+        .any(|file| includes(file.path().as_path()))
+        || base_inventory
+            .source_paths()
+            .iter()
+            .any(|path| includes(path));
+    if !has_selected_source {
+        return Err(ProjectError::NoSourceFiles(request.path.clone()));
+    }
+    Ok(())
+}
+
+/// The files the two trees disagree about, in one ordered table.
+struct DiffChangeSet {
+    changed: Vec<SelectedChange>,
+    all_changed: Vec<SelectedChange>,
+    selected_paths: BTreeSet<PathBuf>,
+}
+
+/// Merges the changes Git reports with the paths only one snapshot holds,
+/// keeps the analyzable ones, and notes which fall inside the selected scope.
+fn select_diff_changes(
+    inventory: &Inventory,
+    base_inventory: &SnapshotInventory,
+    changes: Vec<Change>,
+    path_filter: Option<&Path>,
+) -> DiffChangeSet {
+    let current_sources = inventory
+        .source_files()
+        .map(|file| file.path().as_path().to_path_buf())
+        .collect::<BTreeSet<_>>();
+    let base_sources = base_inventory
+        .source_paths()
+        .iter()
+        .cloned()
+        .collect::<BTreeSet<_>>();
+    let changed_paths = changes
+        .iter()
+        .flat_map(|change| {
+            [
+                change.current_path().to_path_buf(),
+                change.base_path().to_path_buf(),
+            ]
+        })
+        .collect::<BTreeSet<_>>();
+    let mut changed = changes
+        .into_iter()
+        .filter_map(|change| SelectedChange::from_git(change, &current_sources, &base_sources))
+        .collect::<Vec<_>>();
+    for path in current_sources.symmetric_difference(&base_sources) {
+        if !changed_paths.contains(path.as_path()) {
+            changed.push(SelectedChange::from_snapshot(
+                path.clone(),
+                current_sources.contains(path),
+                base_sources.contains(path),
+            ));
+        }
+    }
+    changed.sort_by(|left, right| left.current_path().cmp(right.current_path()));
+    let all_changed = changed.clone();
+    changed.retain(|entry| Analyzer::language(entry.current_path()) != Language::Unknown);
+    let selected_paths: BTreeSet<_> = changed
+        .iter()
+        .filter(|entry| path_filter.is_none_or(|path| entry.current_path().starts_with(path)))
+        .map(|entry| entry.current_path().to_path_buf())
+        .collect();
+    DiffChangeSet {
+        changed,
+        all_changed,
+        selected_paths,
+    }
+}
+
+/// Every resolution configuration either tree declares or the change touched.
+fn base_resolution_configs(
+    inventory: &Inventory,
+    base_inventory: &SnapshotInventory,
+    all_changed: &[SelectedChange],
+) -> Vec<PathBuf> {
+    let mut candidates: Vec<_> = inventory
+        .packages()
+        .iter()
+        .filter_map(|package| package.resolution_config())
+        .map(|path| path.as_path().to_path_buf())
+        .collect();
+    candidates.extend(base_inventory.resolution_configs().iter().cloned());
+    for change in all_changed {
+        for path in [change.current_path(), change.base_path()] {
+            if matches!(
+                path.file_name().and_then(|name| name.to_str()),
+                Some("tsconfig.json" | "jsconfig.json")
+            ) {
+                candidates.push(path.to_path_buf());
+            }
+        }
+    }
+    candidates.sort();
+    candidates.dedup();
+    candidates
+}
+
+/// The package positions the two trees share, current roots first, and the
+/// resolution configuration either tree declares.
+struct DiffPackages {
+    roots: Vec<PathBuf>,
+    current_roots: Vec<PathBuf>,
+    before_roots: Vec<PathBuf>,
+    before_manifest_names: Vec<Option<String>>,
+    resolution_configs: Vec<PathBuf>,
+}
+
+impl DiffPackages {
+    fn of(
+        inventory: &Inventory,
+        base_inventory: &SnapshotInventory,
+        all_changed: &[SelectedChange],
+    ) -> Self {
+        let current_roots: Vec<_> = inventory
+            .packages()
+            .iter()
+            .map(|package| package.root().as_path().to_path_buf())
+            .collect();
+        let before_roots = base_inventory
+            .packages()
+            .iter()
+            .map(|(root, _)| root.clone())
+            .collect::<Vec<_>>();
+        let resolution_configs = base_resolution_configs(inventory, base_inventory, all_changed);
+        let mut base_only_roots = before_roots.clone();
+        base_only_roots.retain(|root| !current_roots.contains(root));
+        base_only_roots.sort();
+        base_only_roots.dedup();
+        let mut roots = current_roots.clone();
+        roots.extend(base_only_roots.iter().cloned());
+        let before_manifest_names = roots
+            .iter()
+            .map(|root| {
+                base_inventory
+                    .packages()
+                    .iter()
+                    .find(|(candidate, _)| candidate == root)
+                    .and_then(|(_, name)| name.clone())
+            })
+            .collect::<Vec<_>>();
+        Self {
+            roots,
+            current_roots,
+            before_roots,
+            before_manifest_names,
+            resolution_configs,
+        }
+    }
+}
+
+/// The scopes a diff places its files in, and the packages it will publish.
+struct DiffHierarchy {
+    scopes: Vec<Scope>,
+    file_scopes: BTreeMap<PathBuf, ScopeId>,
+    packages: Vec<PackageRecord>,
+}
+
+/// Builds the repository hierarchy from the shared package positions, placing
+/// changed files first and every other analyzable current file after them.
+fn build_diff_hierarchy(
+    inventory: &Inventory,
+    changed: &[SelectedChange],
+    packages: &DiffPackages,
+) -> DiffHierarchy {
+    let mut hierarchy = HierarchyBuilder::new(".".to_owned(), &packages.roots);
+    let package_records: Vec<_> = packages
+        .roots
+        .iter()
+        .enumerate()
+        .map(|(index, root)| {
+            let id = PackageId::from_index(index);
+            let scope = hierarchy.package_scopes[index];
+            let path = report_package_path(root);
+            let record = if index < packages.current_roots.len() {
+                PackageRecord::current(id, scope, path)
+            } else {
+                PackageRecord::base_only(id, scope, path)
+            };
+            record.with_manifest_name(declared_manifest_name(inventory, root))
+        })
+        .collect();
+    let changed_paths: BTreeSet<_> = changed
+        .iter()
+        .map(|entry| entry.current_path().to_path_buf())
+        .collect();
+    for entry in changed {
+        let package = package_of(entry.current_path(), &packages.roots, &packages.roots);
+        hierarchy.add_file(entry.current_path(), package.index());
+    }
+    for file in inventory
+        .source_files()
+        .filter(|file| Analyzer::language(file.path().as_path()) != Language::Unknown)
+    {
+        if changed_paths.contains(file.path().as_path()) {
+            continue;
+        }
+        let package = package_of(file.path().as_path(), &packages.roots, &packages.roots);
+        hierarchy.add_file(file.path().as_path(), package.index());
+    }
+    DiffHierarchy {
+        scopes: hierarchy.scopes,
+        file_scopes: hierarchy.file_scopes,
+        packages: package_records,
+    }
+}
+
+/// The Git objects one diff analysis reads from.
+struct DiffObjects {
+    root: PathBuf,
+    base: String,
+    reader: ObjectReader,
+}
+
+/// The files the change left alone, the analysis each produced, and the role
+/// the base tree gives each one — index-aligned tables starting after the
+/// changed files.
+struct DiffUnchanged<'a> {
+    candidates: Vec<&'a DiscoveredFile>,
+    results: Vec<FileResult>,
+    before_roles: Vec<SourceRole>,
+    first_file_index: usize,
+}
+
+/// Analyzes the changed files against the base tree and the unchanged files
+/// in place.
+fn analyze_diff_files<'a>(
+    request: &DiffRequest,
+    inventory: &'a Inventory,
+    changed: Vec<SelectedChange>,
+    objects: DiffObjects,
+    work: &AnalysisWork,
+) -> Result<(Vec<DiffResult>, DiffUnchanged<'a>), ProjectError> {
+    let changed_count = changed.len();
+    let width = request.width.threads().min(changed_count.max(1));
+    let results = analyze_diff_inputs(
+        changed,
+        objects.root,
+        objects.base,
+        objects.reader,
+        DiffAnalysisPolicy {
+            health: request.policy,
+            roles: request.role_rules.clone(),
+        },
+        width,
+        work.clone(),
+    )?;
+    let changed_paths: BTreeSet<_> = results
+        .iter()
+        .filter(|result| result.change.current_exists())
+        .map(|result| result.change.current_path().to_path_buf())
+        .collect();
+    let candidates: Vec<_> = inventory
+        .source_files()
+        .filter(|file| {
+            !changed_paths.contains(file.path().as_path())
+                && Analyzer::language(file.path().as_path()) != Language::Unknown
+        })
+        .collect();
+    let unchanged = analyze_current_files(
+        inventory,
+        &candidates,
+        request.width,
+        request.policy,
+        &request.role_rules,
+        work,
+    )?;
+    let before_roles = unchanged.iter().map(file_result_role).collect();
+    Ok((
+        results,
+        DiffUnchanged {
+            candidates,
+            results: unchanged,
+            before_roles,
+            first_file_index: changed_count,
+        },
+    ))
+}
+
+/// Both trees' resolution rules, selected by side.
+#[derive(Clone, Copy)]
+struct DiffAliases<'a> {
+    current: &'a ResolutionRules,
+    before: &'a ResolutionRules,
+}
+
+impl DiffAliases<'_> {
+    const fn select(&self, side: DiffSideSelector) -> &ResolutionRules {
+        match side {
+            DiffSideSelector::Current => self.current,
+            DiffSideSelector::Before => self.before,
+        }
+    }
+}
+
+/// Reclassifies test-declared files on both sides of the diff.
+fn demote_diff_roles(
+    results: &mut [DiffResult],
+    unchanged: &mut DiffUnchanged<'_>,
+    aliases: DiffAliases<'_>,
+    rules: &[SourceRoleRule],
+) {
+    for side in [DiffSideSelector::Current, DiffSideSelector::Before] {
+        demote_test_declared_diff_roles(
+            side,
+            unchanged.first_file_index,
+            results,
+            &unchanged.candidates,
+            &mut unchanged.results,
+            &mut unchanged.before_roles,
+            DiffRolePolicy {
+                aliases: aliases.select(side),
+                rules,
+            },
+        );
+    }
+}
+
+/// The report builder for a diff, with its root and scope hierarchy set.
+fn new_diff_builder(scopes: Vec<Scope>, selected_count: usize) -> AnalysisReportBuilder {
+    let mut builder = AnalysisReportBuilder::with_capacity(
+        ReportMode::Diff,
+        selected_count * 2 + 2,
+        selected_count,
+        0,
+        selected_count * 2,
+        selected_count,
+    );
+    for scope in scopes {
+        builder.add_scope(scope);
+    }
+    builder.set_root(ScopeId::from_index(0));
+    builder
 }
 
 fn append_relation_comparisons(
@@ -1642,6 +2098,79 @@ fn diff_side_file_record(
         DiffSide::Failed { role, .. } => record.with_source_state(*role, ParseStatus::Failed),
         DiffSide::Missing | DiffSide::RoleConflict { .. } => record,
     }
+}
+
+/// The dependency row one analyzed side of a changed file states.
+fn changed_side_dependencies(
+    file: FileId,
+    path: &Path,
+    side: &DiffSide,
+) -> Option<SourceDependencies> {
+    let DiffSide::Analyzed { analysis, role, .. } = side else {
+        return None;
+    };
+    Some(SourceDependencies {
+        file,
+        path: path.to_path_buf(),
+        references: analysis.dependencies().to_vec(),
+        role: *role,
+        trust: analysis.parse_status().trust(),
+        language: analysis.language(),
+        // A diff never classifies dormant source, so the fact that rule reads
+        // is not carried across the object boundary.
+        module_syntax: false,
+    })
+}
+
+/// The plain record either side of an unchanged file starts from.
+fn unchanged_base_record(
+    file: FileId,
+    scope: ScopeId,
+    path: String,
+    package: PackageId,
+) -> FileRecord {
+    FileRecord::new(
+        file,
+        scope,
+        path,
+        Coverage::default(),
+        HealthCounts::default(),
+    )
+    .with_package(package)
+}
+
+/// The record one side of an unchanged file settles on: the shared analysis
+/// with the role that side gave the file.
+fn unchanged_side_record(record: FileRecord, result: &FileResult, role: SourceRole) -> FileRecord {
+    match result {
+        FileResult::Analyzed(rated) => record
+            .with_language(rated.analysis.language())
+            .with_source_state(role, rated.analysis.parse_status().clone()),
+        FileResult::Unsupported { language, .. } | FileResult::Failed { language, .. } => record
+            .with_language(*language)
+            .with_source_state(role, ParseStatus::Failed),
+        FileResult::RoleConflict { .. } => unreachable!("role conflicts stop composition"),
+    }
+}
+
+/// The dependency row an unchanged file states when its analysis succeeded.
+fn unchanged_dependencies(
+    file: FileId,
+    path: &Path,
+    result: &FileResult,
+) -> Option<SourceDependencies> {
+    let FileResult::Analyzed(rated) = result else {
+        return None;
+    };
+    Some(SourceDependencies {
+        file,
+        path: path.to_path_buf(),
+        references: rated.analysis.dependencies().to_vec(),
+        role: rated.role,
+        trust: rated.analysis.parse_status().trust(),
+        language: rated.analysis.language(),
+        module_syntax: rated.module_syntax,
+    })
 }
 
 #[derive(Default)]
