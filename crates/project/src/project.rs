@@ -17,22 +17,21 @@ use smackdebt_analysis::{
     DependencySyntaxState, Diagnostic, DiagnosticId, DiagnosticKind, DirectoryTree,
     EvolutionAccumulator, ExternalDependency, FileActivity, FileAnalysis, FileDebt, FileId,
     FileReach, FileRecord, Finding, FindingId, GraphConfigurationFailure, GraphEvidence,
-    HealthAssessment, HealthCounts, HealthPolicy, HistoryAvailability, HistoryChangeCounts,
-    HistoryChangeFact, HistoryCommitFact, HistoryCoverage, HistoryWindow, HotspotPolicy, Language,
-    ModuleDeclaration, OrphanCandidate, OrphanFile, PackageClosure, PackageContainment,
-    PackageEdge, PackageEdgeId, PackageFileReach, PackageGraphMeasurement, PackageId,
-    PackageRecord, ParseStatus, Rating, Report, ReportBuilder as AnalysisReportBuilder, ReportMode,
-    ResolutionDiagnostic, ResolutionIssueKind, Scope, ScopeId, ScopeKind, SizeFinding, SizePolicy,
-    SourceCoverageOutcome, SourceRole, SourceTrust, StableDependencyFinding, Thresholds,
-    change_leakage, close_over_packages, compare_architecture, compare_units, cycle_witness,
-    dependency_degree, enters_connection_graph, enters_file_graph, file_reaches, graph_file_count,
-    orphan_files, reach_in_counts, stable_dependency_findings, strongly_connected_components,
+    HealthCounts, HealthPolicy, HistoryAvailability, HistoryChangeCounts, HistoryChangeFact,
+    HistoryCommitFact, HistoryCoverage, HistoryWindow, HotspotPolicy, Language, ModuleDeclaration,
+    OrphanCandidate, OrphanFile, PackageClosure, PackageContainment, PackageEdge, PackageEdgeId,
+    PackageFileReach, PackageGraphMeasurement, PackageId, PackageRecord, ParseStatus, Rating,
+    Report, ReportBuilder as AnalysisReportBuilder, ReportMode, ResolutionDiagnostic,
+    ResolutionIssueKind, Scope, ScopeId, ScopeKind, SizeFinding, SizePolicy, SourceCoverageOutcome,
+    SourceRole, SourceTrust, StableDependencyFinding, Thresholds, change_leakage,
+    close_over_packages, compare_architecture, compare_units, cycle_witness, dependency_degree,
+    enters_connection_graph, enters_file_graph, file_reaches, graph_file_count, orphan_files,
+    reach_in_counts, stable_dependency_findings, strongly_connected_components,
     test_declared_files,
 };
 use smackdebt_discovery::{
-    DiscoveredFile, Inventory, SnapshotInventory, discover_snapshot, generic_source_roles,
-    glob_matches, has_generated_javascript_name, has_vendored_javascript_name,
-    is_runtime_javascript_path, is_source_path, is_tool_configuration_name,
+    DiscoveredFile, Inventory, SnapshotInventory, discover_snapshot, is_runtime_javascript_path,
+    is_source_path, is_tool_configuration_name,
 };
 use smackdebt_git::{Change, ContributorIdentity, GitRepository, ObjectReader};
 use smackdebt_languages::{AnalysisError as LanguageError, Analyzer};
@@ -42,9 +41,17 @@ use crate::manifest_names::{
     manifest_paths_for, package_entry_file,
 };
 use crate::paths::{clean_relative, package_of, report_package_path};
+use crate::rating::{
+    FileResult, file_result_role, rate_file, rated_health, source_coverage, verdict_eligible,
+};
 use crate::requests::{
     CodebaseRequest, DEFAULT_HISTORY_DAYS, DiffRequest, ExecutionWidth, ProjectError,
     ProjectReport, SourceRoleRule, WorkStats,
+};
+#[cfg(test)]
+use crate::roles::has_generated_javascript_content;
+use crate::roles::{
+    classify_source_role, declares_module_syntax, matching_role_rules, role_for_unavailable_source,
 };
 use crate::work::AnalysisWork;
 
@@ -2355,21 +2362,6 @@ fn diff_side_summary(side: &DiffSide) -> (Coverage, HealthCounts, Option<Languag
     }
 }
 
-fn source_coverage(analysis: &FileAnalysis, role: SourceRole) -> Coverage {
-    let outcome = match analysis.parse_status() {
-        ParseStatus::Parsed if role.affects_verdict() => SourceCoverageOutcome::Clean,
-        ParseStatus::Parsed => SourceCoverageOutcome::Context,
-        ParseStatus::Recovered(_) => SourceCoverageOutcome::Recovered,
-        ParseStatus::Failed => SourceCoverageOutcome::Failed,
-    };
-    Coverage::classified(
-        1,
-        outcome,
-        analysis.source_lines(),
-        u32::from(matches!(outcome, SourceCoverageOutcome::Failed)) * analysis.source_lines(),
-    )
-}
-
 fn add_diff_diagnostic(
     report: &mut AnalysisReportBuilder,
     file: FileId,
@@ -2615,127 +2607,6 @@ fn test_declared_demotions<P: AsRef<Path>>(
                 .is_none()
         })
         .collect()
-}
-
-/// The roles explicit configuration states for one path, in rule order.
-fn matching_role_rules<'a>(
-    path: &Path,
-    rules: &'a [SourceRoleRule],
-) -> impl Iterator<Item = SourceRole> + 'a {
-    let normalized = path.to_string_lossy().replace('\\', "/");
-    rules
-        .iter()
-        .filter(move |rule| glob_matches(rule.pattern(), &normalized))
-        .map(SourceRoleRule::role)
-}
-
-fn classify_source_role(
-    path: &Path,
-    source: &[u8],
-    rules: &[SourceRoleRule],
-) -> Result<SourceRole, String> {
-    let mut explicit: Vec<_> = matching_role_rules(path, rules).collect();
-    explicit.sort();
-    explicit.dedup();
-    if !explicit.is_empty() {
-        return one_role(explicit);
-    }
-    if Analyzer::has_generated_marker(path, source) {
-        return Ok(SourceRole::Generated);
-    }
-    if has_generated_javascript_name(path) || has_generated_javascript_content(path, source) {
-        return Ok(SourceRole::Generated);
-    }
-    if has_vendored_javascript_name(path) {
-        return Ok(SourceRole::Vendored);
-    }
-    let generic = generic_source_roles(path);
-    if generic.is_empty() {
-        Ok(SourceRole::Primary)
-    } else {
-        one_role(generic)
-    }
-}
-
-/// Whether the source is written as a module rather than as a plain script.
-///
-/// A module states its own imports and exports, so the dependency graph can see
-/// whether anything uses it: nothing importing a module is an orphan, a fact
-/// the report already states. A script states nothing - a page or a build tool
-/// loads it by name - so no import could ever have named it and an empty fan-in
-/// is what such a file is supposed to look like. Only a script can therefore be
-/// read as dormant.
-///
-/// The test reads the first word of each line, not every occurrence, so the
-/// `module.exports` a UMD wrapper indents inside a function leaves the file the
-/// script it is. That prefix reading is the whole of the rule: it is a cheap
-/// approximation of a statement position, not a parse, and the `export` opening
-/// a line inside a template literal counts too.
-///
-/// The two errors are not symmetric. Missing module syntax lets a module be
-/// called dormant, which is wrong about a file the team may be working on;
-/// seeing it where there is none only spares a file from a rule of absences.
-/// So the accepted follow set is generous - whitespace, a brace, a star, a
-/// parenthesis, either quote, a carriage return, or the end of the line, which
-/// is how a multi-line `import` opens. Only the JavaScript a runtime loads as
-/// written is read at all, because that is the only source the dormancy rule
-/// can classify.
-fn declares_module_syntax(path: &Path, source: &[u8]) -> bool {
-    if !is_runtime_javascript_path(path) {
-        return false;
-    }
-    source.split(|byte| *byte == b'\n').any(|line| {
-        let line = line.trim_ascii_start();
-        ["export", "import"].iter().any(|keyword| {
-            line.strip_prefix(keyword.as_bytes()).is_some_and(|rest| {
-                matches!(
-                    rest.first(),
-                    None | Some(b' ' | b'\t' | b'\r' | b'{' | b'*' | b'(' | b'"' | b'\'')
-                )
-            })
-        })
-    })
-}
-
-fn has_generated_javascript_content(path: &Path, source: &[u8]) -> bool {
-    const MINIMUM_BYTES: usize = 65_536;
-    const MINIMUM_BYTES_PER_NONEMPTY_LINE: usize = 512;
-
-    let supported_extension = path
-        .extension()
-        .and_then(|extension| extension.to_str())
-        .is_some_and(|extension| matches!(extension, "js" | "mjs" | "cjs" | "jsx" | "ts" | "tsx"));
-    if !supported_extension || source.len() < MINIMUM_BYTES {
-        return false;
-    }
-
-    let nonempty_lines = source
-        .split(|byte| *byte == b'\n')
-        .filter(|line| line.iter().any(|byte| !byte.is_ascii_whitespace()))
-        .count();
-    nonempty_lines != 0
-        && nonempty_lines
-            .checked_mul(MINIMUM_BYTES_PER_NONEMPTY_LINE)
-            .is_some_and(|minimum| source.len() >= minimum)
-}
-
-fn role_for_unavailable_source(
-    path: &Path,
-    rules: &[SourceRoleRule],
-) -> Result<SourceRole, String> {
-    classify_source_role(path, &[], rules)
-}
-
-fn one_role(roles: Vec<SourceRole>) -> Result<SourceRole, String> {
-    if roles.len() == 1 {
-        Ok(roles[0])
-    } else {
-        Err(roles
-            .iter()
-            .map(|role| format!("{role:?}").to_ascii_lowercase())
-            .collect::<Vec<_>>()
-            .join(", "))
-    }
 }
 
 fn analyze_bytes(
@@ -3010,126 +2881,6 @@ fn failed_history_availability(
     }
 }
 
-struct RatedFile {
-    analysis: FileAnalysis,
-    role: SourceRole,
-    /// Whether the source states its own imports and exports.
-    module_syntax: bool,
-    health: HealthCounts,
-    debt: Vec<(usize, HealthAssessment)>,
-    /// Whether this file's facts may produce default signals.
-    ///
-    /// Only trusted source in a verdict role feeds the hotspot and size
-    /// tables: recovered facts stay advisory, and fixture or generated source
-    /// stays context. Retained findings are unaffected, so advisory and context
-    /// debt remains visible.
-    signals_verdict: bool,
-    rated_units: u32,
-    max_rating: Rating,
-    container_statements: Vec<(String, u32)>,
-}
-
-fn rate_file(
-    analysis: FileAnalysis,
-    role: SourceRole,
-    policy: HealthPolicy,
-    module_syntax: bool,
-) -> RatedFile {
-    let mut health = HealthCounts::default();
-    let mut debt = Vec::new();
-    let mut max_rating = Rating::Healthy;
-    // Container totals accumulate while units are rated, so no healthy unit is
-    // retained to compute container size later.
-    let mut container_statements: Vec<(String, u32)> = Vec::new();
-    let signals_verdict = verdict_eligible(&analysis, role);
-    for (index, unit) in analysis.units().iter().enumerate() {
-        let assessment = policy.assess(unit.measurements());
-        if assessment.rating() != Rating::Healthy {
-            debt.push((index, assessment));
-        }
-        if !signals_verdict {
-            continue;
-        }
-        health.add_rating(assessment.rating());
-        if assessment.rating() > max_rating {
-            max_rating = assessment.rating();
-        }
-        if let Some(container) = unit.identity().container() {
-            let statements = unit.measurements().logical_lines();
-            match container_statements
-                .iter_mut()
-                .find(|(name, _)| name == container)
-            {
-                Some(total) => total.1 += statements,
-                None => container_statements.push((container.to_owned(), statements)),
-            }
-        }
-    }
-    let rated_units = if signals_verdict {
-        u32::try_from(analysis.units().len()).unwrap_or(u32::MAX)
-    } else {
-        0
-    };
-    RatedFile {
-        analysis,
-        role,
-        module_syntax,
-        health,
-        debt,
-        signals_verdict,
-        rated_units,
-        max_rating,
-        container_statements,
-    }
-}
-
-enum FileResult {
-    Analyzed(RatedFile),
-    Unsupported {
-        language: Language,
-        role: SourceRole,
-    },
-    Failed {
-        message: String,
-        role: SourceRole,
-        language: Language,
-    },
-    RoleConflict {
-        path: PathBuf,
-        roles: String,
-    },
-}
-
-impl FileResult {
-    fn references(&self) -> &[DependencySyntax] {
-        match self {
-            Self::Analyzed(rated) => rated.analysis.dependencies(),
-            _ => &[],
-        }
-    }
-
-    /// Reclassifies a file the build compiles only under `test`.
-    ///
-    /// Rating never changes: a test file is still verdict eligible, so the
-    /// health and debt already computed for it stay correct.
-    fn demote_to_test(&mut self) {
-        let role = match self {
-            Self::Analyzed(rated) => &mut rated.role,
-            Self::Unsupported { role, .. } | Self::Failed { role, .. } => role,
-            Self::RoleConflict { .. } => return,
-        };
-        *role = role.demoted_by_test_scope();
-    }
-}
-
-fn file_result_role(result: &FileResult) -> SourceRole {
-    match result {
-        FileResult::Analyzed(rated) => rated.role,
-        FileResult::Unsupported { role, .. } | FileResult::Failed { role, .. } => *role,
-        FileResult::RoleConflict { .. } => unreachable!("role conflicts stop composition"),
-    }
-}
-
 /// Reclassifies every file the build compiles only when `test` is set.
 ///
 /// This runs before any role reaches the report builder, so findings, ratings,
@@ -3249,20 +3000,6 @@ fn demote_test_declared_diff_roles(
             }
         }
     }
-}
-
-fn verdict_eligible(analysis: &FileAnalysis, role: SourceRole) -> bool {
-    role.affects_verdict() && matches!(analysis.parse_status(), ParseStatus::Parsed)
-}
-
-fn rated_health(analysis: &FileAnalysis, role: SourceRole, policy: HealthPolicy) -> HealthCounts {
-    let mut health = HealthCounts::default();
-    if verdict_eligible(analysis, role) {
-        for unit in analysis.units() {
-            health.add_rating(policy.assess(unit.measurements()).rating());
-        }
-    }
-    health
 }
 
 struct Selection {

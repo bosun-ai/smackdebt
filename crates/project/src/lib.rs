@@ -5,7 +5,9 @@ mod evidence;
 mod manifest_names;
 mod paths;
 mod project;
+mod rating;
 mod requests;
+mod roles;
 mod work;
 
 #[cfg(feature = "evidence-stats")]
