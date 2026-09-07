@@ -10,7 +10,7 @@ use smackdebt_analysis::{
     HistoryChangeCounts, HistoryChangeFact, HistoryCommitFact, HistoryCoverage, HistoryWindow,
     PackageId, SourceRole, SourceTrust,
 };
-use smackdebt_git::{ContributorIdentity, GitRepository};
+use smackdebt_git::{ContributorIdentity, GitRepository, HistoryChange, HistoryCommit};
 
 pub(crate) struct EvolutionInput {
     pub(crate) accumulator: EvolutionAccumulator,
@@ -56,6 +56,127 @@ pub(crate) fn history_directory_paths(
 /// The directory tree is borrowed rather than built here: the caller owns the
 /// one tree of its report, so the same tree that answers a pair's distance also
 /// answers a scope's directory when the report is composed.
+/// Everything one streamed history window accumulates: the identity tables
+/// the paths resolve through and the counters the coverage will state.
+struct HistoryAccumulation<'a> {
+    relative_root: &'a Path,
+    directories: &'a DirectoryTree,
+    window: HistoryWindow,
+    aliases: HashMap<PathBuf, HistoryAlias>,
+    file_paths: HashMap<FileId, PathBuf>,
+    contributors: HashMap<ContributorIdentity, ContributorId>,
+    accumulator: EvolutionAccumulator,
+    activity: HashMap<PathBuf, u32>,
+    textual_changes: u32,
+    uncounted_changes: u32,
+    eligible_commits: u32,
+    mapped_eligible_changes: u32,
+    context_changes: u32,
+    excluded_changes: u32,
+    rename_gaps: u32,
+    streamed_commits: u32,
+    window_excluded_commits: u32,
+}
+
+impl HistoryAccumulation<'_> {
+    /// Accepts one streamed commit into the tables and counters.
+    fn accept(&mut self, commit: &HistoryCommit) {
+        self.streamed_commits += 1;
+        // The window filter runs inside the streamed history process on landed
+        // dates, so out-of-window history is never streamed. This defensive
+        // boundary check compares the same landed instant and keeps any
+        // straggler from becoming a fact; it counts boundary rejects only.
+        if !self.window.includes(commit.timestamp()) {
+            self.window_excluded_commits += 1;
+            return;
+        }
+        let contributor = self.contributor(commit.contributor());
+        let mut changes = Vec::new();
+        let mut contains_eligible_source = false;
+        for change in commit.changes() {
+            let Some((fact, eligible)) = self.change_fact(change) else {
+                continue;
+            };
+            contains_eligible_source |= eligible;
+            changes.push(fact);
+        }
+        if !changes.is_empty() {
+            self.accumulator.accept(
+                HistoryCommitFact::new(contributor, changes),
+                self.directories,
+            );
+        }
+        self.eligible_commits += u32::from(contains_eligible_source);
+    }
+
+    /// The identity one contributor streams under, minted on first sight.
+    fn contributor(&mut self, identity: &ContributorIdentity) -> ContributorId {
+        let next = ContributorId::from_index(self.contributors.len());
+        *self.contributors.entry(identity.clone()).or_insert(next)
+    }
+
+    /// The fact one streamed change states, and whether it is verdict
+    /// eligible — or nothing when no mapped file answers for its path.
+    fn change_fact(&mut self, change: &HistoryChange) -> Option<(HistoryChangeFact, bool)> {
+        let path = change
+            .path()
+            .strip_prefix(self.relative_root)
+            .unwrap_or(change.path());
+        let identity = self.aliases.get(path).copied();
+        let Some(HistoryAlias::Resolved(file, package, role, trust)) = identity else {
+            self.excluded_changes += 1;
+            return None;
+        };
+        self.track_rename(change, HistoryAlias::Resolved(file, package, role, trust));
+        if change.added_lines().is_some() && change.deleted_lines().is_some() {
+            self.textual_changes += 1;
+        } else {
+            self.uncounted_changes += 1;
+        }
+        if let Some(path) = self.file_paths.get(&file) {
+            *self.activity.entry(path.clone()).or_default() += 1;
+        }
+        let eligible = role.affects_verdict() && trust == SourceTrust::Trusted;
+        if eligible {
+            self.mapped_eligible_changes += 1;
+        } else {
+            self.context_changes += 1;
+        }
+        let fact =
+            HistoryChangeFact::new(file, package, change.added_lines(), change.deleted_lines())
+                .with_source_evidence(role, trust);
+        Some((fact, eligible))
+    }
+
+    /// Follows one rename backward, or marks the previous path unusable when
+    /// two identities claim it.
+    fn track_rename(&mut self, change: &HistoryChange, resolved: HistoryAlias) {
+        let HistoryAlias::Resolved(file, package, role, trust) = resolved else {
+            return;
+        };
+        let Some(previous) = change.previous_path() else {
+            return;
+        };
+        let previous = previous
+            .strip_prefix(self.relative_root)
+            .unwrap_or(previous)
+            .to_path_buf();
+        match self.aliases.get(&previous) {
+            Some(HistoryAlias::Resolved(existing_file, existing_package, _, _))
+                if (*existing_file, *existing_package) != (file, package) =>
+            {
+                self.rename_gaps += 1;
+                self.aliases.insert(previous, HistoryAlias::Unusable);
+            }
+            Some(HistoryAlias::Unusable) => {}
+            _ => {
+                self.aliases
+                    .insert(previous, HistoryAlias::Resolved(file, package, role, trust));
+            }
+        }
+    }
+}
+
 pub(crate) fn load_evolution(
     inventory_root: &Path,
     history_days: u32,
@@ -76,109 +197,62 @@ pub(crate) fn load_evolution(
     let relative_root = inventory_root
         .strip_prefix(repository.root())
         .unwrap_or(Path::new(""));
-    let mut aliases: HashMap<PathBuf, HistoryAlias> = files
-        .iter()
-        .map(|(path, file, package, role, trust)| {
-            (
-                path.clone(),
-                HistoryAlias::Resolved(*file, *package, *role, *trust),
-            )
-        })
-        .collect();
-    let file_paths: HashMap<FileId, PathBuf> = files
-        .iter()
-        .map(|(path, file, _, _, _)| (*file, path.clone()))
-        .collect();
-    let mut contributors = HashMap::<ContributorIdentity, ContributorId>::new();
     let mut accumulator = EvolutionAccumulator::default();
     for (_, file, package, role, trust) in files {
         accumulator.register_source(*file, *package, *role, *trust);
     }
-    let mut activity = HashMap::<PathBuf, u32>::new();
-    let mut textual_changes = 0u32;
-    let mut uncounted_changes = 0u32;
-    let mut eligible_commits = 0u32;
-    let mut mapped_eligible_changes = 0u32;
-    let mut context_changes = 0u32;
-    let mut excluded_changes = 0u32;
-    let mut rename_gaps = 0u32;
-    let mut streamed_commits = 0u32;
-    let mut window_excluded_commits = 0u32;
     let now = std::time::SystemTime::now()
         .duration_since(std::time::UNIX_EPOCH)
         .map_or(i64::MIN, |duration| duration.as_secs() as i64);
     let window = HistoryWindow::of_days(history_days, now);
+    let mut state = HistoryAccumulation {
+        relative_root,
+        directories,
+        window,
+        aliases: files
+            .iter()
+            .map(|(path, file, package, role, trust)| {
+                (
+                    path.clone(),
+                    HistoryAlias::Resolved(*file, *package, *role, *trust),
+                )
+            })
+            .collect(),
+        file_paths: files
+            .iter()
+            .map(|(path, file, _, _, _)| (*file, path.clone()))
+            .collect(),
+        contributors: HashMap::new(),
+        accumulator,
+        activity: HashMap::new(),
+        textual_changes: 0,
+        uncounted_changes: 0,
+        eligible_commits: 0,
+        mapped_eligible_changes: 0,
+        context_changes: 0,
+        excluded_changes: 0,
+        rename_gaps: 0,
+        streamed_commits: 0,
+        window_excluded_commits: 0,
+    };
     let history = repository.stream_history(Some(window.cutoff()), |commit| {
-        streamed_commits += 1;
-        // The window filter runs inside the streamed history process on landed
-        // dates, so out-of-window history is never streamed. This defensive
-        // boundary check compares the same landed instant and keeps any
-        // straggler from becoming a fact; it counts boundary rejects only.
-        if !window.includes(commit.timestamp()) {
-            window_excluded_commits += 1;
-            return Ok(());
-        }
-        let next_contributor = ContributorId::from_index(contributors.len());
-        let contributor = *contributors
-            .entry(commit.contributor().clone())
-            .or_insert(next_contributor);
-        let mut changes = Vec::new();
-        let mut contains_eligible_source = false;
-        for change in commit.changes() {
-            let path = change
-                .path()
-                .strip_prefix(relative_root)
-                .unwrap_or(change.path());
-            let identity = aliases.get(path).copied();
-            let Some(HistoryAlias::Resolved(file, package, role, trust)) = identity else {
-                excluded_changes += 1;
-                continue;
-            };
-            if let Some(previous) = change.previous_path() {
-                let previous = previous
-                    .strip_prefix(relative_root)
-                    .unwrap_or(previous)
-                    .to_path_buf();
-                match aliases.get(&previous) {
-                    Some(HistoryAlias::Resolved(existing_file, existing_package, _, _))
-                        if (*existing_file, *existing_package) != (file, package) =>
-                    {
-                        rename_gaps += 1;
-                        aliases.insert(previous, HistoryAlias::Unusable);
-                    }
-                    Some(HistoryAlias::Unusable) => {}
-                    _ => {
-                        aliases
-                            .insert(previous, HistoryAlias::Resolved(file, package, role, trust));
-                    }
-                }
-            }
-            if change.added_lines().is_some() && change.deleted_lines().is_some() {
-                textual_changes += 1;
-            } else {
-                uncounted_changes += 1;
-            }
-            if let Some(path) = file_paths.get(&file) {
-                *activity.entry(path.clone()).or_default() += 1;
-            }
-            if role.affects_verdict() && trust == SourceTrust::Trusted {
-                mapped_eligible_changes += 1;
-                contains_eligible_source = true;
-            } else {
-                context_changes += 1;
-            }
-            changes.push(
-                HistoryChangeFact::new(file, package, change.added_lines(), change.deleted_lines())
-                    .with_source_evidence(role, trust),
-            );
-        }
-        if !changes.is_empty() {
-            accumulator.accept(HistoryCommitFact::new(contributor, changes), directories);
-        }
-        eligible_commits += u32::from(contains_eligible_source);
+        state.accept(&commit);
         Ok(())
     });
     let process_count = repository.git_processes();
+    let accumulator = state.accumulator;
+    let activity = state.activity;
+    let counts = HistoryChangeCounts {
+        mapped_eligible: state.mapped_eligible_changes,
+        context: state.context_changes,
+        textual: state.textual_changes,
+        uncounted: state.uncounted_changes,
+        excluded: state.excluded_changes,
+        rename_gaps: state.rename_gaps,
+    };
+    let eligible_commits = state.eligible_commits;
+    let streamed_commits = state.streamed_commits;
+    let window_excluded_commits = state.window_excluded_commits;
     match history {
         Ok(summary) => LoadedEvolution {
             evolution: EvolutionInput {
@@ -196,14 +270,7 @@ pub(crate) fn load_evolution(
                         .is_shallow()
                         .then(|| "repository history is shallow".to_owned()),
                 )
-                .with_changes(HistoryChangeCounts {
-                    mapped_eligible: mapped_eligible_changes,
-                    context: context_changes,
-                    textual: textual_changes,
-                    uncounted: uncounted_changes,
-                    excluded: excluded_changes,
-                    rename_gaps,
-                })
+                .with_changes(counts)
                 .with_timestamps(summary.newest_timestamp(), summary.oldest_timestamp())
                 .with_window(window.days(), window_excluded_commits),
             },
@@ -230,14 +297,7 @@ pub(crate) fn load_evolution(
                         eligible_commits,
                         Some(reason.clone()),
                     )
-                    .with_changes(HistoryChangeCounts {
-                        mapped_eligible: mapped_eligible_changes,
-                        context: context_changes,
-                        textual: textual_changes,
-                        uncounted: uncounted_changes,
-                        excluded: excluded_changes,
-                        rename_gaps,
-                    })
+                    .with_changes(counts)
                     .with_window(window.days(), window_excluded_commits),
                 },
                 activity,
