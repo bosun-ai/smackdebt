@@ -6,6 +6,7 @@ mod codebase_report;
 mod cycle_findings;
 mod dependencies;
 mod diff_changes;
+mod diff_source;
 mod dormancy;
 #[cfg(feature = "evidence-stats")]
 mod evidence;
@@ -23,6 +24,7 @@ mod roles;
 mod rust_layout;
 mod selection;
 mod source_units;
+mod test_scope;
 mod work;
 
 #[cfg(feature = "evidence-stats")]
