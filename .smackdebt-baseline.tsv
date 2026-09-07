@@ -9,7 +9,7 @@ crates/analysis/src/cycle_witness.rs	cognitive	1	0
 crates/analysis/src/cycle_witness.rs	cyclomatic	0	1
 crates/analysis/src/cycle_witness.rs	nesting	0	1
 crates/analysis/src/evolution.rs	file_size	1	0
-crates/analysis/src/evolution.rs	parameters	1	2
+crates/analysis/src/evolution.rs	parameters	0	2
 crates/analysis/src/gate.rs	cognitive	0	1
 crates/analysis/src/gate.rs	cyclomatic	0	1
 crates/analysis/src/gate.rs	file_size	0	1
@@ -25,8 +25,6 @@ crates/analysis/src/strongly_connected_components.rs	cognitive	1	0
 crates/analysis/src/strongly_connected_components.rs	cyclomatic	0	1
 crates/analysis/src/strongly_connected_components.rs	nesting	0	1
 crates/analysis/src/verdict.rs	file_size	1	0
-crates/cli/src/app.rs	cognitive	2	0
-crates/cli/src/app.rs	cyclomatic	1	1
 crates/cli/src/app.rs	file_size	0	1
 crates/cli/tests/acceptance.rs	cognitive	1	0
 crates/cli/tests/acceptance.rs	cyclomatic	1	0
@@ -67,12 +65,12 @@ crates/output/src/output.rs	cognitive	0	1
 crates/output/src/output.rs	container_size	0	1
 crates/output/src/output.rs	cyclomatic	0	1
 crates/output/src/output.rs	file_size	1	0
-crates/project/src/project.rs	cognitive	2	6
+crates/project/src/project.rs	cognitive	1	6
 crates/project/src/project.rs	container_size	1	0
-crates/project/src/project.rs	cyclomatic	2	5
+crates/project/src/project.rs	cyclomatic	1	5
 crates/project/src/project.rs	file_cycle	0	1
 crates/project/src/project.rs	file_size	1	0
-crates/project/src/project.rs	logical_lines	1	1
+crates/project/src/project.rs	logical_lines	0	1
 crates/project/src/project.rs	nesting	0	2
 crates/project/src/project.rs	parameters	0	12
 crates/project/src/requests.rs	parameters	0	2
