@@ -1,5 +1,6 @@
 #![forbid(unsafe_code)]
 
+mod architecture;
 mod candidates;
 mod cycle_findings;
 mod dependencies;
