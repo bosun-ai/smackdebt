@@ -491,8 +491,10 @@ fn build_diff_architectures(
     let current_manifest_paths = manifest_paths_for(inventory, &packages.roots);
     let current = build_architecture(
         work,
-        &tables.current.files,
-        &tables.current.dependencies,
+        GraphInputs {
+            files: &tables.current.files,
+            dependencies: &tables.current.dependencies,
+        },
         aliases.current,
         PackageTables {
             side_roots: &packages.current_roots,
@@ -510,8 +512,10 @@ fn build_diff_architectures(
     );
     let before = build_architecture(
         work,
-        &tables.before.files,
-        &tables.before.dependencies,
+        GraphInputs {
+            files: &tables.before.files,
+            dependencies: &tables.before.dependencies,
+        },
         aliases.before,
         PackageTables {
             side_roots: &packages.before_roots,
@@ -1364,9 +1368,7 @@ fn analyze_diff_files<'a>(
     let width = request.width.threads().min(changed_count.max(1));
     let results = analyze_diff_inputs(
         changed,
-        objects.root,
-        objects.base,
-        objects.reader,
+        objects,
         DiffAnalysisPolicy {
             health: request.policy,
             roles: request.role_rules.clone(),
@@ -1690,13 +1692,16 @@ struct DiffAnalysisPolicy {
 
 fn analyze_diff_inputs(
     changes: Vec<SelectedChange>,
-    root_path: PathBuf,
-    base: String,
-    mut batch: smackdebt_git::ObjectReader,
+    objects: DiffObjects,
     policy: DiffAnalysisPolicy,
     width: usize,
     work: AnalysisWork,
 ) -> Result<Vec<DiffResult>, ProjectError> {
+    let DiffObjects {
+        root: root_path,
+        base,
+        reader: mut batch,
+    } = objects;
     if changes.len() <= 1 {
         let mut analyzer = Analyzer::default();
         let results = changes
@@ -3541,8 +3546,10 @@ impl<'a> CodebaseReportBuilder<'a> {
     fn finish(mut self, work: &AnalysisWork, directories: &DirectoryTree) -> Report {
         let architecture = build_architecture(
             work,
-            &self.files,
-            &self.dependencies,
+            GraphInputs {
+                files: &self.files,
+                dependencies: &self.dependencies,
+            },
             &self.aliases,
             PackageTables {
                 side_roots: &self.package_roots,
@@ -4910,12 +4917,15 @@ enum WindowedHistory {
 
 fn build_architecture(
     work: &AnalysisWork,
-    files: &[FileRecord],
-    dependencies: &[SourceDependencies],
+    inputs: GraphInputs<'_>,
     aliases: &ResolutionRules,
     packages: PackageTables<'_>,
     history: WindowedHistory,
 ) -> ArchitectureBuild {
+    let GraphInputs {
+        files,
+        dependencies,
+    } = inputs;
     let PackageTables {
         side_roots: side_package_roots,
         roots: package_roots,
@@ -4927,143 +4937,22 @@ fn build_architecture(
         index.insert(source.path.clone(), source.file);
     }
     let manifest_index = ManifestNameIndex::new(manifests.names);
-    let mut tables = ReferenceTables::default();
-    for dependencies in dependencies {
-        let source = dependencies.file;
-        let source_package = package_of(&dependencies.path, side_package_roots, package_roots);
-        for reference in &dependencies.references {
-            match reference.state() {
-                DependencySyntaxState::External => {
-                    let resolution = resolve_manifest_name(
-                        reference,
-                        dependencies,
-                        &manifest_index,
-                        manifests.names,
-                        package_roots,
-                        &index,
-                    );
-                    tables.record_unmatched(
-                        source,
-                        source_package,
-                        reference,
-                        dependencies,
-                        resolution,
-                    );
-                }
-                DependencySyntaxState::Unresolved(reason) => {
-                    let resolution =
-                        if reference.intent() == smackdebt_analysis::DependencyIntent::Internal {
-                            RelationResolution::UnresolvedInternal
-                        } else {
-                            RelationResolution::UnresolvedPackage
-                        };
-                    tables.record_diagnostic(
-                        source,
-                        reference,
-                        dependencies,
-                        resolution,
-                        ResolutionIssueKind::Unresolved,
-                        reason,
-                    );
-                }
-                DependencySyntaxState::Candidates(candidates) => {
-                    let matches =
-                        resolve_candidates(&dependencies.path, candidates, &index, aliases);
-                    match matches.as_slice() {
-                        [] if reference.intent()
-                            == smackdebt_analysis::DependencyIntent::Internal =>
-                        {
-                            tables.record_unmatched_internal(
-                                source,
-                                reference,
-                                dependencies,
-                                candidates,
-                            );
-                        }
-                        [] => {
-                            let resolution = resolve_manifest_name(
-                                reference,
-                                dependencies,
-                                &manifest_index,
-                                manifests.names,
-                                package_roots,
-                                &index,
-                            );
-                            tables.record_unmatched(
-                                source,
-                                source_package,
-                                reference,
-                                dependencies,
-                                resolution,
-                            );
-                        }
-                        [target] => {
-                            tables.record_internal(source, *target, reference, dependencies);
-                        }
-                        _ => {
-                            tables.record_diagnostic(
-                                source,
-                                reference,
-                                dependencies,
-                                RelationResolution::AmbiguousInternal,
-                                ResolutionIssueKind::Ambiguous,
-                                "several repository files match",
-                            );
-                        }
-                    }
-                }
-            }
-        }
-    }
-    let ReferenceTables {
+    let resolver = ReferenceResolver {
+        index: &index,
+        manifest_index: &manifest_index,
+        manifest_names: manifests.names,
+        side_package_roots,
+        package_roots,
+        aliases,
+    };
+    let ReferenceRows {
         coverage,
-        edge_values,
-        external_values,
-        diagnostic_values,
+        mut diagnostics,
+        mut file_edges,
+        mut external,
         internal_issue_files,
-        manifest_package_values,
-        manifest_explanation_pairs,
-    } = tables;
-
-    let coverage = coverage.finish();
-
-    let mut diagnostics: Vec<ResolutionDiagnostic> = diagnostic_values
-        .into_iter()
-        .map(
-            |((source, target, kind, reason, relation, role, trust), (references, locations))| {
-                ResolutionDiagnostic::new(source, locations[0], target, kind, reason)
-                    .with_evidence(relation, role, trust)
-                    .with_occurrences(references, locations)
-            },
-        )
-        .collect();
-
-    let mut file_edges: Vec<_> = edge_values
-        .into_iter()
-        .enumerate()
-        .map(
-            |(edge_index, ((source, target, relation, role, trust), (references, locations)))| {
-                DependencyEdge::new(
-                    DependencyEdgeId::from_index(edge_index),
-                    source,
-                    target,
-                    references,
-                    locations,
-                )
-                .with_relation(relation)
-                .with_evidence(role, trust)
-            },
-        )
-        .collect();
-    let mut external: Vec<_> = external_values
-        .into_iter()
-        .map(
-            |((file, target, relation, role, trust), (references, locations))| {
-                ExternalDependency::new(file, target, references)
-                    .with_evidence(locations, relation, role, trust)
-            },
-        )
-        .collect();
+        manifest,
+    } = resolver.resolve(dependencies).into_rows();
 
     // Computed once, here, and read by both the dormancy rule below and the
     // orphan table further down, so the two can never disagree about what a
@@ -5089,6 +4978,309 @@ fn build_architecture(
     };
     restate_dormant_relations(&dormant, &mut file_edges, &mut external, &mut diagnostics);
 
+    let graph_evidence =
+        architecture_graph_evidence(files, &internal_issue_files, aliases, packages, &coverage);
+
+    let package_graph = package_graph(&file_edges, files, dependencies, packages, manifest);
+    let mut findings = ArchitectureFindings::default();
+    findings.record_package_cycles(&package_graph, files, &file_edges);
+    let stable_dependencies =
+        stable_dependency_findings(&package_graph.edges, &package_graph.measurements);
+
+    // Orphan fan-in asks whether anything uses a file at all, so it keeps the
+    // wider evidence predicate: a file its own tests import is used. The cycle
+    // graph is a verdict, so it keeps primary relations only.
+    let orphan_pairs: Vec<_> = file_edges
+        .iter()
+        .filter(|edge| edge.affects_verdict())
+        .map(|edge| (edge.source().index(), edge.target().index()))
+        .collect();
+    let orphans = derive_orphans(files, dependencies, &orphan_pairs, &declared_entries);
+    let cycle_graph = FileCycleGraph::of(&file_edges, files.len());
+    // Absence is proved against a wider graph than the cycle graph: every
+    // `uses` and every `module_ownership` relation between two graph files, in
+    // both directions of travel. It is built here, beside the cycle graph it
+    // must never be confused with, and carried to the change-leakage join.
+    let connection_relations: Vec<_> = file_edges
+        .iter()
+        .filter(|edge| enters_connection_graph(edge, files))
+        .map(|edge| (edge.source().index(), edge.target().index()))
+        .collect();
+    let package_count = package_roots.len();
+    let graph_packages = graph_packages(files);
+    let connections = ConnectionGraph::new(
+        files.len(),
+        package_count,
+        &connection_relations,
+        &graph_packages,
+    );
+    let largest_component = cycle_graph
+        .components
+        .iter()
+        .max_by(|left, right| left.len().cmp(&right.len()).then_with(|| right.cmp(left)));
+    let file_graph_count = graph_file_count(files);
+    let core_size = CoreSize::from_counts(
+        largest_component.map_or(0, Vec::len) as u32,
+        file_graph_count,
+    );
+    let core_members = largest_component
+        .into_iter()
+        .flatten()
+        .copied()
+        .map(FileId::from_index)
+        .collect();
+    let retained_file_components = cycle_graph
+        .components
+        .iter()
+        .map(|component| component.iter().copied().map(FileId::from_index).collect())
+        .collect();
+    let closures = close_over_packages(package_count, &graph_packages, &cycle_graph.pairs);
+    let file_reach = file_reaches(files, &cycle_graph.components, &cycle_graph.pairs);
+    findings.record_file_cycles(&cycle_graph, files, &file_edges);
+
+    ArchitectureBuild {
+        coverage,
+        graph_evidence,
+        orphans,
+        stable_dependencies,
+        file_edges,
+        package_edges: package_graph.edges,
+        external,
+        diagnostics,
+        measurements: package_graph.measurements,
+        findings: findings.findings,
+        finding_links: findings.links,
+        cycles: findings.cycles,
+        explanation_pairs: package_graph.explanation_pairs,
+        package_closures: closures.closures().to_vec(),
+        package_file_reach: closures.file_reaches().to_vec(),
+        skipped_closures: closures.skipped().to_vec(),
+        file_reach,
+        core_size,
+        core_members,
+        file_components: retained_file_components,
+        file_graph_count,
+        cycle_pairs: cycle_graph.pairs,
+        connections,
+        graph_packages,
+        dormant,
+    }
+}
+
+/// One tree's file records and the dependencies they stated, borrowed as the
+/// graph build reads them.
+#[derive(Clone, Copy)]
+struct GraphInputs<'a> {
+    files: &'a [FileRecord],
+    dependencies: &'a [SourceDependencies],
+}
+
+/// Everything one reference resolution reads: the path index, the manifest
+/// names, the package positions, and the resolution rules.
+struct ReferenceResolver<'a> {
+    index: &'a BTreeMap<PathBuf, FileId>,
+    manifest_index: &'a ManifestNameIndex,
+    manifest_names: &'a [Option<String>],
+    side_package_roots: &'a [PathBuf],
+    package_roots: &'a [PathBuf],
+    aliases: &'a ResolutionRules,
+}
+
+impl ReferenceResolver<'_> {
+    /// Resolves every reference the dependency table states, in table order.
+    fn resolve(&self, dependencies: &[SourceDependencies]) -> ReferenceTables {
+        let mut tables = ReferenceTables::default();
+        for dependencies in dependencies {
+            let source_package = package_of(
+                &dependencies.path,
+                self.side_package_roots,
+                self.package_roots,
+            );
+            for reference in &dependencies.references {
+                self.record(&mut tables, source_package, dependencies, reference);
+            }
+        }
+        tables
+    }
+
+    /// Records what one reference settles to: an internal edge, an external
+    /// dependency, or a diagnostic.
+    fn record(
+        &self,
+        tables: &mut ReferenceTables,
+        source_package: PackageId,
+        dependencies: &SourceDependencies,
+        reference: &DependencySyntax,
+    ) {
+        let source = dependencies.file;
+        match reference.state() {
+            DependencySyntaxState::External => {
+                let resolution = self.manifest_resolution(reference, dependencies);
+                tables.record_unmatched(
+                    source,
+                    source_package,
+                    reference,
+                    dependencies,
+                    resolution,
+                );
+            }
+            DependencySyntaxState::Unresolved(reason) => {
+                let resolution =
+                    if reference.intent() == smackdebt_analysis::DependencyIntent::Internal {
+                        RelationResolution::UnresolvedInternal
+                    } else {
+                        RelationResolution::UnresolvedPackage
+                    };
+                tables.record_diagnostic(
+                    source,
+                    reference,
+                    dependencies,
+                    resolution,
+                    ResolutionIssueKind::Unresolved,
+                    reason,
+                );
+            }
+            DependencySyntaxState::Candidates(candidates) => {
+                let matches =
+                    resolve_candidates(&dependencies.path, candidates, self.index, self.aliases);
+                match matches.as_slice() {
+                    [] if reference.intent() == smackdebt_analysis::DependencyIntent::Internal => {
+                        tables.record_unmatched_internal(
+                            source,
+                            reference,
+                            dependencies,
+                            candidates,
+                        );
+                    }
+                    [] => {
+                        let resolution = self.manifest_resolution(reference, dependencies);
+                        tables.record_unmatched(
+                            source,
+                            source_package,
+                            reference,
+                            dependencies,
+                            resolution,
+                        );
+                    }
+                    [target] => {
+                        tables.record_internal(source, *target, reference, dependencies);
+                    }
+                    _ => {
+                        tables.record_diagnostic(
+                            source,
+                            reference,
+                            dependencies,
+                            RelationResolution::AmbiguousInternal,
+                            ResolutionIssueKind::Ambiguous,
+                            "several repository files match",
+                        );
+                    }
+                }
+            }
+        }
+    }
+
+    /// The manifest-name reading of one reference no repository file matched.
+    fn manifest_resolution(
+        &self,
+        reference: &DependencySyntax,
+        dependencies: &SourceDependencies,
+    ) -> ManifestReference {
+        resolve_manifest_name(
+            reference,
+            dependencies,
+            self.manifest_index,
+            self.manifest_names,
+            self.package_roots,
+            self.index,
+        )
+    }
+}
+
+/// The package-level joins manifest names contributed without file edges.
+struct ManifestJoins {
+    package_values: BTreeMap<(PackageId, PackageId), (BTreeSet<FileId>, u32)>,
+    explanation_pairs: BTreeSet<(PackageId, PackageId)>,
+}
+
+/// The rows the resolved reference tables state, ready for the report.
+struct ReferenceRows {
+    coverage: DependencyCoverage,
+    diagnostics: Vec<ResolutionDiagnostic>,
+    file_edges: Vec<DependencyEdge>,
+    external: Vec<ExternalDependency>,
+    internal_issue_files: BTreeSet<FileId>,
+    manifest: ManifestJoins,
+}
+
+impl ReferenceTables {
+    /// Finishes the accumulated tables into their report rows.
+    fn into_rows(self) -> ReferenceRows {
+        ReferenceRows {
+            coverage: self.coverage.finish(),
+            diagnostics: self
+                .diagnostic_values
+                .into_iter()
+                .map(
+                    |(
+                        (source, target, kind, reason, relation, role, trust),
+                        (references, locations),
+                    )| {
+                        ResolutionDiagnostic::new(source, locations[0], target, kind, reason)
+                            .with_evidence(relation, role, trust)
+                            .with_occurrences(references, locations)
+                    },
+                )
+                .collect(),
+            file_edges: self
+                .edge_values
+                .into_iter()
+                .enumerate()
+                .map(
+                    |(
+                        edge_index,
+                        ((source, target, relation, role, trust), (references, locations)),
+                    )| {
+                        DependencyEdge::new(
+                            DependencyEdgeId::from_index(edge_index),
+                            source,
+                            target,
+                            references,
+                            locations,
+                        )
+                        .with_relation(relation)
+                        .with_evidence(role, trust)
+                    },
+                )
+                .collect(),
+            external: self
+                .external_values
+                .into_iter()
+                .map(
+                    |((file, target, relation, role, trust), (references, locations))| {
+                        ExternalDependency::new(file, target, references)
+                            .with_evidence(locations, relation, role, trust)
+                    },
+                )
+                .collect(),
+            internal_issue_files: self.internal_issue_files,
+            manifest: ManifestJoins {
+                package_values: self.manifest_package_values,
+                explanation_pairs: self.manifest_explanation_pairs,
+            },
+        }
+    }
+}
+
+/// The completeness evidence the graph publishes: which packages hold a hole
+/// and why.
+fn architecture_graph_evidence(
+    files: &[FileRecord],
+    internal_issue_files: &BTreeSet<FileId>,
+    aliases: &ResolutionRules,
+    packages: PackageTables<'_>,
+    coverage: &DependencyCoverage,
+) -> GraphEvidence {
     let parse_failure_files: Vec<_> = files
         .iter()
         .filter(|file| {
@@ -5120,40 +5312,65 @@ fn build_architecture(
             let issue = package.issue.as_ref()?;
             let owner = package_of(
                 &package.root.join("resolution-config"),
-                side_package_roots,
-                package_roots,
+                packages.side_roots,
+                packages.roots,
             );
             incomplete_packages.push(owner);
             Some(GraphConfigurationFailure::new(owner, issue.clone()))
         })
         .collect();
-    let graph_evidence = GraphEvidence::new(
+    GraphEvidence::new(
         incomplete_packages,
         parse_failure_files.len() as u32,
         coverage.unresolved_internal_uses(),
         coverage.ambiguous_internal_uses(),
         configuration_failures,
-    );
+    )
+}
 
+/// The path one file-graph endpoint answers to, preferring the dependency
+/// table's path over the record's.
+fn edge_file_path<'a>(
+    file: FileId,
+    dependencies: &'a [SourceDependencies],
+    files: &'a [FileRecord],
+) -> &'a Path {
+    dependencies
+        .iter()
+        .find(|source| source.file == file)
+        .map(|source| source.path.as_path())
+        .unwrap_or_else(|| Path::new(files[file.index()].path()))
+}
+
+/// The package-level graph the file edges and manifest joins aggregate to.
+struct PackageGraph {
+    edges: Vec<PackageEdge>,
+    measurements: Vec<PackageGraphMeasurement>,
+    explanation_pairs: BTreeSet<(PackageId, PackageId)>,
+    pairs: Vec<(usize, usize)>,
+    count: usize,
+}
+
+/// Aggregates the file edges to package edges, coupling explanations, and
+/// per-package graph measurements.
+fn package_graph(
+    file_edges: &[DependencyEdge],
+    files: &[FileRecord],
+    dependencies: &[SourceDependencies],
+    packages: PackageTables<'_>,
+    manifest: ManifestJoins,
+) -> PackageGraph {
     let mut package_values: BTreeMap<(PackageId, PackageId), (u32, u32, Vec<DependencyEdgeId>)> =
         BTreeMap::new();
     let mut explanation_pairs: BTreeSet<(PackageId, PackageId)> = BTreeSet::new();
-    for edge in &file_edges {
+    for edge in file_edges {
         if !edge.affects_verdict() {
             continue;
         }
-        let source_path = dependencies
-            .iter()
-            .find(|source| source.file == edge.source())
-            .map(|source| source.path.as_path())
-            .unwrap_or_else(|| Path::new(files[edge.source().index()].path()));
-        let target_path = dependencies
-            .iter()
-            .find(|source| source.file == edge.target())
-            .map(|source| source.path.as_path())
-            .unwrap_or_else(|| Path::new(files[edge.target().index()].path()));
-        let source = package_of(source_path, side_package_roots, package_roots);
-        let target = package_of(target_path, side_package_roots, package_roots);
+        let source_path = edge_file_path(edge.source(), dependencies, files);
+        let target_path = edge_file_path(edge.target(), dependencies, files);
+        let source = package_of(source_path, packages.side_roots, packages.roots);
+        let target = package_of(target_path, packages.side_roots, packages.roots);
         if source == target {
             continue;
         }
@@ -5166,13 +5383,13 @@ fn build_architecture(
         value.1 += edge.references();
         value.2.push(edge.id());
     }
-    explanation_pairs.extend(manifest_explanation_pairs);
-    for ((source, target), (files, references)) in manifest_package_values {
+    explanation_pairs.extend(manifest.explanation_pairs);
+    for ((source, target), (files, references)) in manifest.package_values {
         let value = package_values.entry((source, target)).or_default();
         value.0 += u32::try_from(files.len()).unwrap_or(u32::MAX);
         value.1 += references;
     }
-    let package_edges: Vec<_> = package_values
+    let edges: Vec<_> = package_values
         .into_iter()
         .enumerate()
         .map(|(index, ((source, target), (pairs, references, edges)))| {
@@ -5186,15 +5403,15 @@ fn build_architecture(
             )
         })
         .collect();
-    let package_count = package_roots.len();
-    let package_pairs: Vec<_> = package_edges
+    let count = packages.roots.len();
+    let pairs: Vec<_> = edges
         .iter()
         .map(|edge| (edge.source().index(), edge.target().index()))
         .collect();
-    let degrees = dependency_degree(package_count, &package_pairs);
+    let degrees = dependency_degree(count, &pairs);
     // The package graph is small enough to close over whole: its node count is
     // the package count, so no limit gates it.
-    let package_reach = reach_in_counts(package_count, &package_pairs);
+    let package_reach = reach_in_counts(count, &pairs);
     let measurements: Vec<_> = degrees
         .into_iter()
         .enumerate()
@@ -5203,196 +5420,176 @@ fn build_architecture(
                 .with_reach_in(package_reach[index])
         })
         .collect();
-
-    let mut findings = Vec::new();
-    let mut finding_links = Vec::new();
-    let mut cycles = Vec::new();
-    for component in strongly_connected_components(package_count, &package_pairs)
-        .into_iter()
-        .filter(|component| component.len() > 1)
-    {
-        let witness = cycle_witness(&component, &package_pairs).unwrap_or_default();
-        let witness_edges: Vec<_> = witness
-            .iter()
-            .filter_map(|&(source, target)| {
-                package_edges
-                    .iter()
-                    .find(|edge| edge.source().index() == source && edge.target().index() == target)
-            })
-            .flat_map(|edge| edge.file_edges().iter().copied().take(1))
-            .collect();
-        let involved_files: Vec<_> = witness_edges
-            .iter()
-            .flat_map(|id| {
-                let edge = &file_edges[id.index()];
-                [edge.source(), edge.target()]
-            })
-            .collect::<std::collections::BTreeSet<_>>()
-            .into_iter()
-            .collect();
-        let packages: Vec<_> = component.into_iter().map(PackageId::from_index).collect();
-        let mut package_witness: Vec<_> = witness
-            .iter()
-            .map(|(source, _)| PackageId::from_index(*source))
-            .collect();
-        if let Some((_, target)) = witness.last() {
-            package_witness.push(PackageId::from_index(*target));
-        }
-        cycles.push((packages.clone(), package_witness));
-        let id = ArchitectureFindingId::from_index(findings.len());
-        for package in &packages {
-            if let Some(scope) = files
-                .iter()
-                .find(|file| file.package() == Some(*package))
-                .map(FileRecord::scope)
-            {
-                finding_links.push((scope, id));
-            }
-        }
-        findings.push(ArchitectureFinding::new(
-            id,
-            ArchitectureFindingKind::PackageCycle,
-            packages,
-            involved_files,
-            witness_edges,
-        ));
-    }
-    let stable_dependencies = stable_dependency_findings(&package_edges, &measurements);
-
-    // Orphan fan-in asks whether anything uses a file at all, so it keeps the
-    // wider evidence predicate: a file its own tests import is used. The cycle
-    // graph is a verdict, so it keeps primary relations only.
-    let orphan_pairs: Vec<_> = file_edges
-        .iter()
-        .filter(|edge| edge.affects_verdict())
-        .map(|edge| (edge.source().index(), edge.target().index()))
-        .collect();
-    // A Rust `mod` declaration and the imports that accompany it are one wiring
-    // relationship rather than a cycle, so the cycle graph drops the uses
-    // between an owning pair. The exclusion is pairwise: every other relation of
-    // the same component stays, and only this graph sees it.
-    let ownership_pairs: BTreeSet<(usize, usize)> = file_edges
-        .iter()
-        .filter(|edge| edge.relation() == smackdebt_analysis::StaticRelationKind::ModuleOwnership)
-        .map(|edge| unordered_pair(edge.source().index(), edge.target().index()))
-        .collect();
-    let enters_cycle_graph = |edge: &DependencyEdge| {
-        edge.enters_verdict_graph()
-            && !ownership_pairs.contains(&unordered_pair(
-                edge.source().index(),
-                edge.target().index(),
-            ))
-    };
-    let file_pairs: Vec<_> = file_edges
-        .iter()
-        .filter(|edge| enters_cycle_graph(edge))
-        .map(|edge| (edge.source().index(), edge.target().index()))
-        .collect();
-    let orphans = derive_orphans(files, dependencies, &orphan_pairs, &declared_entries);
-    // Absence is proved against a wider graph than the cycle graph: every
-    // `uses` and every `module_ownership` relation between two graph files, in
-    // both directions of travel. It is built here, beside the cycle graph it
-    // must never be confused with, and carried to the change-leakage join.
-    let connection_relations: Vec<_> = file_edges
-        .iter()
-        .filter(|edge| enters_connection_graph(edge, files))
-        .map(|edge| (edge.source().index(), edge.target().index()))
-        .collect();
-    let graph_packages = graph_packages(files);
-    let connections = ConnectionGraph::new(
-        files.len(),
-        package_count,
-        &connection_relations,
-        &graph_packages,
-    );
-    // The components the cycle findings are made of are also the core and the
-    // reach candidates, so they are retained rather than recomputed.
-    let file_components = strongly_connected_components(files.len(), &file_pairs);
-    let largest_component = file_components
-        .iter()
-        .max_by(|left, right| left.len().cmp(&right.len()).then_with(|| right.cmp(left)));
-    let file_graph_count = graph_file_count(files);
-    let core_size = CoreSize::from_counts(
-        largest_component.map_or(0, Vec::len) as u32,
-        file_graph_count,
-    );
-    let core_members = largest_component
-        .into_iter()
-        .flatten()
-        .copied()
-        .map(FileId::from_index)
-        .collect();
-    let retained_file_components = file_components
-        .iter()
-        .map(|component| component.iter().copied().map(FileId::from_index).collect())
-        .collect();
-    let closures = close_over_packages(package_count, &graph_packages, &file_pairs);
-    let file_reach = file_reaches(files, &file_components, &file_pairs);
-    for component in file_components
-        .iter()
-        .filter(|component| component.len() > 1)
-    {
-        let packages: std::collections::BTreeSet<_> = component
-            .iter()
-            .filter_map(|file| files[*file].package())
-            .collect();
-        if packages.len() != 1 {
-            continue;
-        }
-        let witness = cycle_witness(component, &file_pairs).unwrap_or_default();
-        let witness_edges: Vec<_> = witness
-            .iter()
-            .filter_map(|&(source, target)| {
-                file_edges
-                    .iter()
-                    .find(|edge| {
-                        enters_cycle_graph(edge)
-                            && edge.source().index() == source
-                            && edge.target().index() == target
-                    })
-                    .map(DependencyEdge::id)
-            })
-            .collect();
-        let id = ArchitectureFindingId::from_index(findings.len());
-        for file in component {
-            finding_links.push((files[*file].scope(), id));
-        }
-        findings.push(ArchitectureFinding::new(
-            id,
-            ArchitectureFindingKind::FileCycle,
-            packages.into_iter().collect(),
-            component.iter().copied().map(FileId::from_index).collect(),
-            witness_edges,
-        ));
-    }
-
-    ArchitectureBuild {
-        coverage,
-        graph_evidence,
-        orphans,
-        stable_dependencies,
-        file_edges,
-        package_edges,
-        external,
-        diagnostics,
+    PackageGraph {
+        edges,
         measurements,
-        findings,
-        finding_links,
-        cycles,
         explanation_pairs,
-        package_closures: closures.closures().to_vec(),
-        package_file_reach: closures.file_reaches().to_vec(),
-        skipped_closures: closures.skipped().to_vec(),
-        file_reach,
-        core_size,
-        core_members,
-        file_components: retained_file_components,
-        file_graph_count,
-        cycle_pairs: file_pairs,
-        connections,
-        graph_packages,
-        dormant,
+        pairs,
+        count,
     }
+}
+
+/// The cycle findings one build accumulates. File-cycle identities continue
+/// the package-cycle numbering, so both loops share one table.
+#[derive(Default)]
+struct ArchitectureFindings {
+    findings: Vec<ArchitectureFinding>,
+    links: Vec<(ScopeId, ArchitectureFindingId)>,
+    cycles: Vec<smackdebt_analysis::PackageCycle>,
+}
+
+impl ArchitectureFindings {
+    /// Records one finding, witness, and scope links per package cycle.
+    fn record_package_cycles(
+        &mut self,
+        graph: &PackageGraph,
+        files: &[FileRecord],
+        file_edges: &[DependencyEdge],
+    ) {
+        for component in strongly_connected_components(graph.count, &graph.pairs)
+            .into_iter()
+            .filter(|component| component.len() > 1)
+        {
+            let witness = cycle_witness(&component, &graph.pairs).unwrap_or_default();
+            let witness_edges: Vec<_> = witness
+                .iter()
+                .filter_map(|&(source, target)| {
+                    graph.edges.iter().find(|edge| {
+                        edge.source().index() == source && edge.target().index() == target
+                    })
+                })
+                .flat_map(|edge| edge.file_edges().iter().copied().take(1))
+                .collect();
+            let involved_files: Vec<_> = witness_edges
+                .iter()
+                .flat_map(|id| {
+                    let edge = &file_edges[id.index()];
+                    [edge.source(), edge.target()]
+                })
+                .collect::<BTreeSet<_>>()
+                .into_iter()
+                .collect();
+            let packages: Vec<_> = component.into_iter().map(PackageId::from_index).collect();
+            let mut package_witness: Vec<_> = witness
+                .iter()
+                .map(|(source, _)| PackageId::from_index(*source))
+                .collect();
+            if let Some((_, target)) = witness.last() {
+                package_witness.push(PackageId::from_index(*target));
+            }
+            self.cycles.push((packages.clone(), package_witness));
+            let id = ArchitectureFindingId::from_index(self.findings.len());
+            for package in &packages {
+                if let Some(scope) = files
+                    .iter()
+                    .find(|file| file.package() == Some(*package))
+                    .map(FileRecord::scope)
+                {
+                    self.links.push((scope, id));
+                }
+            }
+            self.findings.push(ArchitectureFinding::new(
+                id,
+                ArchitectureFindingKind::PackageCycle,
+                packages,
+                involved_files,
+                witness_edges,
+            ));
+        }
+    }
+
+    /// Records one finding and scope links per single-package file cycle.
+    fn record_file_cycles(
+        &mut self,
+        graph: &FileCycleGraph,
+        files: &[FileRecord],
+        file_edges: &[DependencyEdge],
+    ) {
+        for component in graph
+            .components
+            .iter()
+            .filter(|component| component.len() > 1)
+        {
+            let packages: BTreeSet<_> = component
+                .iter()
+                .filter_map(|file| files[*file].package())
+                .collect();
+            if packages.len() != 1 {
+                continue;
+            }
+            let witness = cycle_witness(component, &graph.pairs).unwrap_or_default();
+            let witness_edges: Vec<_> = witness
+                .iter()
+                .filter_map(|&(source, target)| {
+                    file_edges
+                        .iter()
+                        .find(|edge| {
+                            enters_cycle_graph(edge, &graph.ownership_pairs)
+                                && edge.source().index() == source
+                                && edge.target().index() == target
+                        })
+                        .map(DependencyEdge::id)
+                })
+                .collect();
+            let id = ArchitectureFindingId::from_index(self.findings.len());
+            for file in component {
+                self.links.push((files[*file].scope(), id));
+            }
+            self.findings.push(ArchitectureFinding::new(
+                id,
+                ArchitectureFindingKind::FileCycle,
+                packages.into_iter().collect(),
+                component.iter().copied().map(FileId::from_index).collect(),
+                witness_edges,
+            ));
+        }
+    }
+}
+
+/// The file cycle graph: the ownership pairs it drops, the pairs that enter
+/// it, and the components those pairs form.
+struct FileCycleGraph {
+    ownership_pairs: BTreeSet<(usize, usize)>,
+    pairs: Vec<(usize, usize)>,
+    components: Vec<Vec<usize>>,
+}
+
+impl FileCycleGraph {
+    fn of(file_edges: &[DependencyEdge], file_count: usize) -> Self {
+        // A Rust `mod` declaration and the imports that accompany it are one
+        // wiring relationship rather than a cycle, so the cycle graph drops the
+        // uses between an owning pair. The exclusion is pairwise: every other
+        // relation of the same component stays, and only this graph sees it.
+        let ownership_pairs: BTreeSet<(usize, usize)> = file_edges
+            .iter()
+            .filter(|edge| {
+                edge.relation() == smackdebt_analysis::StaticRelationKind::ModuleOwnership
+            })
+            .map(|edge| unordered_pair(edge.source().index(), edge.target().index()))
+            .collect();
+        let pairs: Vec<_> = file_edges
+            .iter()
+            .filter(|edge| enters_cycle_graph(edge, &ownership_pairs))
+            .map(|edge| (edge.source().index(), edge.target().index()))
+            .collect();
+        // The components the cycle findings are made of are also the core and
+        // the reach candidates, so they are retained rather than recomputed.
+        let components = strongly_connected_components(file_count, &pairs);
+        Self {
+            ownership_pairs,
+            pairs,
+            components,
+        }
+    }
+}
+
+/// Whether one relation enters the file cycle graph.
+fn enters_cycle_graph(edge: &DependencyEdge, ownership_pairs: &BTreeSet<(usize, usize)>) -> bool {
+    edge.enters_verdict_graph()
+        && !ownership_pairs.contains(&unordered_pair(
+            edge.source().index(),
+            edge.target().index(),
+        ))
 }
 
 /// The package of every file that enters the file dependency graph, by file
