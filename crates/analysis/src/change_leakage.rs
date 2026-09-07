@@ -250,6 +250,17 @@ impl<'a> ChangeGraph<'a> {
         self.packages.get(file.index()).copied().flatten()
     }
 
+    /// Whether the graph holds both files a retained pair names.
+    ///
+    /// A diff's graph may not hold a file its history names: a deleted file
+    /// keeps its retained pairs while the current tree keeps no package for
+    /// it, and an added file does the same on the base side. Nothing can be
+    /// proved about a file the graph does not hold, so such a pair goes
+    /// unjudged rather than walked toward a claim.
+    fn holds(&self, pair: FileChangeCoupling) -> bool {
+        self.package(pair.left()).is_some() && self.package(pair.right()).is_some()
+    }
+
     /// Whether no path connects the two files in either direction over the
     /// connection graph, proved in two stages.
     ///
@@ -297,7 +308,11 @@ pub fn change_leakage(
 ) -> Vec<ChangeLeakageFinding> {
     let mut findings = Vec::new();
     let mut probe = None;
-    for (position, pair) in pairs.iter().enumerate() {
+    for (position, pair) in pairs
+        .iter()
+        .enumerate()
+        .filter(|(_, pair)| graph.holds(**pair))
+    {
         if !qualifies(*pair) {
             continue;
         }
@@ -343,4 +358,55 @@ fn qualifies(pair: FileChangeCoupling) -> bool {
         && pair.shared_commits() >= LEAKAGE_SHARED_COMMITS
         && u64::from(pair.shared_commits()) * 1_000
             >= u64::from(pair.union_commits()) * u64::from(required_permille(pair.distance()))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::health::HealthCounts;
+    use crate::report::{Coverage, FileRecord, ScopeId};
+
+    fn file(index: usize, path: &str) -> FileRecord {
+        FileRecord::new(
+            FileId::from_index(index),
+            ScopeId::from_index(0),
+            path,
+            Coverage::default(),
+            HealthCounts::default(),
+        )
+    }
+
+    /// A qualifying pair between two packaged, unconnected files.
+    fn qualifying_pair() -> FileChangeCoupling {
+        FileChangeCoupling::new(FileId::from_index(0), FileId::from_index(1), 6, 6, 2)
+    }
+
+    /// A diff can retain a pair whose file the current graph no longer holds,
+    /// such as a hot file the change deleted. The rule proves absence rather
+    /// than assuming it, so a pair it cannot prove anything about produces
+    /// nothing instead of a claim over a missing file.
+    #[test]
+    fn a_pair_naming_a_file_outside_the_graph_is_not_judged() {
+        let files = [file(0, "left/kept.rs"), file(1, "right/deleted.rs")];
+        let packages = [Some(PackageId::from_index(0)), None];
+        let connections = ConnectionGraph::new(2, 2, &[], &packages);
+        let graph = ChangeGraph::new(&[], &connections, &packages, &files);
+        assert!(change_leakage(&[qualifying_pair()], &graph).is_empty());
+    }
+
+    /// The same pair between two held files keeps its hidden-coupling claim,
+    /// so the guard withholds only what cannot be proved.
+    #[test]
+    fn the_same_pair_between_held_files_still_earns_its_finding() {
+        let files = [file(0, "left/kept.rs"), file(1, "right/kept.rs")];
+        let packages = [
+            Some(PackageId::from_index(0)),
+            Some(PackageId::from_index(1)),
+        ];
+        let connections = ConnectionGraph::new(2, 2, &[], &packages);
+        let graph = ChangeGraph::new(&[], &connections, &packages, &files);
+        let findings = change_leakage(&[qualifying_pair()], &graph);
+        assert_eq!(findings.len(), 1);
+        assert_eq!(findings[0].kind(), ChangeLeakageKind::HiddenCoupling);
+    }
 }
