@@ -2,6 +2,7 @@
 
 mod architecture;
 mod candidates;
+mod codebase_report;
 mod cycle_findings;
 mod dependencies;
 mod diff_changes;
