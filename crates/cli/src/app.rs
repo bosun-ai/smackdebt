@@ -1,7 +1,7 @@
 use std::ffi::OsString;
 use std::io::{self, IsTerminal, Write};
 use std::num::NonZeroUsize;
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 use std::process::ExitCode;
 
 use clap::Parser;
@@ -46,176 +46,225 @@ pub(crate) fn main() -> ExitCode {
 
 fn run(arguments: impl IntoIterator<Item = OsString>) -> ExitCode {
     #[cfg(feature = "evidence-stats")]
-    let evidence_enabled = std::env::var_os("SMACKDEBT_EVIDENCE_STATS").is_some();
-    #[cfg(feature = "evidence-stats")]
-    if evidence_enabled || std::env::var_os("SMACKDEBT_ALLOCATION_STATS").is_some() {
+    reset_evidence_counters();
+    let (cli, selected, config) = match prepare(arguments) {
+        Ok(prepared) => prepared,
+        Err(exit) => return exit,
+    };
+    let (result, common) = match cli.command {
+        None => {
+            let request = codebase_request(cli.path, &cli.common, &config);
+            (request.analyze(), cli.common)
+        }
+        Some(Command::Gate(args)) => return run_gate(args, selected, &config),
+        Some(Command::Diff(args)) => {
+            let request = diff_request(args.path, args.reference, &args.common, &config);
+            (request.analyze(), args.common)
+        }
+    };
+    match result {
+        Ok(result) => render(&result, &common),
+        Err(error) => fail(&error),
+    }
+}
+
+/// Clears the work counters before a measured run when either stats
+/// instrumentation asks for them.
+#[cfg(feature = "evidence-stats")]
+fn reset_evidence_counters() {
+    if std::env::var_os("SMACKDEBT_EVIDENCE_STATS").is_some()
+        || std::env::var_os("SMACKDEBT_ALLOCATION_STATS").is_some()
+    {
         smackdebt_project::reset_evidence();
     }
+}
+
+/// The codebase analysis one invocation asks for.
+fn codebase_request(
+    path: Option<PathBuf>,
+    common: &Common,
+    config: &ProjectConfig,
+) -> CodebaseRequest {
+    let request = match path {
+        Some(path) => CodebaseRequest::new(path),
+        None => CodebaseRequest::automatic("."),
+    };
+    apply_codebase_common(request, common, config)
+}
+
+/// Parses the invocation, validates the selected path, and loads project
+/// configuration, or answers with the exit status the failure earned.
+fn prepare(
+    arguments: impl IntoIterator<Item = OsString>,
+) -> Result<(Cli, Option<PathBuf>, ProjectConfig), ExitCode> {
     let cli = match Cli::try_parse_from(arguments) {
         Ok(cli) => cli,
         Err(error) => {
             let exit = error.exit_code();
             let _ = error.print();
-            return ExitCode::from(u8::try_from(exit).unwrap_or(2));
+            return Err(ExitCode::from(u8::try_from(exit).unwrap_or(2)));
         }
     };
-
-    if cli.common.json && cli.common.all
-        || matches!(&cli.command, Some(Command::Diff(args)) if args.common.json && args.common.all)
-    {
-        return fail_with("--all cannot be used with --json", 2);
+    if json_all_conflict(&cli) {
+        return Err(fail_with("--all cannot be used with --json", 2));
     }
-    let selected_path = match &cli.command {
-        None => cli.path.as_deref(),
-        Some(Command::Diff(args)) => args.path.as_deref().or(cli.path.as_deref()),
-        Some(Command::Gate(args)) => args.path.as_deref().or(cli.path.as_deref()),
-    };
-    if let Some(path) = selected_path.filter(|path| !path.exists()) {
-        return fail_with(&format!("path not found: {}", path.display()), 1);
+    let (selected, config_root) = selected_paths(&cli);
+    if let Some(path) = selected.as_deref().filter(|path| !path.exists()) {
+        return Err(fail_with(&format!("path not found: {}", path.display()), 1));
     }
-
-    let config_path = match &cli.command {
-        None => cli.path.clone().unwrap_or_else(|| PathBuf::from(".")),
-        Some(Command::Diff(args)) => args
-            .path
-            .clone()
-            .or_else(|| cli.path.clone())
-            .unwrap_or_else(|| PathBuf::from(".")),
-        Some(Command::Gate(args)) => args
-            .path
-            .clone()
-            .or_else(|| cli.path.clone())
-            .unwrap_or_else(|| PathBuf::from(".")),
-    };
-    let config = match config::load(&config_path) {
+    let config = match config::load(&config_root) {
         Ok(config) => config,
         Err(message) => {
             let _ = writeln!(io::stderr().lock(), "smackdebt: {message}");
-            return ExitCode::from(2);
+            return Err(ExitCode::from(2));
         }
     };
+    Ok((cli, selected, config))
+}
 
-    let (result, common) = match cli.command {
-        None => {
-            let request = match cli.path {
-                Some(path) => CodebaseRequest::new(path),
-                None => CodebaseRequest::automatic("."),
-            };
-            let request = apply_codebase_common(request, &cli.common, &config);
-            (request.analyze(), cli.common)
-        }
-        Some(Command::Gate(args)) => {
-            let selected = args.path.clone().or_else(|| cli.path.clone());
-            return run_gate(args, selected, &config);
-        }
-        Some(Command::Diff(args)) => {
-            let mut request = match args.path {
-                Some(path) => DiffRequest::new(path),
-                None => DiffRequest::automatic("."),
-            };
-            if let Some(reference) = args.reference {
-                request = request.with_reference(reference);
-            }
-            if let Some(width) = execution_width(args.common.jobs) {
-                request = request.with_width(width);
-            }
-            request = apply_diff_common(request, &args.common, &config);
-            (request.analyze(), args.common)
-        }
+/// Whether any command combines `--all` with `--json`, which no flow accepts.
+fn json_all_conflict(cli: &Cli) -> bool {
+    cli.common.json && cli.common.all
+        || matches!(&cli.command, Some(Command::Diff(args)) if args.common.json && args.common.all)
+}
+
+/// The path the user selected, if any, and the directory configuration is
+/// loaded from.
+fn selected_paths(cli: &Cli) -> (Option<PathBuf>, PathBuf) {
+    let selected = match &cli.command {
+        None => cli.path.clone(),
+        Some(Command::Diff(args)) => args.path.clone().or_else(|| cli.path.clone()),
+        Some(Command::Gate(args)) => args.path.clone().or_else(|| cli.path.clone()),
     };
+    let config_root = selected.clone().unwrap_or_else(|| PathBuf::from("."));
+    (selected, config_root)
+}
 
-    match result {
-        Ok(result) => {
-            #[cfg(feature = "allocation-stats")]
-            if std::env::var_os("SMACKDEBT_ALLOCATION_STATS").is_some() {
-                let stats = smackdebt_project::evidence_snapshot();
-                eprintln!(
-                    "smackdebt project stats: {{\"inventory_walks\":{},\"inventory_visits\":{},\"source_reads\":{},\"object_reads\":{},\"git_processes\":{},\"parser_visits\":{},\"algorithm_passes\":{}}}",
-                    stats.inventory_walks(),
-                    stats.inventory_visits(),
-                    stats.source_reads(),
-                    stats.object_reads(),
-                    stats.git_processes(),
-                    stats.parser_visits(),
-                    stats.algorithm_passes(),
-                );
-            }
-            #[cfg(feature = "evidence-stats")]
-            let before_render = evidence_enabled.then(smackdebt_project::evidence_snapshot);
-            let stdout_is_terminal = io::stdout().is_terminal();
-            let mut stdout = io::BufWriter::new(io::stdout().lock());
-            let rendered = if common.json {
-                #[cfg(feature = "evidence-stats")]
-                if evidence_enabled {
-                    smackdebt_project::record_renderer_entry();
-                }
-                write_json(&mut stdout, result.report(), result.selected_scope())
-                    .and_then(|()| writeln!(stdout))
-            } else {
-                let width =
-                    terminal::width(stdout_is_terminal, std::env::var("COLUMNS").ok().as_deref());
-                let choice = common.color.unwrap_or(ColorChoice::Auto);
-                let color = terminal::color(
-                    choice,
-                    stdout_is_terminal,
-                    std::env::var_os("NO_COLOR").is_some(),
-                );
-                let decorations = terminal::decorations(choice, stdout_is_terminal);
-                #[cfg(feature = "evidence-stats")]
-                if evidence_enabled {
-                    smackdebt_project::record_renderer_entry();
-                }
-                write_terminal(
-                    &mut stdout,
-                    result.report(),
-                    result.selected_scope(),
-                    TerminalOptions::new(width, common.all, color)
-                        .with_decorations(decorations)
-                        .with_top(common.top.and_then(NonZeroUsize::new)),
-                )
-            };
-            match rendered.and_then(|()| stdout.flush()) {
-                Ok(()) => {
-                    #[cfg(feature = "evidence-stats")]
-                    if evidence_enabled {
-                        let before_render = before_render.expect("evidence snapshot");
-                        let after_render = smackdebt_project::evidence_snapshot();
-                        let render = after_render.since(before_render);
-                        eprintln!(
-                            "smackdebt evidence stats: {{\"inventory_walks\":{},\"inventory_visits\":{},\"source_reads\":{},\"object_reads\":{},\"git_processes\":{},\"parser_visits\":{},\"algorithm_passes\":{},\"renderer_entries\":{},\"render_inventory_walks\":{},\"render_inventory_visits\":{},\"render_source_reads\":{},\"render_object_reads\":{},\"render_git_processes\":{},\"render_parser_visits\":{},\"render_algorithm_passes\":{},\"render_renderer_entries\":{}}}",
-                            after_render.inventory_walks(),
-                            after_render.inventory_visits(),
-                            after_render.source_reads(),
-                            after_render.object_reads(),
-                            after_render.git_processes(),
-                            after_render.parser_visits(),
-                            after_render.algorithm_passes(),
-                            after_render.renderer_entries(),
-                            render.inventory_walks(),
-                            render.inventory_visits(),
-                            render.source_reads(),
-                            render.object_reads(),
-                            render.git_processes(),
-                            render.parser_visits(),
-                            render.algorithm_passes(),
-                            render.renderer_entries(),
-                        );
-                    }
-                    ExitCode::SUCCESS
-                }
-                Err(error) => match stdout_failure(&error) {
-                    // A reader that stopped reading, such as `smackdebt | head`,
-                    // is not an error the user has to see.
-                    StdoutFailure::ReaderLeft => ExitCode::SUCCESS,
-                    StdoutFailure::Reportable => fail(&ProjectError::Inspect {
-                        path: PathBuf::from("standard output"),
-                        source: error,
-                    }),
-                },
-            }
-        }
-        Err(error) => fail(&error),
+/// The diff analysis one invocation asks for.
+fn diff_request(
+    path: Option<PathBuf>,
+    reference: Option<String>,
+    common: &Common,
+    config: &ProjectConfig,
+) -> DiffRequest {
+    let mut request = match path {
+        Some(path) => DiffRequest::new(path),
+        None => DiffRequest::automatic("."),
+    };
+    if let Some(reference) = reference {
+        request = request.with_reference(reference);
     }
+    if let Some(width) = execution_width(common.jobs) {
+        request = request.with_width(width);
+    }
+    apply_diff_common(request, common, config)
+}
+
+/// Streams one finished report in the selected format and maps the write
+/// outcome to an exit status.
+fn render(result: &smackdebt_project::ProjectReport, common: &Common) -> ExitCode {
+    #[cfg(feature = "allocation-stats")]
+    print_allocation_run_stats();
+    #[cfg(feature = "evidence-stats")]
+    let evidence_enabled = std::env::var_os("SMACKDEBT_EVIDENCE_STATS").is_some();
+    #[cfg(feature = "evidence-stats")]
+    let before_render = evidence_enabled.then(smackdebt_project::evidence_snapshot);
+    let stdout_is_terminal = io::stdout().is_terminal();
+    let mut stdout = io::BufWriter::new(io::stdout().lock());
+    #[cfg(feature = "evidence-stats")]
+    if evidence_enabled {
+        smackdebt_project::record_renderer_entry();
+    }
+    let rendered = if common.json {
+        write_json(&mut stdout, result.report(), result.selected_scope())
+            .and_then(|()| writeln!(stdout))
+    } else {
+        write_terminal(
+            &mut stdout,
+            result.report(),
+            result.selected_scope(),
+            terminal_options(common, stdout_is_terminal),
+        )
+    };
+    match rendered.and_then(|()| stdout.flush()) {
+        Ok(()) => {
+            #[cfg(feature = "evidence-stats")]
+            if evidence_enabled {
+                print_evidence_stats(before_render.expect("evidence snapshot"));
+            }
+            ExitCode::SUCCESS
+        }
+        Err(error) => match stdout_failure(&error) {
+            // A reader that stopped reading, such as `smackdebt | head`,
+            // is not an error the user has to see.
+            StdoutFailure::ReaderLeft => ExitCode::SUCCESS,
+            StdoutFailure::Reportable => fail(&ProjectError::Inspect {
+                path: PathBuf::from("standard output"),
+                source: error,
+            }),
+        },
+    }
+}
+
+/// The terminal options one run renders with, from the flags and the
+/// environment.
+fn terminal_options(common: &Common, stdout_is_terminal: bool) -> TerminalOptions {
+    let width = terminal::width(stdout_is_terminal, std::env::var("COLUMNS").ok().as_deref());
+    let choice = common.color.unwrap_or(ColorChoice::Auto);
+    let color = terminal::color(
+        choice,
+        stdout_is_terminal,
+        std::env::var_os("NO_COLOR").is_some(),
+    );
+    let decorations = terminal::decorations(choice, stdout_is_terminal);
+    TerminalOptions::new(width, common.all, color)
+        .with_decorations(decorations)
+        .with_top(common.top.and_then(NonZeroUsize::new))
+}
+
+/// Prints the composition work counters when allocation profiling asks.
+#[cfg(feature = "allocation-stats")]
+fn print_allocation_run_stats() {
+    if std::env::var_os("SMACKDEBT_ALLOCATION_STATS").is_some() {
+        let stats = smackdebt_project::evidence_snapshot();
+        eprintln!(
+            "smackdebt project stats: {{\"inventory_walks\":{},\"inventory_visits\":{},\"source_reads\":{},\"object_reads\":{},\"git_processes\":{},\"parser_visits\":{},\"algorithm_passes\":{}}}",
+            stats.inventory_walks(),
+            stats.inventory_visits(),
+            stats.source_reads(),
+            stats.object_reads(),
+            stats.git_processes(),
+            stats.parser_visits(),
+            stats.algorithm_passes(),
+        );
+    }
+}
+
+/// Prints what rendering added on top of composition, from the snapshot taken
+/// before the write.
+#[cfg(feature = "evidence-stats")]
+fn print_evidence_stats(before_render: smackdebt_project::EvidenceSnapshot) {
+    let after_render = smackdebt_project::evidence_snapshot();
+    let render = after_render.since(before_render);
+    eprintln!(
+        "smackdebt evidence stats: {{\"inventory_walks\":{},\"inventory_visits\":{},\"source_reads\":{},\"object_reads\":{},\"git_processes\":{},\"parser_visits\":{},\"algorithm_passes\":{},\"renderer_entries\":{},\"render_inventory_walks\":{},\"render_inventory_visits\":{},\"render_source_reads\":{},\"render_object_reads\":{},\"render_git_processes\":{},\"render_parser_visits\":{},\"render_algorithm_passes\":{},\"render_renderer_entries\":{}}}",
+        after_render.inventory_walks(),
+        after_render.inventory_visits(),
+        after_render.source_reads(),
+        after_render.object_reads(),
+        after_render.git_processes(),
+        after_render.parser_visits(),
+        after_render.algorithm_passes(),
+        after_render.renderer_entries(),
+        render.inventory_walks(),
+        render.inventory_visits(),
+        render.source_reads(),
+        render.object_reads(),
+        render.git_processes(),
+        render.parser_visits(),
+        render.algorithm_passes(),
+        render.renderer_entries(),
+    );
 }
 
 /// Runs the ratchet gate: analyze, compare against the committed baseline,
@@ -230,63 +279,40 @@ fn run_gate(args: GateArgs, selected: Option<PathBuf>, config: &ProjectConfig) -
     let baseline = if args.update {
         None
     } else {
-        let text = match std::fs::read_to_string(&baseline_path) {
-            Ok(text) => text,
-            Err(error) if error.kind() == io::ErrorKind::NotFound => {
-                return fail_with(
-                    &format!("baseline not found: {}", baseline_path.display()),
-                    2,
-                );
-            }
-            Err(error) => {
-                return fail(&ProjectError::Inspect {
-                    path: baseline_path,
-                    source: error,
-                });
-            }
-        };
-        match gate_baseline::parse(&text) {
+        match read_baseline(&baseline_path) {
             Ok(baseline) => Some(baseline),
-            Err(message) => return fail_with(&message, 2),
+            Err(exit) => return exit,
         }
     };
-    let request = match selected {
-        Some(path) => CodebaseRequest::new(path),
-        None => CodebaseRequest::automatic("."),
-    };
-    let configured_history = config
-        .history
-        .as_deref()
-        .and_then(|value| parse_days(value).ok());
-    let request = request
-        .with_history_days(configured_history.unwrap_or(90))
-        .with_excludes(config.exclude.clone())
-        .with_role_rules(config.role_rules());
-    let mut request = apply_codebase_thresholds(request, config);
-    if let Some(width) = execution_width(args.jobs) {
-        request = request.with_width(width);
-    }
-    let result = match request.analyze() {
+    let result = match gate_request(selected, config, args.jobs).analyze() {
         Ok(result) => result,
         Err(error) => return fail(&error),
     };
     let observed = GateSnapshot::from_report(result.report());
     let Some(baseline) = baseline else {
-        return match std::fs::write(&baseline_path, gate_baseline::render(&observed)) {
-            Ok(()) => ExitCode::SUCCESS,
-            Err(error) => fail_with(
-                &format!("could not write {}: {error}", baseline_path.display()),
-                1,
-            ),
-        };
+        return write_baseline(&baseline_path, &observed);
     };
     let comparison = GateComparison::between(&baseline, &observed);
+    render_gate(&baseline_path.display().to_string(), &comparison, args.json)
+}
+
+/// Writes the observed snapshot verbatim, so the baseline moves only on
+/// request.
+fn write_baseline(path: &Path, observed: &GateSnapshot) -> ExitCode {
+    match std::fs::write(path, gate_baseline::render(observed)) {
+        Ok(()) => ExitCode::SUCCESS,
+        Err(error) => fail_with(&format!("could not write {}: {error}", path.display()), 1),
+    }
+}
+
+/// Streams the gate comparison and answers with the exit status the contract
+/// promises: 3 on regression, quiet success when the reader left.
+fn render_gate(baseline_name: &str, comparison: &GateComparison, json: bool) -> ExitCode {
     let mut stdout = io::BufWriter::new(io::stdout().lock());
-    let baseline_name = baseline_path.display().to_string();
-    let rendered = if args.json {
-        write_gate_json(&mut stdout, &baseline_name, &comparison).and_then(|()| writeln!(stdout))
+    let rendered = if json {
+        write_gate_json(&mut stdout, baseline_name, comparison).and_then(|()| writeln!(stdout))
     } else {
-        write_gate(&mut stdout, &baseline_name, &comparison)
+        write_gate(&mut stdout, baseline_name, comparison)
     }
     .and_then(|()| stdout.flush());
     match rendered {
@@ -300,6 +326,52 @@ fn run_gate(args: GateArgs, selected: Option<PathBuf>, config: &ProjectConfig) -
         // which is the contract a check pipeline depends on.
         _ if comparison.regressed() => ExitCode::from(3),
         _ => ExitCode::SUCCESS,
+    }
+}
+
+/// Reads and parses the committed baseline, or answers with the exit status
+/// the failure earned.
+fn read_baseline(path: &Path) -> Result<GateSnapshot, ExitCode> {
+    let text = match std::fs::read_to_string(path) {
+        Ok(text) => text,
+        Err(error) if error.kind() == io::ErrorKind::NotFound => {
+            return Err(fail_with(
+                &format!("baseline not found: {}", path.display()),
+                2,
+            ));
+        }
+        Err(error) => {
+            return Err(fail(&ProjectError::Inspect {
+                path: path.to_path_buf(),
+                source: error,
+            }));
+        }
+    };
+    gate_baseline::parse(&text).map_err(|message| fail_with(&message, 2))
+}
+
+/// The codebase analysis one gate run measures, with config-driven defaults.
+fn gate_request(
+    selected: Option<PathBuf>,
+    config: &ProjectConfig,
+    jobs: Option<usize>,
+) -> CodebaseRequest {
+    let request = match selected {
+        Some(path) => CodebaseRequest::new(path),
+        None => CodebaseRequest::automatic("."),
+    };
+    let configured_history = config
+        .history
+        .as_deref()
+        .and_then(|value| parse_days(value).ok());
+    let request = request
+        .with_history_days(configured_history.unwrap_or(90))
+        .with_excludes(config.exclude.clone())
+        .with_role_rules(config.role_rules());
+    let request = apply_codebase_thresholds(request, config);
+    match execution_width(jobs) {
+        Some(width) => request.with_width(width),
+        None => request,
     }
 }
 

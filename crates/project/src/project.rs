@@ -586,10 +586,10 @@ fn attribute_comparison_files(
 
 /// The side whose graph explains one comparison kind: removals answer from
 /// the base tree, everything else from the current tree.
-fn comparison_explaining_side<'a>(
-    architectures: &'a DiffArchitectures,
+fn comparison_explaining_side(
+    architectures: &DiffArchitectures,
     kind: smackdebt_analysis::ArchitectureComparisonKind,
-) -> &'a ArchitectureBuild {
+) -> &ArchitectureBuild {
     if kind == smackdebt_analysis::ArchitectureComparisonKind::CycleRemoved
         || kind == smackdebt_analysis::ArchitectureComparisonKind::EdgeRemoved
     {
