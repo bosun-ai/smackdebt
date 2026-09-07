@@ -6,19 +6,19 @@ use std::path::{Path, PathBuf};
 use smackdebt_analysis::{
     ArchitectureGraph, ArchitectureReportFacts, Coverage, Diagnostic, DiagnosticId, DiagnosticKind,
     DirectoryTree, FileActivity, FileDebt, FileId, FileRecord, Finding, FindingId, HealthCounts,
-    HistoryAvailability, HotspotPolicy, PackageContainment, PackageId, PackageRecord, ParseStatus,
-    Rating, Report, ReportBuilder as AnalysisReportBuilder, ReportMode, Scope, ScopeId,
-    SizeFinding, SizePolicy, SourceCoverageOutcome, SourceRole,
+    HistoryAvailability, HotspotPolicy, Language, PackageContainment, PackageId, PackageRecord,
+    ParseStatus, Rating, Report, ReportBuilder as AnalysisReportBuilder, ReportMode, Scope,
+    ScopeId, SizeFinding, SizePolicy, SourceCoverageOutcome, SourceRole,
 };
 use smackdebt_discovery::{DiscoveredFile, Inventory};
 
-use crate::architecture::{GraphInputs, build_architecture, leakage_findings};
+use crate::architecture::{ArchitectureBuild, GraphInputs, build_architecture, leakage_findings};
 use crate::dependencies::{ManifestFacts, PackageTables, SourceDependencies};
 use crate::dormancy::WindowedHistory;
 use crate::hierarchy::HierarchyBuilder;
 use crate::history_stream::EvolutionInput;
 use crate::paths::report_package_path;
-use crate::rating::{FileResult, source_coverage};
+use crate::rating::{FileResult, RatedFile, source_coverage};
 use crate::resolution_config::ResolutionRules;
 use crate::work::AnalysisWork;
 
@@ -48,16 +48,35 @@ pub(crate) struct SignalPolicies {
     pub(crate) hotspots: HotspotPolicy,
     pub(crate) size: SizePolicy,
 }
+/// The measured tree one codebase report is built from: the walked
+/// inventory, its analyzable candidates, and the windowed touch counts.
+pub(crate) struct CodebaseInputs<'a> {
+    pub(crate) inventory: &'a Inventory,
+    pub(crate) candidates: &'a [&'a DiscoveredFile],
+    pub(crate) activity: &'a HashMap<PathBuf, u32>,
+}
+
+/// Where one candidate file sits while its analysis is retained.
+struct FileSpot {
+    file: FileId,
+    scope: ScopeId,
+    size_bytes: u64,
+    path: String,
+}
+
 impl<'a> CodebaseReportBuilder<'a> {
     pub(crate) fn new(
         label: String,
-        inventory: &Inventory,
-        candidates: &[&DiscoveredFile],
-        activity: &'a HashMap<PathBuf, u32>,
+        inputs: CodebaseInputs<'a>,
         aliases: ResolutionRules,
         evolution: EvolutionInput,
         policies: SignalPolicies,
     ) -> Self {
+        let CodebaseInputs {
+            inventory,
+            candidates,
+            activity,
+        } = inputs;
         let package_roots: Vec<PathBuf> = inventory
             .packages()
             .iter()
@@ -119,87 +138,103 @@ impl<'a> CodebaseReportBuilder<'a> {
         }
     }
 
+    /// Retains one analyzed file's findings, sizes, dependencies, and parse
+    /// diagnostics, and answers its coverage and language facts.
+    fn add_rated(
+        &mut self,
+        spot: &FileSpot,
+        mut rated: RatedFile,
+    ) -> (Coverage, Option<(Language, SourceRole, ParseStatus)>) {
+        if rated.signals_verdict {
+            self.size_findings.extend(
+                self.policies
+                    .size
+                    .rate_file(spot.file, rated.analysis.source_lines()),
+            );
+        }
+        let mut containers = std::mem::take(&mut rated.container_statements);
+        containers.sort_by(|left, right| left.0.cmp(&right.0));
+        for (container, statements) in containers {
+            self.size_findings.extend(
+                self.policies
+                    .size
+                    .rate_container(spot.file, &container, statements),
+            );
+        }
+        for (unit_index, assessment) in rated.debt {
+            let unit = &rated.analysis.units()[unit_index];
+            let finding_id = FindingId::from_index(self.findings.len());
+            self.scopes[spot.scope.index()].add_finding(finding_id);
+            self.findings.push(
+                Finding::new(
+                    finding_id,
+                    spot.file,
+                    unit.identity().clone(),
+                    unit.span(),
+                    unit.measurements(),
+                    assessment,
+                )
+                .with_evidence(rated.role, rated.analysis.parse_status().trust()),
+            );
+        }
+        let analysis = rated.analysis;
+        self.dependencies.push(SourceDependencies {
+            file: spot.file,
+            path: PathBuf::from(&spot.path),
+            references: analysis.dependencies().to_vec(),
+            role: rated.role,
+            trust: analysis.parse_status().trust(),
+            language: analysis.language(),
+            module_syntax: rated.module_syntax,
+        });
+        let recovered = matches!(analysis.parse_status(), ParseStatus::Recovered(_));
+        let failed = matches!(analysis.parse_status(), ParseStatus::Failed);
+        if failed {
+            self.add_diagnostic(
+                spot.file,
+                DiagnosticKind::ParseFailure,
+                "parser failed",
+                analysis.source_lines(),
+            );
+        } else if recovered {
+            self.add_diagnostic(
+                spot.file,
+                DiagnosticKind::ParseFailure,
+                "parser recovered from syntax errors",
+                0,
+            );
+        }
+        (
+            source_coverage(&analysis, rated.role).with_bytes(spot.size_bytes, 0),
+            Some((
+                analysis.language(),
+                rated.role,
+                analysis.parse_status().clone(),
+            )),
+        )
+    }
+
     pub(crate) fn add_analysis(&mut self, index: usize, result: FileResult) {
-        let file_id = FileId::from_index(index);
         let scope_id = self.file_scopes[index];
-        let size_bytes = self.file_sizes[index];
-        let path = self.scopes[scope_id.index()].name().to_owned();
+        let spot = FileSpot {
+            file: FileId::from_index(index),
+            scope: scope_id,
+            size_bytes: self.file_sizes[index],
+            path: self.scopes[scope_id.index()].name().to_owned(),
+        };
+        let file_id = spot.file;
+        let size_bytes = spot.size_bytes;
+        let path = spot.path.clone();
         let touches = self.activity.get(Path::new(&path)).copied();
         let mut health = HealthCounts::default();
         let mut rated_units = 0;
         let mut max_rating = Rating::Healthy;
         let (coverage, language) = match result {
-            FileResult::Analyzed(mut rated) => {
+            FileResult::Analyzed(rated) => {
                 health = rated.health;
                 rated_units = rated.rated_units;
                 max_rating = rated.max_rating;
-                if rated.signals_verdict {
-                    self.size_findings.extend(
-                        self.policies
-                            .size
-                            .rate_file(file_id, rated.analysis.source_lines()),
-                    );
-                }
-                let mut containers = std::mem::take(&mut rated.container_statements);
-                containers.sort_by(|left, right| left.0.cmp(&right.0));
-                for (container, statements) in containers {
-                    self.size_findings.extend(
-                        self.policies
-                            .size
-                            .rate_container(file_id, &container, statements),
-                    );
-                }
-                for (unit_index, assessment) in rated.debt {
-                    let unit = &rated.analysis.units()[unit_index];
-                    let finding_id = FindingId::from_index(self.findings.len());
-                    self.scopes[scope_id.index()].add_finding(finding_id);
-                    self.findings.push(
-                        Finding::new(
-                            finding_id,
-                            file_id,
-                            unit.identity().clone(),
-                            unit.span(),
-                            unit.measurements(),
-                            assessment,
-                        )
-                        .with_evidence(rated.role, rated.analysis.parse_status().trust()),
-                    );
-                }
-                let analysis = rated.analysis;
-                self.dependencies.push(SourceDependencies {
-                    file: file_id,
-                    path: PathBuf::from(&path),
-                    references: analysis.dependencies().to_vec(),
-                    role: rated.role,
-                    trust: analysis.parse_status().trust(),
-                    language: analysis.language(),
-                    module_syntax: rated.module_syntax,
-                });
-                let recovered = matches!(analysis.parse_status(), ParseStatus::Recovered(_));
-                let failed = matches!(analysis.parse_status(), ParseStatus::Failed);
-                if failed {
-                    self.add_diagnostic(
-                        file_id,
-                        DiagnosticKind::ParseFailure,
-                        "parser failed",
-                        analysis.source_lines(),
-                    );
-                } else if recovered {
-                    self.add_diagnostic(
-                        file_id,
-                        DiagnosticKind::ParseFailure,
-                        "parser recovered from syntax errors",
-                        0,
-                    );
-                }
-                (
-                    source_coverage(&analysis, rated.role).with_bytes(size_bytes, 0),
-                    Some((
-                        analysis.language(),
-                        rated.role,
-                        analysis.parse_status().clone(),
-                    )),
-                )
+                self.add_rated(&spot, rated)
             }
             FileResult::Unsupported { language, role } => {
                 self.add_diagnostic(
@@ -382,33 +417,7 @@ impl<'a> CodebaseReportBuilder<'a> {
         // which a pair can be asked what depends on what.
         let (_, change_leakage_findings, suppressed_leakage) =
             leakage_findings(&architecture, &evolution, &self.files);
-        let suppressed_reach = architecture
-            .package_closures
-            .iter()
-            .filter(|closure| {
-                !architecture
-                    .graph_evidence
-                    .package_is_complete(closure.package())
-            })
-            .count() as u32
-            + u32::from(
-                !architecture.graph_evidence.is_complete()
-                    && architecture
-                        .measurements
-                        .iter()
-                        .map(|value| value.reach_in())
-                        .max()
-                        .and_then(|reach| {
-                            smackdebt_analysis::PropagationReach::packages(
-                                reach,
-                                architecture.measurements.len() as u32,
-                            )
-                        })
-                        .is_some(),
-            );
-        let suppressed_core = u32::from(
-            !architecture.graph_evidence.is_complete() && architecture.core_size.is_some(),
-        );
+        let (suppressed_reach, suppressed_core) = suppressed_propagation(&architecture);
         let graph_evidence = architecture.graph_evidence.clone().with_suppressed(
             suppressed_reach,
             suppressed_core,
@@ -473,35 +482,81 @@ impl<'a> CodebaseReportBuilder<'a> {
         builder.set_evolution(evolution);
         builder.set_change_leakage_findings(change_leakage_findings);
         builder.set_explanation_pairs(explanation_pairs);
-        for finding in evolutionary_findings {
-            let pair = finding.coupling();
-            builder.link_evolutionary_finding(root, finding.id());
-            builder.link_evolutionary_finding(
-                self.packages[pair.left().index()].scope(),
-                finding.id(),
-            );
-            builder.link_evolutionary_finding(
-                self.packages[pair.right().index()].scope(),
-                finding.id(),
-            );
-        }
-        for (index, finding) in architecture.finding_links {
-            builder.link_architecture_finding(index, finding);
-        }
-        for finding in &architecture_findings_for_links {
-            for package in finding.packages() {
-                builder.link_architecture_finding(
-                    self.packages[package.index()].scope(),
-                    finding.id(),
-                );
-            }
-            for file in finding.files() {
-                builder
-                    .link_architecture_finding(builder.files()[file.index()].scope(), finding.id());
-            }
-        }
+        link_evolutionary_findings(&mut builder, root, &self.packages, &evolutionary_findings);
+        link_architecture_findings(
+            &mut builder,
+            &self.packages,
+            architecture.finding_links,
+            &architecture_findings_for_links,
+        );
         builder.set_packages(self.packages);
         builder.finish()
+    }
+}
+
+/// The propagation and core comparisons incomplete evidence suppresses.
+fn suppressed_propagation(architecture: &ArchitectureBuild) -> (u32, u32) {
+    let suppressed_reach = architecture
+        .package_closures
+        .iter()
+        .filter(|closure| {
+            !architecture
+                .graph_evidence
+                .package_is_complete(closure.package())
+        })
+        .count() as u32
+        + u32::from(
+            !architecture.graph_evidence.is_complete()
+                && architecture
+                    .measurements
+                    .iter()
+                    .map(|value| value.reach_in())
+                    .max()
+                    .and_then(|reach| {
+                        smackdebt_analysis::PropagationReach::packages(
+                            reach,
+                            architecture.measurements.len() as u32,
+                        )
+                    })
+                    .is_some(),
+        );
+    let suppressed_core =
+        u32::from(!architecture.graph_evidence.is_complete() && architecture.core_size.is_some());
+    (suppressed_reach, suppressed_core)
+}
+
+/// Links every evolutionary finding to the root and its package pair.
+fn link_evolutionary_findings(
+    builder: &mut AnalysisReportBuilder,
+    root: ScopeId,
+    packages: &[PackageRecord],
+    findings: &[smackdebt_analysis::EvolutionaryFinding],
+) {
+    for finding in findings {
+        let pair = finding.coupling();
+        builder.link_evolutionary_finding(root, finding.id());
+        builder.link_evolutionary_finding(packages[pair.left().index()].scope(), finding.id());
+        builder.link_evolutionary_finding(packages[pair.right().index()].scope(), finding.id());
+    }
+}
+
+/// Links every architecture finding to the scopes it names.
+fn link_architecture_findings(
+    builder: &mut AnalysisReportBuilder,
+    packages: &[PackageRecord],
+    links: Vec<(ScopeId, smackdebt_analysis::ArchitectureFindingId)>,
+    findings: &[smackdebt_analysis::ArchitectureFinding],
+) {
+    for (scope, finding) in links {
+        builder.link_architecture_finding(scope, finding);
+    }
+    for finding in findings {
+        for package in finding.packages() {
+            builder.link_architecture_finding(packages[package.index()].scope(), finding.id());
+        }
+        for file in finding.files() {
+            builder.link_architecture_finding(builder.files()[file.index()].scope(), finding.id());
+        }
     }
 }
 

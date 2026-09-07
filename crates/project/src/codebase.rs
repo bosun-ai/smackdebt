@@ -10,7 +10,7 @@ use smackdebt_analysis::{
 use smackdebt_discovery::{DiscoveredFile, Inventory};
 use std::path::Path;
 
-use crate::codebase_report::{CodebaseReportBuilder, SignalPolicies};
+use crate::codebase_report::{CodebaseInputs, CodebaseReportBuilder, SignalPolicies};
 use crate::history_stream::load_evolution;
 use crate::rating::FileResult;
 use crate::rating::SourcePolicy;
@@ -197,9 +197,11 @@ pub(crate) fn analyze_codebase(request: &CodebaseRequest) -> Result<ProjectRepor
     );
     let mut builder = CodebaseReportBuilder::new(
         selection.label,
-        &inventory,
-        &candidates,
-        &history.activity,
+        CodebaseInputs {
+            inventory: &inventory,
+            candidates: &candidates,
+            activity: &history.activity,
+        },
         aliases,
         history.evolution,
         SignalPolicies {
