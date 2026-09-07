@@ -450,3 +450,142 @@ impl InputSide {
         }
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::diff::analyze_diff;
+    use crate::requests::DiffRequest;
+    use crate::requests::ExecutionWidth;
+    use crate::test_support::{git, repository};
+    use smackdebt_analysis::ScopeId;
+    use smackdebt_analysis::SourceTrust;
+    use std::fs;
+
+    #[test]
+    fn recovered_worktree_units_remain_advisory_without_diff_verdicts() {
+        let root = tempfile::tempdir().unwrap();
+        git(root.path(), ["init", "-q"]);
+        git(
+            root.path(),
+            ["config", "user.email", "test@example.invalid"],
+        );
+        git(root.path(), ["config", "user.name", "Smackdebt Test"]);
+        fs::write(
+            root.path().join("main.js"),
+            "export function work() { return 1; }\n",
+        )
+        .unwrap();
+        git(root.path(), ["add", "-A"]);
+        git(root.path(), ["commit", "-qm", "base"]);
+        fs::write(
+            root.path().join("main.js"),
+            "export function work( { if (a) { if (b) { return 1; } }\n",
+        )
+        .unwrap();
+
+        let result = analyze_diff(
+            &DiffRequest::new(root.path())
+                .with_reference("HEAD")
+                .with_thresholds((1, 2), (1, 2), (1, 2), (4, 7), (6, 9)),
+        )
+        .unwrap();
+        let report = result.report();
+        assert!(report.comparisons().is_empty());
+        assert!(!report.findings().is_empty());
+        assert!(
+            report
+                .findings()
+                .iter()
+                .all(|finding| finding.trust() == SourceTrust::Advisory)
+        );
+        assert_eq!(report.files()[0].health(), HealthCounts::default());
+        assert_eq!(report.files()[0].coverage().clean_files(), 0);
+        assert_eq!(report.files()[0].coverage().recovered_files(), 1);
+        let root_coverage = report.scopes()[report.root().unwrap().index()].coverage();
+        assert_eq!(root_coverage.clean_files(), 0);
+        assert_eq!(root_coverage.recovered_files(), 1);
+        assert_eq!(root_coverage.unsupported_files(), 0);
+        assert_eq!(root_coverage.failed_files(), 0);
+        assert_eq!(root_coverage.context_files(), 0);
+        assert_eq!(root_coverage.selected_files(), 1);
+    }
+    /// An unchanged file in an unsupported language keeps its language and
+    /// failed parse on both sides of a diff, so neither graph side claims a
+    /// completeness it does not have.
+    #[test]
+    fn an_unchanged_unsupported_file_is_counted_by_both_diff_sides() {
+        let root = tempfile::tempdir().unwrap();
+        let repository_path = root.path();
+        git(repository_path, ["init", "-q"]);
+        git(
+            repository_path,
+            ["config", "user.email", "test@example.invalid"],
+        );
+        git(repository_path, ["config", "user.name", "Smackdebt Test"]);
+        fs::write(
+            repository_path.join("page.astro"),
+            "---\nconst title = 'page';\n---\n",
+        )
+        .unwrap();
+        fs::write(
+            repository_path.join("work.rs"),
+            "pub fn work() -> i32 { 1 }\n",
+        )
+        .unwrap();
+        git(repository_path, ["add", "."]);
+        git(repository_path, ["commit", "-qm", "base"]);
+        fs::write(
+            repository_path.join("work.rs"),
+            "pub fn work() -> i32 { 2 }\n",
+        )
+        .unwrap();
+
+        let result =
+            analyze_diff(&DiffRequest::new(repository_path).with_reference("HEAD")).unwrap();
+        let report = result.report();
+        let page = report
+            .files()
+            .iter()
+            .find(|file| file.path() == "page.astro")
+            .expect("an unchanged unsupported file stays in the file table");
+        assert_eq!(page.language(), Some(Language::Astro));
+        assert_eq!(page.role(), SourceRole::Primary);
+        assert_ne!(page.trust(), SourceTrust::Trusted);
+        let evidence = report
+            .diff_graph_evidence()
+            .expect("a diff states both graph sides");
+        assert_eq!(
+            evidence.current().parse_failures(),
+            1,
+            "the current side counts the unsupported file as its one parse failure"
+        );
+        assert_eq!(
+            evidence.base().parse_failures(),
+            1,
+            "the base side states the same failure for the same unchanged file"
+        );
+    }
+    #[test]
+    fn diff_retains_changed_file_scopes_and_reports_side_failures() {
+        let root = repository();
+        let repository_path = root.path().join("repo");
+        fs::write(
+            repository_path.join("sample.rs"),
+            "fn work(value: i32) -> i32 { value + value + 1 }\n",
+        )
+        .unwrap();
+        fs::write(repository_path.join("new.rs"), "fn added() {}\n").unwrap();
+        let result = analyze_diff(
+            &DiffRequest::new(&repository_path)
+                .with_reference("HEAD")
+                .with_width(ExecutionWidth::fixed(2).unwrap()),
+        )
+        .unwrap();
+        assert_eq!(result.report().files().len(), 2);
+        assert_eq!(result.report().scopes().len(), 4);
+        assert_eq!(result.report().root(), Some(ScopeId::from_index(0)));
+        assert!(!result.report().comparisons().is_empty());
+        assert_eq!(result.stats().source_reads, 2);
+    }
+}

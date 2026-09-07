@@ -331,3 +331,247 @@ impl SelectedChange {
         self.base_exists
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::codebase::analyze_codebase;
+    use crate::diff::analyze_diff;
+    use crate::requests::ExecutionWidth;
+    use crate::requests::{CodebaseRequest, DiffRequest};
+    use crate::test_support::{git, repository};
+    use smackdebt_analysis::FileRecord;
+    use smackdebt_analysis::ScopeKind;
+    use std::fs;
+
+    #[test]
+    fn diff_appends_base_only_packages_after_current_ids() {
+        let root = tempfile::tempdir().unwrap();
+        git(root.path(), ["init", "-q"]);
+        git(
+            root.path(),
+            ["config", "user.email", "test@example.invalid"],
+        );
+        git(root.path(), ["config", "user.name", "Smackdebt Test"]);
+        for package in ["a", "m"] {
+            fs::create_dir_all(root.path().join(package)).unwrap();
+            fs::write(root.path().join(package).join("package.json"), "{}").unwrap();
+            fs::write(
+                root.path().join(package).join("main.js"),
+                "export function work() { return 1; }\n",
+            )
+            .unwrap();
+        }
+        git(root.path(), ["add", "-A"]);
+        git(root.path(), ["commit", "-qm", "base"]);
+        fs::remove_dir_all(root.path().join("m")).unwrap();
+        fs::create_dir_all(root.path().join("z")).unwrap();
+        fs::write(root.path().join("z/package.json"), "{}").unwrap();
+        fs::write(
+            root.path().join("z/main.js"),
+            "export function work() { return 1; }\n",
+        )
+        .unwrap();
+
+        let codebase = analyze_codebase(&CodebaseRequest::new(root.path())).unwrap();
+        let diff = analyze_diff(
+            &DiffRequest::new(root.path())
+                .with_reference("HEAD")
+                .with_history_days(0),
+        )
+        .unwrap();
+        let current: Vec<_> = codebase
+            .report()
+            .packages()
+            .iter()
+            .map(|package| (package.id(), package.path()))
+            .collect();
+        assert_eq!(
+            current,
+            [
+                (PackageId::from_index(0), "a"),
+                (PackageId::from_index(1), "z")
+            ]
+        );
+        let packages: Vec<_> = diff
+            .report()
+            .packages()
+            .iter()
+            .map(|package| {
+                let scope = &diff.report().scopes()[package.scope().index()];
+                assert_eq!(scope.kind(), ScopeKind::Package);
+                assert_eq!(scope.name(), package.path());
+                (package.id(), package.path(), package.presence())
+            })
+            .collect();
+        assert_eq!(
+            packages,
+            [
+                (
+                    PackageId::from_index(0),
+                    "a",
+                    smackdebt_analysis::PackagePresence::Current
+                ),
+                (
+                    PackageId::from_index(1),
+                    "z",
+                    smackdebt_analysis::PackagePresence::Current
+                ),
+                (
+                    PackageId::from_index(2),
+                    "m",
+                    smackdebt_analysis::PackagePresence::BaseOnly
+                ),
+            ]
+        );
+    }
+    #[test]
+    fn changed_ignore_rules_select_unchanged_tracked_sources_per_side() {
+        let root = tempfile::tempdir().unwrap();
+        let repository_path = root.path();
+        git(repository_path, ["init", "-q"]);
+        git(
+            repository_path,
+            ["config", "user.email", "test@example.invalid"],
+        );
+        git(repository_path, ["config", "user.name", "Smackdebt Test"]);
+        fs::write(repository_path.join("package.json"), "{}\n").unwrap();
+        fs::write(repository_path.join(".gitignore"), "").unwrap();
+        fs::write(
+            repository_path.join("hidden.ts"),
+            "import missing from './missing.js';\nexport default missing;\n",
+        )
+        .unwrap();
+        fs::write(repository_path.join("main.ts"), "export default 1;\n").unwrap();
+        git(repository_path, ["add", "."]);
+        git(repository_path, ["commit", "-qm", "visible source"]);
+        fs::write(repository_path.join(".gitignore"), "hidden.ts\n").unwrap();
+        fs::write(
+            repository_path.join("hidden.ts"),
+            "import changed from './missing.js';\nexport default changed;\n",
+        )
+        .unwrap();
+
+        let result =
+            analyze_diff(&DiffRequest::new(repository_path).with_reference("HEAD")).unwrap();
+        let evidence = result.report().diff_graph_evidence().unwrap();
+        assert!(!evidence.base().is_complete());
+        assert!(evidence.current().is_complete());
+        assert!(
+            result
+                .report()
+                .files()
+                .iter()
+                .any(|file| file.path() == "hidden.ts")
+        );
+    }
+    #[test]
+    fn a_modified_source_ignored_on_both_sides_never_enters_diff_analysis() {
+        let root = tempfile::tempdir().unwrap();
+        let repository_path = root.path();
+        git(repository_path, ["init", "-q"]);
+        git(
+            repository_path,
+            ["config", "user.email", "test@example.invalid"],
+        );
+        git(repository_path, ["config", "user.name", "Smackdebt Test"]);
+        fs::write(repository_path.join("package.json"), "{}\n").unwrap();
+        fs::write(repository_path.join(".gitignore"), "hidden.ts\n").unwrap();
+        fs::write(
+            repository_path.join("hidden.ts"),
+            "import missing from './missing.js';\nexport default missing;\n",
+        )
+        .unwrap();
+        fs::write(repository_path.join("main.ts"), "export default 1;\n").unwrap();
+        git(repository_path, ["add", "."]);
+        git(repository_path, ["add", "-f", "hidden.ts"]);
+        git(repository_path, ["commit", "-qm", "ignored tracked source"]);
+        fs::write(
+            repository_path.join("hidden.ts"),
+            "import changed from './still-missing.js';\nexport default changed;\n",
+        )
+        .unwrap();
+
+        let result =
+            analyze_diff(&DiffRequest::new(repository_path).with_reference("HEAD")).unwrap();
+        let evidence = result.report().diff_graph_evidence().unwrap();
+        assert!(evidence.base().is_complete());
+        assert!(evidence.current().is_complete());
+        assert!(
+            result
+                .report()
+                .files()
+                .iter()
+                .all(|file| file.path() != "hidden.ts")
+        );
+    }
+    #[test]
+    fn diff_covers_committed_staged_unstaged_renamed_deleted_and_untracked_files() {
+        let root = repository();
+        let repository_path = root.path().join("repo");
+        for name in [
+            "committed.rs",
+            "staged.rs",
+            "unstaged.rs",
+            "old.rs",
+            "deleted.rs",
+        ] {
+            fs::write(
+                repository_path.join(name),
+                format!("fn {}() {{}}\n", name.replace('.', "_")),
+            )
+            .unwrap();
+        }
+        git(&repository_path, ["add", "."]);
+        git(&repository_path, ["commit", "-qm", "add fixture files"]);
+        fs::write(
+            repository_path.join("committed.rs"),
+            "fn committed() { if true {} }\n",
+        )
+        .unwrap();
+        git(&repository_path, ["add", "committed.rs"]);
+        git(&repository_path, ["commit", "-qm", "change committed file"]);
+        fs::write(
+            repository_path.join("staged.rs"),
+            "fn staged() { if true {} }\n",
+        )
+        .unwrap();
+        git(&repository_path, ["add", "staged.rs"]);
+        fs::write(
+            repository_path.join("unstaged.rs"),
+            "fn unstaged() { if true {} }\n",
+        )
+        .unwrap();
+        fs::rename(
+            repository_path.join("old.rs"),
+            repository_path.join("renamed.rs"),
+        )
+        .unwrap();
+        fs::remove_file(repository_path.join("deleted.rs")).unwrap();
+        fs::write(repository_path.join("untracked.rs"), "fn untracked() {}\n").unwrap();
+
+        let result = analyze_diff(
+            &DiffRequest::new(&repository_path)
+                .with_reference("HEAD~1")
+                .with_width(ExecutionWidth::fixed(3).unwrap()),
+        )
+        .unwrap();
+        let paths: Vec<_> = result
+            .report()
+            .files()
+            .iter()
+            .map(FileRecord::path)
+            .collect();
+        for expected in [
+            "committed.rs",
+            "staged.rs",
+            "unstaged.rs",
+            "renamed.rs",
+            "deleted.rs",
+            "untracked.rs",
+        ] {
+            assert!(paths.contains(&expected), "missing {expected}: {paths:?}");
+        }
+        assert!(result.stats().git_processes <= 6);
+    }
+}

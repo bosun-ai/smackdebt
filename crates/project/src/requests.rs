@@ -189,3 +189,17 @@ pub enum ProjectError {
     #[error("not a source file: {0}")]
     NotSourceFile(PathBuf),
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn execution_width_rejects_zero() {
+        assert_eq!(ExecutionWidth::fixed(0), None);
+        assert!(matches!(
+            ExecutionWidth::fixed(1),
+            Some(ExecutionWidth::Fixed(_))
+        ));
+    }
+}

@@ -23,7 +23,6 @@ mod history_stream;
 mod manifest_names;
 mod package_graph;
 mod paths;
-mod project;
 mod propagation_comparisons;
 mod rating;
 mod reference_tables;
@@ -34,6 +33,8 @@ mod rust_layout;
 mod selection;
 mod source_units;
 mod test_scope;
+#[cfg(test)]
+mod test_support;
 mod work;
 
 #[cfg(feature = "evidence-stats")]

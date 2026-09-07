@@ -159,3 +159,109 @@ pub(crate) fn runtime_source_spellings(candidate: &str) -> Vec<String> {
         })
         .collect()
 }
+
+#[cfg(test)]
+mod tests {
+
+    use crate::codebase::analyze_codebase;
+    use crate::requests::CodebaseRequest;
+    use smackdebt_analysis::ResolutionDiagnostic;
+    use smackdebt_analysis::ResolutionIssueKind;
+    use std::fs;
+
+    #[test]
+    fn symbolic_candidates_are_the_last_resort_of_one_reference() {
+        let root = tempfile::tempdir().unwrap();
+        for (path, source) in [
+            (
+                "Cargo.toml",
+                "[package]\nname='symbolic'\nversion='0.1.0'\n",
+            ),
+            (
+                "src/lib.rs",
+                "mod deep;\nmod helper;\nmod registries;\nmod report;\npub struct Item;\n",
+            ),
+            (
+                "src/report.rs",
+                "use crate::Item;\nuse crate::registries::traits::ToolExt;\nmod tests {\n    use super::*;\n}\n",
+            ),
+            ("src/deep/mod.rs", "mod inner;\n"),
+            (
+                "src/deep/inner.rs",
+                "mod tests {\n    use super::helper::work;\n}\n",
+            ),
+            ("src/helper.rs", "pub fn work() -> i32 { 1 }\n"),
+            ("src/registries.rs", "pub mod traits;\n"),
+            ("src/registries/traits.rs", "pub struct ToolExt;\n"),
+            ("standalone/loose.rs", "use crate::Missing;\n"),
+        ] {
+            let file = root.path().join(path);
+            fs::create_dir_all(file.parent().unwrap()).unwrap();
+            fs::write(file, source).unwrap();
+        }
+
+        let result = analyze_codebase(&CodebaseRequest::new(root.path())).unwrap();
+        let report = result.report();
+        let edges: Vec<_> = report
+            .dependency_edges()
+            .iter()
+            .filter(|edge| edge.relation() == smackdebt_analysis::StaticRelationKind::Uses)
+            .map(|edge| {
+                (
+                    report.files()[edge.source().index()].path(),
+                    report.files()[edge.target().index()].path(),
+                )
+            })
+            .collect();
+        assert!(
+            edges.contains(&("src/report.rs", "src/lib.rs")),
+            "a crate-root item resolves to the crate root: {edges:?}"
+        );
+        assert!(
+            edges.contains(&("src/deep/inner.rs", "src/helper.rs")),
+            "a matching module path wins over the declaring file: {edges:?}"
+        );
+        assert!(
+            edges.contains(&("src/report.rs", "src/registries/traits.rs")),
+            "the nearest matching module wins over its parent: {edges:?}"
+        );
+        assert!(
+            !edges
+                .iter()
+                .any(|(source, target)| source == target || *target == "src/deep/inner.rs"),
+            "a reference to the declaring file creates no edge: {edges:?}"
+        );
+        let unresolved: Vec<_> = report
+            .resolution_diagnostics()
+            .iter()
+            .filter(|value| value.kind() == ResolutionIssueKind::Unresolved)
+            .map(ResolutionDiagnostic::target)
+            .collect();
+        assert_eq!(
+            unresolved,
+            ["crate::Missing"],
+            "a symbolic candidate that matches nothing stays unresolved"
+        );
+    }
+    #[test]
+    fn java_source_root_import_resolves_to_a_repository_file() {
+        let root = tempfile::tempdir().unwrap();
+        fs::create_dir_all(root.path().join("src/main/java/app")).unwrap();
+        fs::create_dir_all(root.path().join("src/main/java/usecase")).unwrap();
+        fs::write(root.path().join("pom.xml"), "<project />").unwrap();
+        fs::write(
+            root.path().join("src/main/java/app/Local.java"),
+            "package app; public class Local {}\n",
+        )
+        .unwrap();
+        fs::write(
+            root.path().join("src/main/java/usecase/Main.java"),
+            "package usecase; import app.Local; public class Main {}\n",
+        )
+        .unwrap();
+
+        let result = analyze_codebase(&CodebaseRequest::new(root.path())).unwrap();
+        assert_eq!(result.report().dependency_edges().len(), 1);
+        assert_eq!(result.report().dependency_coverage().internal(), 1);
+    }
+}

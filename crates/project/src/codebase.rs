@@ -22,6 +22,8 @@ use crate::selection::Selection;
 use crate::source_units::analyze_current_files;
 use crate::test_scope::demote_test_declared_roles;
 use crate::work::AnalysisWork;
+#[cfg(test)]
+use std::fs;
 
 impl CodebaseRequest {
     pub fn new(path: impl Into<PathBuf>) -> Self {
@@ -256,4 +258,71 @@ pub(crate) fn analyze_codebase(request: &CodebaseRequest) -> Result<ProjectRepor
             git_processes: history.processes,
         },
     })
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use smackdebt_analysis::{CodebaseTier, WorstOffenderReason};
+    use std::fs;
+
+    #[test]
+    fn a_codebase_verdict_states_the_tier_and_names_the_worst_offender() {
+        let root = tempfile::tempdir().unwrap();
+        fs::write(
+            root.path().join("Cargo.toml"),
+            "[package]\nname='verdicts'\nversion='0.1.0'\n",
+        )
+        .unwrap();
+        fs::write(
+            root.path().join("work.rs"),
+            "pub fn work(a: i32) -> i32 { if a > 0 { if a > 1 { return 1; } } 0 }\n",
+        )
+        .unwrap();
+        let report = CodebaseRequest::new(root.path())
+            .with_thresholds((1, 2), (5, 10), (50, 100), (4, 7), (6, 9))
+            .analyze()
+            .unwrap();
+        let verdict = report.report().verdict().unwrap();
+        assert_eq!(verdict.counts().checked(), 1);
+        assert_eq!(verdict.counts().high(), 1);
+        assert_eq!(verdict.counts().high_permille(), 1000);
+        // One checked unit is far below the density evidence threshold, so
+        // the saturated permille is capped at worn.
+        assert_eq!(verdict.tier(), CodebaseTier::Worn);
+        assert_eq!(verdict.sentence(), "Worn in the usual places.");
+        assert_eq!(verdict.diff_tier(), None);
+        let offender = verdict.worst_offender().unwrap();
+        assert_eq!(offender.path(), "work.rs");
+        assert_eq!(offender.reason(), WorstOffenderReason::MostComplex);
+    }
+}
+
+#[cfg(feature = "evidence-stats")]
+#[test]
+fn live_evidence_snapshot_observes_analysis_started_after_the_snapshot() {
+    let root = tempfile::tempdir().unwrap();
+    fs::write(
+        root.path().join("package.json"),
+        "{\"name\":\"live-evidence\",\"private\":true}\n",
+    )
+    .unwrap();
+    fs::write(
+        root.path().join("main.js"),
+        "export function measured(value) { return value; }\n",
+    )
+    .unwrap();
+    crate::evidence::reset();
+    let before = crate::evidence::snapshot();
+
+    analyze_codebase(&CodebaseRequest::new(root.path())).unwrap();
+
+    let after = crate::evidence::snapshot();
+    let delta = after.since(before);
+    assert!(delta.inventory_walks() >= 1);
+    assert!(delta.inventory_visits() > 0);
+    assert!(delta.source_reads() >= 1);
+    assert!(delta.parser_visits() >= 1);
+    assert!(delta.algorithm_passes() >= 3);
+    assert!(delta.git_processes() > 0);
 }

@@ -95,3 +95,209 @@ impl ArchitectureLinks {
         }
     }
 }
+
+#[cfg(test)]
+mod tests {
+
+    use crate::diff::analyze_diff;
+    use crate::requests::DiffRequest;
+    use crate::test_support::git;
+    use smackdebt_analysis::ResolutionIssueKind;
+    use std::fs;
+
+    #[test]
+    fn diff_uses_unchanged_edges_to_find_an_introduced_package_cycle() {
+        let root = tempfile::tempdir().unwrap();
+        let repository_path = root.path();
+        git(repository_path, ["init", "-q"]);
+        git(
+            repository_path,
+            ["config", "user.email", "test@example.invalid"],
+        );
+        git(repository_path, ["config", "user.name", "Smackdebt Test"]);
+        for package in ["app", "core"] {
+            fs::create_dir_all(repository_path.join(package)).unwrap();
+            fs::write(repository_path.join(package).join("package.json"), "{}").unwrap();
+        }
+        fs::create_dir_all(repository_path.join("app/src")).unwrap();
+        fs::write(
+            repository_path.join("app/src/a.js"),
+            "import core from '../../core/b';\nfunction app() {}\n",
+        )
+        .unwrap();
+        fs::write(repository_path.join("core/b.js"), "function core() {}\n").unwrap();
+        git(repository_path, ["add", "."]);
+        git(repository_path, ["commit", "-qm", "initial"]);
+        fs::write(
+            repository_path.join("core/b.js"),
+            "import app from '../app/src/a';\nfunction core() {}\n",
+        )
+        .unwrap();
+
+        let result =
+            analyze_diff(&DiffRequest::new(repository_path).with_reference("HEAD")).unwrap();
+        assert!(
+            result
+                .report()
+                .architecture_comparisons()
+                .iter()
+                .any(|comparison| {
+                    comparison.kind()
+                        == smackdebt_analysis::ArchitectureComparisonKind::CycleIntroduced
+                        && comparison.direction() == smackdebt_analysis::ComparisonDirection::Worse
+                })
+        );
+        assert_eq!(result.stats().inventory_walks, 1);
+        assert_eq!(result.stats().source_reads, 2);
+    }
+    #[test]
+    fn selected_package_diff_uses_an_outside_change_for_incoming_cycle_evidence() {
+        let root = tempfile::tempdir().unwrap();
+        let repository_path = root.path();
+        git(repository_path, ["init", "-q"]);
+        git(
+            repository_path,
+            ["config", "user.email", "test@example.invalid"],
+        );
+        git(repository_path, ["config", "user.name", "Smackdebt Test"]);
+        for package in ["app", "core"] {
+            fs::create_dir_all(repository_path.join(package)).unwrap();
+            fs::write(repository_path.join(package).join("package.json"), "{}").unwrap();
+        }
+        fs::create_dir_all(repository_path.join("app/src")).unwrap();
+        fs::write(
+            repository_path.join("app/src/a.js"),
+            "import core from '../../core/b';\nfunction app() {}\n",
+        )
+        .unwrap();
+        fs::write(repository_path.join("core/b.js"), "function core() {}\n").unwrap();
+        git(repository_path, ["add", "."]);
+        git(repository_path, ["commit", "-qm", "initial"]);
+        fs::write(
+            repository_path.join("core/b.js"),
+            "import app from '../app/src/a';\nfunction core() {}\n",
+        )
+        .unwrap();
+
+        for selected in ["app", "app/src", "app/src/a.js"] {
+            let result = analyze_diff(
+                &DiffRequest::new(repository_path.join(selected)).with_reference("HEAD"),
+            )
+            .unwrap();
+            let scope = result.selected_scope().unwrap();
+            assert_eq!(result.report().scopes()[scope.index()].name(), selected);
+            let comparisons: Vec<_> = result.report().scopes()[scope.index()]
+                .architecture_comparisons()
+                .iter()
+                .map(|id| &result.report().architecture_comparisons()[id.index()])
+                .collect();
+            assert!(comparisons.iter().any(|value| value.kind()
+                == smackdebt_analysis::ArchitectureComparisonKind::CycleIntroduced));
+            assert!(
+                comparisons.iter().any(|value| value.kind()
+                    == smackdebt_analysis::ArchitectureComparisonKind::EdgeAdded)
+            );
+        }
+    }
+    #[test]
+    fn diff_resolves_manifest_names_from_each_graph_side() {
+        let root = tempfile::tempdir().unwrap();
+        let repository_path = root.path();
+        git(repository_path, ["init", "-q"]);
+        git(
+            repository_path,
+            ["config", "user.email", "test@example.invalid"],
+        );
+        git(repository_path, ["config", "user.name", "Smackdebt Test"]);
+        for package in ["a", "b"] {
+            fs::create_dir_all(repository_path.join(package)).unwrap();
+        }
+        fs::write(
+            repository_path.join("a/package.json"),
+            "{\"name\":\"old-name\",\"main\":\"main.js\"}\n",
+        )
+        .unwrap();
+        fs::write(
+            repository_path.join("b/package.json"),
+            "{\"name\":\"b\",\"main\":\"main.js\"}\n",
+        )
+        .unwrap();
+        fs::write(
+            repository_path.join("a/main.js"),
+            "import value from 'b';\nexport default value;\n",
+        )
+        .unwrap();
+        fs::write(
+            repository_path.join("b/main.js"),
+            "import value from 'old-name';\nexport default value;\n",
+        )
+        .unwrap();
+        git(repository_path, ["add", "."]);
+        git(repository_path, ["commit", "-qm", "old package name"]);
+        fs::write(
+            repository_path.join("a/package.json"),
+            "{\"name\":\"new-name\",\"main\":\"main.js\"}\n",
+        )
+        .unwrap();
+        fs::write(
+            repository_path.join("b/main.js"),
+            "import value from 'new-name';\nexport default value;\n",
+        )
+        .unwrap();
+
+        let result =
+            analyze_diff(&DiffRequest::new(repository_path).with_reference("HEAD")).unwrap();
+        assert_eq!(result.report().architecture_findings().len(), 1);
+        assert!(result.report().architecture_comparisons().is_empty());
+        assert!(
+            result
+                .report()
+                .resolution_diagnostics()
+                .iter()
+                .all(|diagnostic| diagnostic.kind() != ResolutionIssueKind::Unresolved)
+        );
+    }
+    #[test]
+    fn unchanged_gemspec_names_resolve_on_both_sides_of_an_unrelated_diff() {
+        let root = tempfile::tempdir().unwrap();
+        let repository_path = root.path();
+        git(repository_path, ["init", "-q"]);
+        git(
+            repository_path,
+            ["config", "user.email", "test@example.invalid"],
+        );
+        git(repository_path, ["config", "user.name", "Smackdebt Test"]);
+        for package in ["a", "b"] {
+            fs::create_dir_all(repository_path.join(package)).unwrap();
+        }
+        fs::write(
+            repository_path.join("a/a.gemspec"),
+            "Gem::Specification.new do |spec|\n  spec.name = 'a-gem'\nend\n",
+        )
+        .unwrap();
+        fs::write(
+            repository_path.join("b/b.gemspec"),
+            "Gem::Specification.new do |spec|\n  spec.name = 'b-gem'\nend\n",
+        )
+        .unwrap();
+        fs::write(
+            repository_path.join("a/main.js"),
+            "import value from 'b-gem';\nexport default value;\n",
+        )
+        .unwrap();
+        fs::write(
+            repository_path.join("b/main.js"),
+            "import value from 'a-gem';\nexport default value;\n",
+        )
+        .unwrap();
+        fs::write(repository_path.join("note.md"), "before\n").unwrap();
+        git(repository_path, ["add", "."]);
+        git(repository_path, ["commit", "-qm", "gemspec packages"]);
+        fs::write(repository_path.join("note.md"), "after\n").unwrap();
+
+        let result =
+            analyze_diff(&DiffRequest::new(repository_path).with_reference("HEAD")).unwrap();
+        assert_eq!(result.report().architecture_findings().len(), 1);
+        assert!(result.report().architecture_comparisons().is_empty());
+    }
+}

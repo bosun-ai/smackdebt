@@ -267,3 +267,125 @@ pub(crate) fn parse_resolution_aliases(
     });
     Ok(aliases)
 }
+
+#[cfg(test)]
+mod tests {
+
+    use crate::codebase::analyze_codebase;
+    use crate::diff::analyze_diff;
+    use crate::requests::{CodebaseRequest, DiffRequest};
+    use crate::test_support::git;
+    use std::fs;
+
+    #[test]
+    fn project_configuration_aliases_resolve_as_data_without_execution() {
+        let root = tempfile::tempdir().unwrap();
+        fs::create_dir_all(root.path().join("src/core")).unwrap();
+        fs::write(root.path().join("package.json"), "{}").unwrap();
+        fs::write(
+            root.path().join("tsconfig.json"),
+            r#"{"compilerOptions":{"baseUrl":".","paths":{"@/*":["src/*"]}}}"#,
+        )
+        .unwrap();
+        fs::write(
+            root.path().join("src/main.ts"),
+            "import core from '@/core/index';\nfunction main() { return core(); }\n",
+        )
+        .unwrap();
+        fs::write(
+            root.path().join("src/core/index.ts"),
+            "export default function core() {}\n",
+        )
+        .unwrap();
+
+        let result = analyze_codebase(&CodebaseRequest::new(root.path())).unwrap();
+        assert_eq!(result.report().dependency_edges().len(), 1);
+        assert_eq!(result.report().dependency_coverage().internal(), 1);
+    }
+    #[test]
+    fn package_aliases_jsonc_and_runtime_extensions_resolve_within_their_package() {
+        let root = tempfile::tempdir().unwrap();
+        for package in ["app", "core"] {
+            fs::create_dir_all(root.path().join(package).join("src")).unwrap();
+            fs::write(root.path().join(package).join("package.json"), "{}").unwrap();
+            fs::write(
+                root.path().join(package).join("src/main.ts"),
+                "import value from '@/value.js?raw';\nexport default value;\n",
+            )
+            .unwrap();
+            fs::write(
+                root.path().join(package).join("src/value.ts"),
+                "export default 1;\n",
+            )
+            .unwrap();
+        }
+        fs::write(
+            root.path().join("app/tsconfig.json"),
+            "{ extends: './tsconfig.base.json', }",
+        )
+        .unwrap();
+        fs::write(
+            root.path().join("app/tsconfig.base.json"),
+            "{ compilerOptions: { paths: { '@/*': ['./src/*'], }, }, }",
+        )
+        .unwrap();
+        fs::write(
+            root.path().join("core/tsconfig.json"),
+            "{ // package-local alias\n compilerOptions: { paths: { '@/*': ['./src/*'], }, }, }",
+        )
+        .unwrap();
+
+        let result = analyze_codebase(&CodebaseRequest::new(root.path())).unwrap();
+        let report = result.report();
+        assert_eq!(report.dependency_edges().len(), 2);
+        for edge in report.dependency_edges() {
+            let source = &report.files()[edge.source().index()];
+            let target = &report.files()[edge.target().index()];
+            assert_eq!(source.package(), target.package());
+            assert!(target.path().ends_with("src/value.ts"));
+        }
+    }
+    #[test]
+    fn diff_uses_each_sides_alias_configuration_without_extra_git_processes() {
+        let root = tempfile::tempdir().unwrap();
+        let repository_path = root.path();
+        git(repository_path, ["init", "-q"]);
+        git(
+            repository_path,
+            ["config", "user.email", "test@example.invalid"],
+        );
+        git(repository_path, ["config", "user.name", "Smackdebt Test"]);
+        for package in ["app", "core"] {
+            fs::create_dir_all(repository_path.join(package)).unwrap();
+            fs::write(repository_path.join(package).join("package.json"), "{}").unwrap();
+        }
+        fs::write(
+            repository_path.join("app/a.ts"),
+            "import core from '@core/value';\nfunction app() {}\n",
+        )
+        .unwrap();
+        fs::write(
+            repository_path.join("core/value.ts"),
+            "export default function core() {}\n",
+        )
+        .unwrap();
+        fs::write(
+            repository_path.join("tsconfig.json"),
+            r#"{"compilerOptions":{"paths":{"@core/*":["core/*"]}}}"#,
+        )
+        .unwrap();
+        git(repository_path, ["add", "."]);
+        git(repository_path, ["commit", "-qm", "initial"]);
+        fs::write(
+            repository_path.join("tsconfig.json"),
+            r#"{"compilerOptions":{"paths":{"@core/*":["app/*"]}}}"#,
+        )
+        .unwrap();
+        let result =
+            analyze_diff(&DiffRequest::new(repository_path).with_reference("HEAD")).unwrap();
+        assert!(result.report().architecture_comparisons().iter().any(
+            |value| value.kind() == smackdebt_analysis::ArchitectureComparisonKind::EdgeRemoved
+        ));
+        assert_eq!(result.stats().git_processes, 5);
+    }
+}

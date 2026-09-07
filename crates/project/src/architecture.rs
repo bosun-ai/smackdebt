@@ -340,3 +340,347 @@ pub(crate) fn architecture_graph_evidence(
         configuration_failures,
     )
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::codebase::analyze_codebase;
+    use crate::diff::analyze_diff;
+    use crate::requests::ProjectReport;
+    use crate::requests::{CodebaseRequest, DiffRequest};
+    use crate::test_support::git;
+    use smackdebt_analysis::Coverage;
+    use smackdebt_analysis::DiagnosticKind;
+    use smackdebt_analysis::HealthCounts;
+    use smackdebt_analysis::Language;
+    use smackdebt_analysis::ResolutionIssueKind;
+    use std::fs;
+
+    /// A recovered parse whose errors sit beside every fact still discloses
+    /// itself, but it no longer costs its package the completeness that
+    /// reach, core, and leakage are published from.
+    #[test]
+    fn recovery_beside_every_fact_leaves_the_package_complete() {
+        let evidence = recovery_fixture("struct Broken {\n");
+        assert!(evidence.complete);
+        assert_eq!(evidence.parse_failures, 0);
+        assert_eq!(evidence.incomplete_packages, 0);
+        assert_eq!(evidence.unresolved_internal, 0);
+        assert!(evidence.disclosed);
+    }
+    #[test]
+    fn recovery_over_a_measured_unit_marks_the_package_incomplete() {
+        let evidence = recovery_fixture("fn late(value: i32) -> i32 { helper(value broken( }\n");
+        assert!(!evidence.complete);
+        assert_eq!(evidence.parse_failures, 1);
+        assert_eq!(evidence.incomplete_packages, 1);
+        assert!(evidence.disclosed);
+    }
+    struct RecoveryEvidence {
+        complete: bool,
+        parse_failures: u32,
+        incomplete_packages: usize,
+        unresolved_internal: u32,
+        disclosed: bool,
+    }
+    /// One package whose only Primary file recovers from `tail`.
+    fn recovery_fixture(tail: &str) -> RecoveryEvidence {
+        let root = tempfile::tempdir().unwrap();
+        fs::write(
+            root.path().join("Cargo.toml"),
+            "[package]\nname='recovery'\nversion='0.1.0'\n",
+        )
+        .unwrap();
+        fs::write(
+            root.path().join("helper.rs"),
+            "pub fn helper(value: i32) -> i32 {\n    value\n}\n",
+        )
+        .unwrap();
+        fs::write(
+            root.path().join("main.rs"),
+            format!(
+                "mod helper;\nuse crate::helper::helper;\n\nfn work(value: i32) -> i32 {{\n    helper(value)\n}}\n\n{tail}"
+            ),
+        )
+        .unwrap();
+
+        let result = analyze_codebase(&CodebaseRequest::new(root.path())).unwrap();
+        let report = result.report();
+        let evidence = report.graph_evidence();
+        RecoveryEvidence {
+            complete: evidence.is_complete(),
+            parse_failures: evidence.parse_failures(),
+            incomplete_packages: evidence.incomplete_packages().len(),
+            unresolved_internal: evidence.unresolved_internal(),
+            disclosed: report.diagnostics().iter().any(|diagnostic| {
+                diagnostic.kind() == DiagnosticKind::ParseFailure
+                    && diagnostic.message() == "parser recovered from syntax errors"
+            }),
+        }
+    }
+    /// A package closes over its own files, so its own evidence decides
+    /// whether its reach may be stated.
+    #[test]
+    fn a_complete_package_states_the_reach_an_incomplete_one_withholds() {
+        let root = tempfile::tempdir().unwrap();
+        let files = smackdebt_analysis::PACKAGE_REACH_FILES;
+        for package in ["app", "core"] {
+            fs::create_dir_all(root.path().join(package)).unwrap();
+            fs::write(root.path().join(package).join("package.json"), "{}").unwrap();
+            for index in 0..files {
+                let source = if index + 1 < files {
+                    format!(
+                        "import next from './unit{}';\nexport default next;\n",
+                        index + 1
+                    )
+                } else {
+                    "export default 1;\n".to_owned()
+                };
+                fs::write(
+                    root.path().join(package).join(format!("unit{index}.js")),
+                    source,
+                )
+                .unwrap();
+            }
+        }
+        // One import of one primary file in `core` names nothing, which is
+        // what the two packages' evidence differs by.
+        fs::write(
+            root.path().join("core/unread.js"),
+            "import absent from './absent';\nexport default absent;\n",
+        )
+        .unwrap();
+
+        let result = analyze_codebase(&CodebaseRequest::new(root.path())).unwrap();
+        let report = result.report();
+        let scope = |path: &str| {
+            report
+                .packages()
+                .iter()
+                .find(|package| package.path() == path)
+                .expect("both packages are reported")
+                .scope()
+        };
+        assert_eq!(report.graph_evidence().incomplete_packages().len(), 1);
+        assert_eq!(report.graph_evidence().suppressed_reach(), 1);
+        assert!(report.scope_verdict(scope("app")).reach().is_some());
+        assert!(report.scope_verdict(scope("core")).reach().is_none());
+    }
+    /// A leakage finding is about two files, so one unread package withholds
+    /// only the findings that name it.
+    #[test]
+    fn leakage_between_two_complete_packages_survives_a_third_incomplete_one() {
+        let file = |index: usize, package: usize| {
+            FileRecord::new(
+                FileId::from_index(index),
+                ScopeId::from_index(0),
+                "src/unit.js",
+                Coverage::default(),
+                HealthCounts::default(),
+            )
+            .with_package(PackageId::from_index(package))
+        };
+        let files = [file(0, 0), file(1, 1), file(2, 2)];
+        let evidence = GraphEvidence::new(vec![PackageId::from_index(2)], 0, 0, 0, Vec::new());
+        let pair = |left: usize, right: usize| {
+            smackdebt_analysis::FileChangeCoupling::new(
+                FileId::from_index(left),
+                FileId::from_index(right),
+                4,
+                5,
+                2,
+            )
+        };
+        let pairs = [pair(0, 1), pair(0, 2)];
+
+        assert!(leakage_evidence_is_complete(&evidence, pairs[0], &files));
+        assert!(!leakage_evidence_is_complete(&evidence, pairs[1], &files));
+        let suppressed = pairs
+            .into_iter()
+            .filter(|pair| !leakage_evidence_is_complete(&evidence, *pair, &files))
+            .count();
+        assert_eq!(suppressed, 1);
+    }
+    /// A file the file dependency graph never reads cannot leave a hole in it.
+    ///
+    /// A fixture and a test are outside the graph the reach, core, and leakage
+    /// facts are proved over, so an import either of them leaves unresolved
+    /// hides nothing from those facts. The diagnostic is still published:
+    /// what changes is only whether the package's evidence is called
+    /// incomplete.
+    #[test]
+    fn an_unread_import_outside_the_graph_leaves_the_package_complete() {
+        for path in ["tests/fixtures/dynamic.js", "tests/dynamic.test.js"] {
+            let evidence = unread_import_evidence(path);
+            assert!(evidence.complete, "{path}");
+            assert_eq!(evidence.incomplete_packages, 0, "{path}");
+            assert_eq!(evidence.diagnostics, 2, "{path}");
+            assert_eq!(evidence.suppressed_reach, 0, "{path}");
+        }
+    }
+    #[test]
+    fn an_unread_import_in_a_graph_file_marks_its_package_incomplete() {
+        let evidence = unread_import_evidence("src/dynamic.js");
+        assert!(!evidence.complete);
+        assert_eq!(evidence.incomplete_packages, 1);
+        assert_eq!(evidence.diagnostics, 2);
+    }
+    struct UnreadImportEvidence {
+        complete: bool,
+        incomplete_packages: usize,
+        diagnostics: usize,
+        suppressed_reach: u32,
+    }
+    /// One JavaScript package whose file at `path` leaves two imports
+    /// unresolved: a dynamic `require` and a name no file matches. Only that
+    /// path differs between the cases, so only the role it carries can explain
+    /// a difference in the evidence.
+    fn unread_import_evidence(path: &str) -> UnreadImportEvidence {
+        let root = tempfile::tempdir().unwrap();
+        let unread = root.path().join(path);
+        fs::create_dir_all(unread.parent().unwrap()).unwrap();
+        fs::write(root.path().join("package.json"), "{}").unwrap();
+        fs::write(
+            root.path().join("main.js"),
+            "import helper from './helper';\nexport default helper;\n",
+        )
+        .unwrap();
+        fs::write(root.path().join("helper.js"), "export default 1;\n").unwrap();
+        fs::write(
+            unread,
+            "import absent from './absent';\nconst late = require(moduleName);\nexport default [absent, late];\n",
+        )
+        .unwrap();
+
+        let result = analyze_codebase(&CodebaseRequest::new(root.path())).unwrap();
+        let report = result.report();
+        let evidence = report.graph_evidence();
+        UnreadImportEvidence {
+            complete: evidence.is_complete(),
+            incomplete_packages: evidence.incomplete_packages().len(),
+            diagnostics: report
+                .resolution_diagnostics()
+                .iter()
+                .filter(|diagnostic| diagnostic.kind() == ResolutionIssueKind::Unresolved)
+                .count(),
+            suppressed_reach: evidence.suppressed_reach(),
+        }
+    }
+    #[test]
+    fn invalid_resolution_configuration_marks_the_package_graph_incomplete() {
+        let root = tempfile::tempdir().unwrap();
+        fs::write(root.path().join("package.json"), "{}").unwrap();
+        fs::write(root.path().join("tsconfig.json"), "{ compilerOptions:").unwrap();
+        fs::write(
+            root.path().join("main.ts"),
+            "import value from '@/value';\nexport default value;\n",
+        )
+        .unwrap();
+        fs::write(root.path().join("value.ts"), "export default 1;\n").unwrap();
+
+        let result = analyze_codebase(&CodebaseRequest::new(root.path())).unwrap();
+        let evidence = result.report().graph_evidence();
+        assert!(!evidence.is_complete());
+        assert_eq!(evidence.incomplete_packages().len(), 1);
+        assert_eq!(evidence.configuration_failures().len(), 1);
+        assert!(
+            evidence.configuration_failures()[0]
+                .reason()
+                .contains("cannot parse")
+        );
+    }
+    #[test]
+    fn diff_assigns_base_graph_failures_to_the_base_package_owner() {
+        let root = tempfile::tempdir().unwrap();
+        let repository_path = root.path();
+        git(repository_path, ["init", "-q"]);
+        git(
+            repository_path,
+            ["config", "user.email", "test@example.invalid"],
+        );
+        git(repository_path, ["config", "user.name", "Smackdebt Test"]);
+        fs::create_dir_all(repository_path.join("sub")).unwrap();
+        fs::write(repository_path.join("package.json"), "{}").unwrap();
+        fs::write(
+            repository_path.join("sub/a.ts"),
+            "import missing from './missing.js';\nexport default missing;\n",
+        )
+        .unwrap();
+        git(repository_path, ["add", "."]);
+        git(repository_path, ["commit", "-qm", "root package"]);
+        fs::write(repository_path.join("sub/package.json"), "{}").unwrap();
+
+        let result =
+            analyze_diff(&DiffRequest::new(repository_path).with_reference("HEAD")).unwrap();
+        let evidence = result.report().diff_graph_evidence().unwrap();
+        assert_eq!(
+            evidence.base().incomplete_packages(),
+            &[PackageId::from_index(0)]
+        );
+        assert_eq!(
+            evidence.current().incomplete_packages(),
+            &[PackageId::from_index(1)]
+        );
+    }
+    fn astro_diff_result(change: &str) -> ProjectReport {
+        let root = tempfile::tempdir().unwrap();
+        let repository_path = root.path();
+        git(repository_path, ["init", "-q"]);
+        git(
+            repository_path,
+            ["config", "user.email", "test@example.invalid"],
+        );
+        git(repository_path, ["config", "user.name", "Smackdebt Test"]);
+        fs::write(repository_path.join("package.json"), "{}\n").unwrap();
+        if change != "added" {
+            fs::write(repository_path.join("page.astro"), "<h1>Before</h1>\n").unwrap();
+        }
+        git(repository_path, ["add", "."]);
+        git(repository_path, ["commit", "-qm", "base"]);
+        match change {
+            "added" => fs::write(repository_path.join("page.astro"), "<h1>Added</h1>\n").unwrap(),
+            "modified" => {
+                fs::write(repository_path.join("page.astro"), "<h1>After</h1>\n").unwrap()
+            }
+            "deleted" => fs::remove_file(repository_path.join("page.astro")).unwrap(),
+            _ => unreachable!("test chooses an Astro change"),
+        }
+        analyze_diff(&DiffRequest::new(repository_path).with_reference("HEAD")).unwrap()
+    }
+    fn assert_astro_diff_is_retained(result: &ProjectReport) {
+        let report = result.report();
+        let root = report.root().unwrap();
+        let coverage = report.scopes()[root.index()].coverage();
+        assert_eq!(coverage.selected_files(), 1);
+        assert_eq!(coverage.unsupported_files(), 1);
+        assert_eq!(report.files().len(), 1);
+        assert_eq!(report.files()[0].language(), Some(Language::Astro));
+        assert_eq!(report.files()[0].trust(), SourceTrust::Failed);
+        assert!(report.findings().is_empty());
+        assert!(report.dependency_edges().is_empty());
+    }
+    #[test]
+    fn added_astro_makes_only_current_diff_graph_evidence_incomplete() {
+        let result = astro_diff_result("added");
+        assert_astro_diff_is_retained(&result);
+        let evidence = result.report().diff_graph_evidence().unwrap();
+        assert!(!evidence.current().is_complete());
+        assert!(evidence.base().is_complete());
+    }
+    #[test]
+    fn modified_astro_makes_both_diff_graph_evidence_sides_incomplete() {
+        let result = astro_diff_result("modified");
+        assert_astro_diff_is_retained(&result);
+        let evidence = result.report().diff_graph_evidence().unwrap();
+        assert!(!evidence.current().is_complete());
+        assert!(!evidence.base().is_complete());
+    }
+    #[test]
+    fn deleted_astro_makes_only_base_diff_graph_evidence_incomplete() {
+        let result = astro_diff_result("deleted");
+        assert_astro_diff_is_retained(&result);
+        let evidence = result.report().diff_graph_evidence().unwrap();
+        assert!(evidence.current().is_complete());
+        assert!(!evidence.base().is_complete());
+    }
+}

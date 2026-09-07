@@ -271,3 +271,172 @@ pub(crate) fn diff_filter(root: &Path, selected: &Path) -> Option<PathBuf> {
     let root = root.canonicalize().unwrap_or_else(|_| root.to_path_buf());
     absolute.strip_prefix(root).ok().map(Path::to_path_buf)
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::test_support::{git, repository};
+    use std::fs;
+
+    use std::process::Command;
+
+    /// A diff without a reference compares against the default branch, so the
+    /// everyday `smackdebt diff` answers without the user naming anything.
+    #[test]
+    fn a_diff_without_a_reference_compares_against_the_default_branch() {
+        let root = tempfile::tempdir().unwrap();
+        let repository_path = root.path();
+        git(repository_path, ["init", "-q", "-b", "master"]);
+        git(
+            repository_path,
+            ["config", "user.email", "test@example.invalid"],
+        );
+        git(repository_path, ["config", "user.name", "Smackdebt Test"]);
+        fs::write(
+            repository_path.join("work.rs"),
+            "pub fn work() -> i32 { 1 }\n",
+        )
+        .unwrap();
+        git(repository_path, ["add", "."]);
+        git(repository_path, ["commit", "-qm", "base"]);
+        git(repository_path, ["checkout", "-q", "-b", "feature"]);
+        fs::write(
+            repository_path.join("work.rs"),
+            "pub fn work() -> i32 { 2 }\n",
+        )
+        .unwrap();
+
+        let result = analyze_diff(&DiffRequest::new(repository_path)).unwrap();
+        assert_eq!(
+            result.report().comparison_ref(),
+            Some("master"),
+            "the report names the branch it answered against"
+        );
+        assert!(
+            result
+                .report()
+                .files()
+                .iter()
+                .any(|file| file.path() == "work.rs"),
+            "the worktree change against the default branch is the diff's subject"
+        );
+    }
+    /// Without a recognizable default branch the diff stops and asks, rather
+    /// than comparing against something the user never chose.
+    #[test]
+    fn a_diff_with_no_default_branch_reports_the_missing_reference() {
+        let root = tempfile::tempdir().unwrap();
+        let repository_path = root.path();
+        git(repository_path, ["init", "-q", "-b", "trunk"]);
+        git(
+            repository_path,
+            ["config", "user.email", "test@example.invalid"],
+        );
+        git(repository_path, ["config", "user.name", "Smackdebt Test"]);
+        fs::write(
+            repository_path.join("work.rs"),
+            "pub fn work() -> i32 { 1 }\n",
+        )
+        .unwrap();
+        git(repository_path, ["add", "."]);
+        git(repository_path, ["commit", "-qm", "base"]);
+
+        let error = analyze_diff(&DiffRequest::new(repository_path)).unwrap_err();
+        assert!(matches!(error, ProjectError::MissingReference));
+    }
+    /// A diff scoped to a non-source file or a source-free directory fails
+    /// with the same exact errors the codebase flow states, carrying the path
+    /// the user typed.
+    #[test]
+    fn a_diff_scoped_to_a_non_source_target_fails_like_the_codebase_flow() {
+        let root = tempfile::tempdir().unwrap();
+        let repository_path = root.path();
+        git(repository_path, ["init", "-q"]);
+        git(
+            repository_path,
+            ["config", "user.email", "test@example.invalid"],
+        );
+        git(repository_path, ["config", "user.name", "Smackdebt Test"]);
+        fs::write(
+            repository_path.join("work.rs"),
+            "pub fn work() -> i32 { 1 }\n",
+        )
+        .unwrap();
+        fs::write(repository_path.join("README.txt"), "notes\n").unwrap();
+        fs::create_dir_all(repository_path.join("docs")).unwrap();
+        fs::write(repository_path.join("docs/notes.txt"), "notes\n").unwrap();
+        git(repository_path, ["add", "."]);
+        git(repository_path, ["commit", "-qm", "base"]);
+
+        let target = repository_path.join("README.txt");
+        let error = analyze_diff(&DiffRequest::new(&target).with_reference("HEAD")).unwrap_err();
+        assert!(matches!(error, ProjectError::NotSourceFile(path) if path == target));
+
+        let target = repository_path.join("docs");
+        let error = analyze_diff(&DiffRequest::new(&target).with_reference("HEAD")).unwrap_err();
+        assert!(matches!(error, ProjectError::NoSourceFiles(path) if path == target));
+    }
+    #[test]
+    fn diff_path_selection_matches_repository_relative_paths() {
+        let root = repository();
+        let repository_path = root.path().join("repo");
+        fs::create_dir_all(repository_path.join("src")).unwrap();
+        fs::rename(
+            repository_path.join("sample.rs"),
+            repository_path.join("src/sample.rs"),
+        )
+        .unwrap();
+        git(&repository_path, ["add", "."]);
+        git(&repository_path, ["commit", "-qm", "move"]);
+        fs::write(
+            repository_path.join("src/sample.rs"),
+            "fn work(value: i32) -> i32 { value + value }\n",
+        )
+        .unwrap();
+        let result =
+            analyze_diff(&DiffRequest::new(repository_path.join("src")).with_reference("HEAD"))
+                .unwrap();
+        assert_eq!(result.report().files().len(), 1);
+        assert_eq!(result.report().files()[0].path(), "src/sample.rs");
+    }
+    #[test]
+    fn diff_fails_when_a_reachable_base_manifest_object_is_missing() {
+        let root = tempfile::tempdir().unwrap();
+        let repository_path = root.path();
+        git(repository_path, ["init", "-q"]);
+        git(
+            repository_path,
+            ["config", "user.email", "test@example.invalid"],
+        );
+        git(repository_path, ["config", "user.name", "Smackdebt Test"]);
+        fs::write(
+            repository_path.join("package.json"),
+            "{\"name\":\"example\"}\n",
+        )
+        .unwrap();
+        fs::write(repository_path.join("main.ts"), "export default 1;\n").unwrap();
+        git(repository_path, ["add", "."]);
+        git(repository_path, ["commit", "-qm", "base"]);
+        fs::write(repository_path.join("main.ts"), "export default 2;\n").unwrap();
+
+        let output = Command::new("git")
+            .args(["rev-parse", "HEAD:package.json"])
+            .current_dir(repository_path)
+            .output()
+            .unwrap();
+        assert!(output.status.success());
+        let object = String::from_utf8(output.stdout).unwrap();
+        let object = object.trim();
+        fs::remove_file(
+            repository_path
+                .join(".git/objects")
+                .join(&object[..2])
+                .join(&object[2..]),
+        )
+        .unwrap();
+
+        let error =
+            analyze_diff(&DiffRequest::new(repository_path).with_reference("HEAD")).unwrap_err();
+        assert!(matches!(error, ProjectError::Inspect { .. }));
+    }
+}

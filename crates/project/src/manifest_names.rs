@@ -171,3 +171,145 @@ pub(crate) fn package_entry_file(
     .into_iter()
     .find_map(|candidate| index.get(&root.join(candidate)).copied())
 }
+
+#[cfg(test)]
+mod tests {
+
+    use crate::codebase::analyze_codebase;
+    use crate::requests::CodebaseRequest;
+    use crate::test_support::{package_pairs, workspace_with_declared_names};
+    use smackdebt_analysis::ResolutionIssueKind;
+    use std::fs;
+
+    #[test]
+    fn declared_manifest_names_resolve_cross_package_references() {
+        let root = workspace_with_declared_names();
+        let result = analyze_codebase(&CodebaseRequest::new(root.path())).unwrap();
+        let report = result.report();
+        assert_eq!(
+            package_pairs(report),
+            [
+                ("crates/app".to_owned(), "crates/core".to_owned()),
+                ("web".to_owned(), "ui".to_owned()),
+            ]
+        );
+        assert!(
+            report
+                .external_dependencies()
+                .iter()
+                .all(|external| external.target() != "acme_core"
+                    && external.target() != "@acme/ui/button"),
+            "{:?}",
+            report.external_dependencies()
+        );
+        let edges: Vec<_> = report
+            .dependency_edges()
+            .iter()
+            .map(|edge| {
+                (
+                    report.files()[edge.source().index()].path(),
+                    report.files()[edge.target().index()].path(),
+                )
+            })
+            .collect();
+        assert!(
+            edges.contains(&("crates/app/src/lib.rs", "crates/core/src/lib.rs")),
+            "{edges:?}"
+        );
+        assert!(
+            edges.contains(&("web/index.js", "ui/index.js")),
+            "{edges:?}"
+        );
+    }
+    #[test]
+    fn a_shadowed_manifest_name_stays_ambiguous_with_its_diagnostic() {
+        let root = workspace_with_declared_names();
+        fs::create_dir_all(root.path().join("mirror/core/src")).unwrap();
+        fs::write(
+            root.path().join("mirror/core/Cargo.toml"),
+            "[package]\nname='acme-core'\nversion='0.1.0'\n",
+        )
+        .unwrap();
+        fs::write(
+            root.path().join("mirror/core/src/lib.rs"),
+            "pub fn core(value: i32) -> i32 { value }\n",
+        )
+        .unwrap();
+
+        let result = analyze_codebase(&CodebaseRequest::new(root.path())).unwrap();
+        let report = result.report();
+        assert!(
+            !package_pairs(report).contains(&("crates/app".to_owned(), "crates/core".to_owned())),
+            "{:?}",
+            package_pairs(report)
+        );
+        let ambiguous: Vec<_> = report
+            .resolution_diagnostics()
+            .iter()
+            .filter(|value| value.kind() == ResolutionIssueKind::Ambiguous)
+            .map(|value| (value.target(), value.span().start_line()))
+            .collect();
+        assert_eq!(ambiguous, [("acme_core::core", 1)]);
+    }
+    #[test]
+    fn a_package_without_an_entry_file_keeps_a_package_scoped_edge() {
+        let root = tempfile::tempdir().unwrap();
+        for (path, source) in [
+            (
+                "crates/tool/Cargo.toml",
+                "[package]\nname='acme-tool'\nversion='0.1.0'\n",
+            ),
+            (
+                "crates/tool/other/thing.rs",
+                "pub fn thing(value: i32) -> i32 { value }\n",
+            ),
+            (
+                "crates/app/Cargo.toml",
+                "[package]\nname='acme-app'\nversion='0.1.0'\n",
+            ),
+            (
+                "crates/app/src/lib.rs",
+                "use acme_tool::thing;\nuse acme_tool::other::more;\npub fn app(value: i32) -> i32 { thing(more(value)) }\n",
+            ),
+            (
+                "crates/app/src/second.rs",
+                "use acme_tool::thing;\npub fn second(value: i32) -> i32 { thing(value) }\n",
+            ),
+        ] {
+            let file = root.path().join(path);
+            fs::create_dir_all(file.parent().unwrap()).unwrap();
+            fs::write(file, source).unwrap();
+        }
+
+        let result = analyze_codebase(&CodebaseRequest::new(root.path())).unwrap();
+        let report = result.report();
+        assert_eq!(
+            package_pairs(report),
+            [("crates/app".to_owned(), "crates/tool".to_owned())]
+        );
+        let edge = &report.package_edges()[0];
+        assert_eq!(
+            (edge.file_pairs(), edge.references(), edge.file_edges()),
+            (2, 3, [].as_slice()),
+            "two files make three package-scoped references"
+        );
+        assert!(
+            report
+                .dependency_edges()
+                .iter()
+                .all(|edge| !report.files()[edge.target().index()]
+                    .path()
+                    .starts_with("crates/tool")),
+            "a package without an entry file has no file-level target"
+        );
+        assert_eq!(report.dependency_coverage().resolved_internal_uses(), 3);
+        assert!(
+            report
+                .external_dependencies()
+                .iter()
+                .all(|external| !external.target().starts_with("acme_tool")),
+            "{:?}",
+            report.external_dependencies()
+        );
+    }
+}

@@ -216,3 +216,130 @@ pub(crate) fn restate_dormant(files: &[FileRecord], dormant: &BTreeSet<FileId>) 
         })
         .collect()
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::codebase::analyze_codebase;
+    use crate::requests::CodebaseRequest;
+    use crate::test_support::file_id;
+    use smackdebt_analysis::PackageId;
+    use smackdebt_analysis::Rating;
+    use std::fs;
+
+    #[test]
+    fn stable_dependency_violations_and_orphan_files_are_derived_from_the_graph() {
+        let root = tempfile::tempdir().unwrap();
+        let repository_path = root.path();
+        for (path, source) in [
+            ("a/package.json", "{\"name\":\"a\"}\n"),
+            (
+                "a/index.js",
+                "import { b } from '../b/index.js';\nimport { other } from '../b/index.js';\nexport const a = b + other;\n",
+            ),
+            ("a/orphan.js", "export function orphan() { return 1; }\n"),
+            ("b/package.json", "{\"name\":\"b\"}\n"),
+            (
+                "b/index.js",
+                "import { e } from '../e/index.js';\nexport const b = e;\nexport const other = e;\n",
+            ),
+            ("c/package.json", "{\"name\":\"c\"}\n"),
+            (
+                "c/index.js",
+                "import { a } from '../a/index.js';\nexport const c = a;\n",
+            ),
+            ("d/package.json", "{\"name\":\"d\"}\n"),
+            (
+                "d/index.js",
+                "import { a } from '../a/index.js';\nexport const d = a;\n",
+            ),
+            ("e/package.json", "{\"name\":\"e\"}\n"),
+            ("e/index.js", "export const e = 1;\n"),
+        ] {
+            let file = repository_path.join(path);
+            fs::create_dir_all(file.parent().unwrap()).unwrap();
+            fs::write(file, source).unwrap();
+        }
+
+        let analyzed = analyze_codebase(&CodebaseRequest::new(repository_path)).unwrap();
+        let report = analyzed.report();
+        let package_path =
+            |package: PackageId| report.packages()[package.index()].path().to_owned();
+
+        // Package `a` is more stable than `b`, so depending on it with two
+        // references reverses the intended direction.
+        let violations: Vec<_> = report
+            .stable_dependency_findings()
+            .iter()
+            .map(|finding| {
+                let evidence = finding.evidence();
+                (
+                    package_path(finding.source()),
+                    package_path(finding.target()),
+                    (
+                        evidence.source().fan_in(),
+                        evidence.source().fan_out(),
+                        evidence.target().fan_in(),
+                        evidence.target().fan_out(),
+                    ),
+                    evidence.references(),
+                    finding.rating(),
+                )
+            })
+            .collect();
+        assert_eq!(
+            violations,
+            [(
+                "a".to_owned(),
+                "b".to_owned(),
+                (2, 1, 1, 1),
+                2,
+                Rating::Watch
+            )]
+        );
+
+        let orphans: Vec<_> = report
+            .orphan_files()
+            .iter()
+            .map(|orphan| report.files()[orphan.file().index()].path().to_owned())
+            .collect();
+        assert_eq!(orphans, ["a/orphan.js".to_owned()]);
+    }
+    #[test]
+    fn a_primary_file_imported_only_by_tests_is_not_an_orphan() {
+        let root = tempfile::tempdir().unwrap();
+        fs::create_dir_all(root.path().join("src")).unwrap();
+        fs::write(
+            root.path().join("Cargo.toml"),
+            "[package]\nname='orphans'\nversion='0.1.0'\n",
+        )
+        .unwrap();
+        fs::write(
+            root.path().join("src/lib.rs"),
+            "#[cfg(test)]\nmod tests {\n    use crate::only_tests::sample;\n    #[test]\n    fn runs() { assert!(sample()); }\n}\n",
+        )
+        .unwrap();
+        fs::write(
+            root.path().join("src/only_tests.rs"),
+            "pub fn sample() -> bool { true }\n",
+        )
+        .unwrap();
+
+        let result = analyze_codebase(&CodebaseRequest::new(root.path())).unwrap();
+        let report = result.report();
+        let only_tests = file_id(report, "src/only_tests.rs");
+        assert!(
+            report
+                .dependency_edges()
+                .iter()
+                .any(|edge| edge.target() == only_tests && edge.role() == SourceRole::Test)
+        );
+        assert!(
+            report
+                .orphan_files()
+                .iter()
+                .all(|orphan| orphan.file() != only_tests),
+            "a file its own tests import is used"
+        );
+    }
+}

@@ -105,3 +105,131 @@ impl Selection {
         )
     }
 }
+
+#[cfg(test)]
+mod tests {
+
+    use crate::codebase::analyze_codebase;
+    use crate::requests::CodebaseRequest;
+    use crate::test_support::{git, repository};
+    use std::fs;
+
+    /// A package cannot say who imports it from its own files, so selecting
+    /// one reads the repository that answers the question and shows the
+    /// package.
+    #[test]
+    fn package_selection_reads_the_sibling_source_that_imports_it() {
+        let root = tempfile::tempdir().unwrap();
+        git(root.path(), ["init", "-q"]);
+        for package in ["app", "core"] {
+            fs::create_dir_all(root.path().join(package)).unwrap();
+            fs::write(root.path().join(package).join("package.json"), "{}").unwrap();
+        }
+        fs::write(
+            root.path().join("app/a.js"),
+            "import core from '../core/b';\nfunction app() {}\n",
+        )
+        .unwrap();
+        fs::write(root.path().join("core/b.js"), "function core() {}\n").unwrap();
+
+        let result = analyze_codebase(&CodebaseRequest::new(root.path().join("core"))).unwrap();
+        assert_eq!(result.report().files().len(), 2);
+        assert_eq!(result.report().dependency_edges().len(), 1);
+        assert_eq!(result.stats().inventory_walks, 1);
+        assert_eq!(result.stats().source_reads, 2);
+        let selected = result.selected_scope().unwrap();
+        assert_eq!(result.report().scopes()[selected.index()].name(), "core");
+        assert_eq!(result.report().scopes()[0].name(), ".");
+    }
+    #[test]
+    fn automatic_scope_uses_the_git_root_from_a_nested_directory() {
+        let root = repository();
+        let repository_path = root.path().join("repo");
+        let nested = repository_path.join("nested/deeper");
+        fs::create_dir_all(&nested).unwrap();
+        let result = analyze_codebase(&CodebaseRequest::automatic(&nested)).unwrap();
+        assert!(
+            result
+                .report()
+                .files()
+                .iter()
+                .any(|file| file.path() == "sample.rs")
+        );
+        assert_eq!(result.report().scopes()[0].name(), ".");
+    }
+    /// A file selection answers one file of the repository report, so the
+    /// walk is the repository and the answered scope is that file.
+    #[test]
+    fn explicit_file_selection_answers_one_scope_of_the_repository() {
+        let root = repository();
+        let repository_path = root.path().join("repo");
+        fs::write(
+            repository_path.join("outside.rs"),
+            "fn outside() { if true {} }\n",
+        )
+        .unwrap();
+
+        let result =
+            analyze_codebase(&CodebaseRequest::new(repository_path.join("sample.rs"))).unwrap();
+
+        assert_eq!(result.report().files().len(), 2);
+        assert_eq!(result.stats().inventory_walks, 1);
+        assert_eq!(result.stats().source_reads, 2);
+        let selected = result.selected_scope().unwrap();
+        assert_eq!(
+            result.report().scopes()[selected.index()].name(),
+            "sample.rs"
+        );
+        assert_eq!(result.report().scopes()[0].name(), ".");
+    }
+    #[test]
+    fn codebase_path_selection_keeps_repository_relative_scope_identity() {
+        let root = repository();
+        let repository_path = root.path().join("repo");
+        fs::create_dir_all(repository_path.join("src")).unwrap();
+        fs::write(
+            repository_path.join("src/lib.rs"),
+            "fn selected() { if true {} }\n",
+        )
+        .unwrap();
+        let result = analyze_codebase(&CodebaseRequest::new(repository_path.join("src"))).unwrap();
+        assert_ne!(result.selected_scope(), result.report().root());
+        assert!(
+            result
+                .report()
+                .files()
+                .iter()
+                .any(|file| file.path() == "src/lib.rs")
+        );
+        assert!(
+            result
+                .report()
+                .scopes()
+                .iter()
+                .any(|scope| scope.name() == "src")
+        );
+    }
+    #[test]
+    fn source_outside_manifest_roots_uses_discoverys_fallback_package() {
+        let root = tempfile::tempdir().unwrap();
+        fs::create_dir_all(root.path().join("app/src")).unwrap();
+        fs::write(
+            root.path().join("app/Cargo.toml"),
+            "[package]\nname='app'\nversion='0.1.0'\n",
+        )
+        .unwrap();
+        fs::write(root.path().join("app/src/lib.rs"), "fn app() {}\n").unwrap();
+        fs::write(root.path().join("outside.rs"), "fn outside() {}\n").unwrap();
+
+        let result = analyze_codebase(&CodebaseRequest::new(root.path())).unwrap();
+
+        assert_eq!(result.report().files().len(), 2);
+        assert!(
+            result
+                .report()
+                .files()
+                .iter()
+                .any(|file| file.path() == "outside.rs")
+        );
+    }
+}

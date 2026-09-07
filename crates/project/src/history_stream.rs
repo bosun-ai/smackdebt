@@ -263,3 +263,175 @@ pub(crate) enum HistoryAlias {
     Resolved(FileId, PackageId, SourceRole, SourceTrust),
     Unusable,
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::codebase::analyze_codebase;
+    use crate::requests::CodebaseRequest;
+    use crate::requests::SourceRoleRule;
+    use crate::test_support::{git, git_dated};
+    use smackdebt_analysis::Report;
+    use std::fs;
+    use std::path::PathBuf;
+
+    /// A history file list the diff flow could produce: file 1 was filtered
+    /// out, so the second entry's identity is 2, not 1.
+    #[test]
+    fn history_paths_are_placed_by_file_identity_rather_than_pushed_in_order() {
+        let files = [
+            (PathBuf::from("left/a.rs"), 0),
+            (PathBuf::from("right/b.rs"), 2),
+        ]
+        .map(|(path, index)| {
+            (
+                path,
+                FileId::from_index(index),
+                PackageId::from_index(0),
+                SourceRole::Primary,
+                SourceTrust::Trusted,
+            )
+        });
+        let paths = history_directory_paths(&files);
+        assert_eq!(paths, ["left/a.rs", "", "right/b.rs"]);
+
+        // Pushing in order would file `right/b.rs` under identity 1 and answer
+        // the root for identity 2, so both directories and every distance drawn
+        // from them would be wrong with no wrong-looking value to notice.
+        let tree = DirectoryTree::from_file_paths(paths);
+        let directory = |index| tree.directory_of(FileId::from_index(index));
+        assert_eq!(directory(1), Some(DirectoryTree::ROOT));
+        assert_ne!(directory(2), Some(DirectoryTree::ROOT));
+        assert_eq!(
+            tree.distance(directory(0).unwrap(), directory(2).unwrap()),
+            2
+        );
+    }
+    #[test]
+    fn malformed_or_interrupted_history_is_incomplete_but_empty_history_is_unavailable() {
+        assert_eq!(
+            failed_history_availability(
+                &smackdebt_git::GitError::InvalidOutput("malformed record".to_owned()),
+                0,
+            ),
+            HistoryAvailability::Incomplete
+        );
+        assert_eq!(
+            failed_history_availability(&smackdebt_git::GitError::EmptyHistory, 0),
+            HistoryAvailability::Unavailable
+        );
+        assert_eq!(
+            failed_history_availability(&smackdebt_git::GitError::EmptyHistory, 1),
+            HistoryAvailability::Incomplete
+        );
+    }
+    #[test]
+    fn the_history_window_excludes_older_commits_and_coverage_states_it() {
+        let root = tempfile::tempdir().unwrap();
+        let repository_path = root.path();
+        git(repository_path, ["init", "-q"]);
+        git(
+            repository_path,
+            ["config", "user.email", "test@example.invalid"],
+        );
+        git(repository_path, ["config", "user.name", "Smackdebt Test"]);
+        fs::write(repository_path.join("old.rs"), "pub fn old() {}\n").unwrap();
+        git(repository_path, ["add", "."]);
+        git_dated(
+            repository_path,
+            "2001-02-03T04:05:06+00:00",
+            ["commit", "-qm", "old"],
+        );
+        fs::write(repository_path.join("recent.rs"), "pub fn recent() {}\n").unwrap();
+        git(repository_path, ["add", "."]);
+        git(repository_path, ["commit", "-qm", "recent"]);
+
+        let windowed = analyze_codebase(&CodebaseRequest::new(repository_path)).unwrap();
+        let coverage = windowed.report().history_coverage();
+        assert_eq!(coverage.window_days(), Some(90));
+        // The window filter runs inside the history stream, so the streamed
+        // set is the windowed set and no boundary reject is counted.
+        assert_eq!(coverage.commits(), 1);
+        assert_eq!(coverage.window_excluded_commits(), 0);
+        assert_eq!(coverage.eligible_commits(), 1);
+        let touches = |report: &Report, path: &str| {
+            let file = report
+                .files()
+                .iter()
+                .find(|file| file.path() == path)
+                .expect("selected file");
+            report
+                .file_history()
+                .iter()
+                .filter(|history| history.file() == file.id())
+                .map(|history| history.touches())
+                .sum::<u32>()
+        };
+        assert_eq!(touches(windowed.report(), "old.rs"), 0);
+        assert_eq!(touches(windowed.report(), "recent.rs"), 1);
+
+        let complete =
+            analyze_codebase(&CodebaseRequest::new(repository_path).with_history_days(36_500))
+                .unwrap();
+        let coverage = complete.report().history_coverage();
+        assert_eq!(coverage.window_days(), Some(36_500));
+        assert_eq!(coverage.window_excluded_commits(), 0);
+        assert_eq!(coverage.eligible_commits(), 2);
+        assert_eq!(touches(complete.report(), "old.rs"), 1);
+    }
+    #[test]
+    fn reused_rename_path_excludes_older_history_from_both_current_files() {
+        let root = tempfile::tempdir().unwrap();
+        git(root.path(), ["init", "-q"]);
+        git(
+            root.path(),
+            ["config", "user.email", "test@example.invalid"],
+        );
+        git(root.path(), ["config", "user.name", "Smackdebt Test"]);
+        fs::write(
+            root.path().join(".smackdebt.toml"),
+            "[source_roles]\ngenerated = ['old.js', 'new.js']\n",
+        )
+        .unwrap();
+        fs::write(root.path().join("old.js"), "export const value = 1;\n").unwrap();
+        git(root.path(), ["add", "-A"]);
+        git(root.path(), ["commit", "-qm", "initial old path"]);
+        fs::rename(root.path().join("old.js"), root.path().join("new.js")).unwrap();
+        git(root.path(), ["add", "-A"]);
+        git(root.path(), ["commit", "-qm", "rename old to new"]);
+        fs::write(root.path().join("old.js"), "export const reused = 2;\n").unwrap();
+        git(root.path(), ["add", "-A"]);
+        git(root.path(), ["commit", "-qm", "reuse old path"]);
+
+        let result = analyze_codebase(
+            &CodebaseRequest::new(root.path())
+                .with_history_days(36_500)
+                .with_role_rules(vec![
+                    SourceRoleRule::generated("old.js"),
+                    SourceRoleRule::generated("new.js"),
+                ]),
+        )
+        .unwrap();
+        let report = result.report();
+        let touches = report
+            .file_history()
+            .iter()
+            .map(|history| {
+                (
+                    report.files()[history.file().index()].path(),
+                    history.touches(),
+                )
+            })
+            .collect::<HashMap<_, _>>();
+        assert_eq!(touches["new.js"], 1);
+        assert_eq!(touches["old.js"], 1);
+        assert!(report.file_history().iter().all(|history| {
+            history.role() == SourceRole::Generated && history.trust() == SourceTrust::Trusted
+        }));
+        assert_eq!(report.history_coverage().eligible_commits(), 0);
+        assert_eq!(report.history_coverage().mapped_eligible_changes(), 0);
+        assert_eq!(report.history_coverage().context_changes(), 2);
+        assert_eq!(report.history_coverage().rename_gaps(), 1);
+        assert_eq!(report.history_coverage().excluded_changes(), 2);
+    }
+}

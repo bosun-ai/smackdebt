@@ -231,3 +231,220 @@ pub(crate) fn add_diff_diagnostic(
         0,
     ));
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::diff::analyze_diff;
+    use crate::requests::DiffRequest;
+    use crate::test_support::git;
+    use smackdebt_analysis::DiffTier;
+    use std::fs;
+
+    #[test]
+    fn a_real_diff_answers_from_moved_debt_and_never_from_healthy_additions() {
+        let root = tempfile::tempdir().unwrap();
+        let repository_path = root.path();
+        git(repository_path, ["init", "-q"]);
+        git(
+            repository_path,
+            ["config", "user.email", "test@example.invalid"],
+        );
+        git(repository_path, ["config", "user.name", "Smackdebt Test"]);
+        fs::write(
+            repository_path.join("Cargo.toml"),
+            "[package]\nname='verdicts'\nversion='0.1.0'\n",
+        )
+        .unwrap();
+        let complex = "pub fn work(a: i32) -> i32 { if a > 0 { if a > 1 { return 1; } } 0 }\n";
+        fs::write(repository_path.join("work.rs"), complex).unwrap();
+        git(repository_path, ["add", "."]);
+        git(repository_path, ["commit", "-qm", "complex base"]);
+        let request = DiffRequest::new(repository_path)
+            .with_reference("HEAD")
+            .with_thresholds((1, 2), (5, 10), (50, 100), (4, 7), (6, 9));
+
+        fs::write(
+            repository_path.join("work.rs"),
+            format!("{complex}pub fn helper() -> i32 {{ 1 }}\n"),
+        )
+        .unwrap();
+        let added = analyze_diff(&request).unwrap();
+        let verdict = added.report().verdict().unwrap();
+        assert_eq!(verdict.diff_tier(), Some(DiffTier::NoDebtChange));
+        assert_eq!(verdict.sentence(), "No debt changed.");
+        assert!(verdict.selection().is_empty());
+        // The healthy addition stays in the machine report while it moves
+        // nothing.
+        assert!(
+            added
+                .report()
+                .comparisons()
+                .iter()
+                .any(|comparison| comparison.kind() == smackdebt_analysis::ComparisonKind::Added)
+        );
+
+        fs::write(
+            repository_path.join("work.rs"),
+            "pub fn work(a: i32) -> i32 { a }\n",
+        )
+        .unwrap();
+        let improved = analyze_diff(&request).unwrap();
+        assert_eq!(
+            improved.report().verdict().unwrap().diff_tier(),
+            Some(DiffTier::Better)
+        );
+
+        fs::write(
+            repository_path.join("work.rs"),
+            format!(
+                "pub fn work(a: i32) -> i32 {{ a }}\n{}",
+                complex.replace("work", "later")
+            ),
+        )
+        .unwrap();
+        let mixed = analyze_diff(&request).unwrap();
+        let verdict = mixed.report().verdict().unwrap();
+        assert_eq!(verdict.diff_tier(), Some(DiffTier::Mixed));
+        assert_eq!(
+            verdict.sentence(),
+            "Debt increased in some places and decreased in others."
+        );
+        assert_eq!(verdict.facts().source().worse(), 1);
+        assert_eq!(verdict.facts().source().better(), 1);
+        assert!(
+            verdict
+                .facts()
+                .moved(smackdebt_analysis::DebtFamily::Source)
+        );
+        assert!(
+            !verdict
+                .facts()
+                .moved(smackdebt_analysis::DebtFamily::Architecture)
+        );
+        assert!(!verdict.selection().has_duplicate_identity());
+    }
+    #[test]
+    fn a_real_diff_pairs_only_safe_anonymous_units() {
+        let root = tempfile::tempdir().unwrap();
+        let repository_path = root.path();
+        git(repository_path, ["init", "-q"]);
+        git(
+            repository_path,
+            ["config", "user.email", "test@example.invalid"],
+        );
+        git(repository_path, ["config", "user.name", "Smackdebt Test"]);
+        fs::write(
+            repository_path.join("callbacks.js"),
+            "watch('ready', () => work());\nrepeat(() => same());\ngone(() => old());\n",
+        )
+        .unwrap();
+        git(repository_path, ["add", "."]);
+        git(repository_path, ["commit", "-qm", "callback base"]);
+        fs::write(
+            repository_path.join("callbacks.js"),
+            "\nwatch('ready', () => { if (ready) work(); });\nrepeat(() => same());\nrepeat(() => same());\nonly(() => new_one());\nonly(() => new_one());\n",
+        )
+        .unwrap();
+
+        let report =
+            analyze_diff(&DiffRequest::new(repository_path).with_reference("HEAD")).unwrap();
+        let report = report.report();
+        let kinds: Vec<_> = report
+            .comparisons()
+            .iter()
+            .map(smackdebt_analysis::Comparison::kind)
+            .collect();
+        assert_eq!(
+            kinds
+                .iter()
+                .filter(|kind| **kind == smackdebt_analysis::ComparisonKind::Ambiguous)
+                .count(),
+            1
+        );
+        assert_eq!(
+            kinds
+                .iter()
+                .filter(|kind| **kind == smackdebt_analysis::ComparisonKind::Added)
+                .count(),
+            2
+        );
+        assert_eq!(
+            kinds
+                .iter()
+                .filter(|kind| **kind == smackdebt_analysis::ComparisonKind::Removed)
+                .count(),
+            1
+        );
+        assert_eq!(
+            kinds
+                .iter()
+                .filter(|kind| **kind == smackdebt_analysis::ComparisonKind::MetricChanged)
+                .count(),
+            1
+        );
+        let diagnostics: Vec<_> = report
+            .diagnostics()
+            .iter()
+            .filter(|value| value.kind() == DiagnosticKind::AmbiguousIdentity)
+            .collect();
+        assert_eq!(diagnostics.len(), 1);
+        assert_eq!(diagnostics[0].file(), Some(FileId::from_index(0)));
+        assert!(
+            report
+                .comparisons()
+                .iter()
+                .any(Comparison::is_anonymous_ambiguity)
+        );
+        assert_eq!(
+            report.verdict().unwrap().diff_tier(),
+            Some(DiffTier::NoDebtChange)
+        );
+        assert!(
+            !report
+                .verdict()
+                .unwrap()
+                .selection()
+                .has_duplicate_identity()
+        );
+    }
+    #[test]
+    fn repeated_declared_names_do_not_create_an_anonymous_warning() {
+        let root = tempfile::tempdir().unwrap();
+        let repository_path = root.path();
+        git(repository_path, ["init", "-q"]);
+        git(
+            repository_path,
+            ["config", "user.email", "test@example.invalid"],
+        );
+        git(repository_path, ["config", "user.name", "Smackdebt Test"]);
+        fs::write(
+            repository_path.join("duplicate.js"),
+            "function same() { return 1; }\nfunction same() { return 2; }\n",
+        )
+        .unwrap();
+        git(repository_path, ["add", "."]);
+        git(repository_path, ["commit", "-qm", "duplicate base"]);
+        fs::write(
+            repository_path.join("duplicate.js"),
+            "function same() { return 1; }\nfunction same() { if (ready) return 2; }\n",
+        )
+        .unwrap();
+
+        let report =
+            analyze_diff(&DiffRequest::new(repository_path).with_reference("HEAD")).unwrap();
+        let report = report.report();
+        assert_eq!(report.comparisons().len(), 1);
+        assert_eq!(
+            report.comparisons()[0].kind(),
+            smackdebt_analysis::ComparisonKind::Ambiguous
+        );
+        assert!(!report.comparisons()[0].is_anonymous_ambiguity());
+        assert!(
+            report
+                .diagnostics()
+                .iter()
+                .all(|value| value.kind() != DiagnosticKind::AmbiguousIdentity)
+        );
+    }
+}

@@ -111,3 +111,169 @@ pub(crate) fn append_core_comparison(
         (after_counts.0, after_counts.1, current_members.to_vec()),
     ));
 }
+
+#[cfg(test)]
+mod tests {
+
+    use crate::diff::analyze_diff;
+    use crate::requests::DiffRequest;
+    use crate::test_support::git;
+    use std::fs;
+
+    #[test]
+    fn diff_reports_a_new_material_core_from_the_existing_two_graphs() {
+        let root = tempfile::tempdir().unwrap();
+        let repository_path = root.path();
+        git(repository_path, ["init", "-q"]);
+        git(
+            repository_path,
+            ["config", "user.email", "test@example.invalid"],
+        );
+        git(repository_path, ["config", "user.name", "Smackdebt Test"]);
+        fs::write(repository_path.join("package.json"), "{}").unwrap();
+        for index in 0..20 {
+            fs::write(
+                repository_path.join(format!("f{index}.ts")),
+                format!("export const f{index} = {index};\n"),
+            )
+            .unwrap();
+        }
+        git(repository_path, ["add", "."]);
+        git(repository_path, ["commit", "-qm", "initial"]);
+        for index in 0..5 {
+            let next = (index + 1) % 5;
+            fs::write(
+                repository_path.join(format!("f{index}.ts")),
+                format!(
+                    "import {{ f{next} }} from './f{next}.js';\nexport const f{index} = f{next} + 1;\n"
+                ),
+            )
+            .unwrap();
+        }
+
+        let result =
+            analyze_diff(&DiffRequest::new(repository_path).with_reference("HEAD")).unwrap();
+        let comparison = &result.report().core_comparisons()[0];
+        assert_eq!(
+            comparison.direction(),
+            smackdebt_analysis::ComparisonDirection::Worse
+        );
+        assert_eq!(comparison.before(), (1, 20));
+        assert_eq!(comparison.after(), (5, 20));
+        assert_eq!(comparison.after_members().len(), 5);
+    }
+    #[test]
+    fn diff_counts_a_core_candidate_before_incomplete_evidence_withholds_it() {
+        let root = tempfile::tempdir().unwrap();
+        let repository_path = root.path();
+        git(repository_path, ["init", "-q"]);
+        git(
+            repository_path,
+            ["config", "user.email", "test@example.invalid"],
+        );
+        git(repository_path, ["config", "user.name", "Smackdebt Test"]);
+        fs::write(repository_path.join("package.json"), "{}").unwrap();
+        for index in 0..20 {
+            fs::write(
+                repository_path.join(format!("f{index}.ts")),
+                format!("export const f{index} = {index};\n"),
+            )
+            .unwrap();
+        }
+        git(repository_path, ["add", "."]);
+        git(repository_path, ["commit", "-qm", "initial"]);
+        for index in 0..5 {
+            let next = (index + 1) % 5;
+            fs::write(
+                repository_path.join(format!("f{index}.ts")),
+                format!(
+                    "import {{ f{next} }} from './f{next}.js';\nexport const f{index} = f{next} + 1;\n"
+                ),
+            )
+            .unwrap();
+        }
+        fs::write(
+            repository_path.join("f5.ts"),
+            "import missing from './missing.js';\nexport const f5 = missing;\n",
+        )
+        .unwrap();
+
+        let result =
+            analyze_diff(&DiffRequest::new(repository_path).with_reference("HEAD")).unwrap();
+        let evidence = result.report().diff_graph_evidence().unwrap();
+        assert_eq!(evidence.core().total(), 1);
+        assert_eq!(evidence.core().current(), 1);
+        assert_eq!(evidence.core().base(), 0);
+        assert!(result.report().core_comparisons().is_empty());
+    }
+    #[test]
+    fn diff_does_not_compare_disjoint_largest_dependency_cycles() {
+        let root = tempfile::tempdir().unwrap();
+        let repository_path = root.path();
+        git(repository_path, ["init", "-q"]);
+        git(
+            repository_path,
+            ["config", "user.email", "test@example.invalid"],
+        );
+        git(repository_path, ["config", "user.name", "Smackdebt Test"]);
+        fs::write(repository_path.join("package.json"), "{}").unwrap();
+        for index in 0..20 {
+            fs::write(
+                repository_path.join(format!("f{index}.ts")),
+                format!("export const f{index} = {index};\n"),
+            )
+            .unwrap();
+        }
+        for index in 0..5 {
+            let next = (index + 1) % 5;
+            fs::write(
+                repository_path.join(format!("f{index}.ts")),
+                format!(
+                    "import {{ f{next} }} from './f{next}.js';\nexport const f{index} = f{next};\n"
+                ),
+            )
+            .unwrap();
+        }
+        git(repository_path, ["add", "."]);
+        git(repository_path, ["commit", "-qm", "first core"]);
+        for index in 0..5 {
+            fs::write(
+                repository_path.join(format!("f{index}.ts")),
+                format!("export const f{index} = {index};\n"),
+            )
+            .unwrap();
+        }
+        for index in 5..11 {
+            let next = if index == 10 { 5 } else { index + 1 };
+            fs::write(
+                repository_path.join(format!("f{index}.ts")),
+                format!(
+                    "import {{ f{next} }} from './f{next}.js';\nexport const f{index} = f{next};\n"
+                ),
+            )
+            .unwrap();
+        }
+
+        let result =
+            analyze_diff(&DiffRequest::new(repository_path).with_reference("HEAD")).unwrap();
+        let rows = result.report().core_comparisons();
+        assert_eq!(rows.len(), 2);
+        assert!(rows.iter().all(|row| {
+            row.before_members().contains(&row.anchor())
+                && row.after_members().contains(&row.anchor())
+        }));
+        assert!(
+            rows.iter()
+                .any(|row| row.before() == (5, 20) && row.after() == (1, 20))
+        );
+        assert!(
+            rows.iter()
+                .any(|row| row.before() == (1, 20) && row.after() == (6, 20))
+        );
+        assert!(
+            !rows
+                .iter()
+                .any(|row| row.before() == (5, 20) && row.after() == (6, 20))
+        );
+    }
+}

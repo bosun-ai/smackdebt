@@ -139,3 +139,116 @@ impl LeakageComparisonEvidence<'_> {
         )
     }
 }
+
+#[cfg(test)]
+mod tests {
+
+    use crate::diff::analyze_diff;
+    use crate::requests::DiffRequest;
+    use crate::test_support::git;
+    use std::fs;
+
+    #[test]
+    fn adding_a_code_link_resolves_hidden_coupling_in_the_diff() {
+        let root = tempfile::tempdir().unwrap();
+        let repository_path = root.path();
+        git(repository_path, ["init", "-q"]);
+        git(
+            repository_path,
+            ["config", "user.email", "test@example.invalid"],
+        );
+        git(repository_path, ["config", "user.name", "Smackdebt Test"]);
+        fs::write(repository_path.join("package.json"), "{}").unwrap();
+        fs::create_dir_all(repository_path.join("left")).unwrap();
+        fs::create_dir_all(repository_path.join("right")).unwrap();
+        for revision in 0..5 {
+            fs::write(
+                repository_path.join("left/a.ts"),
+                format!("export const a = {revision};\n"),
+            )
+            .unwrap();
+            fs::write(
+                repository_path.join("right/b.ts"),
+                format!("export const b = {revision};\n"),
+            )
+            .unwrap();
+            git(repository_path, ["add", "."]);
+            git(
+                repository_path,
+                ["commit", "-qm", &format!("change {revision}")],
+            );
+        }
+        fs::write(
+            repository_path.join("left/a.ts"),
+            "import { b } from '../right/b.js';\nexport const a = b + 1;\n",
+        )
+        .unwrap();
+
+        let result =
+            analyze_diff(&DiffRequest::new(repository_path).with_reference("HEAD")).unwrap();
+        let comparison = result
+            .report()
+            .change_leakage_comparisons()
+            .iter()
+            .find(|comparison| {
+                comparison.kind() == smackdebt_analysis::ChangeLeakageKind::HiddenCoupling
+            })
+            .expect("the new code link resolves the hidden pair");
+        assert_eq!(
+            comparison.direction(),
+            smackdebt_analysis::ComparisonDirection::Better
+        );
+    }
+    #[test]
+    fn diff_counts_a_leakage_candidate_before_incomplete_evidence_withholds_it() {
+        let root = tempfile::tempdir().unwrap();
+        let repository_path = root.path();
+        git(repository_path, ["init", "-q"]);
+        git(
+            repository_path,
+            ["config", "user.email", "test@example.invalid"],
+        );
+        git(repository_path, ["config", "user.name", "Smackdebt Test"]);
+        fs::write(repository_path.join("package.json"), "{}").unwrap();
+        fs::create_dir_all(repository_path.join("left")).unwrap();
+        fs::create_dir_all(repository_path.join("right")).unwrap();
+        for revision in 0..5 {
+            fs::write(
+                repository_path.join("left/a.ts"),
+                format!("export const a = {revision};\n"),
+            )
+            .unwrap();
+            fs::write(
+                repository_path.join("right/b.ts"),
+                format!("export const b = {revision};\n"),
+            )
+            .unwrap();
+            git(repository_path, ["add", "."]);
+            git(
+                repository_path,
+                ["commit", "-qm", &format!("change {revision}")],
+            );
+        }
+        fs::write(
+            repository_path.join("left/a.ts"),
+            "import { b } from '../right/b.js';\nexport const a = b + 1;\n",
+        )
+        .unwrap();
+        fs::write(
+            repository_path.join("other.ts"),
+            "import missing from './missing.js';\nexport default missing;\n",
+        )
+        .unwrap();
+
+        let result =
+            analyze_diff(&DiffRequest::new(repository_path).with_reference("HEAD")).unwrap();
+        let evidence = result.report().diff_graph_evidence().unwrap();
+        // The new dependency resolves one hidden-coupling candidate and creates
+        // one leaky-interface candidate. Both are counted before the incomplete
+        // current graph withholds them.
+        assert_eq!(evidence.leakage().total(), 2);
+        assert_eq!(evidence.leakage().current(), 2);
+        assert_eq!(evidence.leakage().base(), 0);
+        assert!(result.report().change_leakage_comparisons().is_empty());
+    }
+}

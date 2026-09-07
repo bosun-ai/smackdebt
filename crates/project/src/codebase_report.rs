@@ -504,3 +504,162 @@ impl<'a> CodebaseReportBuilder<'a> {
         builder.finish()
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::codebase::analyze_codebase;
+    use crate::requests::CodebaseRequest;
+    use crate::test_support::git;
+    use std::fs;
+
+    #[test]
+    fn concentrated_package_knowledge_is_a_watch_finding_of_counts_only() {
+        let root = tempfile::tempdir().unwrap();
+        let repository_path = root.path();
+        git(repository_path, ["init", "-q"]);
+        git(
+            repository_path,
+            ["config", "user.email", "owner@example.invalid"],
+        );
+        git(repository_path, ["config", "user.name", "Sole Owner"]);
+        for revision in 0..10 {
+            fs::write(
+                repository_path.join("owned.rs"),
+                format!("pub fn owned() -> i32 {{ {revision} }}\n"),
+            )
+            .unwrap();
+            git(repository_path, ["add", "."]);
+            git(repository_path, ["commit", "-qm", "change"]);
+        }
+
+        let analyzed = analyze_codebase(&CodebaseRequest::new(repository_path)).unwrap();
+        let report = analyzed.report();
+        let findings = report.knowledge_concentration_findings();
+        assert_eq!(findings.len(), 1);
+        assert_eq!(findings[0].rating(), Rating::Watch);
+        let concentration = findings[0].concentration();
+        assert_eq!(
+            (
+                concentration.contributor_count(),
+                concentration.numerator(),
+                concentration.denominator()
+            ),
+            (1, 10, 10)
+        );
+        assert!(report.evolutionary_findings().is_empty());
+        // No contributor identity reaches any retained report value.
+        let retained = format!("{report:?}");
+        assert!(!retained.contains("Sole Owner"));
+        assert!(!retained.contains("owner@example.invalid"));
+    }
+    #[test]
+    fn hotspots_cross_rated_files_with_their_windowed_touch_count() {
+        let root = tempfile::tempdir().unwrap();
+        let repository_path = root.path();
+        git(repository_path, ["init", "-q"]);
+        git(
+            repository_path,
+            ["config", "user.email", "test@example.invalid"],
+        );
+        git(repository_path, ["config", "user.name", "Smackdebt Test"]);
+        fs::write(repository_path.join("cold.rs"), "pub fn cold() {}\n").unwrap();
+        for revision in 0..5 {
+            fs::write(
+                repository_path.join("hot.rs"),
+                format!("pub fn hot(value: i32) -> i32 {{ value + {revision} }}\n"),
+            )
+            .unwrap();
+            git(repository_path, ["add", "."]);
+            git(repository_path, ["commit", "-qm", "change"]);
+        }
+
+        let report = analyze_codebase(&CodebaseRequest::new(repository_path)).unwrap();
+        let report = report.report();
+        let named = |file: FileId| report.files()[file.index()].path().to_owned();
+        let hotspots: Vec<_> = report
+            .hotspots()
+            .iter()
+            .map(|hotspot| (named(hotspot.file()), hotspot.touches()))
+            .collect();
+        assert_eq!(hotspots, [("hot.rs".to_owned(), 5)]);
+        assert!(
+            report.is_hotspot(
+                report
+                    .files()
+                    .iter()
+                    .find(|file| file.path() == "hot.rs")
+                    .unwrap()
+                    .id()
+            )
+        );
+
+        let below_boundary = analyze_codebase(
+            &CodebaseRequest::new(repository_path).with_minimum_hotspot_touches(6),
+        )
+        .unwrap();
+        assert!(below_boundary.report().hotspots().is_empty());
+    }
+    #[test]
+    fn file_and_container_size_are_rated_outside_the_unit_health_counts() {
+        let root = tempfile::tempdir().unwrap();
+        let repository_path = root.path();
+        git(repository_path, ["init", "-q"]);
+        git(
+            repository_path,
+            ["config", "user.email", "test@example.invalid"],
+        );
+        git(repository_path, ["config", "user.name", "Smackdebt Test"]);
+        fs::write(
+            repository_path.join("big.rs"),
+            "struct Worker;\nimpl Worker {\n    fn one(&self) {\n        let a = 1;\n        let b = 2;\n        let c = 3;\n    }\n    fn two(&self) {\n        let d = 4;\n        let e = 5;\n    }\n}\n",
+        )
+        .unwrap();
+        git(repository_path, ["add", "."]);
+        git(repository_path, ["commit", "-qm", "size"]);
+
+        let report = analyze_codebase(
+            &CodebaseRequest::new(repository_path).with_size_thresholds((10, 20), (4, 6)),
+        )
+        .unwrap();
+        let report = report.report();
+        let findings: Vec<_> = report
+            .size_findings()
+            .iter()
+            .map(|finding| {
+                (
+                    report.files()[finding.file().index()].path().to_owned(),
+                    finding.subject(),
+                    finding.container().map(str::to_owned),
+                    finding.value(),
+                    finding.rating(),
+                )
+            })
+            .collect();
+        assert_eq!(
+            findings,
+            [
+                (
+                    "big.rs".to_owned(),
+                    smackdebt_analysis::SizeSubject::File,
+                    None,
+                    12,
+                    Rating::Watch
+                ),
+                (
+                    "big.rs".to_owned(),
+                    smackdebt_analysis::SizeSubject::Container,
+                    Some("Worker".to_owned()),
+                    5,
+                    Rating::Watch
+                ),
+            ]
+        );
+        // Size findings never enter the unit verdict counts.
+        let root_scope = report.root().unwrap();
+        assert_eq!(
+            report.scopes()[root_scope.index()].health(),
+            HealthCounts::new(2, 0, 0)
+        );
+    }
+}
