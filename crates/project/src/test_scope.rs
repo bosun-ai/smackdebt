@@ -5,10 +5,8 @@ use std::collections::{BTreeMap, BTreeSet};
 use std::path::{Path, PathBuf};
 
 use smackdebt_analysis::{
-    DependencySyntax, DependencySyntaxState, FileId, ModuleDeclaration, SourceRole,
-    test_declared_files,
+    DependencySyntax, DependencySyntaxState, FileId, ModuleDeclaration, test_declared_files,
 };
-use smackdebt_discovery::DiscoveredFile;
 
 use crate::candidates::resolve_candidates;
 use crate::dependencies::DiffSideSelector;
@@ -29,11 +27,8 @@ pub(crate) fn demote_diff_roles(
     for side in [DiffSideSelector::Current, DiffSideSelector::Before] {
         demote_test_declared_diff_roles(
             side,
-            unchanged.first_file_index,
             results,
-            &unchanged.candidates,
-            &mut unchanged.results,
-            &mut unchanged.before_roles,
+            unchanged,
             DiffRolePolicy {
                 aliases: aliases.select(side),
                 rules,
@@ -51,23 +46,33 @@ pub(crate) fn module_declarations<'a>(
     aliases: &ResolutionRules,
 ) -> BTreeSet<ModuleDeclaration> {
     let mut declarations = BTreeSet::new();
-    for (declarer, path, references) in sources {
-        for reference in references {
-            if reference.relation() != smackdebt_analysis::StaticRelationKind::ModuleOwnership {
-                continue;
-            }
-            let DependencySyntaxState::Candidates(candidates) = reference.state() else {
-                continue;
-            };
-            let test_scoped = reference.scope() == smackdebt_analysis::DependencyScope::Test;
-            for target in resolve_candidates(path, candidates, index, aliases) {
-                if target.index() != declarer {
-                    declarations.insert((declarer, target.index(), test_scoped));
-                }
+    for source in sources {
+        record_declarer(&mut declarations, source, index, aliases);
+    }
+    declarations
+}
+
+/// Records the module files one declarer's ownership references resolve to.
+fn record_declarer(
+    declarations: &mut BTreeSet<ModuleDeclaration>,
+    (declarer, path, references): (usize, &Path, &[DependencySyntax]),
+    index: &BTreeMap<PathBuf, FileId>,
+    aliases: &ResolutionRules,
+) {
+    for reference in references {
+        if reference.relation() != smackdebt_analysis::StaticRelationKind::ModuleOwnership {
+            continue;
+        }
+        let DependencySyntaxState::Candidates(candidates) = reference.state() else {
+            continue;
+        };
+        let test_scoped = reference.scope() == smackdebt_analysis::DependencyScope::Test;
+        for target in resolve_candidates(path, candidates, index, aliases) {
+            if target.index() != declarer {
+                declarations.insert((declarer, target.index(), test_scoped));
             }
         }
     }
-    declarations
 }
 /// The files a pass reclassifies because the build only compiles them when
 /// `test` is set.
@@ -135,13 +140,11 @@ pub(crate) struct DiffRolePolicy<'a> {
 }
 pub(crate) fn demote_test_declared_diff_roles(
     side: DiffSideSelector,
-    changed_count: usize,
     results: &mut [DiffResult],
-    unchanged_candidates: &[&DiscoveredFile],
-    unchanged: &mut [FileResult],
-    before_unchanged_roles: &mut [SourceRole],
+    unchanged: &mut DiffUnchanged<'_>,
     policy: DiffRolePolicy<'_>,
 ) {
+    let changed_count = unchanged.first_file_index;
     debug_assert_eq!(results.len(), changed_count);
     debug_assert!(
         results
@@ -150,27 +153,31 @@ pub(crate) fn demote_test_declared_diff_roles(
             .all(|(offset, result)| result.index == offset),
         "diff results are dense and ordered by file index"
     );
-    let demotions =
-        {
-            let (paths, references): (Vec<PathBuf>, Vec<&[DependencySyntax]>) =
-                results
+    let demotions = {
+        let (paths, references): (Vec<PathBuf>, Vec<&[DependencySyntax]>) = results
+            .iter()
+            .map(|result| match side {
+                DiffSideSelector::Current => (
+                    result.change.current_path().to_path_buf(),
+                    result.current.references(),
+                ),
+                DiffSideSelector::Before => (
+                    result.change.base_path().to_path_buf(),
+                    result.before.references(),
+                ),
+            })
+            .chain(
+                unchanged
+                    .candidates
                     .iter()
-                    .map(|result| match side {
-                        DiffSideSelector::Current => (
-                            result.change.current_path().to_path_buf(),
-                            result.current.references(),
-                        ),
-                        DiffSideSelector::Before => (
-                            result.change.base_path().to_path_buf(),
-                            result.before.references(),
-                        ),
-                    })
-                    .chain(unchanged_candidates.iter().zip(unchanged.iter()).map(
-                        |(file, result)| (file.path().as_path().to_path_buf(), result.references()),
-                    ))
-                    .unzip();
-            test_declared_demotions(&paths, &references, policy.aliases, policy.rules)
-        };
+                    .zip(unchanged.results.iter())
+                    .map(|(file, result)| {
+                        (file.path().as_path().to_path_buf(), result.references())
+                    }),
+            )
+            .unzip();
+        test_declared_demotions(&paths, &references, policy.aliases, policy.rules)
+    };
     for file in demotions {
         if file < changed_count {
             match side {
@@ -180,10 +187,10 @@ pub(crate) fn demote_test_declared_diff_roles(
         } else {
             let unchanged_index = file - changed_count;
             match side {
-                DiffSideSelector::Current => unchanged[unchanged_index].demote_to_test(),
+                DiffSideSelector::Current => unchanged.results[unchanged_index].demote_to_test(),
                 DiffSideSelector::Before => {
-                    before_unchanged_roles[unchanged_index] =
-                        before_unchanged_roles[unchanged_index].demoted_by_test_scope();
+                    unchanged.before_roles[unchanged_index] =
+                        unchanged.before_roles[unchanged_index].demoted_by_test_scope();
                 }
             }
         }
@@ -199,6 +206,7 @@ mod tests {
     use crate::test_support::{file_id, git, package_pairs, write_crate};
     use smackdebt_analysis::ArchitectureFindingKind;
     use smackdebt_analysis::DependencyEdge;
+    use smackdebt_analysis::SourceRole;
     use std::fs;
 
     #[test]
