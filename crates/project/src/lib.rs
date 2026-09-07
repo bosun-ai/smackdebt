@@ -3,9 +3,15 @@
 mod architecture;
 mod candidates;
 mod codebase_report;
+mod core_comparisons;
 mod cycle_findings;
 mod dependencies;
 mod diff_changes;
+mod diff_comparisons;
+mod diff_findings;
+mod diff_graphs;
+mod diff_impact;
+mod diff_report;
 mod diff_source;
 mod dormancy;
 #[cfg(feature = "evidence-stats")]
@@ -16,6 +22,7 @@ mod manifest_names;
 mod package_graph;
 mod paths;
 mod project;
+mod propagation_comparisons;
 mod rating;
 mod reference_tables;
 mod requests;
