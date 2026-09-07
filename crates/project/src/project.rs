@@ -23,10 +23,10 @@ use smackdebt_analysis::{
     PackageEdge, PackageEdgeId, PackageFileReach, PackageGraphMeasurement, PackageId,
     PackageRecord, ParseStatus, Rating, Report, ReportBuilder as AnalysisReportBuilder, ReportMode,
     ResolutionDiagnostic, ResolutionIssueKind, Scope, ScopeId, ScopeKind, SizeFinding, SizePolicy,
-    SourceCoverageOutcome, SourceRole, SourceTrust, StableDependencyFinding, change_leakage,
-    close_over_packages, compare_architecture, compare_units, cycle_witness, dependency_degree,
-    enters_connection_graph, enters_file_graph, file_reaches, graph_file_count, orphan_files,
-    reach_in_counts, stable_dependency_findings, strongly_connected_components,
+    SourceCoverageOutcome, SourceRole, SourceTrust, StableDependencyFinding, Thresholds,
+    change_leakage, close_over_packages, compare_architecture, compare_units, cycle_witness,
+    dependency_degree, enters_connection_graph, enters_file_graph, file_reaches, graph_file_count,
+    orphan_files, reach_in_counts, stable_dependency_findings, strongly_connected_components,
     test_declared_files,
 };
 use smackdebt_discovery::{
@@ -38,12 +38,96 @@ use smackdebt_git::{Change, ContributorIdentity, GitRepository, ObjectReader};
 use smackdebt_languages::{AnalysisError as LanguageError, Analyzer};
 
 use crate::requests::{
-    CodebaseRequest, DiffRequest, ExecutionWidth, ProjectError, ProjectReport, SourceRoleRule,
-    WorkStats,
+    CodebaseRequest, DEFAULT_HISTORY_DAYS, DiffRequest, ExecutionWidth, ProjectError,
+    ProjectReport, SourceRoleRule, WorkStats,
 };
 
 const PARALLEL_FILE_CUTOVER: usize = 100;
 const RETAINED_RELATION_LOCATIONS: usize = 3;
+
+impl CodebaseRequest {
+    pub fn new(path: impl Into<PathBuf>) -> Self {
+        Self {
+            path: path.into(),
+            automatic_scope: false,
+            width: ExecutionWidth::Automatic,
+            history_days: DEFAULT_HISTORY_DAYS,
+            excludes: Vec::new(),
+            policy: HealthPolicy::default(),
+            role_rules: Vec::new(),
+            hotspots: HotspotPolicy::default(),
+            size: SizePolicy::default(),
+        }
+    }
+
+    pub fn automatic(path: impl Into<PathBuf>) -> Self {
+        let mut request = Self::new(path);
+        request.automatic_scope = true;
+        request
+    }
+
+    pub fn with_width(mut self, width: ExecutionWidth) -> Self {
+        self.width = width;
+        self
+    }
+
+    pub fn with_history_days(mut self, days: u32) -> Self {
+        self.history_days = days;
+        self
+    }
+
+    /// Sets the minimum windowed touch count a rated file needs to be hot.
+    pub fn with_minimum_hotspot_touches(mut self, touches: u32) -> Self {
+        self.hotspots = HotspotPolicy::new(touches);
+        self
+    }
+
+    /// Sets the file and container size thresholds.
+    pub fn with_size_thresholds(
+        mut self,
+        file_lines: (u32, u32),
+        container_lines: (u32, u32),
+    ) -> Self {
+        self.size = SizePolicy::new(
+            Thresholds::new(file_lines.0, file_lines.1),
+            Thresholds::new(container_lines.0, container_lines.1),
+        );
+        self
+    }
+
+    pub fn with_excludes(mut self, excludes: Vec<String>) -> Self {
+        self.excludes = excludes;
+        self
+    }
+
+    pub fn with_role_rules(mut self, rules: Vec<SourceRoleRule>) -> Self {
+        self.role_rules = rules;
+        self
+    }
+
+    pub fn with_thresholds(
+        mut self,
+        cognitive: (u32, u32),
+        cyclomatic: (u32, u32),
+        logical_lines: (u32, u32),
+        nesting: (u32, u32),
+        parameters: (u32, u32),
+    ) -> Self {
+        self.policy = HealthPolicy::new(
+            Thresholds::new(cognitive.0, cognitive.1),
+            Thresholds::new(cyclomatic.0, cyclomatic.1),
+            Thresholds::new(logical_lines.0, logical_lines.1),
+            Thresholds::new(nesting.0, nesting.1),
+            Thresholds::new(parameters.0, parameters.1),
+        );
+        self
+    }
+
+    /// Analyzes the selected codebase.
+    pub fn analyze(&self) -> Result<ProjectReport, ProjectError> {
+        analyze_codebase(self)
+    }
+}
 
 /// Analyzes the selected codebase.
 pub(super) fn analyze_codebase(request: &CodebaseRequest) -> Result<ProjectReport, ProjectError> {
@@ -195,6 +279,69 @@ pub(super) fn analyze_codebase(request: &CodebaseRequest) -> Result<ProjectRepor
             git_processes: history.processes,
         },
     })
+}
+
+impl DiffRequest {
+    pub fn new(path: impl Into<PathBuf>) -> Self {
+        Self {
+            path: path.into(),
+            automatic_scope: false,
+            reference: None,
+            width: ExecutionWidth::Automatic,
+            history_days: DEFAULT_HISTORY_DAYS,
+            policy: HealthPolicy::default(),
+            role_rules: Vec::new(),
+        }
+    }
+
+    pub fn automatic(path: impl Into<PathBuf>) -> Self {
+        let mut request = Self::new(path);
+        request.automatic_scope = true;
+        request
+    }
+
+    pub fn with_reference(mut self, reference: impl Into<String>) -> Self {
+        self.reference = Some(reference.into());
+        self
+    }
+
+    pub fn with_width(mut self, width: ExecutionWidth) -> Self {
+        self.width = width;
+        self
+    }
+
+    pub fn with_history_days(mut self, days: u32) -> Self {
+        self.history_days = days;
+        self
+    }
+
+    pub fn with_role_rules(mut self, rules: Vec<SourceRoleRule>) -> Self {
+        self.role_rules = rules;
+        self
+    }
+
+    pub fn with_thresholds(
+        mut self,
+        cognitive: (u32, u32),
+        cyclomatic: (u32, u32),
+        logical_lines: (u32, u32),
+        nesting: (u32, u32),
+        parameters: (u32, u32),
+    ) -> Self {
+        self.policy = HealthPolicy::new(
+            Thresholds::new(cognitive.0, cognitive.1),
+            Thresholds::new(cyclomatic.0, cyclomatic.1),
+            Thresholds::new(logical_lines.0, logical_lines.1),
+            Thresholds::new(nesting.0, nesting.1),
+            Thresholds::new(parameters.0, parameters.1),
+        );
+        self
+    }
+
+    /// Compares the worktree with the selected ref.
+    pub fn analyze(&self) -> Result<ProjectReport, ProjectError> {
+        analyze_diff(self)
+    }
 }
 
 /// Compares changed source units with the selected ref.
