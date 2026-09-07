@@ -6,94 +6,125 @@ use std::path::Path;
 use std::sync::atomic::Ordering;
 
 use rayon::prelude::*;
-use smackdebt_analysis::{FileAnalysis, FileId, HealthPolicy, Language};
+use smackdebt_analysis::{FileAnalysis, FileId, Language};
 use smackdebt_discovery::{DiscoveredFile, Inventory};
 use smackdebt_languages::{AnalysisError as LanguageError, Analyzer};
 
-use crate::rating::{FileResult, rate_file};
+use crate::rating::{FileResult, SourcePolicy, rate_file};
 use crate::requests::{ExecutionWidth, ProjectError, SourceRoleRule};
 use crate::roles::{classify_source_role, declares_module_syntax, role_for_unavailable_source};
 use crate::work::AnalysisWork;
 
 pub(crate) const PARALLEL_FILE_CUTOVER: usize = 100;
 
+/// One worker's analysis session: its reusable parser and the work counters
+/// it reports into.
+pub(crate) struct AnalysisSession<'a> {
+    pub(crate) analyzer: &'a mut Analyzer,
+    pub(crate) work: &'a AnalysisWork,
+}
+
+/// Reads and rates one discovered file.
+fn analyze_one_file(
+    session: &mut AnalysisSession<'_>,
+    (index, file): (usize, &DiscoveredFile),
+    inventory: &Inventory,
+    policy: SourcePolicy<'_>,
+) -> FileResult {
+    let path = file.path().as_path();
+    let language = Analyzer::language(path);
+    if matches!(
+        language,
+        Language::Astro | Language::Kotlin | Language::Unknown
+    ) {
+        return match role_for_unavailable_source(path, policy.rules) {
+            Ok(role) => FileResult::Unsupported { language, role },
+            Err(roles) => conflict(path, roles),
+        };
+    }
+    let Some(absolute) = inventory.absolute_path(file.path()) else {
+        return failed_result(
+            path,
+            policy.rules,
+            language,
+            "source path escaped the selected root".to_owned(),
+        );
+    };
+    match fs::read(&absolute) {
+        Ok(source) => {
+            session.work.source_reads.fetch_add(1, Ordering::Relaxed);
+            #[cfg(feature = "evidence-stats")]
+            crate::evidence::record_source_read();
+            rate_source(session, FileId::from_index(index), path, source, policy)
+        }
+        Err(error) => failed_result(path, policy.rules, language, error.to_string()),
+    }
+}
+
+/// The conflict result that stops composition when rules disagree.
+fn conflict(path: &Path, roles: String) -> FileResult {
+    FileResult::RoleConflict {
+        path: path.to_path_buf(),
+        roles,
+    }
+}
+
+/// A failure result carrying the role the path rules settle.
+fn failed_result(
+    path: &Path,
+    rules: &[SourceRoleRule],
+    language: Language,
+    message: String,
+) -> FileResult {
+    match role_for_unavailable_source(path, rules) {
+        Ok(role) => FileResult::Failed {
+            message,
+            role,
+            language,
+        },
+        Err(roles) => conflict(path, roles),
+    }
+}
+
+/// Classifies and parses one read source.
+fn rate_source(
+    session: &mut AnalysisSession<'_>,
+    file: FileId,
+    path: &Path,
+    source: Vec<u8>,
+    policy: SourcePolicy<'_>,
+) -> FileResult {
+    let role = match classify_source_role(path, &source, policy.rules) {
+        Ok(role) => role,
+        Err(roles) => {
+            return FileResult::RoleConflict {
+                path: path.to_path_buf(),
+                roles,
+            };
+        }
+    };
+    let module_syntax = declares_module_syntax(path, &source);
+    match analyze_bytes(session.analyzer, file, path, source, session.work) {
+        Ok(value) => FileResult::Analyzed(rate_file(value, role, policy.health, module_syntax)),
+        Err(LanguageError::Unsupported(language)) => FileResult::Unsupported { language, role },
+        Err(error) => FileResult::Failed {
+            message: error.to_string(),
+            role,
+            language: Analyzer::language(path),
+        },
+    }
+}
+
 pub(crate) fn analyze_current_files(
     inventory: &Inventory,
     candidates: &[&DiscoveredFile],
     width: ExecutionWidth,
-    policy: HealthPolicy,
-    role_rules: &[SourceRoleRule],
+    policy: SourcePolicy<'_>,
     work: &AnalysisWork,
 ) -> Result<Vec<FileResult>, ProjectError> {
     let analyze = |analyzer: &mut Analyzer, (index, file): (usize, &&DiscoveredFile)| {
-        let path = file.path().as_path();
-        let language = Analyzer::language(path);
-        if matches!(
-            language,
-            Language::Astro | Language::Kotlin | Language::Unknown
-        ) {
-            return match role_for_unavailable_source(path, role_rules) {
-                Ok(role) => FileResult::Unsupported { language, role },
-                Err(roles) => FileResult::RoleConflict {
-                    path: path.to_path_buf(),
-                    roles,
-                },
-            };
-        }
-        let Some(absolute) = inventory.absolute_path(file.path()) else {
-            return match role_for_unavailable_source(path, role_rules) {
-                Ok(role) => FileResult::Failed {
-                    message: "source path escaped the selected root".to_owned(),
-                    role,
-                    language,
-                },
-                Err(roles) => FileResult::RoleConflict {
-                    path: path.to_path_buf(),
-                    roles,
-                },
-            };
-        };
-        match fs::read(&absolute) {
-            Ok(source) => {
-                work.source_reads.fetch_add(1, Ordering::Relaxed);
-                #[cfg(feature = "evidence-stats")]
-                crate::evidence::record_source_read();
-                let role = match classify_source_role(path, &source, role_rules) {
-                    Ok(role) => role,
-                    Err(roles) => {
-                        return FileResult::RoleConflict {
-                            path: path.to_path_buf(),
-                            roles,
-                        };
-                    }
-                };
-                let module_syntax = declares_module_syntax(path, &source);
-                match analyze_bytes(analyzer, FileId::from_index(index), path, source, work) {
-                    Ok(value) => {
-                        FileResult::Analyzed(rate_file(value, role, policy, module_syntax))
-                    }
-                    Err(LanguageError::Unsupported(language)) => {
-                        FileResult::Unsupported { language, role }
-                    }
-                    Err(error) => FileResult::Failed {
-                        message: error.to_string(),
-                        role,
-                        language,
-                    },
-                }
-            }
-            Err(error) => match role_for_unavailable_source(path, role_rules) {
-                Ok(role) => FileResult::Failed {
-                    message: error.to_string(),
-                    role,
-                    language,
-                },
-                Err(roles) => FileResult::RoleConflict {
-                    path: path.to_path_buf(),
-                    roles,
-                },
-            },
-        }
+        let mut session = AnalysisSession { analyzer, work };
+        analyze_one_file(&mut session, (index, file), inventory, policy)
     };
 
     if candidates.len() < PARALLEL_FILE_CUTOVER || width.threads() == 1 {

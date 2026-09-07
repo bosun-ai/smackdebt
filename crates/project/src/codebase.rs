@@ -13,6 +13,7 @@ use std::path::Path;
 use crate::codebase_report::{CodebaseReportBuilder, SignalPolicies};
 use crate::history_stream::load_evolution;
 use crate::rating::FileResult;
+use crate::rating::SourcePolicy;
 use crate::requests::{
     CodebaseRequest, DEFAULT_HISTORY_DAYS, ExecutionWidth, ProjectError, ProjectReport,
     SourceRoleRule, WorkStats,
@@ -134,8 +135,10 @@ pub(crate) fn analyze_codebase(request: &CodebaseRequest) -> Result<ProjectRepor
         &inventory,
         &candidates,
         request.width,
-        request.policy,
-        &request.role_rules,
+        SourcePolicy {
+            health: request.policy,
+            rules: &request.role_rules,
+        },
         &work,
     )?;
     let candidate_paths: Vec<_> = candidates

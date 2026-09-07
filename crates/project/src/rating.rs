@@ -3,6 +3,7 @@
 
 use std::path::PathBuf;
 
+use crate::requests::SourceRoleRule;
 use smackdebt_analysis::{
     Coverage, DependencySyntax, FileAnalysis, HealthAssessment, HealthCounts, HealthPolicy,
     Language, ParseStatus, Rating, SourceCoverageOutcome, SourceRole,
@@ -22,6 +23,14 @@ pub(crate) fn source_coverage(analysis: &FileAnalysis, role: SourceRole) -> Cove
         u32::from(matches!(outcome, SourceCoverageOutcome::Failed)) * analysis.source_lines(),
     )
 }
+/// How one tree's source is judged: the health thresholds every unit is
+/// rated under and the configured role rules.
+#[derive(Clone, Copy)]
+pub(crate) struct SourcePolicy<'a> {
+    pub(crate) health: HealthPolicy,
+    pub(crate) rules: &'a [SourceRoleRule],
+}
+
 pub(crate) struct RatedFile {
     pub(crate) analysis: FileAnalysis,
     pub(crate) role: SourceRole,

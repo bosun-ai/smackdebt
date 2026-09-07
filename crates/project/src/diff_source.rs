@@ -15,10 +15,10 @@ use smackdebt_git::ObjectReader;
 use smackdebt_languages::{AnalysisError as LanguageError, Analyzer};
 
 use crate::diff_changes::SelectedChange;
-use crate::rating::{FileResult, file_result_role, rated_health};
+use crate::rating::{FileResult, SourcePolicy, file_result_role, rated_health};
 use crate::requests::{DiffRequest, ProjectError, SourceRoleRule};
 use crate::roles::{classify_source_role, role_for_unavailable_source};
-use crate::source_units::{analyze_bytes, analyze_current_files};
+use crate::source_units::{AnalysisSession, analyze_bytes, analyze_current_files};
 use crate::work::AnalysisWork;
 
 /// The Git objects one diff analysis reads from.
@@ -73,8 +73,10 @@ pub(crate) fn analyze_diff_files<'a>(
         inventory,
         &candidates,
         request.width,
-        request.policy,
-        &request.role_rules,
+        SourcePolicy {
+            health: request.policy,
+            rules: &request.role_rules,
+        },
         work,
     )?;
     let before_roles = unchanged.iter().map(file_result_role).collect();
@@ -133,12 +135,6 @@ pub(crate) struct DiffAnalysisPolicy {
     pub(crate) health: HealthPolicy,
     pub(crate) roles: Vec<SourceRoleRule>,
 }
-/// One worker's analysis session: its reusable parser and the work counters
-/// it reports into.
-pub(crate) struct DiffWorker<'a> {
-    pub(crate) analyzer: &'a mut Analyzer,
-    pub(crate) work: &'a AnalysisWork,
-}
 
 pub(crate) fn analyze_diff_inputs(
     changes: Vec<SelectedChange>,
@@ -155,7 +151,7 @@ pub(crate) fn analyze_diff_inputs(
             .enumerate()
             .map(|(index, change)| {
                 let input = read_diff_input(index, change, &mut objects, &work);
-                let mut worker = DiffWorker {
+                let mut worker = AnalysisSession {
                     analyzer: &mut analyzer,
                     work: &work,
                 };
@@ -199,7 +195,7 @@ pub(crate) fn analyze_diff_inputs(
                             receiver.recv()
                         };
                         let Ok(input) = input else { break };
-                        let mut worker = DiffWorker {
+                        let mut worker = AnalysisSession {
                             analyzer: &mut analyzer,
                             work: &worker_work,
                         };
@@ -270,7 +266,7 @@ pub(crate) fn read_diff_input(
 pub(crate) fn analyze_diff_input(
     input: DiffInput,
     policy: &DiffAnalysisPolicy,
-    worker: &mut DiffWorker<'_>,
+    worker: &mut AnalysisSession<'_>,
 ) -> DiffResult {
     let file_id = FileId::from_index(input.index);
     let current = analyze_diff_side(
@@ -309,7 +305,7 @@ pub(crate) fn diff_units(side: &DiffSide) -> Option<&[smackdebt_analysis::UnitFa
     }
 }
 pub(crate) fn analyze_diff_side(
-    worker: &mut DiffWorker<'_>,
+    worker: &mut AnalysisSession<'_>,
     file: FileId,
     path: &Path,
     input: InputSide,
