@@ -154,14 +154,22 @@ fn evidence_role(reference: &DependencySyntax, dependencies: &SourceDependencies
         dependencies.role
     }
 }
+/// What one undecided reference is recorded as: the coverage partition it
+/// lands in, the issue kind, and the reason a reader sees.
+struct ResolutionVerdict<'a> {
+    resolution: RelationResolution,
+    kind: ResolutionIssueKind,
+    reason: &'a str,
+}
+
 impl ReferenceTables {
     fn record_internal(
         &mut self,
-        source: FileId,
         target: FileId,
         reference: &DependencySyntax,
         dependencies: &SourceDependencies,
     ) {
+        let source = dependencies.file;
         let role = evidence_role(reference, dependencies);
         self.coverage.record(
             reference.relation(),
@@ -190,10 +198,10 @@ impl ReferenceTables {
 
     pub(crate) fn record_external(
         &mut self,
-        source: FileId,
         reference: &DependencySyntax,
         dependencies: &SourceDependencies,
     ) {
+        let source = dependencies.file;
         let role = evidence_role(reference, dependencies);
         self.coverage.record(
             reference.relation(),
@@ -254,34 +262,43 @@ impl ReferenceTables {
 
     fn record_diagnostic(
         &mut self,
-        source: FileId,
         reference: &DependencySyntax,
         dependencies: &SourceDependencies,
-        resolution: RelationResolution,
-        kind: ResolutionIssueKind,
-        reason: &str,
+        verdict: ResolutionVerdict<'_>,
     ) {
+        let source = dependencies.file;
         let role = evidence_role(reference, dependencies);
-        self.coverage
-            .record(reference.relation(), role, dependencies.trust, resolution);
+        self.coverage.record(
+            reference.relation(),
+            role,
+            dependencies.trust,
+            verdict.resolution,
+        );
         if dependencies.trust == SourceTrust::Trusted
             && role == SourceRole::Primary
             && matches!(
-                resolution,
+                verdict.resolution,
                 RelationResolution::UnresolvedInternal | RelationResolution::AmbiguousInternal
             )
         {
             self.internal_issue_files.insert(source);
         }
-        record_resolution_diagnostic(
-            &mut self.diagnostic_values,
-            source,
-            reference,
-            role,
-            dependencies.trust,
-            kind,
-            reason,
-        );
+        let value = self
+            .diagnostic_values
+            .entry((
+                source,
+                reference.target().to_owned(),
+                verdict.kind,
+                verdict.reason.to_owned(),
+                reference.relation(),
+                role,
+                dependencies.trust,
+            ))
+            .or_default();
+        value.0 += 1;
+        if value.1.len() < RETAINED_RELATION_LOCATIONS {
+            value.1.push(reference.span());
+        }
     }
 
     /// Records an internal reference that no repository file matched.
@@ -294,31 +311,29 @@ impl ReferenceTables {
     /// under its own reason instead.
     fn record_unmatched_internal(
         &mut self,
-        source: FileId,
         reference: &DependencySyntax,
         dependencies: &SourceDependencies,
         candidates: &[String],
     ) {
-        let (resolution, kind, reason) = if candidates_name_an_asset(candidates) {
-            (
-                RelationResolution::AssetReference,
-                ResolutionIssueKind::Asset,
-                "target is an asset",
-            )
+        let verdict = if candidates_name_an_asset(candidates) {
+            ResolutionVerdict {
+                resolution: RelationResolution::AssetReference,
+                kind: ResolutionIssueKind::Asset,
+                reason: "target is an asset",
+            }
         } else {
-            (
-                RelationResolution::UnresolvedInternal,
-                ResolutionIssueKind::Unresolved,
-                "no repository file matches",
-            )
+            ResolutionVerdict {
+                resolution: RelationResolution::UnresolvedInternal,
+                kind: ResolutionIssueKind::Unresolved,
+                reason: "no repository file matches",
+            }
         };
-        self.record_diagnostic(source, reference, dependencies, resolution, kind, reason);
+        self.record_diagnostic(reference, dependencies, verdict);
     }
 
     /// Records a reference no path candidate matched.
     fn record_unmatched(
         &mut self,
-        source: FileId,
         source_package: PackageId,
         reference: &DependencySyntax,
         dependencies: &SourceDependencies,
@@ -326,73 +341,25 @@ impl ReferenceTables {
     ) {
         match resolution {
             ManifestReference::Entry(target) => {
-                self.record_internal(source, target, reference, dependencies);
+                self.record_internal(target, reference, dependencies);
             }
             ManifestReference::Package(target) => {
                 self.record_package(source_package, target, reference, dependencies);
             }
             ManifestReference::Ambiguous => self.record_diagnostic(
-                source,
                 reference,
                 dependencies,
-                RelationResolution::AmbiguousInternal,
-                ResolutionIssueKind::Ambiguous,
-                "several packages declare this name",
+                ResolutionVerdict {
+                    resolution: RelationResolution::AmbiguousInternal,
+                    kind: ResolutionIssueKind::Ambiguous,
+                    reason: "several packages declare this name",
+                },
             ),
-            ManifestReference::Absent => self.record_external(source, reference, dependencies),
+            ManifestReference::Absent => self.record_external(reference, dependencies),
         }
     }
 }
 /// Resolves one unmatched reference against the declared package names.
-fn resolve_manifest_name(
-    reference: &DependencySyntax,
-    dependencies: &SourceDependencies,
-    manifest_index: &ManifestNameIndex,
-    manifest_names: &[Option<String>],
-    package_roots: &[PathBuf],
-    index: &BTreeMap<PathBuf, FileId>,
-) -> ManifestReference {
-    if reference.relation() != smackdebt_analysis::StaticRelationKind::Uses {
-        return ManifestReference::Absent;
-    }
-    match manifest_index.resolve(reference.target(), dependencies.language) {
-        ManifestNameMatch::Absent => ManifestReference::Absent,
-        ManifestNameMatch::Ambiguous => ManifestReference::Ambiguous,
-        ManifestNameMatch::Package(position) => {
-            let root = &package_roots[position];
-            let name = manifest_names[position].as_deref().unwrap_or_default();
-            package_entry_file(root, name, index).map_or(
-                ManifestReference::Package(PackageId::from_index(position)),
-                ManifestReference::Entry,
-            )
-        }
-    }
-}
-fn record_resolution_diagnostic(
-    values: &mut BTreeMap<ResolutionDiagnosticKey, DependencyEdgeValue>,
-    source: FileId,
-    reference: &DependencySyntax,
-    role: SourceRole,
-    trust: SourceTrust,
-    kind: ResolutionIssueKind,
-    reason: &str,
-) {
-    let value = values
-        .entry((
-            source,
-            reference.target().to_owned(),
-            kind,
-            reason.to_owned(),
-            reference.relation(),
-            role,
-            trust,
-        ))
-        .or_default();
-    value.0 += 1;
-    if value.1.len() < RETAINED_RELATION_LOCATIONS {
-        value.1.push(reference.span());
-    }
-}
 /// Everything one reference resolution reads: the path index, the manifest
 /// names, the package positions, and the resolution rules.
 pub(crate) struct ReferenceResolver<'a> {
@@ -429,17 +396,10 @@ impl ReferenceResolver<'_> {
         dependencies: &SourceDependencies,
         reference: &DependencySyntax,
     ) {
-        let source = dependencies.file;
         match reference.state() {
             DependencySyntaxState::External => {
                 let resolution = self.manifest_resolution(reference, dependencies);
-                tables.record_unmatched(
-                    source,
-                    source_package,
-                    reference,
-                    dependencies,
-                    resolution,
-                );
+                tables.record_unmatched(source_package, reference, dependencies, resolution);
             }
             DependencySyntaxState::Unresolved(reason) => {
                 let resolution =
@@ -449,12 +409,13 @@ impl ReferenceResolver<'_> {
                         RelationResolution::UnresolvedPackage
                     };
                 tables.record_diagnostic(
-                    source,
                     reference,
                     dependencies,
-                    resolution,
-                    ResolutionIssueKind::Unresolved,
-                    reason,
+                    ResolutionVerdict {
+                        resolution,
+                        kind: ResolutionIssueKind::Unresolved,
+                        reason,
+                    },
                 );
             }
             DependencySyntaxState::Candidates(candidates) => {
@@ -462,17 +423,11 @@ impl ReferenceResolver<'_> {
                     resolve_candidates(&dependencies.path, candidates, self.index, self.aliases);
                 match matches.as_slice() {
                     [] if reference.intent() == smackdebt_analysis::DependencyIntent::Internal => {
-                        tables.record_unmatched_internal(
-                            source,
-                            reference,
-                            dependencies,
-                            candidates,
-                        );
+                        tables.record_unmatched_internal(reference, dependencies, candidates);
                     }
                     [] => {
                         let resolution = self.manifest_resolution(reference, dependencies);
                         tables.record_unmatched(
-                            source,
                             source_package,
                             reference,
                             dependencies,
@@ -480,16 +435,17 @@ impl ReferenceResolver<'_> {
                         );
                     }
                     [target] => {
-                        tables.record_internal(source, *target, reference, dependencies);
+                        tables.record_internal(*target, reference, dependencies);
                     }
                     _ => {
                         tables.record_diagnostic(
-                            source,
                             reference,
                             dependencies,
-                            RelationResolution::AmbiguousInternal,
-                            ResolutionIssueKind::Ambiguous,
-                            "several repository files match",
+                            ResolutionVerdict {
+                                resolution: RelationResolution::AmbiguousInternal,
+                                kind: ResolutionIssueKind::Ambiguous,
+                                reason: "several repository files match",
+                            },
                         );
                     }
                 }
@@ -503,14 +459,24 @@ impl ReferenceResolver<'_> {
         reference: &DependencySyntax,
         dependencies: &SourceDependencies,
     ) -> ManifestReference {
-        resolve_manifest_name(
-            reference,
-            dependencies,
-            self.manifest_index,
-            self.manifest_names,
-            self.package_roots,
-            self.index,
-        )
+        if reference.relation() != smackdebt_analysis::StaticRelationKind::Uses {
+            return ManifestReference::Absent;
+        }
+        match self
+            .manifest_index
+            .resolve(reference.target(), dependencies.language)
+        {
+            ManifestNameMatch::Absent => ManifestReference::Absent,
+            ManifestNameMatch::Ambiguous => ManifestReference::Ambiguous,
+            ManifestNameMatch::Package(position) => {
+                let root = &self.package_roots[position];
+                let name = self.manifest_names[position].as_deref().unwrap_or_default();
+                package_entry_file(root, name, self.index).map_or(
+                    ManifestReference::Package(PackageId::from_index(position)),
+                    ManifestReference::Entry,
+                )
+            }
+        }
     }
 }
 /// The package-level joins manifest names contributed without file edges.
