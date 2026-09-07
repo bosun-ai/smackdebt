@@ -2,7 +2,7 @@
 
 use std::path::{Path, PathBuf};
 
-use smackdebt_analysis::{HealthPolicy, Report, Scope, ScopeId, Thresholds};
+use smackdebt_analysis::{HealthPolicy, Report, Scope, ScopeId};
 use smackdebt_discovery::{Inventory, SnapshotInventory, is_source_path};
 use smackdebt_git::GitRepository;
 use std::sync::atomic::Ordering;
@@ -68,21 +68,9 @@ impl DiffRequest {
         self
     }
 
-    pub fn with_thresholds(
-        mut self,
-        cognitive: (u32, u32),
-        cyclomatic: (u32, u32),
-        logical_lines: (u32, u32),
-        nesting: (u32, u32),
-        parameters: (u32, u32),
-    ) -> Self {
-        self.policy = HealthPolicy::new(
-            Thresholds::new(cognitive.0, cognitive.1),
-            Thresholds::new(cyclomatic.0, cyclomatic.1),
-            Thresholds::new(logical_lines.0, logical_lines.1),
-            Thresholds::new(nesting.0, nesting.1),
-            Thresholds::new(parameters.0, parameters.1),
-        );
+    /// Sets the health policy every unit is rated under.
+    pub fn with_thresholds(mut self, policy: HealthPolicy) -> Self {
+        self.policy = policy;
         self
     }
 

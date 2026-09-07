@@ -163,6 +163,7 @@ mod tests {
     use smackdebt_analysis::FileActivity;
     use smackdebt_analysis::FileId;
     use smackdebt_analysis::SourceTrust;
+    use smackdebt_analysis::{HealthPolicy, Thresholds};
     use smackdebt_languages::Analyzer;
     use std::fs;
     use std::path::Path;
@@ -215,11 +216,13 @@ mod tests {
         .unwrap();
 
         let result = analyze_codebase(&CodebaseRequest::new(root.path()).with_thresholds(
-            (1, 2),
-            (1, 2),
-            (1, 2),
-            (4, 7),
-            (6, 9),
+            HealthPolicy::new(
+                Thresholds::new(1, 2),
+                Thresholds::new(1, 2),
+                Thresholds::new(1, 2),
+                Thresholds::new(4, 7),
+                Thresholds::new(6, 9),
+            ),
         ))
         .unwrap();
         let report = result.report();

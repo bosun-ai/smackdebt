@@ -48,6 +48,7 @@ pub use requests::{
 };
 pub use smackdebt_analysis::DEFAULT_MINIMUM_TOUCHES;
 pub use smackdebt_analysis::{GateComparison, GateRow, GateSignal, GateSnapshot};
+pub use smackdebt_analysis::{HealthPolicy, Thresholds};
 
 #[doc(hidden)]
 pub use smackdebt_languages::{parser_time_ns, reset_parser_time};

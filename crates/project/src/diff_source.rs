@@ -460,6 +460,7 @@ mod tests {
     use crate::test_support::{git, repository};
     use smackdebt_analysis::ScopeId;
     use smackdebt_analysis::SourceTrust;
+    use smackdebt_analysis::{HealthPolicy, Thresholds};
     use std::fs;
 
     #[test]
@@ -487,7 +488,13 @@ mod tests {
         let result = analyze_diff(
             &DiffRequest::new(root.path())
                 .with_reference("HEAD")
-                .with_thresholds((1, 2), (1, 2), (1, 2), (4, 7), (6, 9)),
+                .with_thresholds(HealthPolicy::new(
+                    Thresholds::new(1, 2),
+                    Thresholds::new(1, 2),
+                    Thresholds::new(1, 2),
+                    Thresholds::new(4, 7),
+                    Thresholds::new(6, 9),
+                )),
         )
         .unwrap();
         let report = result.report();

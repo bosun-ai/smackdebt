@@ -76,6 +76,7 @@ mod tests {
     use crate::codebase::analyze_codebase;
     use crate::requests::CodebaseRequest;
     use smackdebt_analysis::HealthCounts;
+    use smackdebt_analysis::{HealthPolicy, Thresholds};
     use std::fs;
 
     #[test]
@@ -108,11 +109,13 @@ mod tests {
         .unwrap();
 
         let result = analyze_codebase(&CodebaseRequest::new(root.path()).with_thresholds(
-            (1, 2),
-            (1, 2),
-            (1, 2),
-            (4, 7),
-            (6, 9),
+            HealthPolicy::new(
+                Thresholds::new(1, 2),
+                Thresholds::new(1, 2),
+                Thresholds::new(1, 2),
+                Thresholds::new(4, 7),
+                Thresholds::new(6, 9),
+            ),
         ))
         .unwrap();
         let report = result.report();

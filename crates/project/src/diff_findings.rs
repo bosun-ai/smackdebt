@@ -239,6 +239,7 @@ mod tests {
     use crate::requests::DiffRequest;
     use crate::test_support::git;
     use smackdebt_analysis::DiffTier;
+    use smackdebt_analysis::{HealthPolicy, Thresholds};
     use std::fs;
 
     #[test]
@@ -262,7 +263,13 @@ mod tests {
         git(repository_path, ["commit", "-qm", "complex base"]);
         let request = DiffRequest::new(repository_path)
             .with_reference("HEAD")
-            .with_thresholds((1, 2), (5, 10), (50, 100), (4, 7), (6, 9));
+            .with_thresholds(HealthPolicy::new(
+                Thresholds::new(1, 2),
+                Thresholds::new(5, 10),
+                Thresholds::new(50, 100),
+                Thresholds::new(4, 7),
+                Thresholds::new(6, 9),
+            ));
 
         fs::write(
             repository_path.join("work.rs"),

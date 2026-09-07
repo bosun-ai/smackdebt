@@ -85,21 +85,9 @@ impl CodebaseRequest {
         self
     }
 
-    pub fn with_thresholds(
-        mut self,
-        cognitive: (u32, u32),
-        cyclomatic: (u32, u32),
-        logical_lines: (u32, u32),
-        nesting: (u32, u32),
-        parameters: (u32, u32),
-    ) -> Self {
-        self.policy = HealthPolicy::new(
-            Thresholds::new(cognitive.0, cognitive.1),
-            Thresholds::new(cyclomatic.0, cyclomatic.1),
-            Thresholds::new(logical_lines.0, logical_lines.1),
-            Thresholds::new(nesting.0, nesting.1),
-            Thresholds::new(parameters.0, parameters.1),
-        );
+    /// Sets the health policy every unit is rated under.
+    pub fn with_thresholds(mut self, policy: HealthPolicy) -> Self {
+        self.policy = policy;
         self
     }
 
@@ -264,6 +252,7 @@ pub(crate) fn analyze_codebase(request: &CodebaseRequest) -> Result<ProjectRepor
 mod tests {
     use super::*;
     use smackdebt_analysis::{CodebaseTier, WorstOffenderReason};
+    use smackdebt_analysis::{HealthPolicy, Thresholds};
     use std::fs;
 
     #[test]
@@ -280,7 +269,13 @@ mod tests {
         )
         .unwrap();
         let report = CodebaseRequest::new(root.path())
-            .with_thresholds((1, 2), (5, 10), (50, 100), (4, 7), (6, 9))
+            .with_thresholds(HealthPolicy::new(
+                Thresholds::new(1, 2),
+                Thresholds::new(5, 10),
+                Thresholds::new(50, 100),
+                Thresholds::new(4, 7),
+                Thresholds::new(6, 9),
+            ))
             .analyze()
             .unwrap();
         let verdict = report.report().verdict().unwrap();

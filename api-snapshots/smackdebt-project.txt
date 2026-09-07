@@ -4,6 +4,8 @@ pub use smackdebt_project::GateComparison
 pub use smackdebt_project::GateRow
 pub use smackdebt_project::GateSignal
 pub use smackdebt_project::GateSnapshot
+pub use smackdebt_project::HealthPolicy
+pub use smackdebt_project::Thresholds
 pub enum smackdebt_project::ExecutionWidth
 pub smackdebt_project::ExecutionWidth::Automatic
 pub smackdebt_project::ExecutionWidth::Fixed(core::num::nonzero::NonZeroUsize)
@@ -32,7 +34,7 @@ pub fn smackdebt_project::CodebaseRequest::with_history_days(self, u32) -> Self
 pub fn smackdebt_project::CodebaseRequest::with_minimum_hotspot_touches(self, u32) -> Self
 pub fn smackdebt_project::CodebaseRequest::with_role_rules(self, alloc::vec::Vec<smackdebt_project::SourceRoleRule>) -> Self
 pub fn smackdebt_project::CodebaseRequest::with_size_thresholds(self, (u32, u32), (u32, u32)) -> Self
-pub fn smackdebt_project::CodebaseRequest::with_thresholds(self, (u32, u32), (u32, u32), (u32, u32), (u32, u32), (u32, u32)) -> Self
+pub fn smackdebt_project::CodebaseRequest::with_thresholds(self, smackdebt_analysis::health::HealthPolicy) -> Self
 pub fn smackdebt_project::CodebaseRequest::with_width(self, smackdebt_project::ExecutionWidth) -> Self
 pub struct smackdebt_project::DiffRequest
 impl smackdebt_project::DiffRequest
@@ -42,7 +44,7 @@ pub fn smackdebt_project::DiffRequest::new(impl core::convert::Into<std::path::P
 pub fn smackdebt_project::DiffRequest::with_history_days(self, u32) -> Self
 pub fn smackdebt_project::DiffRequest::with_reference(self, impl core::convert::Into<alloc::string::String>) -> Self
 pub fn smackdebt_project::DiffRequest::with_role_rules(self, alloc::vec::Vec<smackdebt_project::SourceRoleRule>) -> Self
-pub fn smackdebt_project::DiffRequest::with_thresholds(self, (u32, u32), (u32, u32), (u32, u32), (u32, u32), (u32, u32)) -> Self
+pub fn smackdebt_project::DiffRequest::with_thresholds(self, smackdebt_analysis::health::HealthPolicy) -> Self
 pub fn smackdebt_project::DiffRequest::with_width(self, smackdebt_project::ExecutionWidth) -> Self
 pub struct smackdebt_project::ProjectReport
 impl smackdebt_project::ProjectReport
