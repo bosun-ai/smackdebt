@@ -18,10 +18,8 @@ use smackdebt_analysis::{
     Scope, ScopeId, ScopeKind, SizeFinding, SizePolicy, SourceCoverageOutcome, SourceRole,
     SourceTrust, Thresholds, compare_architecture, compare_units, test_declared_files,
 };
-use smackdebt_discovery::{
-    DiscoveredFile, Inventory, SnapshotInventory, discover_snapshot, is_source_path,
-};
-use smackdebt_git::{Change, GitRepository, ObjectReader};
+use smackdebt_discovery::{DiscoveredFile, Inventory, SnapshotInventory, is_source_path};
+use smackdebt_git::{GitRepository, ObjectReader};
 use smackdebt_languages::{AnalysisError as LanguageError, Analyzer};
 
 use crate::architecture::{
@@ -31,12 +29,19 @@ use crate::architecture::{
 #[cfg(test)]
 use crate::candidates::candidates_name_an_asset;
 use crate::candidates::resolve_candidates;
-use crate::dependencies::{DiffTables, ManifestFacts, PackageTables, SourceDependencies};
+use crate::dependencies::{
+    DiffSideSelector, DiffTables, ManifestFacts, PackageTables, SourceDependencies,
+};
+use crate::diff_changes::{
+    DiffAliases, DiffChangeSet, DiffHierarchy, DiffPackages, SelectedChange, build_diff_hierarchy,
+    discover_base_tree, discover_current_tree, resolve_diff_refs, select_diff_changes,
+};
 use crate::dormancy::WindowedHistory;
+use crate::hierarchy::HierarchyBuilder;
 #[cfg(test)]
 use crate::history_stream::failed_history_availability;
 use crate::history_stream::{EvolutionInput, history_directory_paths, load_evolution};
-use crate::manifest_names::{declared_manifest_name, manifest_names_for, manifest_paths_for};
+use crate::manifest_names::{manifest_names_for, manifest_paths_for};
 use crate::paths::{package_of, report_package_path};
 #[cfg(test)]
 use crate::rating::rate_file;
@@ -55,6 +60,7 @@ use crate::roles::declares_module_syntax;
 #[cfg(test)]
 use crate::roles::has_generated_javascript_content;
 use crate::roles::{classify_source_role, matching_role_rules, role_for_unavailable_source};
+use crate::selection::Selection;
 use crate::source_units::{analyze_bytes, analyze_current_files};
 use crate::work::AnalysisWork;
 #[cfg(test)]
@@ -1174,45 +1180,6 @@ fn diff_selected_scope(
     }
 }
 
-/// Resolves the reference a diff answers against and the merge base the
-/// changes are stated from.
-fn resolve_diff_refs(
-    repository: &GitRepository,
-    requested: Option<&str>,
-) -> Result<(String, String), ProjectError> {
-    let reference = match requested {
-        Some(reference) => reference.to_owned(),
-        None => repository
-            .default_ref()?
-            .ok_or(ProjectError::MissingReference)?,
-    };
-    let base = repository
-        .merge_base(&reference, "HEAD")
-        .map_err(|error| match error {
-            // Git reports an unknown ref through a failed command, so the
-            // failure is restated as the fixable value the user supplied.
-            smackdebt_git::GitError::Command { .. } | smackdebt_git::GitError::MissingObject(_) => {
-                ProjectError::UnknownReference(reference.clone())
-            }
-            other => ProjectError::Git(other),
-        })?;
-    Ok((reference, base))
-}
-
-/// The one ignore-aware walk of the current tree.
-fn discover_current_tree(repository: &GitRepository) -> Result<Inventory, ProjectError> {
-    let inventory =
-        Inventory::discover_sources(repository.root(), Vec::new()).map_err(|source| {
-            ProjectError::Inspect {
-                path: repository.root().to_path_buf(),
-                source,
-            }
-        })?;
-    #[cfg(feature = "evidence-stats")]
-    crate::evidence::record_inventory(inventory.visited_entries());
-    Ok(inventory)
-}
-
 /// The path filter an explicit diff scope selects, refused when it points at
 /// a file no language claims.
 fn diff_selection_filter(
@@ -1226,30 +1193,6 @@ fn diff_selection_filter(
         return Err(ProjectError::NotSourceFile(request.path.clone()));
     }
     Ok(path_filter)
-}
-
-/// The base tree's inventory, read through the batched object reader.
-fn discover_base_tree(
-    repository: &GitRepository,
-    batch: &mut ObjectReader,
-    base: &str,
-) -> Result<SnapshotInventory, ProjectError> {
-    let base_tree_files = batch.tree_files(base)?;
-    let mut base_metadata: BTreeMap<PathBuf, Result<Vec<u8>, String>> = BTreeMap::new();
-    discover_snapshot(repository.root(), &base_tree_files, |path| {
-        if let Some(source) = base_metadata.get(path) {
-            return source.clone().map_err(std::io::Error::other);
-        }
-        let source = batch
-            .read_path(base, path)
-            .map_err(|error| error.to_string());
-        base_metadata.insert(path.to_path_buf(), source.clone());
-        source.map_err(std::io::Error::other)
-    })
-    .map_err(|source| ProjectError::Inspect {
-        path: repository.root().to_path_buf(),
-        source,
-    })
 }
 
 /// Fails an explicit scope that selects no source in either tree.
@@ -1274,204 +1217,6 @@ fn require_selected_source(
         return Err(ProjectError::NoSourceFiles(request.path.clone()));
     }
     Ok(())
-}
-
-/// The files the two trees disagree about, in one ordered table.
-struct DiffChangeSet {
-    changed: Vec<SelectedChange>,
-    all_changed: Vec<SelectedChange>,
-    selected_paths: BTreeSet<PathBuf>,
-}
-
-/// Merges the changes Git reports with the paths only one snapshot holds,
-/// keeps the analyzable ones, and notes which fall inside the selected scope.
-fn select_diff_changes(
-    inventory: &Inventory,
-    base_inventory: &SnapshotInventory,
-    changes: Vec<Change>,
-    path_filter: Option<&Path>,
-) -> DiffChangeSet {
-    let current_sources = inventory
-        .source_files()
-        .map(|file| file.path().as_path().to_path_buf())
-        .collect::<BTreeSet<_>>();
-    let base_sources = base_inventory
-        .source_paths()
-        .iter()
-        .cloned()
-        .collect::<BTreeSet<_>>();
-    let changed_paths = changes
-        .iter()
-        .flat_map(|change| {
-            [
-                change.current_path().to_path_buf(),
-                change.base_path().to_path_buf(),
-            ]
-        })
-        .collect::<BTreeSet<_>>();
-    let mut changed = changes
-        .into_iter()
-        .filter_map(|change| SelectedChange::from_git(change, &current_sources, &base_sources))
-        .collect::<Vec<_>>();
-    for path in current_sources.symmetric_difference(&base_sources) {
-        if !changed_paths.contains(path.as_path()) {
-            changed.push(SelectedChange::from_snapshot(
-                path.clone(),
-                current_sources.contains(path),
-                base_sources.contains(path),
-            ));
-        }
-    }
-    changed.sort_by(|left, right| left.current_path().cmp(right.current_path()));
-    let all_changed = changed.clone();
-    changed.retain(|entry| Analyzer::language(entry.current_path()) != Language::Unknown);
-    let selected_paths: BTreeSet<_> = changed
-        .iter()
-        .filter(|entry| path_filter.is_none_or(|path| entry.current_path().starts_with(path)))
-        .map(|entry| entry.current_path().to_path_buf())
-        .collect();
-    DiffChangeSet {
-        changed,
-        all_changed,
-        selected_paths,
-    }
-}
-
-/// Every resolution configuration either tree declares or the change touched.
-fn base_resolution_configs(
-    inventory: &Inventory,
-    base_inventory: &SnapshotInventory,
-    all_changed: &[SelectedChange],
-) -> Vec<PathBuf> {
-    let mut candidates: Vec<_> = inventory
-        .packages()
-        .iter()
-        .filter_map(|package| package.resolution_config())
-        .map(|path| path.as_path().to_path_buf())
-        .collect();
-    candidates.extend(base_inventory.resolution_configs().iter().cloned());
-    for change in all_changed {
-        for path in [change.current_path(), change.base_path()] {
-            if matches!(
-                path.file_name().and_then(|name| name.to_str()),
-                Some("tsconfig.json" | "jsconfig.json")
-            ) {
-                candidates.push(path.to_path_buf());
-            }
-        }
-    }
-    candidates.sort();
-    candidates.dedup();
-    candidates
-}
-
-/// The package positions the two trees share, current roots first, and the
-/// resolution configuration either tree declares.
-struct DiffPackages {
-    roots: Vec<PathBuf>,
-    current_roots: Vec<PathBuf>,
-    before_roots: Vec<PathBuf>,
-    before_manifest_names: Vec<Option<String>>,
-    resolution_configs: Vec<PathBuf>,
-}
-
-impl DiffPackages {
-    fn of(
-        inventory: &Inventory,
-        base_inventory: &SnapshotInventory,
-        all_changed: &[SelectedChange],
-    ) -> Self {
-        let current_roots: Vec<_> = inventory
-            .packages()
-            .iter()
-            .map(|package| package.root().as_path().to_path_buf())
-            .collect();
-        let before_roots = base_inventory
-            .packages()
-            .iter()
-            .map(|(root, _)| root.clone())
-            .collect::<Vec<_>>();
-        let resolution_configs = base_resolution_configs(inventory, base_inventory, all_changed);
-        let mut base_only_roots = before_roots.clone();
-        base_only_roots.retain(|root| !current_roots.contains(root));
-        base_only_roots.sort();
-        base_only_roots.dedup();
-        let mut roots = current_roots.clone();
-        roots.extend(base_only_roots.iter().cloned());
-        let before_manifest_names = roots
-            .iter()
-            .map(|root| {
-                base_inventory
-                    .packages()
-                    .iter()
-                    .find(|(candidate, _)| candidate == root)
-                    .and_then(|(_, name)| name.clone())
-            })
-            .collect::<Vec<_>>();
-        Self {
-            roots,
-            current_roots,
-            before_roots,
-            before_manifest_names,
-            resolution_configs,
-        }
-    }
-}
-
-/// The scopes a diff places its files in, and the packages it will publish.
-struct DiffHierarchy {
-    scopes: Vec<Scope>,
-    file_scopes: BTreeMap<PathBuf, ScopeId>,
-    packages: Vec<PackageRecord>,
-}
-
-/// Builds the repository hierarchy from the shared package positions, placing
-/// changed files first and every other analyzable current file after them.
-fn build_diff_hierarchy(
-    inventory: &Inventory,
-    changed: &[SelectedChange],
-    packages: &DiffPackages,
-) -> DiffHierarchy {
-    let mut hierarchy = HierarchyBuilder::new(".".to_owned(), &packages.roots);
-    let package_records: Vec<_> = packages
-        .roots
-        .iter()
-        .enumerate()
-        .map(|(index, root)| {
-            let id = PackageId::from_index(index);
-            let scope = hierarchy.package_scopes[index];
-            let path = report_package_path(root);
-            let record = if index < packages.current_roots.len() {
-                PackageRecord::current(id, scope, path)
-            } else {
-                PackageRecord::base_only(id, scope, path)
-            };
-            record.with_manifest_name(declared_manifest_name(inventory, root))
-        })
-        .collect();
-    let changed_paths: BTreeSet<_> = changed
-        .iter()
-        .map(|entry| entry.current_path().to_path_buf())
-        .collect();
-    for entry in changed {
-        let package = package_of(entry.current_path(), &packages.roots, &packages.roots);
-        hierarchy.add_file(entry.current_path(), package.index());
-    }
-    for file in inventory
-        .source_files()
-        .filter(|file| Analyzer::language(file.path().as_path()) != Language::Unknown)
-    {
-        if changed_paths.contains(file.path().as_path()) {
-            continue;
-        }
-        let package = package_of(file.path().as_path(), &packages.roots, &packages.roots);
-        hierarchy.add_file(file.path().as_path(), package.index());
-    }
-    DiffHierarchy {
-        scopes: hierarchy.scopes,
-        file_scopes: hierarchy.file_scopes,
-        packages: package_records,
-    }
 }
 
 /// The Git objects one diff analysis reads from.
@@ -1542,22 +1287,6 @@ fn analyze_diff_files<'a>(
             first_file_index: changed_count,
         },
     ))
-}
-
-/// Both trees' resolution rules, selected by side.
-#[derive(Clone, Copy)]
-struct DiffAliases<'a> {
-    current: &'a ResolutionRules,
-    before: &'a ResolutionRules,
-}
-
-impl DiffAliases<'_> {
-    const fn select(&self, side: DiffSideSelector) -> &ResolutionRules {
-        match side {
-            DiffSideSelector::Current => self.current,
-            DiffSideSelector::Before => self.before,
-        }
-    }
 }
 
 /// Reclassifies test-declared files on both sides of the diff.
@@ -1703,58 +1432,6 @@ impl InputSide {
             bytes: None,
             error: Some(error),
         }
-    }
-}
-
-#[derive(Clone, Debug)]
-struct SelectedChange {
-    current_path: PathBuf,
-    base_path: PathBuf,
-    current_exists: bool,
-    base_exists: bool,
-}
-
-impl SelectedChange {
-    fn from_git(
-        change: Change,
-        current_sources: &BTreeSet<PathBuf>,
-        base_sources: &BTreeSet<PathBuf>,
-    ) -> Option<Self> {
-        let current_exists =
-            change.current_exists() && current_sources.contains(change.current_path());
-        let base_exists = change.base_exists() && base_sources.contains(change.base_path());
-        (current_exists || base_exists).then(|| Self {
-            current_path: change.current_path().to_path_buf(),
-            base_path: change.base_path().to_path_buf(),
-            current_exists,
-            base_exists,
-        })
-    }
-
-    fn from_snapshot(path: PathBuf, current_exists: bool, base_exists: bool) -> Self {
-        debug_assert!(current_exists || base_exists);
-        Self {
-            current_path: path.clone(),
-            base_path: path,
-            current_exists,
-            base_exists,
-        }
-    }
-
-    fn current_path(&self) -> &Path {
-        &self.current_path
-    }
-
-    fn base_path(&self) -> &Path {
-        &self.base_path
-    }
-
-    const fn current_exists(&self) -> bool {
-        self.current_exists
-    }
-
-    const fn base_exists(&self) -> bool {
-        self.base_exists
     }
 }
 
@@ -2494,13 +2171,6 @@ fn demote_test_declared_roles(
     }
 }
 
-/// Which side of a diff a classification pass reads.
-#[derive(Clone, Copy, Eq, PartialEq)]
-enum DiffSideSelector {
-    Current,
-    Before,
-}
-
 impl DiffSide {
     fn role(&self) -> Option<SourceRole> {
         match self {
@@ -2591,106 +2261,6 @@ fn demote_test_declared_diff_roles(
                 }
             }
         }
-    }
-}
-
-struct Selection {
-    /// The root every recorded path is relative to.
-    inventory_root: PathBuf,
-    /// The tree walked when no repository stands behind the selection.
-    discovery_root: PathBuf,
-    exact_file: Option<PathBuf>,
-    prefix: Option<PathBuf>,
-    label: String,
-    /// Whether a repository stands behind the selection, which is what makes
-    /// the selection a scope of one repository report rather than a report of
-    /// its own.
-    repository: bool,
-}
-
-impl Selection {
-    fn resolve(path: &Path, automatic_scope: bool) -> Result<Self, ProjectError> {
-        let absolute = std::path::absolute(path).map_err(|source| ProjectError::Inspect {
-            path: path.to_path_buf(),
-            source,
-        })?;
-        if !automatic_scope && absolute.is_file() && !is_source_path(&absolute) {
-            return Err(ProjectError::NotSourceFile(path.to_path_buf()));
-        }
-        if let Ok(repository) = GitRepository::discover(&absolute) {
-            let root = repository
-                .root()
-                .canonicalize()
-                .unwrap_or_else(|_| repository.root().to_path_buf());
-            let selected_absolute = absolute.canonicalize().unwrap_or_else(|_| absolute.clone());
-            let prefix = if automatic_scope {
-                None
-            } else {
-                Some(
-                    selected_absolute
-                        .strip_prefix(&root)
-                        .unwrap_or(Path::new(""))
-                        .to_path_buf(),
-                )
-            };
-            let exact_file = selected_absolute.is_file().then(|| {
-                selected_absolute
-                    .strip_prefix(&root)
-                    .unwrap_or(Path::new(""))
-                    .to_path_buf()
-            });
-            // The report is the repository however little of it is answered,
-            // so its root scope carries the repository's own name.
-            return Ok(Self {
-                inventory_root: root,
-                discovery_root: selected_absolute,
-                exact_file,
-                prefix,
-                label: ".".to_owned(),
-                repository: true,
-            });
-        }
-        if absolute.is_file() {
-            let root = absolute.parent().unwrap_or(Path::new(".")).to_path_buf();
-            let exact_file = absolute.file_name().map(PathBuf::from);
-            return Ok(Self {
-                inventory_root: root,
-                discovery_root: absolute,
-                exact_file,
-                prefix: None,
-                label: path.display().to_string(),
-                repository: false,
-            });
-        }
-        Ok(Self {
-            inventory_root: absolute.clone(),
-            discovery_root: absolute,
-            exact_file: None,
-            prefix: None,
-            label: path.display().to_string(),
-            repository: false,
-        })
-    }
-
-    /// The tree the inventory walk covers, which the reader is shown if the
-    /// walk fails.
-    fn walk_root(&self) -> &Path {
-        if self.repository {
-            &self.inventory_root
-        } else {
-            &self.discovery_root
-        }
-    }
-
-    fn includes(&self, path: &Path) -> bool {
-        self.exact_file.as_deref().map_or_else(
-            || {
-                self.prefix
-                    .as_deref()
-                    .is_none_or(|prefix| path.starts_with(prefix))
-            },
-            |file| path == file,
-        )
     }
 }
 
@@ -3517,83 +3087,6 @@ fn diff_filter(root: &Path, selected: &Path) -> Option<PathBuf> {
     let absolute = absolute.canonicalize().unwrap_or(absolute);
     let root = root.canonicalize().unwrap_or_else(|_| root.to_path_buf());
     absolute.strip_prefix(root).ok().map(Path::to_path_buf)
-}
-
-struct HierarchyBuilder {
-    scopes: Vec<Scope>,
-    package_scopes: Vec<ScopeId>,
-    file_scopes: BTreeMap<PathBuf, ScopeId>,
-    directories: BTreeMap<(PathBuf, PathBuf), ScopeId>,
-    package_roots: Vec<PathBuf>,
-}
-
-impl HierarchyBuilder {
-    fn new(label: String, package_roots: &[PathBuf]) -> Self {
-        let root = ScopeId::from_index(0);
-        let mut scopes = vec![Scope::new(root, ScopeKind::Repository, label, None)];
-        let mut package_scopes = Vec::with_capacity(package_roots.len());
-        for package_root in package_roots {
-            let id = ScopeId::from_index(scopes.len());
-            package_scopes.push(id);
-            scopes[root.index()].add_child(id);
-            scopes.push(Scope::new(
-                id,
-                ScopeKind::Package,
-                if package_root.as_os_str().is_empty() {
-                    ".".to_owned()
-                } else {
-                    package_root.display().to_string()
-                },
-                Some(root),
-            ));
-        }
-        Self {
-            scopes,
-            package_scopes,
-            file_scopes: BTreeMap::new(),
-            directories: BTreeMap::new(),
-            package_roots: package_roots.to_vec(),
-        }
-    }
-
-    fn add_file(&mut self, path: &Path, package_index: usize) {
-        let package_root = self.package_roots[package_index].clone();
-        let package_scope = self.package_scopes[package_index];
-        let relative_directory = path
-            .parent()
-            .unwrap_or(Path::new(""))
-            .strip_prefix(&package_root)
-            .unwrap_or(Path::new(""));
-        let mut parent = package_scope;
-        let mut accumulated = package_root.clone();
-        for component in relative_directory.components() {
-            accumulated.push(component);
-            let key = (package_root.clone(), accumulated.clone());
-            parent = if let Some(id) = self.directories.get(&key) {
-                *id
-            } else {
-                let id = ScopeId::from_index(self.scopes.len());
-                self.scopes[parent.index()].add_child(id);
-                self.scopes.push(Scope::new(
-                    id,
-                    ScopeKind::Directory,
-                    accumulated.display().to_string(),
-                    Some(parent),
-                ));
-                self.directories.insert(key, id);
-                id
-            };
-        }
-        let file_scope = ScopeId::from_index(self.scopes.len());
-        self.scopes[parent.index()].add_child(file_scope);
-        self.scopes.push(Scope::new(
-            file_scope,
-            ScopeKind::File,
-            path.display().to_string(),
-            Some(parent),
-        ));
-        self.file_scopes.insert(path.to_path_buf(), file_scope);
-    }
 }
 
 #[cfg(test)]

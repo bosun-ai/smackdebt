@@ -62,3 +62,10 @@ pub(crate) struct PackageTables<'a> {
     pub(crate) roots: &'a [PathBuf],
     pub(crate) manifests: ManifestFacts<'a>,
 }
+
+/// Which side of a diff a classification pass reads.
+#[derive(Clone, Copy, Eq, PartialEq)]
+pub(crate) enum DiffSideSelector {
+    Current,
+    Before,
+}

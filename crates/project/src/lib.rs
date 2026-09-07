@@ -4,9 +4,11 @@ mod architecture;
 mod candidates;
 mod cycle_findings;
 mod dependencies;
+mod diff_changes;
 mod dormancy;
 #[cfg(feature = "evidence-stats")]
 mod evidence;
+mod hierarchy;
 mod history_stream;
 mod manifest_names;
 mod package_graph;
@@ -18,6 +20,7 @@ mod requests;
 mod resolution_config;
 mod roles;
 mod rust_layout;
+mod selection;
 mod source_units;
 mod work;
 
