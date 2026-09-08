@@ -317,6 +317,8 @@ pub struct FileRecord {
     health: HealthCounts,
     activity: Option<FileActivity>,
     path_id: Option<PathId>,
+    base_path: Option<String>,
+    base_path_id: Option<PathId>,
     package: Option<PackageId>,
     role: SourceRole,
     parse_status: Option<ParseStatus>,
@@ -352,6 +354,8 @@ impl FileRecord {
             health,
             activity: None,
             path_id: None,
+            base_path: None,
+            base_path_id: None,
             package: None,
             role: SourceRole::Primary,
             parse_status: None,
@@ -405,6 +409,19 @@ impl FileRecord {
     pub const fn path_id(&self) -> Option<PathId> {
         self.path_id
     }
+    /// The path this file answered to on the comparison's base side, when the
+    /// change renamed it. A record without one kept its path.
+    pub fn base_path(&self) -> Option<&str> {
+        self.base_path.as_deref()
+    }
+    pub const fn base_path_id(&self) -> Option<PathId> {
+        self.base_path_id
+    }
+    #[must_use]
+    pub fn with_base_path(mut self, path: impl Into<String>) -> Self {
+        self.base_path = Some(path.into());
+        self
+    }
     pub const fn package(&self) -> Option<PackageId> {
         self.package
     }
@@ -447,6 +464,9 @@ impl FileRecord {
     }
     fn set_path_id(&mut self, path: PathId) {
         self.path_id = Some(path);
+    }
+    fn set_base_path_id(&mut self, path: PathId) {
+        self.base_path_id = Some(path);
     }
 }
 
@@ -1812,6 +1832,10 @@ impl Report {
         let mut file = file;
         let path_id = self.intern_path(file.path());
         file.set_path_id(path_id);
+        if let Some(base) = file.base_path().map(str::to_owned) {
+            let base_id = self.intern_path(&base);
+            file.set_base_path_id(base_id);
+        }
         self.files.push(file);
         id
     }

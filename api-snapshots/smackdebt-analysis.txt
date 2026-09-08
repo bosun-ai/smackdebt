@@ -696,6 +696,8 @@ pub struct smackdebt_analysis::FileRecord
 impl smackdebt_analysis::FileRecord
 pub const fn smackdebt_analysis::FileRecord::activity(&self) -> core::option::Option<smackdebt_analysis::FileActivity>
 pub const fn smackdebt_analysis::FileRecord::base_only(self) -> Self
+pub fn smackdebt_analysis::FileRecord::base_path(&self) -> core::option::Option<&str>
+pub const fn smackdebt_analysis::FileRecord::base_path_id(&self) -> core::option::Option<smackdebt_analysis::PathId>
 pub const fn smackdebt_analysis::FileRecord::coverage(&self) -> smackdebt_analysis::Coverage
 pub const fn smackdebt_analysis::FileRecord::health(&self) -> smackdebt_analysis::HealthCounts
 pub const fn smackdebt_analysis::FileRecord::id(&self) -> smackdebt_analysis::FileId
@@ -711,6 +713,7 @@ pub const fn smackdebt_analysis::FileRecord::role(&self) -> smackdebt_analysis::
 pub const fn smackdebt_analysis::FileRecord::scope(&self) -> smackdebt_analysis::ScopeId
 pub fn smackdebt_analysis::FileRecord::trust(&self) -> smackdebt_analysis::SourceTrust
 pub fn smackdebt_analysis::FileRecord::with_activity(self, smackdebt_analysis::FileActivity) -> Self
+pub fn smackdebt_analysis::FileRecord::with_base_path(self, impl core::convert::Into<alloc::string::String>) -> Self
 pub fn smackdebt_analysis::FileRecord::with_language(self, smackdebt_analysis::Language) -> Self
 pub fn smackdebt_analysis::FileRecord::with_package(self, smackdebt_analysis::PackageId) -> Self
 pub fn smackdebt_analysis::FileRecord::with_source_state(self, smackdebt_analysis::SourceRole, smackdebt_analysis::ParseStatus) -> Self

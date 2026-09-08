@@ -459,10 +459,11 @@ impl Serialize for FileView<'_> {
         S: Serializer,
     {
         let file = self.0;
-        let mut map = serializer.serialize_map(Some(11))?;
+        let mut map = serializer.serialize_map(Some(12))?;
         map.serialize_entry("id", &file.id().get())?;
         map.serialize_entry("scope", &file.scope().get())?;
         map.serialize_entry("path", &file.path_id().map(|id| id.get()))?;
+        map.serialize_entry("base_path", &file.base_path_id().map(|id| id.get()))?;
         map.serialize_entry("language", &file.language().map(language_name))?;
         map.serialize_entry("coverage", &CoverageView(file.coverage()))?;
         map.serialize_entry("health", &(self.1 as u32 + file.id().get()))?;

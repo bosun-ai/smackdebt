@@ -1715,17 +1715,18 @@ impl DiffFindingRows<'_> {
             source_diff_row_key(report, left).cmp(&source_diff_row_key(report, right))
         });
         for comparison in comparisons {
-            let path = comparison
+            let record = comparison
                 .file()
-                .and_then(|file| report.files().get(file.index()))
-                .map(FileRecord::path);
+                .and_then(|file| report.files().get(file.index()));
+            let path = record.map(FileRecord::path);
             let head = format!(
                 "{} · {}",
                 unit_identity(comparison.identity(), path.unwrap_or_default()),
                 unit_kind_label(comparison.identity().kind())
             );
             let mut row = Row::new(Some(Word::direction(comparison.direction())), head);
-            if let Some(path) = path {
+            if let Some(record) = record {
+                let path = comparison_location_path(record, comparison);
                 row = row.with_location(match comparison.span() {
                     Some(span) => format!("{path}:{}", span.start_line()),
                     None => path.to_owned(),
@@ -1750,6 +1751,18 @@ const RATED_SIGNALS: [Signal; 5] = [
     Signal::MaxNesting,
     Signal::ParameterCount,
 ];
+
+/// The path a comparison's location answers to.
+///
+/// A removed unit's span measures the base-side content, so a renamed file
+/// answers with the base-side name it had there.
+fn comparison_location_path<'a>(record: &'a FileRecord, comparison: &Comparison) -> &'a str {
+    if comparison.kind() == ComparisonKind::Removed {
+        record.base_path().unwrap_or_else(|| record.path())
+    } else {
+        record.path()
+    }
+}
 
 fn changed_measurements(comparison: &Comparison) -> Vec<String> {
     match comparison.kind() {

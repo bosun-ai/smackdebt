@@ -150,3 +150,56 @@ fn a_cleanup_diff_points_past_a_deleted_path_to_a_surviving_one() {
     assert!(one.contains("  better gone · function"), "{one}");
     assert!(!one.contains("next:"), "{one}");
 }
+
+/// A unit removed inside a renamed file answers with the base-side name its
+/// span was measured against, not the name the rename gave the survivor.
+#[test]
+fn a_removed_unit_in_a_renamed_file_names_its_base_path() {
+    let mut builder = ReportBuilder::new(ReportMode::Diff);
+    let mut root = Scope::new(ROOT, ScopeKind::Repository, ".", None);
+    root.add_child(PACKAGE);
+    builder.add_scope(root);
+    let mut package = Scope::new(PACKAGE, ScopeKind::Package, "pkg", Some(ROOT));
+    package.add_child(GONE);
+    builder.add_scope(package);
+    builder.add_scope(Scope::new(
+        GONE,
+        ScopeKind::File,
+        "pkg/new.js",
+        Some(PACKAGE),
+    ));
+    builder.set_root(ROOT);
+    let owner = PackageId::from_index(0);
+    builder.set_packages(vec![PackageRecord::current(owner, PACKAGE, "pkg")]);
+    builder.add_file(
+        FileRecord::new(
+            FileId::from_index(0),
+            GONE,
+            "pkg/new.js",
+            Coverage::new(1, 1, 0, 0, 10, 0),
+            HealthCounts::default(),
+        )
+        .with_package(owner)
+        .with_base_path("pkg/old.js"),
+    );
+    builder.link_file(GONE, FileId::from_index(0));
+    builder.add_comparison(
+        Comparison::new(
+            ComparisonId::from_index(0),
+            UnitIdentity::new("gone", UnitKind::Function),
+            ComparisonKind::Removed,
+            Some(Measurements::new(14, 15, 15)),
+            None,
+            Some(Rating::High),
+            None,
+        )
+        .with_file(FileId::from_index(0))
+        .with_span(SourceSpan::new(7, 16)),
+    );
+    builder.link_comparison(GONE, ComparisonId::from_index(0));
+    builder.set_comparison_ref("main");
+    let report = builder.finish();
+    let terminal = render(&report, TerminalOptions::default());
+    assert!(terminal.contains("pkg/old.js:7"), "{terminal}");
+    assert!(!terminal.contains("pkg/new.js:7"), "{terminal}");
+}

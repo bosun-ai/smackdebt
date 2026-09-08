@@ -139,6 +139,11 @@ impl ResultSink<'_> {
             health,
         )
         .with_package(self.spot.package);
+        // A renamed file keeps the base-side name its removed units answer to.
+        if result.change.base_exists() && result.change.base_path() != result.change.current_path()
+        {
+            file = file.with_base_path(result.change.base_path().to_string_lossy());
+        }
         if let Some(language) = language {
             file = file.with_language(language);
         }
@@ -272,6 +277,52 @@ pub(crate) fn add_diff_diagnostic(
 
 #[cfg(test)]
 mod tests {
+
+    /// A rename with a deletion keeps the base name on the record, so the
+    /// removed unit's location stays a place that held it.
+    #[test]
+    fn a_renamed_file_names_its_base_path_for_the_units_it_removed() {
+        let root = tempfile::tempdir().unwrap();
+        let repository_path = root.path();
+        git(repository_path, ["init", "-q"]);
+        git(
+            repository_path,
+            ["config", "user.email", "test@example.invalid"],
+        );
+        git(repository_path, ["config", "user.name", "Smackdebt Test"]);
+        let kept: String = (0..8)
+            .map(|index| format!("pub fn kept_{index}() -> i32 {{ {index} }}\n"))
+            .collect();
+        fs::write(
+            repository_path.join("old.rs"),
+            format!("{kept}pub fn dropped() -> i32 {{ 2 }}\n"),
+        )
+        .unwrap();
+        git(repository_path, ["add", "."]);
+        git(repository_path, ["commit", "-qm", "base"]);
+        git(repository_path, ["mv", "old.rs", "new.rs"]);
+        fs::write(repository_path.join("new.rs"), kept).unwrap();
+
+        let result =
+            analyze_diff(&DiffRequest::new(repository_path).with_reference("HEAD")).unwrap();
+        let report = result.report();
+        let file = report
+            .files()
+            .iter()
+            .find(|file| file.path() == "new.rs")
+            .expect("the renamed file keeps one record");
+        assert_eq!(file.base_path(), Some("old.rs"));
+        assert!(
+            report
+                .comparisons()
+                .iter()
+                .any(
+                    |comparison| comparison.kind() == smackdebt_analysis::ComparisonKind::Removed
+                        && comparison.identity().name() == "dropped"
+                ),
+            "the deleted unit stays a removal"
+        );
+    }
     use super::*;
     use crate::diff::analyze_diff;
     use crate::requests::DiffRequest;

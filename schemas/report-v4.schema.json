@@ -646,6 +646,7 @@
         "id",
         "scope",
         "path",
+        "base_path",
         "language",
         "coverage",
         "health",
@@ -663,6 +664,9 @@
           "$ref": "#/$defs/index"
         },
         "path": {
+          "$ref": "#/$defs/nullable_index"
+        },
+        "base_path": {
           "$ref": "#/$defs/nullable_index"
         },
         "language": {
