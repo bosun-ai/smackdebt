@@ -2841,12 +2841,14 @@ fn help_and_version_use_the_success_stream_contract() {
 }
 
 #[test]
-fn readme_console_examples_use_the_simple_terminal_vocabulary() {
-    let readme =
-        fs::read_to_string(Path::new(env!("CARGO_MANIFEST_DIR")).join("../../README.md")).unwrap();
+fn documentation_console_examples_use_the_simple_terminal_vocabulary() {
+    let root = Path::new(env!("CARGO_MANIFEST_DIR")).join("../..");
+    let documentation = ["README.md", "docs/guide.md", "docs/examples.md"]
+        .map(|path| fs::read_to_string(root.join(path)).unwrap())
+        .join("\n");
     let mut console = String::new();
     let mut inside = false;
-    for line in readme.lines() {
+    for line in documentation.lines() {
         if line == "```console" {
             inside = true;
             continue;
@@ -2862,7 +2864,7 @@ fn readme_console_examples_use_the_simple_terminal_vocabulary() {
             console.push('\n');
         }
     }
-    assert!(!inside, "README console block is not closed");
+    assert!(!inside, "Documentation console block is not closed");
     for required in [
         "AREAS",
         "PROBLEMS",
@@ -2922,7 +2924,10 @@ fn readme_console_examples_use_the_simple_terminal_vocabulary() {
         "`fights_back`",
         "`no_debt_change`",
     ] {
-        assert!(readme.contains(required), "README is missing {required}");
+        assert!(
+            documentation.contains(required),
+            "Documentation is missing {required}"
+        );
     }
     // `change together without a dependency` was banned while it belonged to a
     // deleted coupling section, to prove the section had not crept back. It is
@@ -2944,14 +2949,18 @@ fn readme_console_examples_use_the_simple_terminal_vocabulary() {
         "source owns target",
         "· 1 import",
     ] {
-        assert!(!readme.contains(removed), "README contains {removed}");
+        assert!(
+            !documentation.contains(removed),
+            "Documentation contains {removed}"
+        );
     }
 }
 
 #[test]
-fn executable_readme_examples_match_named_public_fixtures() {
+fn documented_examples_match_named_public_fixtures() {
     let readme =
-        fs::read_to_string(Path::new(env!("CARGO_MANIFEST_DIR")).join("../../README.md")).unwrap();
+        fs::read_to_string(Path::new(env!("CARGO_MANIFEST_DIR")).join("../../docs/examples.md"))
+            .unwrap();
     let examples = readme_examples(&readme);
     assert_eq!(examples.len(), 17);
     for example in examples {

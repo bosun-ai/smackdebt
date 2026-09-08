@@ -4,10 +4,12 @@ version.workspace = true
 edition.workspace = true
 rust-version.workspace = true
 license.workspace = true
+repository.workspace = true
 publish.workspace = true
+description = "Compiled language analyzers for Smackdebt"
 
 [dependencies]
-smackdebt-analysis = { path = "../analysis" }
+smackdebt-analysis = { path = "../analysis", version = "0.1.0" }
 tree-sitter.workspace = true
 tree-sitter-c.workspace = true
 tree-sitter-cpp.workspace = true

@@ -1,4 +1,4 @@
-"""Git policy for release evidence recorded immediately before its commit."""
+"""Check that a release contains the source used to record its evidence."""
 
 from __future__ import annotations
 
@@ -44,27 +44,34 @@ def release_revision_problem(
 ) -> str | None:
     if head is None:
         head = _git(repository, "rev-parse", "HEAD")
+    if (
+        not isinstance(recorded_revision, str)
+        or len(recorded_revision) != 40
+        or any(character not in "0123456789abcdef" for character in recorded_revision)
+    ):
+        return "recorded revision must be a full Git commit id"
+    try:
+        _git(repository, "cat-file", "-e", f"{recorded_revision}^{{commit}}")
+    except subprocess.CalledProcessError:
+        return "recorded release commit is missing; fetch it before checking evidence"
     worktree_paths = _worktree_paths(repository)
     if recorded_revision == head:
         if not worktree_paths:
             return "pre-commit release check requires uncommitted release evidence"
         return _path_problem(worktree_paths)
-    if not isinstance(recorded_revision, str):
-        return "recorded revision must identify HEAD or its evidence-only parent"
-
     if worktree_paths:
         return "post-commit release check requires a clean worktree"
-    parents = _git(repository, "rev-list", "--parents", "-n", "1", head).split()
-    if len(parents) != 2 or parents[1] != recorded_revision:
-        return "recorded revision must identify HEAD or its sole parent"
+    # GitHub can merge, squash, or rebase the release PR. Compare the complete
+    # trees, not parent counts: only the reviewed evidence may differ.
     changed = _git_paths(
         repository,
-        "diff-tree",
-        "--no-commit-id",
+        "diff",
+        "--no-renames",
         "--name-only",
         "-z",
-        "-r",
+        recorded_revision,
         head,
+        "--",
     )
     return _path_problem(changed)
 

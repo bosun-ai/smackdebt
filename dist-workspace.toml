@@ -1,0 +1,18 @@
+[workspace]
+members = ["cargo:."]
+
+[dist]
+cargo-dist-version = "0.32.0"
+ci = "github"
+installers = ["shell"]
+targets = ["x86_64-unknown-linux-gnu", "x86_64-apple-darwin", "aarch64-apple-darwin"]
+install-path = "CARGO_HOME"
+install-updater = false
+pr-run-mode = "plan"
+global-artifacts-jobs = ["./check", "./release-verify"]
+
+[dist.github-custom-job-permissions.check]
+contents = "read"
+
+[dist.github-custom-job-permissions.release-verify]
+contents = "read"
