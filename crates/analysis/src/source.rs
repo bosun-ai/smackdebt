@@ -77,6 +77,10 @@ pub fn is_symbolic_candidate(candidate: &str) -> bool {
 /// Why a dependency cannot safely produce path candidates.
 #[derive(Clone, Debug, Eq, Hash, Ord, PartialEq, PartialOrd)]
 pub enum DependencySyntaxState {
+    /// An import names a package's complete source membership.
+    PackageMembers,
+    /// A name resolves through source declarations and lexical imports.
+    Name(crate::NameReference),
     Candidates(Vec<String>),
     External,
     Unresolved(String),
@@ -191,24 +195,7 @@ impl SourceSpan {
     }
 }
 
-/// Language classification retained in report facts.
-#[derive(Clone, Copy, Debug, Eq, Hash, Ord, PartialEq, PartialOrd)]
-pub enum Language {
-    C,
-    Cpp,
-    Java,
-    JavaScript,
-    Jsx,
-    Python,
-    Rust,
-    TypeScript,
-    Tsx,
-    Ruby,
-    Vue,
-    Astro,
-    Kotlin,
-    Unknown,
-}
+pub use crate::language_catalog::Language;
 
 /// The repository role of a selected source file.
 #[derive(Clone, Copy, Debug, Eq, Hash, Ord, PartialEq, PartialOrd)]
@@ -518,6 +505,7 @@ pub struct FileAnalysis {
     parse_status: ParseStatus,
     units: Vec<UnitFact>,
     dependencies: Vec<DependencySyntax>,
+    names: crate::SourceNames,
 }
 
 impl FileAnalysis {
@@ -543,6 +531,7 @@ impl FileAnalysis {
             parse_status,
             units,
             dependencies,
+            names: crate::SourceNames::default(),
         }
     }
 
@@ -560,6 +549,14 @@ impl FileAnalysis {
 
     pub fn units(&self) -> &[UnitFact] {
         &self.units
+    }
+
+    pub fn with_names(mut self, names: crate::SourceNames) -> Self {
+        self.names = names;
+        self
+    }
+    pub fn names(&self) -> &crate::SourceNames {
+        &self.names
     }
 
     pub fn dependencies(&self) -> &[DependencySyntax] {

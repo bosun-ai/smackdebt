@@ -3460,33 +3460,7 @@ pub(super) fn scope_kind(kind: ScopeKind) -> &'static str {
 }
 
 pub(super) fn language_name(language: Language) -> &'static str {
-    common_language_name(language).unwrap_or_else(|| additional_language_name(language))
-}
-
-fn common_language_name(language: Language) -> Option<&'static str> {
-    match language {
-        Language::C => Some("c"),
-        Language::Cpp => Some("cpp"),
-        Language::Java => Some("java"),
-        Language::JavaScript => Some("javascript"),
-        Language::Jsx => Some("jsx"),
-        Language::Python => Some("python"),
-        Language::Rust => Some("rust"),
-        _ => None,
-    }
-}
-
-fn additional_language_name(language: Language) -> &'static str {
-    match language {
-        Language::TypeScript => "typescript",
-        Language::Tsx => "tsx",
-        Language::Ruby => "ruby",
-        Language::Vue => "vue",
-        Language::Astro => "astro",
-        Language::Kotlin => "kotlin",
-        Language::Unknown => "unknown",
-        _ => unreachable!("common languages are handled before this point"),
-    }
+    language.key()
 }
 
 pub(super) fn diagnostic_name(kind: DiagnosticKind) -> &'static str {

@@ -19,7 +19,7 @@ use crate::hierarchy::HierarchyBuilder;
 use crate::history_stream::EvolutionInput;
 use crate::paths::report_package_path;
 use crate::rating::{FileResult, RatedFile, source_coverage};
-use crate::resolution_config::ResolutionRules;
+use crate::resolution_rules::ResolutionRules;
 use crate::work::AnalysisWork;
 
 pub(crate) struct CodebaseReportBuilder<'a> {
@@ -182,6 +182,7 @@ impl<'a> CodebaseReportBuilder<'a> {
             file: spot.file,
             path: PathBuf::from(&spot.path),
             references: analysis.dependencies().to_vec(),
+            names: analysis.names().clone(),
             role: rated.role,
             trust: analysis.parse_status().trust(),
             language: analysis.language(),

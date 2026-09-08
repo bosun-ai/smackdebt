@@ -26,6 +26,7 @@ mod health;
 mod history_window;
 mod hotspot;
 mod instability;
+mod language_catalog;
 mod measurements;
 mod median;
 mod orphan_files;
@@ -36,6 +37,7 @@ mod reachability;
 mod report;
 mod size;
 mod source;
+mod source_names;
 mod stable_dependencies;
 mod strongly_connected_components;
 mod table_index;
@@ -134,6 +136,7 @@ pub use source::{
     PARENT_MODULE_CANDIDATE, ParseStatus, RecoveredFacts, SourceRole, SourceSpan, SourceTrust,
     StaticRelationKind, UnitFact, UnitIdentity, UnitKind, UnitMatchEvidence, is_symbolic_candidate,
 };
+pub use source_names::{NameDeclaration, NameImport, NameReference, SourceNames, SymbolKind};
 pub use stable_dependencies::{
     MINIMUM_STABLE_DEPENDENCY_REFERENCES, StableDependencyEvidence, StableDependencyFinding,
     StableDependencyFindingId, stable_dependency_findings,

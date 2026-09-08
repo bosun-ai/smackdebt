@@ -4,7 +4,7 @@
 //! one deterministic walk and leaves reading and parsing to the project and
 //! language crates.
 
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, BTreeSet};
 use std::fs;
 use std::io;
 use std::path::{Component, Path, PathBuf};
@@ -66,6 +66,7 @@ enum ManifestKind {
     Cmake,
     Bundler,
     Gemspec,
+    Go,
 }
 
 impl ManifestKind {
@@ -132,19 +133,29 @@ impl ManifestKind {
 
     fn for_file(path: &Path) -> Option<Self> {
         let name = path.file_name()?.to_str()?;
-        match name {
-            "Cargo.toml" => Some(Self::Cargo),
-            "package.json" => Some(Self::Npm),
-            "pyproject.toml" | "setup.py" | "setup.cfg" => Some(Self::Python),
-            "pom.xml" => Some(Self::Maven),
-            "settings.gradle" | "settings.gradle.kts" | "build.gradle" | "build.gradle.kts" => {
-                Some(Self::Gradle)
-            }
-            "CMakeLists.txt" => Some(Self::Cmake),
-            "Gemfile" | "gems.rb" => Some(Self::Bundler),
-            _ if name.ends_with(".gemspec") => Some(Self::Gemspec),
-            _ => None,
-        }
+        let exact = [
+            ("go.mod", Self::Go),
+            ("Cargo.toml", Self::Cargo),
+            ("package.json", Self::Npm),
+            ("pyproject.toml", Self::Python),
+            ("setup.py", Self::Python),
+            ("setup.cfg", Self::Python),
+            ("pom.xml", Self::Maven),
+            ("settings.gradle", Self::Gradle),
+            ("settings.gradle.kts", Self::Gradle),
+            ("build.gradle", Self::Gradle),
+            ("build.gradle.kts", Self::Gradle),
+            ("CMakeLists.txt", Self::Cmake),
+            ("Gemfile", Self::Bundler),
+            ("gems.rb", Self::Bundler),
+        ];
+        exact
+            .iter()
+            .find_map(|(filename, kind)| (*filename == name).then_some(*kind))
+            .or_else(|| match path.extension()?.to_str()? {
+                "gemspec" => Some(Self::Gemspec),
+                _ => None,
+            })
     }
 }
 
@@ -240,7 +251,7 @@ pub fn discover_snapshot(
                 *name = manifest.declared_name(path, &source);
             }
         }
-        if resolution_config_priority(path).is_some() {
+        if is_resolution_file(path) {
             resolution_configs.push(path.clone());
         }
         if matches!(file_kind(path), FileKind::Source) {
@@ -655,6 +666,7 @@ struct InventoryOptions {
 /// The result of one deterministic filesystem walk.
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct Inventory {
+    resolution_files: Vec<PathBuf>,
     root: PathBuf,
     files: Vec<DiscoveredFile>,
     packages: Vec<Package>,
@@ -663,6 +675,10 @@ pub struct Inventory {
 }
 
 impl Inventory {
+    /// All recognized resolution metadata retained by the inventory walk.
+    pub fn resolution_files(&self) -> &[PathBuf] {
+        &self.resolution_files
+    }
     /// Walks a directory with the default ignore rules.
     pub fn discover(root: impl AsRef<Path>) -> io::Result<Self> {
         Self::discover_with(root, InventoryOptions::default())
@@ -821,6 +837,7 @@ struct Walker {
     manifest_names: BTreeMap<PathBuf, Option<String>>,
     manifest_paths: BTreeMap<PathBuf, Vec<String>>,
     resolution_configs: BTreeMap<PathBuf, RelativePath>,
+    resolution_files: BTreeSet<PathBuf>,
     diagnostics: Vec<InventoryDiagnostic>,
     stats: InventoryStats,
 }
@@ -858,6 +875,7 @@ impl Walker {
             manifest_names: BTreeMap::new(),
             manifest_paths: BTreeMap::new(),
             resolution_configs: BTreeMap::new(),
+            resolution_files: BTreeSet::new(),
             diagnostics: Vec::new(),
             stats: InventoryStats::default(),
         }
@@ -991,6 +1009,9 @@ impl Walker {
     }
 
     fn record_resolution_config(&mut self, path: &Path, relative: &RelativePath) {
+        if is_resolution_file(path) {
+            self.resolution_files.insert(path.to_path_buf());
+        }
         let Some(priority) = resolution_config_priority(path) else {
             return;
         };
@@ -1098,6 +1119,7 @@ impl Walker {
         }
 
         Ok(Inventory {
+            resolution_files: self.resolution_files.into_iter().collect(),
             root,
             files,
             packages,
@@ -1182,6 +1204,15 @@ impl AncestorMetadataIgnore {
     }
 }
 
+/// Whether a path supplies static import or project configuration.
+pub fn is_resolution_file(path: &Path) -> bool {
+    resolution_config_priority(path).is_some()
+        || path
+            .file_name()
+            .and_then(|name| name.to_str())
+            .is_some_and(|name| matches!(name, "go.mod" | "go.work"))
+}
+
 fn resolution_config_priority(path: &Path) -> Option<u8> {
     match path.file_name()?.to_str()? {
         "tsconfig.json" => Some(0),
@@ -1205,49 +1236,15 @@ fn nearest_resolution_config(
 }
 
 fn file_kind(path: &Path) -> FileKind {
-    let extension = path
-        .extension()
-        .and_then(|extension| extension.to_str())
-        .unwrap_or_default();
-    let source = matches!(
-        extension,
-        "c" | "h"
-            | "cc"
-            | "hh"
-            | "cpp"
-            | "hpp"
-            | "cxx"
-            | "hxx"
-            | "java"
-            | "js"
-            | "jsx"
-            | "mjs"
-            | "cjs"
-            | "py"
-            | "rs"
-            | "ts"
-            | "tsx"
-            | "mts"
-            | "cts"
-            | "rb"
-            | "vue"
-            | "astro"
-            | "kt"
-            | "kts"
-            | "go"
-            | "cs"
-            | "swift"
-            | "php"
-            | "scala"
-            | "sc"
-            | "ex"
-            | "exs"
-            | "dart"
-    ) || path
+    if let Some(manifest) = ManifestKind::for_file(path) {
+        return FileKind::Manifest(manifest);
+    }
+    if path
         .file_name()
         .and_then(|name| name.to_str())
-        .is_some_and(|name| matches!(name, "Rakefile" | "Gemfile"));
-    if source {
+        .and_then(smackdebt_analysis::Language::from_filename)
+        .is_some()
+    {
         FileKind::Source
     } else {
         FileKind::Other

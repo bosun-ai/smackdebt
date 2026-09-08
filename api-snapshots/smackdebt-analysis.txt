@@ -74,6 +74,8 @@ pub smackdebt_analysis::DependencyScope::Test
 pub enum smackdebt_analysis::DependencySyntaxState
 pub smackdebt_analysis::DependencySyntaxState::Candidates(alloc::vec::Vec<alloc::string::String>)
 pub smackdebt_analysis::DependencySyntaxState::External
+pub smackdebt_analysis::DependencySyntaxState::Name(smackdebt_analysis::NameReference)
+pub smackdebt_analysis::DependencySyntaxState::PackageMembers
 pub smackdebt_analysis::DependencySyntaxState::Unresolved(alloc::string::String)
 pub enum smackdebt_analysis::DiagnosticKind
 pub smackdebt_analysis::DiagnosticKind::AmbiguousIdentity
@@ -123,6 +125,7 @@ pub enum smackdebt_analysis::Language
 pub smackdebt_analysis::Language::Astro
 pub smackdebt_analysis::Language::C
 pub smackdebt_analysis::Language::Cpp
+pub smackdebt_analysis::Language::Go
 pub smackdebt_analysis::Language::Java
 pub smackdebt_analysis::Language::JavaScript
 pub smackdebt_analysis::Language::Jsx
@@ -134,6 +137,12 @@ pub smackdebt_analysis::Language::Tsx
 pub smackdebt_analysis::Language::TypeScript
 pub smackdebt_analysis::Language::Unknown
 pub smackdebt_analysis::Language::Vue
+impl smackdebt_analysis::Language
+pub fn smackdebt_analysis::Language::from_filename(&str) -> core::option::Option<Self>
+pub const fn smackdebt_analysis::Language::key(self) -> &'static str
+pub const fn smackdebt_analysis::Language::name(self) -> &'static str
+impl smackdebt_analysis::Language
+pub fn smackdebt_analysis::Language::source_name(&str) -> core::option::Option<&'static str>
 pub enum smackdebt_analysis::PackagePresence
 pub smackdebt_analysis::PackagePresence::BaseOnly
 pub smackdebt_analysis::PackagePresence::Current
@@ -248,6 +257,10 @@ pub smackdebt_analysis::SourceTrust::Trusted
 pub enum smackdebt_analysis::StaticRelationKind
 pub smackdebt_analysis::StaticRelationKind::ModuleOwnership
 pub smackdebt_analysis::StaticRelationKind::Uses
+pub enum smackdebt_analysis::SymbolKind
+pub smackdebt_analysis::SymbolKind::Constant
+pub smackdebt_analysis::SymbolKind::Function
+pub smackdebt_analysis::SymbolKind::Type
 pub enum smackdebt_analysis::UnitKind
 pub smackdebt_analysis::UnitKind::Closure
 pub smackdebt_analysis::UnitKind::Function
@@ -667,11 +680,13 @@ pub struct smackdebt_analysis::FileAnalysis
 impl smackdebt_analysis::FileAnalysis
 pub fn smackdebt_analysis::FileAnalysis::dependencies(&self) -> &[smackdebt_analysis::DependencySyntax]
 pub const fn smackdebt_analysis::FileAnalysis::language(&self) -> smackdebt_analysis::Language
+pub fn smackdebt_analysis::FileAnalysis::names(&self) -> &smackdebt_analysis::SourceNames
 pub fn smackdebt_analysis::FileAnalysis::new(smackdebt_analysis::Language, u32, smackdebt_analysis::ParseStatus, alloc::vec::Vec<smackdebt_analysis::UnitFact>) -> Self
 pub const fn smackdebt_analysis::FileAnalysis::parse_status(&self) -> &smackdebt_analysis::ParseStatus
 pub const fn smackdebt_analysis::FileAnalysis::source_lines(&self) -> u32
 pub fn smackdebt_analysis::FileAnalysis::units(&self) -> &[smackdebt_analysis::UnitFact]
 pub fn smackdebt_analysis::FileAnalysis::with_dependencies(smackdebt_analysis::Language, u32, smackdebt_analysis::ParseStatus, alloc::vec::Vec<smackdebt_analysis::UnitFact>, alloc::vec::Vec<smackdebt_analysis::DependencySyntax>) -> Self
+pub fn smackdebt_analysis::FileAnalysis::with_names(self, smackdebt_analysis::SourceNames) -> Self
 pub struct smackdebt_analysis::FileChangeCoupling
 impl smackdebt_analysis::FileChangeCoupling
 pub const fn smackdebt_analysis::FileChangeCoupling::distance(self) -> u32
@@ -952,6 +967,27 @@ pub const fn smackdebt_analysis::Measurements::new(u32, u32, u32) -> Self
 pub const fn smackdebt_analysis::Measurements::parameter_count(self) -> u32
 pub const fn smackdebt_analysis::Measurements::rated(self) -> (u32, u32, u32, u32, u32)
 pub const fn smackdebt_analysis::Measurements::with_shape(self, u32, u32) -> Self
+pub struct smackdebt_analysis::NameDeclaration
+impl smackdebt_analysis::NameDeclaration
+pub const fn smackdebt_analysis::NameDeclaration::is_shared(&self) -> bool
+pub const fn smackdebt_analysis::NameDeclaration::kind(&self) -> smackdebt_analysis::SymbolKind
+pub fn smackdebt_analysis::NameDeclaration::name(&self) -> &str
+pub fn smackdebt_analysis::NameDeclaration::new(impl core::convert::Into<alloc::string::String>, smackdebt_analysis::SymbolKind, bool) -> Self
+pub struct smackdebt_analysis::NameImport
+impl smackdebt_analysis::NameImport
+pub fn smackdebt_analysis::NameImport::alias(&self) -> core::option::Option<&str>
+pub fn smackdebt_analysis::NameImport::contains(&self, usize) -> bool
+pub const fn smackdebt_analysis::NameImport::is_global(&self) -> bool
+pub const fn smackdebt_analysis::NameImport::kind(&self) -> smackdebt_analysis::SymbolKind
+pub fn smackdebt_analysis::NameImport::new(impl core::convert::Into<alloc::string::String>, core::option::Option<alloc::string::String>, core::ops::range::Range<usize>, bool, smackdebt_analysis::SymbolKind) -> Self
+pub fn smackdebt_analysis::NameImport::target(&self) -> &str
+pub struct smackdebt_analysis::NameReference
+impl smackdebt_analysis::NameReference
+pub const fn smackdebt_analysis::NameReference::kind(&self) -> smackdebt_analysis::SymbolKind
+pub fn smackdebt_analysis::NameReference::name(&self) -> &str
+pub fn smackdebt_analysis::NameReference::namespace(&self) -> &str
+pub fn smackdebt_analysis::NameReference::new(impl core::convert::Into<alloc::string::String>, impl core::convert::Into<alloc::string::String>, usize, smackdebt_analysis::SymbolKind) -> Self
+pub const fn smackdebt_analysis::NameReference::position(&self) -> usize
 pub struct smackdebt_analysis::OrphanCandidate<'a>
 impl<'a> smackdebt_analysis::OrphanCandidate<'a>
 pub const fn smackdebt_analysis::OrphanCandidate<'a>::new(smackdebt_analysis::FileId, &'a str, smackdebt_analysis::SourceRole, bool, u32, bool) -> Self
@@ -1276,6 +1312,12 @@ pub fn smackdebt_analysis::SizePolicy::rate_container(self, smackdebt_analysis::
 pub fn smackdebt_analysis::SizePolicy::rate_file(self, smackdebt_analysis::FileId, u32) -> core::option::Option<smackdebt_analysis::SizeFinding>
 impl core::default::Default for smackdebt_analysis::SizePolicy
 pub fn smackdebt_analysis::SizePolicy::default() -> Self
+pub struct smackdebt_analysis::SourceNames
+impl smackdebt_analysis::SourceNames
+pub fn smackdebt_analysis::SourceNames::declarations(&self) -> &[smackdebt_analysis::NameDeclaration]
+pub fn smackdebt_analysis::SourceNames::declare(&mut self, smackdebt_analysis::NameDeclaration)
+pub fn smackdebt_analysis::SourceNames::import(&mut self, smackdebt_analysis::NameImport)
+pub fn smackdebt_analysis::SourceNames::imports(&self) -> &[smackdebt_analysis::NameImport]
 pub struct smackdebt_analysis::SourceSpan
 impl smackdebt_analysis::SourceSpan
 pub const fn smackdebt_analysis::SourceSpan::end_line(self) -> u32

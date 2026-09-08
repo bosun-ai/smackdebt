@@ -221,7 +221,7 @@ remain context. Each language owns its generated marker syntax, while discovery
 owns path and filename rules.
 
 A directory containing one or more recognized manifests is one package root.
-Cargo, npm, Python, Maven, Gradle, CMake, Bundler, and gemspec manifests in the
+Cargo, npm, Python, Maven, Gradle, CMake, Bundler, gemspec, and Go manifests in the
 same directory are ecosystem evidence for that single package. Each source file
 belongs to its nearest package ancestor. A repository with no recognized
 manifest gets `.` as its package.
@@ -277,11 +277,24 @@ them.
 
 The engine constructs analysis-owned `FileAnalysis` and `UnitFact` values
 directly. Tree-sitter nodes, trees, grammars, and semantic traversal values do
-not cross the language crate seam. C, C++, Java, JavaScript, JSX, Python, Rust,
+not cross the language crate seam. C, C++, Go, Java, JavaScript, JSX, Python, Rust,
 TypeScript, TSX, Ruby, and Vue have checked exact fixtures. Astro and Kotlin
 remain visible unsupported files and contribute no healthy unit. Astro has a
 compiled language identity and participates in current and ref inventories,
 coverage, diagnostics, and graph trust, but has no analysis dispatch.
+
+Source labels, serialized keys, extensions, and special filenames live in one
+analysis-owned language catalog. The language crate's private analyzer registry
+owns worker parser storage, query slots, generated markers, and static dispatch.
+Adding an analyzer needs a language implementation, a catalog entry, and a registry
+entry; it does not require changing shared metric algorithms or renderers.
+
+Go package imports cross the adapter seam as owned analysis values. The project
+crate builds a package-member index once per graph and applies local `go.mod`,
+replacement, and `go.work` metadata. A package import may yield several file edges
+while counting as one resolved reference. Project metadata comes from the same
+inventory and batched Git objects as the existing resolution configuration,
+separately for each diff side.
 
 Each unit also carries an analysis-owned match-evidence value that language
 adapters can create but no other crate can inspect. Human identity remains

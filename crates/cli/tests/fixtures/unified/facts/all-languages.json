@@ -1,7 +1,8 @@
 {
   "fixture": "all-languages",
-  "lower_level_truth_test": "every_supported_language_has_a_complete_ordered_truth_fixture and vue_fixture_keeps_script_and_template_facts_in_original_document_positions",
+  "lower_level_truth_test": "every_supported_language_has_a_complete_ordered_truth_fixture and go_measures_nested_work_independently and vue_fixture_keeps_script_and_template_facts_in_original_document_positions",
   "files": [
+    {"path":"src/go.go","units":[["outer",1,2,3],["inner",1,2,2]]},
     {"path":"src/c.c","units":[["controls",9,8,6]]},
     {"path":"src/cpp.cpp","units":[["run",1,2,3],["<lambda 5>",2,3,1]]},
     {"path":"src/java.java","units":[["Worker",1,2,1],["run",4,4,5],["<lambda 4>",1,2,0]]},
