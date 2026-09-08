@@ -19,6 +19,7 @@ pub const ENTRY_FILENAMES: &[&str] = &[
     "index.js",
     "index.jsx",
     "index.mjs",
+    "index.php",
     "index.ts",
     "index.tsx",
     "index.vue",
@@ -129,7 +130,7 @@ mod tests {
 
     #[test]
     fn an_entry_file_without_incoming_dependencies_is_exempt() {
-        for path in ["src/lib.rs", "cmd/main.go"] {
+        for path in ["src/lib.rs", "cmd/main.go", "public/index.php"] {
             assert!(orphan_files(&[candidate(0, path, SourceRole::Primary, 0)]).is_empty());
         }
         assert!(orphan_files(&[candidate(0, "app/index.js", SourceRole::Primary, 0)]).is_empty());

@@ -942,6 +942,7 @@ project packages. It recognizes packages from common manifests, including:
 
 - `Cargo.toml`
 - `go.mod`
+- `composer.json`
 - `package.json`
 - `pyproject.toml`
 - `pom.xml`
@@ -1034,6 +1035,7 @@ One tree-sitter source engine supports:
 - Go
 - Java
 - JavaScript and JSX
+- PHP (`.php` and `.phtml`, including mixed HTML/PHP)
 - Python
 - Rust
 - TypeScript and TSX
@@ -1041,12 +1043,19 @@ One tree-sitter source engine supports:
 - Vue single-file components, including script and template regions
 
 React components, hooks, and callbacks use the existing JSX and TSX analyzers.
-Go receivers and closures use the same five measurements as other languages.
+Go receivers and closures, plus PHP methods and closures, use the same five
+measurements as other languages.
 
 Go imports name packages. Smackdebt connects an import to the package's source
 files, excluding `_test.go`, using `go.mod`, local replacements, and `go.work`.
 The same rules apply independently to each side of a diff, including edits that
 only change project configuration. No compiler or build tool runs.
+
+PHP resolves namespaces and aliases against Composer PSR-4, PSR-0, classmap,
+and files declarations. Composer's generated autoloader is an external bootstrap
+reference. Literal includes and `__DIR__` paths resolve locally; dynamic includes
+remain visible as unresolved references. The same rules apply independently to
+each side of a diff without running PHP or Composer.
 
 Astro and Kotlin files remain visible as unsupported coverage; they are not
 counted as healthy. Astro documents stay in codebase and diff inventories, but

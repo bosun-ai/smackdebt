@@ -231,6 +231,7 @@ pub(crate) fn copy_language_truth_files(repository: &GeneratedRepository) {
     let fixture_root = Path::new(env!("CARGO_MANIFEST_DIR")).join("../languages/tests/fixtures");
     for name in [
         "go.go",
+        "php.php",
         "c.c",
         "cpp.cpp",
         "java.java",

@@ -1,6 +1,6 @@
 smackdebt · src
   The code is winning.
-27 high · 2 watch · 29 checked
+29 high · 2 watch · 31 checked
 worst: src/c.c — most complex
 
 AREAS
@@ -52,6 +52,10 @@ PROBLEMS
   high outer · function · src/go.go:2
         cognitive 1 · cyclomatic 2 · statements 3
         src/go.go:3 · closure · cognitive 1 ·
+        cyclomatic 2 · statements 2
+  high outer · function · src/php.php:2
+        cognitive 1 · cyclomatic 2 · statements 3
+        src/php.php:3 · closure · cognitive 1 ·
         cyclomatic 2 · statements 2
   high View::render · method · src/jsx.jsx:2
         cognitive 1 · cyclomatic 2 · statements 2
