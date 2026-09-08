@@ -5,6 +5,7 @@ mod candidates;
 mod codebase;
 mod codebase_report;
 mod core_comparisons;
+mod csharp_project;
 mod cycle_findings;
 mod dependencies;
 mod diff;

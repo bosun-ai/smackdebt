@@ -141,7 +141,7 @@ impl<'a> NamedDependencies<'a> {
         if source.language == Language::Php {
             return self.resolve_php(source, reference);
         }
-        self.resolve_scoped_name(source, reference, &imports)
+        self.resolve_csharp(source, reference, &imports)
     }
     fn resolve_php(
         &self,
@@ -166,7 +166,7 @@ impl<'a> NamedDependencies<'a> {
         }
         outcome
     }
-    fn resolve_scoped_name(
+    fn resolve_csharp(
         &self,
         source: &SourceDependencies,
         reference: &NameReference,

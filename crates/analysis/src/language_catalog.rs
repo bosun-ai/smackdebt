@@ -48,13 +48,13 @@ languages! {
     Kotlin => ("Kotlin", "kotlin", ["kt", "kts"], []),
     Go => ("Go", "go", ["go"], []),
     Php => ("PHP", "php", ["php", "phtml"], []),
+    CSharp => ("C#", "csharp", ["cs"], []),
     Unknown => ("Unknown", "unknown", [], []),
 }
 
 fn unsupported_name(extension: &str) -> Option<&'static str> {
     Some(match extension {
         "swift" => "Swift",
-        "cs" => "C#",
         "razor" | "cshtml" => "Razor",
         "scala" | "sc" => "Scala",
         "ex" | "exs" => "Elixir",

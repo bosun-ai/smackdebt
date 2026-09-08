@@ -68,6 +68,7 @@ enum ManifestKind {
     Gemspec,
     Go,
     Composer,
+    Dotnet,
 }
 
 impl ManifestKind {
@@ -155,6 +156,7 @@ impl ManifestKind {
             .iter()
             .find_map(|(filename, kind)| (*filename == name).then_some(*kind))
             .or_else(|| match path.extension()?.to_str()? {
+                "csproj" => Some(Self::Dotnet),
                 "gemspec" => Some(Self::Gemspec),
                 _ => None,
             })
@@ -1212,7 +1214,16 @@ pub fn is_resolution_file(path: &Path) -> bool {
         || path
             .file_name()
             .and_then(|name| name.to_str())
-            .is_some_and(|name| matches!(name, "go.mod" | "go.work" | "composer.json"))
+            .is_some_and(|name| {
+                matches!(
+                    name,
+                    "go.mod"
+                        | "go.work"
+                        | "composer.json"
+                        | "Directory.Build.props"
+                        | "Directory.Build.targets"
+                ) || name.ends_with(".csproj")
+            })
 }
 
 fn resolution_config_priority(path: &Path) -> Option<u8> {

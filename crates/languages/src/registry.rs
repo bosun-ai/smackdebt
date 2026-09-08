@@ -2,6 +2,7 @@
 use crate::analyzer::AnalysisError;
 use crate::c_language::C;
 use crate::cpp_language::Cpp;
+use crate::csharp_language::CSharp;
 use crate::engine::{self, Scratch};
 use crate::go_language::Go;
 use crate::java_language::Java;
@@ -65,4 +66,5 @@ analyzers! {
     Ruby => ruby: Ruby,
     Go => go: Go,
     Php => php: Php,
+    CSharp => csharp: CSharp,
 }
