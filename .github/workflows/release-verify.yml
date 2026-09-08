@@ -1,0 +1,59 @@
+name: Verify release
+
+on:
+  workflow_call:
+    inputs:
+      plan:
+        required: true
+        type: string
+
+permissions:
+  contents: read
+
+jobs:
+  archives:
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: ubuntu-22.04
+            target: x86_64-unknown-linux-gnu
+          - os: macos-15-intel
+            target: x86_64-apple-darwin
+          - os: macos-14
+            target: aarch64-apple-darwin
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          persist-credentials: false
+      - uses: actions/setup-python@v6
+        with:
+          python-version: '3.12'
+      - run: python3 -m pip install -r scripts/requirements.txt
+      - uses: actions/download-artifact@v8
+        with:
+          pattern: artifacts-build-local-*
+          path: artifacts
+          merge-multiple: true
+      - name: Test the archive that will be published
+        env:
+          TARGET: ${{ matrix.target }}
+        run: python3 scripts/smoke-release.py "artifacts/smackdebt-$TARGET.tar.xz"
+
+  evidence:
+    runs-on: ubuntu-22.04
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+      - uses: actions/setup-python@v6
+        with:
+          python-version: '3.12'
+      - name: Fetch the reviewed candidate
+        run: python3 scripts/fetch-release-evidence.py
+      - name: Validate release evidence
+        run: |
+          python3 scripts/performance/check-baselines.py --release-head
+          python3 scripts/performance/check-workload-reviews.py --release-head

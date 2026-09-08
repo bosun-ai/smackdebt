@@ -15,7 +15,11 @@ version = "0.1.0"
 edition = "2024"
 rust-version = "1.97"
 license = "MIT"
-publish = false
+repository = "https://github.com/bosun-ai/smackdebt"
+# release-plz reconstructs previous versions with `cargo package --workspace`.
+# Cargo needs every local dependency eligible for that temporary registry.
+# Registry publishing is disabled in release-plz.toml; we ship GitHub binaries.
+publish = true
 
 [workspace.lints.rust]
 unsafe_code = "forbid"
@@ -48,3 +52,8 @@ tree-sitter-rust = "0.24.2"
 tree-sitter-typescript = "0.23.2"
 tree-sitter-vue-next = "0.1.0"
 unicode-width = "0.2"
+
+# The profile that 'dist' will build with
+[profile.dist]
+inherits = "release"
+lto = "thin"

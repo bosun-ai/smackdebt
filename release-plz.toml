@@ -1,0 +1,25 @@
+[workspace]
+git_only = true
+publish = false
+git_tag_enable = false
+git_tag_name = "v{{ version }}"
+git_release_enable = false
+changelog_update = false
+semver_check = false
+dependencies_update = false
+release_always = false
+features_always_increment_minor = true
+
+[[package]]
+name = "smackdebt"
+git_tag_enable = true
+changelog_update = true
+changelog_path = "CHANGELOG.md"
+changelog_include = [
+    "smackdebt-analysis",
+    "smackdebt-languages",
+    "smackdebt-discovery",
+    "smackdebt-git",
+    "smackdebt-project",
+    "smackdebt-output",
+]

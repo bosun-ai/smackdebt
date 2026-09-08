@@ -1,4 +1,5 @@
 [licenses]
+exceptions = [{ name = "json5", allow = ["ISC"] }]
 allow = [
     "Apache-2.0",
     "MIT",

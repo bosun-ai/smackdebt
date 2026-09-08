@@ -37,8 +37,8 @@ flowchart TD
 Infrastructure crates do not depend on each other. Languages and discovery use
 analysis-owned values at their seams, but do not depend on another adapter.
 Project orchestration is the only place that composes filesystem, language, and
-Git behavior. Every crate is private until a separate release change
-approves publication.
+Git behavior. Internal Rust APIs remain implementation details. GitHub releases
+distribute the CLI; registry publishing is disabled in release-plz.
 
 Workspace checks read Cargo metadata and reject dependency edges outside this
 diagram. Compiler-visible API snapshots make cross-crate surface changes
@@ -845,3 +845,18 @@ Smackdebt runs locally and does not upload source, paths, metrics, or Git
 history. Configuration changes exclusions, thresholds, history, and worker
 count only. It cannot execute commands or load analyzer code. No async runtime
 or persistent cache is part of the first release.
+
+## Release automation
+
+Release-plz manages the shared workspace version and one application changelog.
+Merging its release PR creates one version tag; cargo-dist owns the generated
+GitHub workflow, platform archives, shell installer, and GitHub Release.
+The application and gate JSON schemas do not change with packaging.
+
+The release workflow reuses the complete repository checks and tests the exact
+archives before publishing. Release evidence records the clean candidate commit.
+The Git check compares complete trees and permits only the existing approved
+evidence paths to differ, so GitHub merge, squash, and rebase commits do not
+require identical parent lists. Source or release configuration drift still
+requires fresh evidence. Private workloads run locally; CI verifies their
+privacy-safe aggregate records. See [RELEASING.md](RELEASING.md).
