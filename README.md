@@ -636,7 +636,10 @@ Smackdebt does not guess when identity is unclear. Unmatched and ambiguous
 references are counted in one grouped warning sentence, their per-reference
 detail appears under `--all` or when the selected scope is a file, and JSON
 retains their locations and reasons. At every other scope that grouped sentence
-is their whole terminal presence.
+is their whole terminal presence. A diff warns only about the files it
+measured: the change's own imports can earn the sentence, a standing hole in a
+file the change never touched cannot, and the full diagnostic table stays
+whole in JSON either way.
 
 An asset reference is not one of them. Smackdebt inventories source files only,
 so a relative import whose name carries an extension no source language claims —

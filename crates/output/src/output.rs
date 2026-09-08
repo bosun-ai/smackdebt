@@ -487,8 +487,12 @@ impl Presentation {
             rows
         });
         let diff_rows = diff_candidates.as_deref().map(|candidates| {
-            let mut rows =
-                select_diff_rows(candidates, all, top, verdict.diff_tier() == Some(DiffTier::Mixed));
+            let mut rows = select_diff_rows(
+                candidates,
+                all,
+                top,
+                verdict.diff_tier() == Some(DiffTier::Mixed),
+            );
             // `--top` names its own number and keeps it.
             if trust_only && top.is_none() {
                 rows.keep_top();
@@ -2047,6 +2051,7 @@ fn unmatched_import_rows(report: &Report, selected: &Scope) -> Vec<Row> {
         .resolution_diagnostics()
         .iter()
         .filter(|value| file_belongs_to_scope(report, value.file(), selected))
+        .filter(|value| measured_by_report(report, value.file()))
         .filter_map(|diagnostic| {
             let source = report.files()[diagnostic.file().index()].path();
             let status = match diagnostic.kind() {
@@ -2515,6 +2520,7 @@ fn resolution_warning(report: &Report, selected: &Scope, listed: bool) -> Option
         .resolution_diagnostics()
         .iter()
         .filter(|diagnostic| file_belongs_to_scope(report, diagnostic.file(), selected))
+        .filter(|diagnostic| measured_by_report(report, diagnostic.file()))
     {
         match diagnostic.kind() {
             smackdebt_analysis::ResolutionIssueKind::Unresolved => unresolved += 1,
@@ -2991,6 +2997,21 @@ fn diagnostic_summary(kind: DiagnosticKind, count: usize) -> String {
     format!("{subject} {}", if count == 1 { singular } else { plural })
 }
 
+/// Whether a diagnostic's file is one this report measured.
+///
+/// A diff builds the whole current tree's dependency graph, so its diagnostic
+/// table names files the change never touched. A change report warns only
+/// about the files it measured; the full table stays whole in JSON, exactly
+/// as the history rows a diff leaves out do. A codebase report measures
+/// everything it selected, so this reads true there.
+fn measured_by_report(report: &Report, file: FileId) -> bool {
+    report.mode() != ReportMode::Diff
+        || report
+            .files()
+            .get(file.index())
+            .is_some_and(|file| file.coverage().selected_files() > 0)
+}
+
 fn file_belongs_to_scope(report: &Report, file: FileId, selected: &Scope) -> bool {
     let Some(record) = report.files().get(file.index()) else {
         return false;
@@ -3204,11 +3225,7 @@ pub(super) fn direction_name(direction: ComparisonDirection) -> &'static str {
 /// one. A diff that moved nothing, one whose movements all name gone or
 /// shallower paths, and a file view — already as deep as a path goes — print
 /// no pointer rather than a command that fails or repeats the one just run.
-fn diff_next(
-    report: &Report,
-    selected: &Scope,
-    candidates: &[DiffRowCandidate],
-) -> Option<String> {
+fn diff_next(report: &Report, selected: &Scope, candidates: &[DiffRowCandidate]) -> Option<String> {
     if selected.kind() == ScopeKind::File {
         return None;
     }
