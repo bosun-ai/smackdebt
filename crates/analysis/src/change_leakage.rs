@@ -1,10 +1,25 @@
-use std::cmp::Reverse;
-use std::collections::BTreeSet;
+//! Change-coupling findings informed by static dependency evidence.
+//!
+//! These are Smackdebt-specific heuristics over retained file-pair measurements.
+//! Both require directory distance of at least two and five shared commits.
+//! The required Jaccard similarity starts at 40%, falls five percentage points
+//! per additional directory step, and stops at 20%.
+//!
+//! A direct dependency whose importer follows changes can indicate a leaking
+//! abstraction. Unexpected coupling requires proof of no connection; an exhausted
+//! path probe leaves the answer unknown and creates no absence claim. Each rule
+//! uses its own graph population and the existing wiring-file exclusions.
+//! Findings retain their operands and comparisons retain their file identities.
 
+#![deny(missing_docs)]
+
+use crate::ComparisonDirection;
 use crate::{
     ConnectionGraph, FileChangeCoupling, FileChangeCouplingId, FileId, FileRecord, PackageId,
     PathProbe, Rating, ReachAnswer,
 };
+use std::cmp::Reverse;
+use std::collections::BTreeSet;
 
 macro_rules! leakage_index {
     ($(#[$documentation:meta])* $name:ident) => {
@@ -54,8 +69,6 @@ leakage_index!(
 /// the component leakage this rule exists to name, so all of them stay
 /// eligible and their importers following their changes remains a claim worth
 /// making.
-///
-/// This is a proposed constant under review.
 pub const WIRING_FILENAMES: &[&str] = &[
     "__init__.py",
     "index.cjs",
@@ -73,35 +86,23 @@ pub fn is_wiring_filename(path: &str) -> bool {
 }
 
 /// The directories two files sit apart before either rule may name them.
-///
-/// This is a proposed constant under review.
 pub const LEAKAGE_MIN_DISTANCE: u32 = 2;
 
 /// The commits a pair must share before either rule may name it.
-///
-/// This is a proposed constant under review.
 pub const LEAKAGE_SHARED_COMMITS: u32 = 5;
 
 /// The share of its union, in permille, a pair at the minimum distance must
 /// reach.
-///
-/// This is a proposed constant under review.
 pub const LEAKAGE_SIMILARITY_PERMILLE: u32 = 400;
 
 /// The permille the similarity bar falls for each directory beyond the
 /// minimum distance.
-///
-/// This is a proposed constant under review.
 pub const LEAKAGE_SIMILARITY_STEP_PERMILLE: u32 = 50;
 
 /// The share of its union, in permille, no distance lowers the bar below.
-///
-/// This is a proposed constant under review.
 pub const LEAKAGE_SIMILARITY_FLOOR_PERMILLE: u32 = 200;
 
 /// The nodes one path probe may visit before it answers undecided.
-///
-/// This is a proposed constant under review.
 pub const PATH_PROBE_NODES: usize = 4_096;
 
 /// The share of its union a pair that many directories apart must reach.
@@ -167,6 +168,7 @@ impl ChangeLeakageFinding {
         }
     }
 
+    /// The finding or movement category represented by this row.
     pub const fn kind(self) -> ChangeLeakageKind {
         self.kind
     }
@@ -359,6 +361,60 @@ fn qualifies(pair: FileChangeCoupling) -> bool {
         && u64::from(pair.shared_commits()) * 1_000
             >= u64::from(pair.union_commits()) * u64::from(required_permille(pair.distance()))
 }
+
+/// Introduced or removed leakage evidence for a stable file pair.
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub struct ChangeLeakageComparison {
+    id: ChangeLeakageComparisonId,
+    kind: crate::ChangeLeakageKind,
+    left: FileId,
+    right: FileId,
+    direction: ComparisonDirection,
+}
+
+impl ChangeLeakageComparison {
+    /// Retains the classified leakage movement and its file pair.
+    pub const fn new(
+        id: ChangeLeakageComparisonId,
+        kind: crate::ChangeLeakageKind,
+        left: FileId,
+        right: FileId,
+        direction: ComparisonDirection,
+    ) -> Self {
+        Self {
+            id,
+            kind,
+            left,
+            right,
+            direction,
+        }
+    }
+    /// The row's typed position in its owning report table.
+    pub const fn id(self) -> ChangeLeakageComparisonId {
+        self.id
+    }
+    /// The finding or movement category represented by this row.
+    pub const fn kind(self) -> crate::ChangeLeakageKind {
+        self.kind
+    }
+    /// The first subject in the retained pair.
+    pub const fn left(self) -> FileId {
+        self.left
+    }
+    /// The second subject in the retained pair.
+    pub const fn right(self) -> FileId {
+        self.right
+    }
+    /// Whether the comparison represents worse, better, or neutral debt movement.
+    pub const fn direction(self) -> ComparisonDirection {
+        self.direction
+    }
+}
+
+crate::table_index::table_index!(
+    /// The position of one change leakage comparison in its report table.
+    ChangeLeakageComparisonId
+);
 
 #[cfg(test)]
 mod tests {

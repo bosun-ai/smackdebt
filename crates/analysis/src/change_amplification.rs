@@ -1,10 +1,25 @@
-use std::collections::{BTreeMap, BTreeSet};
-use std::iter::once;
+//! Change amplification: how many files a typical commit touching a scope changes.
+//!
+//! Smackdebt measures this design symptom with the nearest-rank median of
+//! repository-wide eligible file counts, one observation per touched directory
+//! and ancestor. For an even sample the lower middle observation is used.
+//! Only trusted primary files count. File counts are capped at 1,000; bulk commits
+//! excluded from file-pair coupling still contribute here.
+//!
+//! A result needs at least ten commits and a median of three files. Each scope
+//! reads its directory's own sample, never an average of child medians. File
+//! scopes have no amplification value. History composition withholds unreliable
+//! samples. Amplification is descriptive and does not change the health tier.
+//!
+//! Terminology: [Ousterhout, change amplification](https://web.stanford.edu/~ouster/cgi-bin/cs190-winter18/lecture.php?topic=complexity).
+
+#![deny(missing_docs)]
 
 use crate::median::nearest_rank_median_of_counts;
-use crate::{
-    ChangeAmplification, DirectoryAmplification, DirectoryId, DirectoryTree, HistoryCommitFact,
-};
+use crate::{DirectoryId, DirectoryTree, HistoryCommitFact};
+use crate::{Scope, ScopeKind};
+use std::collections::{BTreeMap, BTreeSet};
+use std::iter::once;
 
 /// The most files one commit may be observed to have touched.
 ///
@@ -14,18 +29,12 @@ use crate::{
 /// touched. The clamp bounds the key space of every histogram to this many
 /// keys, which is what keeps the median a walk over counts rather than over
 /// commits.
-///
-/// This is a proposed constant under review.
 pub const AMPLIFICATION_MAX_FILES: u32 = 1_000;
 
 /// The observations a directory needs before its median is called typical.
-///
-/// This is a proposed constant under review.
 pub const AMPLIFICATION_MIN_COMMITS: u32 = 10;
 
 /// The median a directory needs before stating it says anything.
-///
-/// This is a proposed constant under review.
 pub const AMPLIFICATION_MIN_MEDIAN: u32 = 3;
 
 /// Accumulates how many files a commit touched, per directory, one commit at a
@@ -110,6 +119,118 @@ impl ChangeAmplificationAccumulator {
                 .collect(),
         )
     }
+}
+
+/// How many files a typical change to one scope touches.
+///
+/// The value is the nearest-rank median of the scope's directory histogram, so
+/// it is a member of the sample rather than an average of it: a repository
+/// whose changes touch three files usually says three, whatever one sweeping
+/// commit did. The fact is descriptive — it is never rated, creates no finding,
+/// and changes no verdict — and its sentence is copy owned by analysis, so a
+/// terminal renderer and a machine consumer print the same bytes.
+#[derive(Clone, Copy, Debug, Eq, Hash, PartialEq)]
+pub struct ChangeAmplification {
+    median: u32,
+    commits: u32,
+}
+
+impl ChangeAmplification {
+    /// Completes an amplification fact when the sample is both long enough and
+    /// wide enough to be worth stating.
+    ///
+    /// A handful of commits is an anecdote rather than a typical change, and a
+    /// median of one or two files is what a directory is for, so each floor
+    /// rules out one of those and a scope below either states nothing rather
+    /// than stating noise. Whether the history stream was complete enough to
+    /// hold a sample at all is decided before a histogram is finished, so it
+    /// never reaches here.
+    pub const fn from_counts(median: u32, commits: u32) -> Option<Self> {
+        if commits < AMPLIFICATION_MIN_COMMITS || median < AMPLIFICATION_MIN_MEDIAN {
+            return None;
+        }
+        Some(Self { median, commits })
+    }
+
+    /// The exact sentence every consumer prints for this amplification.
+    ///
+    /// The median is at least the floor, so the plural is always the correct
+    /// form and the sentence needs no singular arm.
+    pub fn sentence(self) -> String {
+        format!("A typical change here touches {} files.", self.median)
+    }
+
+    /// The files a typical change to this scope touches.
+    pub const fn median(self) -> u32 {
+        self.median
+    }
+
+    /// The commits the median was computed from.
+    pub const fn commits(self) -> u32 {
+        self.commits
+    }
+}
+
+/// The change amplification of every directory whose value is material.
+///
+/// A directory whose sample is too short, or whose median is below the floor,
+/// has no entry at all rather than a weak one, so a reader of this table never
+/// has to know the materiality rule to use it. The table is keyed by directory
+/// because that is what the history stream observed; turning it into the answer
+/// a scope states is the join below.
+#[derive(Clone, Debug, Default, Eq, PartialEq)]
+pub struct DirectoryAmplification(BTreeMap<DirectoryId, ChangeAmplification>);
+
+impl DirectoryAmplification {
+    /// The table these material facts make, keyed by directory.
+    pub(crate) const fn new(facts: BTreeMap<DirectoryId, ChangeAmplification>) -> Self {
+        Self(facts)
+    }
+
+    /// What a typical change to this directory touches, when the fact is
+    /// material.
+    ///
+    /// A table stating nothing anywhere is the default one, so a caller asking
+    /// whether a stream observed anything compares against that rather than
+    /// counting rows.
+    pub(crate) fn get(&self, directory: DirectoryId) -> Option<ChangeAmplification> {
+        self.0.get(&directory).copied()
+    }
+}
+
+/// The amplification each scope states, by scope position.
+///
+/// Every scope maps to exactly one directory, stated rather than inferred:
+///
+/// - a repository scope reads the root directory, which every tree holds;
+/// - a package scope reads its own root directory, which is the path its scope
+///   is named by — a package rooted at the repository root therefore reads the
+///   root histogram and states the same median the repository states, which is
+///   one fact stated at two scopes rather than two numbers;
+/// - a directory scope reads itself;
+/// - a file scope reads nothing, because a per-file histogram would state
+///   sample noise as a fact.
+///
+/// The join is computed once, while the report is composed, so rendering a
+/// scope reads one table position rather than walking a tree.
+pub fn scope_amplification(
+    scopes: &[Scope],
+    directories: &DirectoryTree,
+    amplification: &DirectoryAmplification,
+) -> Vec<Option<ChangeAmplification>> {
+    scopes
+        .iter()
+        .map(|scope| {
+            let directory = match scope.kind() {
+                ScopeKind::Repository => Some(DirectoryTree::ROOT),
+                ScopeKind::Package | ScopeKind::Directory => {
+                    directories.directory_of_path(scope.name())
+                }
+                ScopeKind::File => None,
+            };
+            directory.and_then(|directory| amplification.get(directory))
+        })
+        .collect()
 }
 
 #[cfg(test)]
@@ -307,5 +428,83 @@ mod tests {
             nothing,
             "a typical change of two files is below the median floor"
         );
+    }
+
+    #[test]
+    fn an_amplification_is_material_only_above_both_of_its_floors() {
+        assert!(
+            ChangeAmplification::from_counts(3, AMPLIFICATION_MIN_COMMITS - 1).is_none(),
+            "nine commits are too few to call a median typical"
+        );
+        assert!(
+            ChangeAmplification::from_counts(AMPLIFICATION_MIN_MEDIAN - 1, 40).is_none(),
+            "a typical change of two files is what a directory is for"
+        );
+        let exactly =
+            ChangeAmplification::from_counts(AMPLIFICATION_MIN_MEDIAN, AMPLIFICATION_MIN_COMMITS)
+                .expect("both floors are inclusive");
+        assert_eq!(exactly.median(), 3);
+        assert_eq!(exactly.commits(), 10);
+        assert_eq!(exactly.sentence(), "A typical change here touches 3 files.");
+        let wide = ChangeAmplification::from_counts(4, 40).expect("a busy directory");
+        assert_eq!(wide.sentence(), "A typical change here touches 4 files.");
+    }
+}
+
+#[cfg(test)]
+mod scope_tests {
+    use crate::ScopeId;
+    /// Three directories stating three different medians, so a scope reading
+    /// the wrong one is a wrong number rather than the same number.
+    fn table(directories: &DirectoryTree) -> DirectoryAmplification {
+        let directory = |path| {
+            directories
+                .directory_of_path(path)
+                .expect("the tree holds this directory")
+        };
+        let fact =
+            |median| ChangeAmplification::from_counts(median, 12).expect("a material sample");
+        DirectoryAmplification::new(BTreeMap::from([
+            (DirectoryTree::ROOT, fact(3)),
+            (directory("src"), fact(4)),
+            (directory("src/deep"), fact(5)),
+        ]))
+    }
+
+    use super::*;
+
+    #[test]
+    fn every_scope_reads_the_one_directory_its_kind_names() {
+        let directories = DirectoryTree::from_file_paths(["src/deep/one.js", "src/other.js"]);
+        let root = ScopeId::from_index(0);
+        let below =
+            |index, kind, name| Scope::new(ScopeId::from_index(index), kind, name, Some(root));
+        let scopes = [
+            Scope::new(root, ScopeKind::Repository, ".", None),
+            below(1, ScopeKind::Package, "."),
+            below(2, ScopeKind::Package, "src"),
+            below(3, ScopeKind::Directory, "src/deep"),
+            below(4, ScopeKind::File, "src/deep/one.js"),
+            below(5, ScopeKind::Directory, "gone"),
+        ];
+        let medians: Vec<_> = scope_amplification(&scopes, &directories, &table(&directories))
+            .into_iter()
+            .map(|amplification| amplification.map(ChangeAmplification::median))
+            .collect();
+        assert_eq!(
+            medians,
+            [Some(3), Some(3), Some(4), Some(5), None, None],
+            "a package rooted at the repository root states the root's own median, \
+             a deeper scope states its own, a file scope states nothing, and a \
+             directory the tree never saw states nothing"
+        );
+    }
+
+    #[test]
+    fn a_stream_that_observed_nothing_leaves_every_scope_stating_nothing() {
+        let directories = DirectoryTree::from_file_paths(["src/deep/one.js"]);
+        let root = Scope::new(ScopeId::from_index(0), ScopeKind::Repository, ".", None);
+        let stated = scope_amplification(&[root], &directories, &DirectoryAmplification::default());
+        assert_eq!(stated, [None]);
     }
 }

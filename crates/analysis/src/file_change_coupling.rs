@@ -1,6 +1,21 @@
-use std::collections::{BTreeMap, BTreeSet};
+//! File change coupling across directories, measured from shared commits.
+//!
+//! Similarity is shared commits divided by their union (Jaccard similarity).
+//! Only trusted primary source enters this population. A commit with more than
+//! 25 distinct eligible files contributes neither pairs nor file touch counts
+//! here; other history metrics still count it. Files in one directory do not
+//! form a pair. Retention requires three shared commits and at least 10%
+//! similarity; retained rows are evidence, not rated findings.
+//!
+//! At most one million pair keys are accumulated. Existing pairs keep counting
+//! when new keys are declined. History coverage records both these omissions and
+//! bulk commits. Directory distance is retained with the pair for change-leakage
+//! rules; the same inventory directory tree must be used throughout accumulation.
 
-use crate::{DirectoryId, DirectoryTree, FileChangeCoupling, FileId, HistoryCommitFact};
+#![deny(missing_docs)]
+
+use crate::{DirectoryId, DirectoryTree, FileId, HistoryCommitFact};
+use std::collections::{BTreeMap, BTreeSet};
 
 /// The distinct change-graph files a commit may hold before it contributes no
 /// pair at all.
@@ -10,13 +25,9 @@ use crate::{DirectoryId, DirectoryTree, FileChangeCoupling, FileId, HistoryCommi
 /// grow with the square of its size. Such a commit is counted as a bulk commit
 /// and disclosed; every other signal — churn, touches, package change coupling,
 /// contributor concentration, hotspots — still counts it in full.
-///
-/// This is a proposed constant under review.
 pub const BULK_COMMIT_FILES: usize = 25;
 
 /// The commits a pair must share before it is worth retaining at all.
-///
-/// This is a proposed constant under review.
 pub const RETAINED_FILE_PAIR_SHARED_COMMITS: u32 = 3;
 
 /// The share of a pair's union, in permille, its shared commits must reach
@@ -24,8 +35,6 @@ pub const RETAINED_FILE_PAIR_SHARED_COMMITS: u32 = 3;
 ///
 /// Retention is deliberately far below any detector's bar: it decides which
 /// pairs a detector may read, not which pairs are worth a word.
-///
-/// This is a proposed constant under review.
 pub const RETAINED_FILE_PAIR_SIMILARITY_PERMILLE: u32 = 100;
 
 /// The pair keys the accumulator may hold before it stops creating new ones.
@@ -33,8 +42,6 @@ pub const RETAINED_FILE_PAIR_SIMILARITY_PERMILLE: u32 = 100;
 /// Past the limit no new key is created and each declined pair is counted, so
 /// the approximation only ever loses pairs the stream had not yet seen while
 /// every key already held keeps accumulating.
-///
-/// This is a proposed constant under review.
 pub const RETAINED_FILE_PAIR_LIMIT: usize = 1_000_000;
 
 /// One accumulating pair: how many commits it was seen in, and how far apart
@@ -175,6 +182,74 @@ fn is_retained(shared_commits: u32, union_commits: u32) -> bool {
         && u64::from(shared_commits) * 1_000
             >= u64::from(union_commits) * u64::from(RETAINED_FILE_PAIR_SIMILARITY_PERMILLE)
 }
+
+/// Two files that change in the same commits, named lower identity first.
+///
+/// Every operand is an integer. The distance is the directory distance of the
+/// pair, which is at least 1 because a pair inside one directory is never
+/// stored. Similarity is derived by a reader, exactly as it is for package
+/// change coupling, so no ratio is stored or serialized.
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub struct FileChangeCoupling {
+    left: FileId,
+    right: FileId,
+    shared_commits: u32,
+    union_commits: u32,
+    distance: u32,
+}
+
+impl FileChangeCoupling {
+    /// Creates one retained pair, which names the lower file identity first.
+    pub fn new(
+        left: FileId,
+        right: FileId,
+        shared_commits: u32,
+        union_commits: u32,
+        distance: u32,
+    ) -> Self {
+        assert!(
+            left < right,
+            "a file pair names the lower file identity first"
+        );
+        assert!(
+            shared_commits <= union_commits,
+            "shared commits are part of the union"
+        );
+        assert!(distance >= 1, "a stored pair crosses a directory boundary");
+        Self {
+            left,
+            right,
+            shared_commits,
+            union_commits,
+            distance,
+        }
+    }
+    /// The first subject in the retained pair.
+    pub const fn left(self) -> FileId {
+        self.left
+    }
+    /// The second subject in the retained pair.
+    pub const fn right(self) -> FileId {
+        self.right
+    }
+    /// Distinct commits touching both subjects in this pair's history population.
+    pub const fn shared_commits(self) -> u32 {
+        self.shared_commits
+    }
+    /// Distinct commits touching either subject, counting shared commits once.
+    pub const fn union_commits(self) -> u32 {
+        self.union_commits
+    }
+    /// The integer directory distance between the two files.
+    pub const fn distance(self) -> u32 {
+        self.distance
+    }
+}
+
+crate::table_index::table_index!(
+    /// The position of one file change coupling in its report table.
+    FileChangeCouplingId
+);
 
 #[cfg(test)]
 mod tests {

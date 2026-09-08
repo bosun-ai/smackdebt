@@ -1,3 +1,5 @@
+//! Shared transitive-reach algorithms over indexed dependency graphs.
+
 use crate::strongly_connected_components;
 use std::collections::VecDeque;
 

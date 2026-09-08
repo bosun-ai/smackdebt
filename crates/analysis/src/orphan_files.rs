@@ -1,3 +1,12 @@
+//! Orphan files: supported primary source with no incoming graph references.
+//!
+//! Known entry filenames and explicitly declared entry files are exempt. The
+//! caller supplies fan-in from the eligible dependency graph. Results are
+//! candidates for inspection: dynamic references may exist outside that graph.
+//! Orphan facts are descriptive, never rated, and preserve candidate order.
+
+#![deny(missing_docs)]
+
 use crate::report::FileId;
 use crate::source::SourceRole;
 
@@ -41,6 +50,7 @@ pub struct OrphanCandidate<'a> {
 }
 
 impl<'a> OrphanCandidate<'a> {
+    /// Borrows a file's path and retains the eligibility, degree, and entry evidence used by orphan policy.
     pub const fn new(
         file: FileId,
         path: &'a str,
@@ -70,9 +80,11 @@ pub struct OrphanFile {
 }
 
 impl OrphanFile {
+    /// Retains the identity of a file already selected as an orphan candidate.
     pub const fn new(file: FileId) -> Self {
         Self { file }
     }
+    /// The file-table identity this observation describes.
     pub const fn file(self) -> FileId {
         self.file
     }

@@ -1,22 +1,23 @@
-use crate::architecture::{
-    ArchitectureFinding, ArchitectureFindingId, DependencyEdge, StableDependencyFinding,
-    StableDependencyFindingId,
-};
+//! Named problem detection, finding claims, and stable report ranking.
+
+use crate::architecture::DependencyEdge;
+use crate::change_impact::FileReach;
 use crate::change_leakage::{ChangeLeakageFinding, ChangeLeakageFindingId, ChangeLeakageKind};
+use crate::code_churn::FileActivity;
+use crate::code_ownership::{KnowledgeConcentrationFinding, KnowledgeConcentrationFindingId};
+use crate::dependency_cycles::{ArchitectureFinding, ArchitectureFindingId};
 use crate::dependency_degree::dependency_degree;
-use crate::evolution::{
-    EvolutionaryFinding, EvolutionaryFindingId, FileChangeCoupling, KnowledgeConcentrationFinding,
-    KnowledgeConcentrationFindingId,
-};
-use crate::file_reach::FileReach;
+use crate::file_change_coupling::FileChangeCoupling;
 use crate::health::Rating;
 use crate::hotspot::Hotspot;
 use crate::median::nearest_rank_median;
+use crate::package_change_coupling::{EvolutionaryFinding, EvolutionaryFindingId};
 use crate::report::{
-    FileActivity, FileId, FileRecord, Finding, FindingId, FindingRank, PackageId, PackageRecord,
+    FileId, FileRecord, Finding, FindingId, FindingRank, PackageId, PackageRecord,
 };
 use crate::size::{SizeFinding, SizeFindingId};
 use crate::source::SourceRole;
+use crate::stable_dependencies::{StableDependencyFinding, StableDependencyFindingId};
 use crate::{GraphEvidence, PackageClosure};
 use std::cmp::Reverse;
 use std::collections::{BTreeMap, BTreeSet};
@@ -145,7 +146,7 @@ pub enum ProblemEvidence {
     /// Files in an anchor file set.
     Members(u32),
     /// Files that transitively depend on the anchor, excluding the anchor
-    /// itself, for a file inside the bounded reach candidate set.
+    /// itself, for a file inside the limited reach candidate set.
     ReachIn(u32),
     /// Importers of a `leaky_interface` card's file that follow its changes,
     /// stored as its own fact so a consumer reads the count without counting
@@ -239,8 +240,6 @@ impl ProblemCard {
 }
 
 /// The High findings a file concentrates before it can be a `god_file`.
-///
-/// This is a proposed constant under review.
 pub const CONCENTRATED_HIGH_FINDINGS: u32 = 3;
 
 /// The units rated Watch or High a file holds before one High finding is
@@ -250,25 +249,17 @@ pub const CONCENTRATED_HIGH_FINDINGS: u32 = 3;
 /// file's rated unit total is its length in units: counting all of them made
 /// every long file with a single bug a `god_file`, which is what single-file
 /// components produce by the hundred.
-///
-/// This is a proposed constant under review.
 pub const BROAD_DEBT_UNITS: u32 = 6;
 
 /// The fan-out at which a file is broad enough for the `god_file` rule without
 /// a size finding.
-///
-/// This is a proposed constant under review.
 pub const GOD_FILE_FAN_OUT: u32 = 10;
 
 /// The file degree a `hub` reaches before its package median is consulted.
-///
-/// This is a proposed constant under review.
 pub const HUB_DEGREE: u32 = 8;
 
 /// The multiple of its package's median degree a `hub` reaches when that
 /// median is not zero.
-///
-/// This is a proposed constant under review.
 pub const HUB_MEDIAN_MULTIPLE: u32 = 4;
 
 /// The integer thresholds the file patterns are decided by.
@@ -544,7 +535,7 @@ impl<'a> ProblemInput<'a> {
         self
     }
 
-    /// The exact reach of a file inside the bounded candidate set, when that
+    /// The exact reach of a file inside the limited candidate set, when that
     /// reach is worth a line.
     ///
     /// A candidate qualifies on either half of its degree, so a file that
@@ -1286,17 +1277,18 @@ fn anchor_start_line(input: &ProblemInput<'_>, card: &ProblemCard) -> u32 {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::architecture::{
-        ArchitectureFindingKind, DependencyEdgeId, PackageGraphMeasurement,
-        StableDependencyEvidence,
-    };
-    use crate::evolution::{ChangeCoupling, ContributorConcentration};
-    use crate::health::{HealthCounts, HealthPolicy, Measurements, Thresholds};
+    use crate::architecture::{DependencyEdgeId, PackageGraphMeasurement};
+    use crate::code_ownership::ContributorConcentration;
+    use crate::dependency_cycles::ArchitectureFindingKind;
+    use crate::health::{HealthCounts, HealthPolicy, Thresholds};
+    use crate::measurements::Measurements;
+    use crate::package_change_coupling::ChangeCoupling;
     use crate::report::{Coverage, ScopeId};
     use crate::size::SizePolicy;
     use crate::source::{
         SourceRole, SourceSpan, SourceTrust, StaticRelationKind, UnitIdentity, UnitKind,
     };
+    use crate::stable_dependencies::StableDependencyEvidence;
 
     /// A unit that rates High on cognitive complexity alone.
     fn high() -> Measurements {

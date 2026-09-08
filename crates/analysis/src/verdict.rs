@@ -1,23 +1,22 @@
-use crate::architecture::{
+//! Codebase and diff verdict policy over completed metric and finding facts.
+
+use crate::ChangeAmplification;
+use crate::architecture_comparison::{
     ArchitectureComparison, ArchitectureComparisonId, ArchitectureComparisonKind,
-    ChangeLeakageComparison, ChangeLeakageComparisonId, CoreComparison, CoreComparisonId,
-    PropagationComparison, PropagationComparisonId,
 };
-use crate::change_amplification::{AMPLIFICATION_MIN_COMMITS, AMPLIFICATION_MIN_MEDIAN};
+use crate::change_impact::{PropagationComparison, PropagationComparisonId};
+use crate::change_leakage::{ChangeLeakageComparison, ChangeLeakageComparisonId};
+use crate::code_ownership::{ConcentrationComparison, ConcentrationComparisonId};
 use crate::comparison::{Comparison, ComparisonKind};
-use crate::evolution::{
-    ConcentrationComparison, ConcentrationComparisonId, EvolutionaryComparison,
-    EvolutionaryComparisonId,
-};
+use crate::dependency_cycles::{CoreComparison, CoreComparisonId};
 use crate::health::{HealthCounts, is_rated};
-use crate::propagation::{
-    CORE_SIZE_FILES, CORE_SIZE_PERCENT, PACKAGE_REACH_FILES, ROOT_REACH_PACKAGES,
-    ROOT_REACH_REACHED,
-};
+use crate::package_change_coupling::{EvolutionaryComparison, EvolutionaryComparisonId};
 use crate::report::{ComparisonId, DiffCounts};
+use crate::source::UnitIdentity;
+use crate::{CoreSize, PropagationReach};
+
 #[cfg(test)]
 use crate::source::SourceRole;
-use crate::source::UnitIdentity;
 
 /// The frozen codebase answer.
 ///
@@ -237,191 +236,6 @@ impl VerdictShare {
     /// The High units the whole repository holds.
     pub const fn repository_high(self) -> u32 {
         self.repository_high
-    }
-}
-
-/// How far a change to one node of a scope's dependency graph can travel.
-///
-/// The two forms answer the same question at the two scopes that can answer
-/// it: a package's change spreads to packages at the repository root, and a
-/// file's change spreads to files inside its own package. Both counts include
-/// the changed node, which is why a package reachable from eight others reads
-/// "9 of 14". The sentence is copy owned by analysis, so a terminal renderer
-/// and a machine consumer print the same bytes; the fact is stated only and
-/// never moves the tier, exactly as the repository share never does.
-#[derive(Clone, Copy, Debug, Eq, Hash, PartialEq)]
-pub struct PropagationReach {
-    reached: u32,
-    total: u32,
-    subject: ReachSubject,
-}
-
-/// What one reach fact counts, which decides its sentence.
-#[derive(Clone, Copy, Debug, Eq, Hash, PartialEq)]
-enum ReachSubject {
-    Packages,
-    Files,
-}
-
-impl PropagationReach {
-    /// Completes the repository's package reach when it is worth stating.
-    ///
-    /// A repository with fewer than [`ROOT_REACH_PACKAGES`] packages, or whose
-    /// most depended-on package is reached by no other, has nothing to say and
-    /// carries no fact rather than a one-of-one sentence.
-    pub const fn packages(reached: u32, total: u32) -> Option<Self> {
-        if total < ROOT_REACH_PACKAGES || reached < ROOT_REACH_REACHED {
-            return None;
-        }
-        Some(Self {
-            reached,
-            total,
-            subject: ReachSubject::Packages,
-        })
-    }
-
-    /// Completes one package's file reach when the package is large enough for
-    /// the fraction to mean anything.
-    pub const fn files(reached: u32, total: u32) -> Option<Self> {
-        if total < PACKAGE_REACH_FILES {
-            return None;
-        }
-        Some(Self {
-            reached,
-            total,
-            subject: ReachSubject::Files,
-        })
-    }
-
-    /// The exact sentence every consumer prints for this reach.
-    pub fn sentence(self) -> String {
-        match self.subject {
-            ReachSubject::Packages => format!(
-                "A change in one package can reach {} of {} packages.",
-                self.reached, self.total
-            ),
-            ReachSubject::Files => format!(
-                "A change here can reach {} of {} files in this package.",
-                self.reached, self.total
-            ),
-        }
-    }
-
-    /// The nodes one change reaches, counting the changed node itself.
-    pub const fn reached(self) -> u32 {
-        self.reached
-    }
-
-    /// The nodes the graph this reach was closed over holds.
-    pub const fn total(self) -> u32 {
-        self.total
-    }
-}
-
-/// The largest file dependency cycle, against the graph it sits in.
-///
-/// A core is descriptive: it is never rated, creates no finding, and changes
-/// no verdict. The per-component cycle findings and their witnesses are what a
-/// reader acts on; this states how much of the codebase moves together.
-#[derive(Clone, Copy, Debug, Eq, Hash, PartialEq)]
-pub struct CoreSize {
-    core: u32,
-    files: u32,
-}
-
-impl CoreSize {
-    /// Completes a core size when the largest cycle is both absolutely and
-    /// proportionally worth stating.
-    ///
-    /// A three-file cycle is a local knot rather than a core, and a cycle that
-    /// is a rounding error of the codebase says nothing about the codebase, so
-    /// each floor rules out one of those.
-    pub const fn from_counts(core: u32, files: u32) -> Option<Self> {
-        if core < CORE_SIZE_FILES {
-            return None;
-        }
-        if core as u64 * 100 < files as u64 * CORE_SIZE_PERCENT as u64 {
-            return None;
-        }
-        Some(Self { core, files })
-    }
-
-    /// The exact sentence every consumer prints for this core.
-    pub fn sentence(self) -> String {
-        format!("{}.", self.fragment())
-    }
-
-    /// The same fact without its full stop, which is what a card states.
-    ///
-    /// A card stacks lowercase fragments — `a change here reaches 11 files`,
-    /// `2 files in the cycle` — and a closed sentence among them reads as a
-    /// different kind of claim than the ones around it. A verdict-level
-    /// statement is a sentence and keeps the stop.
-    pub fn fragment(self) -> String {
-        format!(
-            "{} of {} files sit in one dependency cycle",
-            self.core, self.files
-        )
-    }
-
-    /// The files the largest cycle holds.
-    pub const fn core(self) -> u32 {
-        self.core
-    }
-
-    /// The files the file dependency graph is built over.
-    pub const fn files(self) -> u32 {
-        self.files
-    }
-}
-
-/// How many files a typical change to one scope touches.
-///
-/// The value is the nearest-rank median of the scope's directory histogram, so
-/// it is a member of the sample rather than an average of it: a repository
-/// whose changes touch three files usually says three, whatever one sweeping
-/// commit did. The fact is descriptive — it is never rated, creates no finding,
-/// and changes no verdict — and its sentence is copy owned by analysis, so a
-/// terminal renderer and a machine consumer print the same bytes.
-#[derive(Clone, Copy, Debug, Eq, Hash, PartialEq)]
-pub struct ChangeAmplification {
-    median: u32,
-    commits: u32,
-}
-
-impl ChangeAmplification {
-    /// Completes an amplification fact when the sample is both long enough and
-    /// wide enough to be worth stating.
-    ///
-    /// A handful of commits is an anecdote rather than a typical change, and a
-    /// median of one or two files is what a directory is for, so each floor
-    /// rules out one of those and a scope below either states nothing rather
-    /// than stating noise. Whether the history stream was complete enough to
-    /// hold a sample at all is decided before a histogram is finished, so it
-    /// never reaches here.
-    pub const fn from_counts(median: u32, commits: u32) -> Option<Self> {
-        if commits < AMPLIFICATION_MIN_COMMITS || median < AMPLIFICATION_MIN_MEDIAN {
-            return None;
-        }
-        Some(Self { median, commits })
-    }
-
-    /// The exact sentence every consumer prints for this amplification.
-    ///
-    /// The median is at least the floor, so the plural is always the correct
-    /// form and the sentence needs no singular arm.
-    pub fn sentence(self) -> String {
-        format!("A typical change here touches {} files.", self.median)
-    }
-
-    /// The files a typical change to this scope touches.
-    pub const fn median(self) -> u32 {
-        self.median
-    }
-
-    /// The commits the median was computed from.
-    pub const fn commits(self) -> u32 {
-        self.commits
     }
 }
 
@@ -840,7 +654,7 @@ impl WorstOffender {
 
 /// The most offenders one verdict names.
 ///
-/// Three is enough for a reader and for a machine head, and it is bounded, so
+/// Three is enough for a reader and for a machine head, and it is limited, so
 /// selecting them never sorts a whole finding table.
 pub const WORST_OFFENDER_LIMIT: usize = 3;
 
@@ -1031,8 +845,9 @@ fn moves_debt(comparison: &Comparison) -> bool {
 mod tests {
     use super::*;
     use crate::comparison::ComparisonDirection;
-    use crate::evolution::{ChangeCoupling, EvolutionaryComparisonKind};
-    use crate::health::{Measurements, Rating};
+    use crate::health::Rating;
+    use crate::measurements::Measurements;
+    use crate::package_change_coupling::{ChangeCoupling, EvolutionaryComparisonKind};
     use crate::report::{FileId, PackageId};
     use crate::source::{UnitIdentity, UnitKind};
 
@@ -1138,103 +953,6 @@ mod tests {
         assert_eq!(framed.counts(), bare.counts());
         assert_eq!(framed.worst_offender(), bare.worst_offender());
         assert!(framed.share().is_some());
-    }
-
-    #[test]
-    fn package_reach_is_material_only_above_both_of_its_floors() {
-        assert!(
-            PropagationReach::packages(2, 2).is_none(),
-            "two packages are not a system"
-        );
-        assert!(
-            PropagationReach::packages(1, 14).is_none(),
-            "a package nothing depends on has nothing to say"
-        );
-        let reach = PropagationReach::packages(9, 14).expect("nine of fourteen is material");
-        assert_eq!(reach.reached(), 9);
-        assert_eq!(reach.total(), 14);
-        assert_eq!(
-            reach.sentence(),
-            "A change in one package can reach 9 of 14 packages."
-        );
-        // Exactly at both floors the fact exists.
-        assert_eq!(
-            PropagationReach::packages(2, 3)
-                .expect("both floors are inclusive")
-                .sentence(),
-            "A change in one package can reach 2 of 3 packages."
-        );
-    }
-
-    #[test]
-    fn file_reach_is_material_only_from_a_package_of_twenty_files() {
-        assert!(
-            PropagationReach::files(19, 19).is_none(),
-            "nineteen files are too few to divide"
-        );
-        let reach = PropagationReach::files(34, 98).expect("a package of ninety-eight files");
-        assert_eq!(reach.reached(), 34);
-        assert_eq!(reach.total(), 98);
-        assert_eq!(
-            reach.sentence(),
-            "A change here can reach 34 of 98 files in this package."
-        );
-        assert_eq!(
-            PropagationReach::files(1, 20)
-                .expect("the file floor is inclusive")
-                .sentence(),
-            "A change here can reach 1 of 20 files in this package."
-        );
-    }
-
-    #[test]
-    fn a_core_is_material_only_above_both_of_its_floors() {
-        assert!(
-            CoreSize::from_counts(4, 20).is_none(),
-            "four files are a knot rather than a core"
-        );
-        assert!(
-            CoreSize::from_counts(3, 200).is_none(),
-            "three of two hundred is below both floors"
-        );
-        assert!(
-            CoreSize::from_counts(5, 300).is_none(),
-            "five of three hundred is below the proportional floor alone"
-        );
-        let exactly = CoreSize::from_counts(5, 250).expect("exactly two percent is material");
-        assert_eq!(exactly.core(), 5);
-        assert_eq!(exactly.files(), 250);
-        let core = CoreSize::from_counts(34, 210).expect("a large core");
-        assert_eq!(
-            core.sentence(),
-            "34 of 210 files sit in one dependency cycle."
-        );
-        // The two forms are one fact: the fragment a card stacks, and the
-        // sentence a verdict-level statement closes.
-        assert_eq!(
-            core.fragment(),
-            "34 of 210 files sit in one dependency cycle"
-        );
-    }
-
-    #[test]
-    fn an_amplification_is_material_only_above_both_of_its_floors() {
-        assert!(
-            ChangeAmplification::from_counts(3, AMPLIFICATION_MIN_COMMITS - 1).is_none(),
-            "nine commits are too few to call a median typical"
-        );
-        assert!(
-            ChangeAmplification::from_counts(AMPLIFICATION_MIN_MEDIAN - 1, 40).is_none(),
-            "a typical change of two files is what a directory is for"
-        );
-        let exactly =
-            ChangeAmplification::from_counts(AMPLIFICATION_MIN_MEDIAN, AMPLIFICATION_MIN_COMMITS)
-                .expect("both floors are inclusive");
-        assert_eq!(exactly.median(), 3);
-        assert_eq!(exactly.commits(), 10);
-        assert_eq!(exactly.sentence(), "A typical change here touches 3 files.");
-        let wide = ChangeAmplification::from_counts(4, 40).expect("a busy directory");
-        assert_eq!(wide.sentence(), "A typical change here touches 4 files.");
     }
 
     #[test]

@@ -1,3 +1,5 @@
+//! Nearest-rank medians for samples and frequency histograms.
+
 use std::collections::BTreeMap;
 
 /// The nearest-rank median of a sorted integer sample, which stays an integer

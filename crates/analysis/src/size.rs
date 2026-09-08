@@ -1,3 +1,13 @@
+//! File size in source lines and container size in exclusive logical statements.
+//!
+//! Default inclusive Watch/High thresholds are 400/800 for files and 300/600 for
+//! containers. Healthy observations produce no finding. Source composition
+//! supplies trusted parsed measurements in verdict roles. File and container
+//! findings remain separate from unit health counts to avoid counting one unit's
+//! debt twice. A container name is only allocated once its size is rated.
+
+#![deny(missing_docs)]
+
 use crate::health::{Rating, Thresholds};
 use crate::report::FileId;
 
@@ -39,7 +49,9 @@ size_index!(
 /// What a size finding measured.
 #[derive(Clone, Copy, Debug, Eq, Hash, Ord, PartialEq, PartialOrd)]
 pub enum SizeSubject {
+    /// A file in the retained source inventory.
     File,
+    /// A named container within a file.
     Container,
 }
 
@@ -59,9 +71,11 @@ pub struct SizeFinding {
 }
 
 impl SizeFinding {
+    /// The file-table identity this observation describes.
     pub const fn file(&self) -> FileId {
         self.file
     }
+    /// The subject whose measurement this value records.
     pub const fn subject(&self) -> SizeSubject {
         self.subject
     }
@@ -73,6 +87,7 @@ impl SizeFinding {
     pub const fn value(&self) -> u32 {
         self.value
     }
+    /// The health rating carried by this observation.
     pub const fn rating(&self) -> Rating {
         self.rating
     }
@@ -92,6 +107,7 @@ impl Default for SizePolicy {
 }
 
 impl SizePolicy {
+    /// Sets separate inclusive threshold pairs for file lines and container statements.
     pub const fn new(file_lines: Thresholds, container_lines: Thresholds) -> Self {
         Self {
             file_lines,
@@ -99,10 +115,12 @@ impl SizePolicy {
         }
     }
 
+    /// The inclusive thresholds for physical source lines in a file.
     pub const fn file_lines(self) -> Thresholds {
         self.file_lines
     }
 
+    /// The inclusive thresholds for exclusive logical statements in a container.
     pub const fn container_lines(self) -> Thresholds {
         self.container_lines
     }

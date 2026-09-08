@@ -1,3 +1,13 @@
+//! Hotspots: rated code that changes frequently in the selected history window.
+//!
+//! A file is hot when it holds at least one rated unit and reaches the configured
+//! touch count (five commits by default). It keeps its maximum unit rating and
+//! exact activity count. No complexity-times-churn score is introduced. Source
+//! composition supplies trusted eligible debt; recovered and context code cannot
+//! become hot through activity alone. Results preserve input file order.
+
+#![deny(missing_docs)]
+
 use crate::health::Rating;
 use crate::report::FileId;
 
@@ -19,6 +29,7 @@ pub struct FileDebt {
 }
 
 impl FileDebt {
+    /// Combines a file's rated-unit count, highest unit rating, and history touches.
     pub const fn new(file: FileId, rated_units: u32, max_rating: Rating, touches: u32) -> Self {
         Self {
             file,
@@ -27,15 +38,19 @@ impl FileDebt {
             touches,
         }
     }
+    /// The file-table identity this observation describes.
     pub const fn file(self) -> FileId {
         self.file
     }
+    /// The number of Watch or High units retained for this file.
     pub const fn rated_units(self) -> u32 {
         self.rated_units
     }
+    /// The highest unit rating in this file.
     pub const fn max_rating(self) -> Rating {
         self.max_rating
     }
+    /// Distinct commits touching this subject in the selected history window.
     pub const fn touches(self) -> u32 {
         self.touches
     }
@@ -50,6 +65,7 @@ pub struct Hotspot {
 }
 
 impl Hotspot {
+    /// Retains a file already selected as hot, with its rating and exact touch count.
     pub const fn new(file: FileId, rating: Rating, touches: u32) -> Self {
         Self {
             file,
@@ -57,6 +73,7 @@ impl Hotspot {
             touches,
         }
     }
+    /// The file-table identity this observation describes.
     pub const fn file(self) -> FileId {
         self.file
     }
@@ -86,10 +103,12 @@ impl Default for HotspotPolicy {
 pub const DEFAULT_MINIMUM_TOUCHES: u32 = 5;
 
 impl HotspotPolicy {
+    /// Sets the inclusive minimum commit count for a rated file to be hot.
     pub const fn new(minimum_touches: u32) -> Self {
         Self { minimum_touches }
     }
 
+    /// The inclusive touch count required for a rated file to be hot.
     pub const fn minimum_touches(self) -> u32 {
         self.minimum_touches
     }

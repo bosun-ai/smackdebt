@@ -80,4 +80,16 @@ Other rated findings appear under their own names. Each problem includes measure
 
 [User guide](docs/guide.md) · [Checked examples](docs/examples.md) · [JSON schemas](schemas/README.md) · [Architecture](ARCHITECTURE.md) · [Releasing](RELEASING.md)
 
+## Development checks
+
+Install the Python check dependencies in a virtual environment before running
+the workspace checks:
+
+```console
+python3 -m venv .venv
+. .venv/bin/activate
+python3 -m pip install -r scripts/requirements.txt
+just check
+```
+
 MIT licensed. Built with [tree-sitter](https://tree-sitter.github.io/tree-sitter/) and its language grammars; Smackdebt owns the measurements and reports.

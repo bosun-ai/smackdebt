@@ -1,3 +1,5 @@
+//! Test-source classification from resolved module declarations.
+
 use std::collections::{BTreeMap, BTreeSet};
 
 /// One file bringing another into the build, and whether it does so only under
@@ -10,7 +12,7 @@ pub type ModuleDeclaration = (usize, usize, bool);
 ///
 /// A file qualifies when it is declared at least once and every declaration of
 /// it is test-scoped, where a declaration is test-scoped if its reference is or
-/// if the declaring file already qualifies. The set only grows and is bounded
+/// if the declaring file already qualifies. The set only grows and is limited
 /// by the declared files, so iterating to a fixpoint over ordered structures
 /// terminates and is deterministic — including over a cycle of declarations,
 /// which simply never qualifies unless every declaration into it is already

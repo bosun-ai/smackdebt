@@ -1,16 +1,23 @@
+//! Completed report tables, scope aggregation, and report construction.
+
+use crate::FileActivity;
+use crate::change_amplification::ChangeAmplification;
+use crate::change_impact::FileReach;
+use crate::change_impact::PackageClosure;
+use crate::change_impact::PropagationReach;
 use crate::change_leakage::ChangeLeakageFinding;
 use crate::comparison::{Comparison, ComparisonDirection};
-use crate::file_reach::FileReach;
-use crate::health::{HealthAssessment, HealthCounts, Measurements, Rating};
+use crate::dependency_cycles::CoreSize;
+use crate::health::{HealthAssessment, HealthCounts, Rating};
 use crate::hotspot::Hotspot;
-use crate::orphan::OrphanFile;
+use crate::measurements::Measurements;
+use crate::orphan_files::OrphanFile;
 use crate::problem::{ProblemCard, ProblemInput, cluster_problems};
-use crate::propagation::PackageClosure;
 use crate::size::SizeFinding;
 use crate::source::{Language, ParseStatus, SourceRole, SourceSpan, SourceTrust, UnitIdentity};
 use crate::verdict::{
-    ChangeAmplification, CoreSize, CoverageQualifier, DebtDiffSelection, PropagationReach, Verdict,
-    VerdictCounts, VerdictShare, WORST_OFFENDER_LIMIT, WorstOffender, WorstOffenderReason,
+    CoverageQualifier, DebtDiffSelection, Verdict, VerdictCounts, VerdictShare,
+    WORST_OFFENDER_LIMIT, WorstOffender, WorstOffenderReason,
 };
 use crate::{
     ArchitectureComparison, ArchitectureComparisonId, ArchitectureFinding, ArchitectureFindingId,
@@ -27,10 +34,11 @@ use crate::{
     HistoryComparisonSuppression, HistoryComparisonSuppressionId, HistoryCoverage,
     KnowledgeConcentrationFinding, PackageHistory,
 };
-#[cfg(test)]
-use crate::{HealthPolicy, LocalUnitId, Signal, Thresholds, compare_units};
 use std::cmp::{Ordering, Reverse};
 use std::collections::{BTreeMap, BTreeSet, VecDeque};
+
+#[cfg(test)]
+use crate::{HealthPolicy, LocalUnitId, compare_units};
 
 macro_rules! index_type {
     ($name:ident) => {
@@ -289,21 +297,6 @@ impl Coverage {
             selected_bytes: self.selected_bytes + other.selected_bytes,
             unsupported_bytes: self.unsupported_bytes + other.unsupported_bytes,
         }
-    }
-}
-
-/// Non-merge file activity retained for hotspot context.
-#[derive(Clone, Copy, Debug, Default, Eq, Hash, PartialEq)]
-pub struct FileActivity {
-    touches: u32,
-}
-
-impl FileActivity {
-    pub const fn new(touches: u32) -> Self {
-        Self { touches }
-    }
-    pub const fn touches(self) -> u32 {
-        self.touches
     }
 }
 
@@ -970,7 +963,7 @@ pub struct Report {
     /// per package whose value is material and none for any other, so a
     /// consumer joins it by package rather than by position.
     package_closures: Vec<PackageClosure>,
-    /// The exact repository-wide reach of the bounded candidate set, in file
+    /// The exact repository-wide reach of the limited candidate set, in file
     /// order; a file outside the set has no row.
     file_reach: Vec<FileReach>,
     /// The largest file dependency cycle, when it is material.
@@ -1119,7 +1112,7 @@ impl ReportBuilder {
     /// Sets the rated size findings, ordered by file, subject, and container.
     ///
     /// A size finding's identity is its position in this table, so the order
-    /// given here is the [`SizeFindingId`] a problem card links.
+    /// given here is the [`crate::SizeFindingId`] a problem card links.
     pub fn set_size_findings(&mut self, findings: Vec<SizeFinding>) {
         self.report.size_findings = findings;
     }
@@ -1510,7 +1503,7 @@ impl Report {
         &self.hotspots
     }
     /// The rated size findings, where a row's position is its
-    /// [`SizeFindingId`].
+    /// [`crate::SizeFindingId`].
     pub fn size_findings(&self) -> &[SizeFinding] {
         &self.size_findings
     }
@@ -1766,7 +1759,7 @@ impl Report {
     /// to the witnesses of its package dependency cycles.
     ///
     /// At most `WORST_OFFENDER_LIMIT` offenders are kept, and they are kept by
-    /// bounded insertion rather than by sorting, so naming them costs one pass
+    /// limited insertion rather than by sorting, so naming them costs one pass
     /// over the scope's findings however large the scope is.
     fn worst_offenders(&self, scope: &Scope) -> Vec<WorstOffender> {
         let mut best: Vec<(FindingRank<'_>, &Finding)> = Vec::with_capacity(WORST_OFFENDER_LIMIT);
@@ -1900,8 +1893,11 @@ impl Report {
         }
         for pair in &self.change_coupling {
             let (left, right) = (pair.left(), pair.right());
-            let link = if crate::evolution::pair_is_explained(&self.explanation_pairs, left, right)
-            {
+            let link = if crate::package_change_coupling::pair_is_explained(
+                &self.explanation_pairs,
+                left,
+                right,
+            ) {
                 CouplingLink::Direct
             } else {
                 let forward = shortest_path(&adjacency, left.index(), right.index());
@@ -2087,10 +2083,9 @@ fn aggregate_scope(scopes: &mut [Scope], files: &[FileRecord], scope_id: ScopeId
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::architecture::{
-        ArchitectureComparisonKind, ArchitectureFinding, ArchitectureFindingKind,
-        ArchitectureGraph, DependencyEdge, DependencyEdgeId, PackageEdgeId,
-    };
+    use crate::architecture::{ArchitectureGraph, DependencyEdge, DependencyEdgeId, PackageEdgeId};
+    use crate::architecture_comparison::ArchitectureComparisonKind;
+    use crate::dependency_cycles::{ArchitectureFinding, ArchitectureFindingKind};
     use crate::hotspot::Hotspot;
     use crate::verdict::{CodebaseTier, DebtFamily, DiffTier, WorstOffenderReason};
     use crate::{ComparisonKind, UnitFact, UnitKind};
@@ -2626,80 +2621,6 @@ mod tests {
     }
 
     #[test]
-    fn highest_signal_sets_health_rating_and_preserves_all_signal_values() {
-        let policy = HealthPolicy::default();
-        let assessment = policy.assess(Measurements::new(15, 2, 120));
-        assert_eq!(assessment.rating(), Rating::High);
-        assert_eq!(
-            assessment.signal(Signal::CognitiveComplexity).rating(),
-            Rating::Watch
-        );
-        assert_eq!(
-            assessment.signal(Signal::CyclomaticComplexity).rating(),
-            Rating::Healthy
-        );
-        assert_eq!(
-            assessment.signal(Signal::LogicalLines).rating(),
-            Rating::High
-        );
-    }
-
-    #[test]
-    fn shape_measurements_are_rated_and_explain_a_rating_on_their_own() {
-        let policy = HealthPolicy::default();
-        let healthy = Measurements::new(1, 1, 1);
-        assert_eq!(healthy.max_nesting(), 0);
-        assert_eq!(healthy.parameter_count(), 0);
-        assert_eq!(policy.assess(healthy).rating(), Rating::Healthy);
-        // A unit whose complexity, cyclomatic, and statement values are healthy
-        // is still High when it nests seven levels deep.
-        let nested = healthy.with_shape(7, 0);
-        assert_eq!(policy.assess(nested).rating(), Rating::High);
-        assert_eq!(policy.assess(nested).signal(Signal::MaxNesting).value(), 7);
-        let many_parameters = healthy.with_shape(0, 9);
-        assert_eq!(policy.assess(many_parameters).rating(), Rating::High);
-        assert_eq!(
-            policy
-                .assess(many_parameters)
-                .signal(Signal::ParameterCount)
-                .value(),
-            9
-        );
-    }
-
-    #[test]
-    fn nesting_and_parameter_thresholds_trigger_on_their_exact_values() {
-        let policy = HealthPolicy::default();
-        let base = Measurements::new(1, 1, 1);
-        let nesting = |value| policy.assess(base.with_shape(value, 0)).rating();
-        assert_eq!(nesting(3), Rating::Healthy);
-        assert_eq!(nesting(4), Rating::Watch);
-        assert_eq!(nesting(6), Rating::Watch);
-        assert_eq!(nesting(7), Rating::High);
-        let parameters = |value| policy.assess(base.with_shape(0, value)).rating();
-        assert_eq!(parameters(5), Rating::Healthy);
-        assert_eq!(parameters(6), Rating::Watch);
-        assert_eq!(parameters(8), Rating::Watch);
-        assert_eq!(parameters(9), Rating::High);
-    }
-
-    #[test]
-    fn both_promoted_thresholds_are_configurable() {
-        let policy = HealthPolicy::new(
-            Thresholds::new(15, 25),
-            Thresholds::new(11, 21),
-            Thresholds::new(50, 100),
-            Thresholds::new(2, 3),
-            Thresholds::new(2, 3),
-        );
-        assert_eq!(policy.nesting(), Thresholds::new(2, 3));
-        assert_eq!(policy.parameters(), Thresholds::new(2, 3));
-        let base = Measurements::new(1, 1, 1);
-        assert_eq!(policy.assess(base.with_shape(2, 0)).rating(), Rating::Watch);
-        assert_eq!(policy.assess(base.with_shape(0, 3)).rating(), Rating::High);
-    }
-
-    #[test]
     fn every_rated_measurement_classifies_a_unit_comparison() {
         let before = [unit("same", Measurements::new(2, 1, 1).with_shape(1, 1))];
         let after = [unit("same", Measurements::new(2, 1, 1).with_shape(2, 1))];
@@ -2707,16 +2628,6 @@ mod tests {
         assert_eq!(comparisons[0].kind(), ComparisonKind::MetricChanged);
         let unchanged = compare_units(&before, &before, HealthPolicy::default());
         assert_eq!(unchanged[0].kind(), ComparisonKind::Unchanged);
-    }
-
-    #[test]
-    fn default_policy_has_documented_limits() {
-        let policy = HealthPolicy::default();
-        assert_eq!(policy.cognitive(), Thresholds::new(15, 25));
-        assert_eq!(policy.cyclomatic(), Thresholds::new(11, 21));
-        assert_eq!(policy.logical_lines(), Thresholds::new(50, 100));
-        assert_eq!(policy.nesting(), Thresholds::new(4, 7));
-        assert_eq!(policy.parameters(), Thresholds::new(6, 9));
     }
 
     #[test]

@@ -1,6 +1,8 @@
+//! Undirected dependency connectivity used to prove or withhold absence claims.
+
 use crate::architecture::DependencyEdge;
+use crate::change_impact::enters_file_graph;
 use crate::path_probe::PathProbe;
-use crate::propagation::enters_file_graph;
 use crate::report::{FileRecord, PackageId};
 use crate::source::StaticRelationKind;
 use crate::strongly_connected_components::strongly_connected_components;
