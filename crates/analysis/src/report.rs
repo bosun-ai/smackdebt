@@ -1252,18 +1252,16 @@ impl ReportBuilder {
 fn unsupported_language_label(path: &str) -> String {
     let name = path.rsplit(['/', '\\']).next().unwrap_or(path);
     let extension = name.rsplit_once('.').map_or("", |(_, extension)| extension);
-    match extension {
-        "kt" | "kts" => "Kotlin".to_owned(),
-        "go" => "Go".to_owned(),
-        "cs" => "C#".to_owned(),
-        "swift" => "Swift".to_owned(),
-        "php" => "PHP".to_owned(),
-        "scala" | "sc" => "Scala".to_owned(),
-        "ex" | "exs" => "Elixir".to_owned(),
-        "dart" => "Dart".to_owned(),
-        "" => "an unknown language".to_owned(),
-        other => other.to_owned(),
-    }
+    Language::source_name(name).map_or_else(
+        || {
+            if extension.is_empty() {
+                "an unknown language".to_owned()
+            } else {
+                extension.to_owned()
+            }
+        },
+        str::to_owned,
+    )
 }
 
 /// The stable map key for an unordered package pair.

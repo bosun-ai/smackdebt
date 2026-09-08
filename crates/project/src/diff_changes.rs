@@ -14,7 +14,7 @@ use crate::hierarchy::HierarchyBuilder;
 use crate::manifest_names::declared_manifest_name;
 use crate::paths::{package_of, report_package_path};
 use crate::requests::ProjectError;
-use crate::resolution_config::ResolutionRules;
+use crate::resolution_rules::ResolutionRules;
 
 /// Resolves the reference a diff answers against and the merge base the
 /// changes are stated from.
@@ -147,13 +147,11 @@ pub(crate) fn base_resolution_configs(
         .filter_map(|package| package.resolution_config())
         .map(|path| path.as_path().to_path_buf())
         .collect();
+    candidates.extend(inventory.resolution_files().iter().cloned());
     candidates.extend(base_inventory.resolution_configs().iter().cloned());
     for change in all_changed {
         for path in [change.current_path(), change.base_path()] {
-            if matches!(
-                path.file_name().and_then(|name| name.to_str()),
-                Some("tsconfig.json" | "jsconfig.json")
-            ) {
+            if smackdebt_discovery::is_resolution_file(path) {
                 candidates.push(path.to_path_buf());
             }
         }

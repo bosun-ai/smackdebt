@@ -9,39 +9,8 @@ use smackdebt_discovery::Inventory;
 
 use crate::paths::clean_relative;
 
-#[derive(Clone)]
-pub(crate) struct ResolutionAlias {
-    prefix: String,
-    suffix: String,
-    replacement: String,
-}
-#[derive(Clone, Default)]
-pub(crate) struct ResolutionRules {
-    pub(crate) packages: Vec<PackageResolution>,
-}
-#[derive(Clone)]
-pub(crate) struct PackageResolution {
-    pub(crate) root: PathBuf,
-    pub(crate) aliases: Vec<ResolutionAlias>,
-    pub(crate) issue: Option<String>,
-}
-impl ResolutionRules {
-    pub(crate) fn aliases_for(&self, source: &Path) -> &[ResolutionAlias] {
-        self.packages
-            .iter()
-            .filter(|package| source.starts_with(&package.root))
-            .max_by_key(|package| package.root.components().count())
-            .map_or(&[], |package| package.aliases.as_slice())
-    }
-}
-impl ResolutionAlias {
-    pub(crate) fn expand(&self, candidate: &str) -> Option<String> {
-        let middle = candidate
-            .strip_prefix(&self.prefix)?
-            .strip_suffix(&self.suffix)?;
-        Some(self.replacement.replace('*', middle))
-    }
-}
+use crate::resolution_rules::{PackageResolution, ResolutionAlias, ResolutionRules};
+
 pub(crate) fn load_resolution_aliases(root: &Path, inventory: &Inventory) -> ResolutionRules {
     let packages = inventory
         .packages()
@@ -69,7 +38,11 @@ pub(crate) fn load_resolution_aliases(root: &Path, inventory: &Inventory) -> Res
             }
         })
         .collect();
-    ResolutionRules { packages }
+    let metadata =
+        crate::project_metadata::ProjectMetadata::load(inventory.resolution_files(), |path| {
+            fs::read(root.join(path)).map_err(|error| error.to_string())
+        });
+    ResolutionRules::new(metadata, packages)
 }
 pub(crate) fn load_base_resolution_aliases(
     reader: &mut smackdebt_git::ObjectReader,
@@ -90,6 +63,7 @@ pub(crate) fn load_base_resolution_aliases(
     for root in package_roots {
         let config = config_candidates
             .iter()
+            .filter(|path| is_script_config(path))
             .filter(|path| {
                 path.parent()
                     .is_some_and(|directory| root.starts_with(directory))
@@ -129,8 +103,24 @@ pub(crate) fn load_base_resolution_aliases(
             issue,
         });
     }
-    ResolutionRules { packages }
+    let existing: Vec<_> = config_candidates
+        .iter()
+        .filter(|path| sources.get(*path).is_some_and(Result::is_ok))
+        .cloned()
+        .collect();
+    let metadata = crate::project_metadata::ProjectMetadata::load(&existing, |path| {
+        sources
+            .get(path)
+            .cloned()
+            .unwrap_or_else(|| Err("configuration object is absent".to_owned()))
+    });
+    ResolutionRules::new(metadata, packages)
 }
+fn is_script_config(path: &Path) -> bool {
+    path.file_name()
+        .is_some_and(|name| name == "tsconfig.json" || name == "jsconfig.json")
+}
+
 pub(crate) fn load_resolution_chain(
     config: &Path,
     read: &mut impl FnMut(&Path) -> Result<Vec<u8>, String>,

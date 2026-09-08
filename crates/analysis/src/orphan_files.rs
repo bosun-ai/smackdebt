@@ -25,6 +25,7 @@ pub const ENTRY_FILENAMES: &[&str] = &[
     "lib.rs",
     "main.c",
     "main.cpp",
+    "main.go",
     "main.py",
     "main.rb",
     "main.rs",
@@ -128,7 +129,9 @@ mod tests {
 
     #[test]
     fn an_entry_file_without_incoming_dependencies_is_exempt() {
-        assert!(orphan_files(&[candidate(0, "src/lib.rs", SourceRole::Primary, 0)]).is_empty());
+        for path in ["src/lib.rs", "cmd/main.go"] {
+            assert!(orphan_files(&[candidate(0, path, SourceRole::Primary, 0)]).is_empty());
+        }
         assert!(orphan_files(&[candidate(0, "app/index.js", SourceRole::Primary, 0)]).is_empty());
         assert!(
             orphan_files(&[OrphanCandidate::new(

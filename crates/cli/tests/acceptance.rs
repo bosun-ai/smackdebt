@@ -1019,7 +1019,7 @@ fn a_mostly_unsupported_selection_qualifies_its_verdict() {
     assert_eq!(qualifier["selected_files"], 2);
     assert_eq!(qualifier["analyzed_files"], 1);
     assert_eq!(qualifier["share_permille"], 625);
-    assert_eq!(qualifier["largest_language"], "Go");
+    assert_eq!(qualifier["largest_language"], "Swift");
     let coverage = &report["scopes"][0]["coverage"];
     assert_eq!(coverage["selected_bytes"], 104);
     assert_eq!(coverage["unsupported_bytes"], 65);
@@ -2154,10 +2154,10 @@ fn every_problem_pattern_reaches_a_committed_terminal_and_machine_view() {
     // A warning detail row names its file once: the row states the path and
     // the diagnostic states what happened to it.
     assert!(
-        text.contains("  hub/first.go: uses an unsupported language\n"),
+        text.contains("  hub/first.swift: uses an unsupported language\n"),
         "{text}"
     );
-    assert!(!text.contains("hub/first.go: hub/first.go"), "{text}");
+    assert!(!text.contains("hub/first.swift: hub/first.swift"), "{text}");
     // A recovered file's whole debt is advisory, so its card states that trust
     // and cannot be one of the two names reserved for debt that moves a
     // verdict.
@@ -3630,7 +3630,7 @@ fn nested_checkout_fixture() -> tempfile::TempDir {
     project
 }
 
-/// One supported JavaScript file of 39 bytes beside one unsupported Go file
+/// One supported JavaScript file of 39 bytes beside one unsupported Swift file
 /// of 65 bytes, so the unsupported byte share is exactly 625 permille.
 fn unsupported_share_fixture() -> tempfile::TempDir {
     let project = tempfile::tempdir().unwrap();
@@ -3640,8 +3640,8 @@ fn unsupported_share_fixture() -> tempfile::TempDir {
     )
     .unwrap();
     fs::write(
-        project.path().join("main.go"),
-        "package main\n\nimport \"fmt\"\n\nfunc main() {\n\tfmt.Println(\"debt\")\n}\n",
+        project.path().join("main.swift"),
+        "// Swift\n\nlet message = \"debt\"\n\nfunc main() {\n  print(message)\n}\n",
     )
     .unwrap();
     project
@@ -3981,8 +3981,8 @@ fn problem_pattern_fixture() -> tempfile::TempDir {
     // states a plural subject with a plural verb and a plural object.
     for name in ["first", "second"] {
         fs::write(
-            project.path().join(format!("hub/{name}.go")),
-            format!("package hub\n\nfunc {name}() int {{ return 1 }}\n"),
+            project.path().join(format!("hub/{name}.swift")),
+            format!("// Swift\n\nfunc {name}() -> Int {{ return 1 }}\n"),
         )
         .unwrap();
     }

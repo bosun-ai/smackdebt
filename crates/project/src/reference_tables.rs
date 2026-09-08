@@ -14,8 +14,9 @@ use smackdebt_analysis::{
 use crate::candidates::{candidates_name_an_asset, resolve_candidates};
 use crate::dependencies::SourceDependencies;
 use crate::manifest_names::{ManifestNameIndex, ManifestNameMatch, package_entry_file};
+use crate::named_dependencies::{NamedDependencies, NamedResolution};
 use crate::paths::package_of;
-use crate::resolution_config::ResolutionRules;
+use crate::resolution_rules::ResolutionRules;
 
 const RETAINED_RELATION_LOCATIONS: usize = 3;
 
@@ -163,13 +164,51 @@ struct ResolutionVerdict<'a> {
 }
 
 impl ReferenceTables {
+    fn record_named(
+        &mut self,
+        resolution: NamedResolution,
+        reference: &DependencySyntax,
+        dependencies: &SourceDependencies,
+    ) {
+        match resolution {
+            NamedResolution::Files(files) => self.record_group(&files, reference, dependencies),
+            NamedResolution::External => self.record_external(reference, dependencies),
+            NamedResolution::Unresolved(reason) => self.record_diagnostic(
+                reference,
+                dependencies,
+                ResolutionVerdict {
+                    resolution: RelationResolution::UnresolvedInternal,
+                    kind: ResolutionIssueKind::Unresolved,
+                    reason: &reason,
+                },
+            ),
+            NamedResolution::Ambiguous => self.record_diagnostic(
+                reference,
+                dependencies,
+                ResolutionVerdict {
+                    resolution: RelationResolution::AmbiguousInternal,
+                    kind: ResolutionIssueKind::Ambiguous,
+                    reason: "several declarations match the name",
+                },
+            ),
+        }
+    }
+
     fn record_internal(
         &mut self,
         target: FileId,
         reference: &DependencySyntax,
         dependencies: &SourceDependencies,
     ) {
-        let source = dependencies.file;
+        self.record_group(&[target], reference, dependencies);
+    }
+
+    fn record_group(
+        &mut self,
+        targets: &[FileId],
+        reference: &DependencySyntax,
+        dependencies: &SourceDependencies,
+    ) {
         let role = evidence_role(reference, dependencies);
         self.coverage.record(
             reference.relation(),
@@ -177,6 +216,19 @@ impl ReferenceTables {
             dependencies.trust,
             RelationResolution::ResolvedInternal,
         );
+        for &target in targets {
+            self.record_file_edge(target, reference, dependencies);
+        }
+    }
+
+    fn record_file_edge(
+        &mut self,
+        target: FileId,
+        reference: &DependencySyntax,
+        dependencies: &SourceDependencies,
+    ) {
+        let source = dependencies.file;
+        let role = evidence_role(reference, dependencies);
         if source == target {
             return;
         }
@@ -374,6 +426,11 @@ impl ReferenceResolver<'_> {
     /// Resolves every reference the dependency table states, in table order.
     pub(crate) fn resolve(&self, dependencies: &[SourceDependencies]) -> ReferenceTables {
         let mut tables = ReferenceTables::default();
+        let names = NamedDependencies::new(
+            dependencies,
+            self.side_package_roots,
+            &self.aliases.metadata,
+        );
         for dependencies in dependencies {
             let source_package = package_of(
                 &dependencies.path,
@@ -381,10 +438,42 @@ impl ReferenceResolver<'_> {
                 self.package_roots,
             );
             for reference in &dependencies.references {
+                if matches!(
+                    reference.state(),
+                    DependencySyntaxState::PackageMembers | DependencySyntaxState::Name(_)
+                ) {
+                    tables.record_named(
+                        names.resolve(dependencies, reference),
+                        reference,
+                        dependencies,
+                    );
+                    continue;
+                }
+                if self.is_external_bootstrap(dependencies, reference) {
+                    tables.record_external(reference, dependencies);
+                    continue;
+                }
                 self.record(&mut tables, source_package, dependencies, reference);
             }
         }
         tables
+    }
+
+    fn is_external_bootstrap(
+        &self,
+        dependencies: &SourceDependencies,
+        reference: &DependencySyntax,
+    ) -> bool {
+        let DependencySyntaxState::Candidates(candidates) = reference.state() else {
+            return false;
+        };
+        candidates.iter().any(|candidate| {
+            self.aliases.metadata.is_external_bootstrap(
+                dependencies.language,
+                &dependencies.path,
+                candidate,
+            )
+        })
     }
 
     /// Records what one reference settles to: an internal edge, an external
@@ -397,6 +486,9 @@ impl ReferenceResolver<'_> {
         reference: &DependencySyntax,
     ) {
         match reference.state() {
+            DependencySyntaxState::PackageMembers | DependencySyntaxState::Name(_) => {
+                unreachable!("named references are resolved before path references");
+            }
             DependencySyntaxState::External => {
                 let resolution = self.manifest_resolution(reference, dependencies);
                 tables.record_unmatched(source_package, reference, dependencies, resolution);

@@ -941,6 +941,7 @@ Smackdebt finds the repository root, supported source files, ignored paths, and
 project packages. It recognizes packages from common manifests, including:
 
 - `Cargo.toml`
+- `go.mod`
 - `package.json`
 - `pyproject.toml`
 - `pom.xml`
@@ -1030,6 +1031,7 @@ does not quietly count them as healthy.
 One tree-sitter source engine supports:
 
 - C and C++
+- Go
 - Java
 - JavaScript and JSX
 - Python
@@ -1037,6 +1039,14 @@ One tree-sitter source engine supports:
 - TypeScript and TSX
 - Ruby
 - Vue single-file components, including script and template regions
+
+React components, hooks, and callbacks use the existing JSX and TSX analyzers.
+Go receivers and closures use the same five measurements as other languages.
+
+Go imports name packages. Smackdebt connects an import to the package's source
+files, excluding `_test.go`, using `go.mod`, local replacements, and `go.work`.
+The same rules apply independently to each side of a diff, including edits that
+only change project configuration. No compiler or build tool runs.
 
 Astro and Kotlin files remain visible as unsupported coverage; they are not
 counted as healthy. Astro documents stay in codebase and diff inventories, but

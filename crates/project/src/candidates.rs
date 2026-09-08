@@ -8,7 +8,7 @@ use smackdebt_analysis::FileId;
 use smackdebt_discovery::is_source_path;
 
 use crate::paths::clean_relative;
-use crate::resolution_config::ResolutionRules;
+use crate::resolution_rules::ResolutionRules;
 use crate::rust_layout::{resolve_symbolic_candidates, rust_module_directory, rust_source_root};
 
 pub(crate) fn resolve_candidates(

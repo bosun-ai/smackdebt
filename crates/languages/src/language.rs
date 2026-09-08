@@ -22,6 +22,17 @@ pub(super) trait Language {
     fn syntax(node: Node<'_>, source: &[u8]) -> Syntax;
     fn generated_marker(path: &Path, source: &[u8]) -> bool;
 
+    fn collect_names(
+        _node: Node<'_>,
+        _source: &[u8],
+        _names: &mut smackdebt_analysis::SourceNames,
+    ) {
+    }
+
+    fn container(_node: Node<'_>, _source: &[u8]) -> Option<String> {
+        None
+    }
+
     fn dependency(_node: Node<'_>, _source: &[u8]) -> Option<DependencySyntax> {
         None
     }

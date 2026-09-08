@@ -23,7 +23,7 @@ use crate::manifest_names::ManifestNameIndex;
 use crate::package_graph::{graph_packages, package_graph};
 use crate::paths::package_of;
 use crate::reference_tables::{ReferenceResolver, ReferenceRows};
-use crate::resolution_config::ResolutionRules;
+use crate::resolution_rules::ResolutionRules;
 use crate::work::AnalysisWork;
 
 /// Joins the retained file pairs with the graphs the architecture build
@@ -169,12 +169,18 @@ pub(crate) fn build_architecture(
     // Computed once, here, and read by both the dormancy rule below and the
     // orphan table further down, so the two can never disagree about what a
     // package owns.
-    let declared_entries = declared_entry_files(PackageEntries {
+    let mut declared_entries = declared_entry_files(PackageEntries {
         package_roots,
         manifest_names: manifests.names,
         manifest_paths: manifests.paths,
         index: &index,
     });
+    declared_entries.extend(
+        aliases
+            .metadata
+            .entries()
+            .filter_map(|path| index.get(path).copied()),
+    );
     // The last role this build settles, and the first point at which it can be:
     // dormancy is recognized by what nothing does with a file, so the resolved
     // relations above are its evidence. Every graph fact below is derived from

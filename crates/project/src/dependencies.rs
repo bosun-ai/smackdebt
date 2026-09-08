@@ -35,6 +35,7 @@ pub(crate) struct SourceDependencies {
     pub(crate) file: FileId,
     pub(crate) path: PathBuf,
     pub(crate) references: Vec<DependencySyntax>,
+    pub(crate) names: smackdebt_analysis::SourceNames,
     pub(crate) role: SourceRole,
     pub(crate) trust: SourceTrust,
     pub(crate) language: Language,

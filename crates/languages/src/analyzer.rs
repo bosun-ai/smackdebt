@@ -3,18 +3,9 @@
 use std::path::Path;
 use std::sync::atomic::{AtomicU64, Ordering};
 
+use crate::engine::Scratch;
+use crate::registry::Parsers;
 use smackdebt_analysis::{FileAnalysis, Language};
-use tree_sitter::Parser;
-
-use crate::c_language::C;
-use crate::cpp_language::Cpp;
-use crate::engine::{self, Scratch};
-use crate::java_language::Java;
-use crate::javascript_language::{JavaScript, Jsx, Tsx, TypeScript};
-use crate::python_language::Python;
-use crate::ruby_language::Ruby;
-use crate::rust_language::Rust;
-use crate::vue::analyze_vue;
 
 static PARSER_TIME_NS: AtomicU64 = AtomicU64::new(0);
 
@@ -35,51 +26,11 @@ pub fn parser_time_ns() -> u64 {
     PARSER_TIME_NS.load(Ordering::Relaxed)
 }
 
-fn language_name(language: Language) -> &'static str {
-    match language {
-        Language::C => "C",
-        Language::Cpp => "C++",
-        Language::Java => "Java",
-        Language::JavaScript | Language::Jsx => "JavaScript",
-        Language::Python => "Python",
-        Language::Rust => "Rust",
-        Language::TypeScript | Language::Tsx => "TypeScript",
-        Language::Ruby => "Ruby",
-        Language::Vue => "Vue",
-        Language::Astro => "Astro",
-        Language::Kotlin => "Kotlin",
-        Language::Unknown => "Unknown",
-    }
-}
-
 fn detect(path: &Path) -> Language {
-    let name = path
-        .file_name()
+    path.file_name()
         .and_then(|name| name.to_str())
-        .unwrap_or_default();
-    if matches!(name, "Rakefile" | "Gemfile") {
-        return Language::Ruby;
-    }
-    match path
-        .extension()
-        .and_then(|extension| extension.to_str())
-        .unwrap_or_default()
-    {
-        "c" => Language::C,
-        "h" | "cc" | "hh" | "cpp" | "hpp" | "cxx" | "hxx" => Language::Cpp,
-        "java" => Language::Java,
-        "js" | "mjs" | "cjs" => Language::JavaScript,
-        "jsx" => Language::Jsx,
-        "py" => Language::Python,
-        "rs" => Language::Rust,
-        "ts" | "mts" | "cts" => Language::TypeScript,
-        "tsx" => Language::Tsx,
-        "rb" | "rake" | "gemspec" => Language::Ruby,
-        "vue" => Language::Vue,
-        "astro" => Language::Astro,
-        "kt" | "kts" => Language::Kotlin,
-        _ => Language::Unknown,
-    }
+        .and_then(Language::from_filename)
+        .unwrap_or(Language::Unknown)
 }
 
 #[derive(Clone, Debug, Eq, PartialEq)]
@@ -92,7 +43,7 @@ impl std::fmt::Display for AnalysisError {
     fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
             Self::Unsupported(language) => {
-                write!(formatter, "{} is not supported", language_name(*language))
+                write!(formatter, "{} is not supported", language.name())
             }
             Self::Parser(message) => write!(formatter, "parser failed: {message}"),
         }
@@ -104,17 +55,7 @@ impl std::error::Error for AnalysisError {}
 /// Per-worker source analysis state. Each parser is reused by consecutive files.
 #[derive(Default)]
 pub struct Analyzer {
-    c: Parser,
-    cpp: Parser,
-    java: Parser,
-    javascript: Parser,
-    jsx: Parser,
-    python: Parser,
-    rust: Parser,
-    ruby: Parser,
-    typescript: Parser,
-    tsx: Parser,
-    vue: Parser,
+    parsers: Parsers,
     scratch: Scratch,
 }
 
@@ -124,53 +65,12 @@ impl Analyzer {
     }
 
     pub fn has_generated_marker(path: &Path, source: &[u8]) -> bool {
-        use crate::language::Language as _;
-        match detect(path) {
-            Language::C => C::generated_marker(path, source),
-            Language::Cpp => Cpp::generated_marker(path, source),
-            Language::Java => Java::generated_marker(path, source),
-            Language::JavaScript => JavaScript::generated_marker(path, source),
-            Language::Jsx => Jsx::generated_marker(path, source),
-            Language::Python => Python::generated_marker(path, source),
-            Language::Rust => Rust::generated_marker(path, source),
-            Language::TypeScript => TypeScript::generated_marker(path, source),
-            Language::Tsx => Tsx::generated_marker(path, source),
-            Language::Ruby => Ruby::generated_marker(path, source),
-            Language::Vue => crate::vue::has_generated_marker(source),
-            Language::Astro | Language::Kotlin | Language::Unknown => false,
-        }
+        Parsers::generated_marker(detect(path), path, source)
     }
 
     pub fn analyze(&mut self, path: &Path, source: Vec<u8>) -> Result<FileAnalysis, AnalysisError> {
-        let result = match detect(path) {
-            Language::C => engine::analyze::<C>(&mut self.c, &source, &mut self.scratch),
-            Language::Cpp => engine::analyze::<Cpp>(&mut self.cpp, &source, &mut self.scratch),
-            Language::Java => engine::analyze::<Java>(&mut self.java, &source, &mut self.scratch),
-            Language::JavaScript => {
-                engine::analyze::<JavaScript>(&mut self.javascript, &source, &mut self.scratch)
-            }
-            Language::Jsx => engine::analyze::<Jsx>(&mut self.jsx, &source, &mut self.scratch),
-            Language::Python => {
-                engine::analyze::<Python>(&mut self.python, &source, &mut self.scratch)
-            }
-            Language::Rust => engine::analyze::<Rust>(&mut self.rust, &source, &mut self.scratch),
-            Language::TypeScript => {
-                engine::analyze::<TypeScript>(&mut self.typescript, &source, &mut self.scratch)
-            }
-            Language::Tsx => engine::analyze::<Tsx>(&mut self.tsx, &source, &mut self.scratch),
-            Language::Ruby => engine::analyze::<Ruby>(&mut self.ruby, &source, &mut self.scratch),
-            Language::Vue => analyze_vue(
-                &mut self.vue,
-                &mut self.javascript,
-                &mut self.typescript,
-                &source,
-                &mut self.scratch,
-            ),
-            language @ (Language::Astro | Language::Kotlin | Language::Unknown) => {
-                return Err(AnalysisError::Unsupported(language));
-            }
-        };
-        result.map_err(AnalysisError::Parser)
+        self.parsers
+            .analyze(detect(path), &source, &mut self.scratch)
     }
 }
 

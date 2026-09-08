@@ -8,6 +8,7 @@ use crate::cognitive_complexity::CognitiveComplexity;
 use crate::cyclomatic_complexity::CyclomaticComplexity;
 use crate::language::Language;
 use crate::logical_lines::LogicalLines;
+use crate::registry::{PARSER_COUNT, query_slot};
 use crate::semantic::Syntax;
 
 #[derive(Clone, Copy)]
@@ -25,7 +26,8 @@ pub(super) struct Scratch {
     dependencies: Vec<DependencySyntax>,
     fact_bytes: Vec<ByteRange>,
     error_bytes: Vec<ByteRange>,
-    queries: [Option<QueryState>; 11],
+    names: smackdebt_analysis::SourceNames,
+    queries: [Option<QueryState>; PARSER_COUNT],
 }
 
 impl Default for Scratch {
@@ -39,6 +41,7 @@ impl Default for Scratch {
             dependencies: Vec::new(),
             fact_bytes: Vec::new(),
             error_bytes: Vec::new(),
+            names: smackdebt_analysis::SourceNames::default(),
             queries: std::array::from_fn(|_| None),
         }
     }
@@ -145,7 +148,8 @@ pub(super) fn analyze<L: Language>(
         parse_status(root, scratch),
         units,
         dependencies,
-    ))
+    )
+    .with_names(std::mem::take(&mut scratch.names)))
 }
 
 /// The parse outcome for a tree whose facts were just collected into `scratch`.
@@ -231,7 +235,7 @@ pub(super) fn reserve_unit_capacity<L: Language>(
     source: &[u8],
     scratch: &mut Scratch,
 ) -> Result<(), String> {
-    let slot = language_slot(L::REPORT_LANGUAGE);
+    let slot = query_slot(L::REPORT_LANGUAGE);
     if scratch.queries[slot].is_none() {
         let query = Query::new(&L::grammar(), L::unit_query())
             .map_err(|error| format!("language query failed: {error}"))?;
@@ -250,25 +254,6 @@ pub(super) fn reserve_unit_capacity<L: Language>(
     Ok(())
 }
 
-const fn language_slot(language: smackdebt_analysis::Language) -> usize {
-    match language {
-        smackdebt_analysis::Language::C => 0,
-        smackdebt_analysis::Language::Cpp => 1,
-        smackdebt_analysis::Language::Java => 2,
-        smackdebt_analysis::Language::JavaScript => 3,
-        smackdebt_analysis::Language::Jsx => 4,
-        smackdebt_analysis::Language::Python => 5,
-        smackdebt_analysis::Language::Rust => 6,
-        smackdebt_analysis::Language::TypeScript => 7,
-        smackdebt_analysis::Language::Tsx => 8,
-        smackdebt_analysis::Language::Ruby => 9,
-        smackdebt_analysis::Language::Vue => 10,
-        smackdebt_analysis::Language::Astro
-        | smackdebt_analysis::Language::Kotlin
-        | smackdebt_analysis::Language::Unknown => 10,
-    }
-}
-
 fn collect_units<L: Language>(
     root: Node<'_>,
     source: &[u8],
@@ -278,6 +263,7 @@ fn collect_units<L: Language>(
 ) -> (Vec<UnitFact>, Vec<DependencySyntax>) {
     scratch.unit_drafts.clear();
     scratch.dependencies.clear();
+    scratch.names = smackdebt_analysis::SourceNames::default();
     scratch.unit_by_depth.clear();
     scratch.fact_bytes.clear();
     scratch.error_bytes.clear();
@@ -287,8 +273,12 @@ fn collect_units<L: Language>(
     walk(root, |node, depth| {
         scratch.unit_by_depth.truncate(depth);
         let parent = scratch.unit_by_depth.last().copied().flatten();
+        let names_before = scratch.names.declarations().len() + scratch.names.imports().len();
+        L::collect_names(node, source, &mut scratch.names);
         let classification = L::classify(node, source, true);
-        let carries_fact = classification.unit.is_some() || classification.dependency.is_some();
+        let carries_fact = classification.unit.is_some()
+            || classification.dependency.is_some()
+            || scratch.names.declarations().len() + scratch.names.imports().len() != names_before;
         if recovered {
             record_recovery_spans(node, carries_fact, scratch);
         }
@@ -371,7 +361,8 @@ fn unit_draft<L: Language>(site: &UnitSite<'_, '_>, scratch: &mut Scratch) -> Un
     } = *site;
     let declared_identity = L::has_declared_identity(node, source);
     let measurements = measure::<L>(node, source, scratch);
-    let declared_container = enclosing_container::<L>(node, source);
+    let declared_container =
+        L::container(node, source).or_else(|| enclosing_container::<L>(node, source));
     let display_container = declared_container
         .clone()
         .or_else(|| parent.map(|parent| scratch.unit_drafts[parent].identity.name().to_owned()));
@@ -558,7 +549,7 @@ mod tests {
         let mut parser = Parser::new();
         let mut scratch = Scratch::default();
         analyze::<Rust>(&mut parser, b"fn one() { if true {} }", &mut scratch).unwrap();
-        let query = scratch.queries[language_slot(smackdebt_analysis::Language::Rust)]
+        let query = scratch.queries[query_slot(smackdebt_analysis::Language::Rust)]
             .as_ref()
             .unwrap();
         let cursor_address = std::ptr::from_ref(&query.cursor);
@@ -567,7 +558,7 @@ mod tests {
 
         analyze::<Rust>(&mut parser, b"fn two() { while false {} }", &mut scratch).unwrap();
 
-        let query = scratch.queries[language_slot(smackdebt_analysis::Language::Rust)]
+        let query = scratch.queries[query_slot(smackdebt_analysis::Language::Rust)]
             .as_ref()
             .unwrap();
         assert_eq!(std::ptr::from_ref(&query.cursor), cursor_address);

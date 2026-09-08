@@ -14,7 +14,7 @@ use crate::diff_changes::DiffAliases;
 use crate::diff_source::{DiffResult, DiffUnchanged};
 use crate::rating::FileResult;
 use crate::requests::SourceRoleRule;
-use crate::resolution_config::ResolutionRules;
+use crate::resolution_rules::ResolutionRules;
 use crate::roles::matching_role_rules;
 
 /// Reclassifies test-declared files on both sides of the diff.
@@ -104,6 +104,13 @@ pub(crate) fn test_declared_demotions<P: AsRef<Path>>(
     );
     test_declared_files(&declarations)
         .into_iter()
+        .chain(
+            paths
+                .iter()
+                .enumerate()
+                .filter(|(_, path)| aliases.metadata.is_test_source(path.as_ref()))
+                .map(|(index, _)| index),
+        )
         .filter(|file| {
             matching_role_rules(paths[*file].as_ref(), rules)
                 .next()
