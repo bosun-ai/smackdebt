@@ -10,6 +10,25 @@ dependencies_update = false
 release_always = false
 features_always_increment_minor = true
 
+[changelog]
+body = """
+## [{{ version }}]{% if release_link %}({{ release_link }}){% endif %} - {{ timestamp | date(format="%Y-%m-%d") }}
+
+Install the CLI and agent skill:
+
+```sh
+curl -fsSL https://github.com/bosun-ai/smackdebt/releases/download/v{{ version }}/install.sh | sh
+```
+
+For just the CLI, add `-s -- --no-skill` after `sh`.
+{% for group, commits in commits | group_by(attribute="group") %}
+### {{ group | upper_first }}
+{% for commit in commits %}
+- {% if commit.scope %}*({{ commit.scope }})* {% endif %}{% if commit.breaking %}[**breaking**] {% endif %}{{ commit.message }}{% if commit.links %} ({% for link in commit.links %}[{{ link.text }}]({{ link.href }}) {% endfor %}){% endif %}
+{% endfor %}
+{% endfor %}
+"""
+
 [[package]]
 name = "smackdebt"
 git_tag_enable = true

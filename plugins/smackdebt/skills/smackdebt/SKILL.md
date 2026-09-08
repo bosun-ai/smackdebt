@@ -13,7 +13,7 @@ report that the check could not run. [Installation](https://github.com/bosun-ai/
 
 1. Before editing, record `git rev-parse HEAD` as `START`. Keep this commit for
    the final check, even if you commit during the task. If the tree is dirty,
-   save `smackdebt diff START --color never` outside the repository so you can
+   save `smackdebt diff START --all --color never` outside the repository so you can
    distinguish existing debt from your changes.
 2. Run `smackdebt PATH --color never` on the affected file or directory. Use
    `.` for a repository debt review. Read the ranked findings and inspect the

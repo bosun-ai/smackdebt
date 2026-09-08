@@ -46,8 +46,7 @@ check_destination() {
     if [ -f "$1/SKILL.md" ]; then
         [ -f "$1/.smackdebt.sha256" ] || fail "existing skill is not managed by this installer: $1"
         observed=$(hash_file "$1/SKILL.md")
-        recorded=$(cat "$1/.smackdebt.sha256")
-        [ "$observed" = "$recorded" ] ||
+        grep -Fxq "$observed" "$1/.smackdebt.sha256" ||
             fail "skill has local edits; move it aside before reinstalling: $1"
     fi
     mkdir -p "$1"
@@ -55,14 +54,16 @@ check_destination() {
 }
 
 install_skill() {
+    # Record both versions first so an interrupted replacement can be retried.
+    staged=$(mktemp "$1/.smackdebt.XXXXXX")
+    cp "$temporary/skill.sha256" "$staged"
+    if [ -f "$1/SKILL.md" ]; then hash_file "$1/SKILL.md" >> "$staged"; fi
+    chmod 644 "$staged"
+    mv -f "$staged" "$1/.smackdebt.sha256"
     staged=$(mktemp "$1/.smackdebt.XXXXXX")
     cp "$temporary/SKILL.md" "$staged"
     chmod 644 "$staged"
     mv -f "$staged" "$1/SKILL.md"
-    staged=$(mktemp "$1/.smackdebt.XXXXXX")
-    cp "$temporary/skill.sha256" "$staged"
-    chmod 644 "$staged"
-    mv -f "$staged" "$1/.smackdebt.sha256"
     staged=''
     completed="${completed:+$completed; }skill at $1"
 }

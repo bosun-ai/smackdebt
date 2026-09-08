@@ -53,7 +53,13 @@ Use the target matching your machine. The Linux archive requires glibc; the gene
 Installer tests run through stdin with isolated user directories on all three
 check runners. They cover opt-outs, updates, existing skills, and failed installs.
 `dist build --artifacts=global` must include `install.sh` and the existing
-`smackdebt-installer.sh`. After publication, verify the combined installer with
+`smackdebt-installer.sh`. The release verification job tests the finished CLI
+archives and combined installer on all three platforms before cargo-dist
+publishes the GitHub Release in its announce step, including prereleases.
+Release-plz puts the versioned combined install command first in each changelog
+entry. Cargo-dist labels its additional install section "Smackdebt CLI only"
+because that command does not install the skill.
+After publication, verify the combined installer with
 a fresh user profile before announcing the one-line install.
 
 If an upload or runner fails, rerun the failed release jobs for the same tag. Never move a published tag. If code or evidence needs changing, prepare a new version through a release PR. After publication, verify the release's installer and download links before announcing it.

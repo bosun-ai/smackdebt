@@ -50,7 +50,9 @@ class AgentInstallerTests(unittest.TestCase):
         expected = builder.SKILL.read_bytes()
         for destination in self.destinations:
             self.assertEqual((destination / "SKILL.md").read_bytes(), expected)
-            self.assertEqual((destination / ".smackdebt.sha256").read_text().strip(), hashlib.sha256(expected).hexdigest())
+            receipts = (destination / ".smackdebt.sha256").read_text().splitlines()
+            self.assertEqual(receipts[0], hashlib.sha256(expected).hexdigest())
+            self.assertLessEqual(len(receipts), 2)
 
     def test_default_installs_cli_and_the_shared_and_claude_skills(self):
         result = self.run_installer()
@@ -152,6 +154,42 @@ class AgentInstallerTests(unittest.TestCase):
         self.assertIn("disk full", result.stderr)
         self.assertIn("completed: CLI", result.stderr)
         self.assertNotIn("installed", result.stdout)
+
+    def assert_failed_replacement_can_be_retried(self, existing, failed_file):
+        if existing:
+            for destination in self.destinations:
+                destination.mkdir(parents=True)
+                (destination / "SKILL.md").write_text("older release\n")
+                (destination / ".smackdebt.sha256").write_text(hashlib.sha256(b"older release\n").hexdigest())
+        self.executable("mv", f'''#!/bin/sh
+for destination do :; done
+case "$destination" in */{failed_file}) echo 'disk full' >&2; exit 1 ;; esac
+exec /bin/mv "$@"
+''')
+        result = self.run_installer("--no-cli")
+        self.assertNotEqual(result.returncode, 0)
+        self.assertIn("disk full", result.stderr)
+        for destination in self.destinations:
+            if existing:
+                self.assertEqual((destination / "SKILL.md").read_text(), "older release\n")
+            else:
+                self.assertFalse((destination / "SKILL.md").exists())
+        (self.bin / "mv").unlink()
+        result = self.run_installer("--no-cli")
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assert_installed_skill()
+
+    def test_first_install_can_retry_after_receipt_write_fails(self):
+        self.assert_failed_replacement_can_be_retried(False, ".smackdebt.sha256")
+
+    def test_upgrade_can_retry_after_receipt_write_fails(self):
+        self.assert_failed_replacement_can_be_retried(True, ".smackdebt.sha256")
+
+    def test_first_install_can_retry_after_skill_write_fails(self):
+        self.assert_failed_replacement_can_be_retried(False, "SKILL.md")
+
+    def test_upgrade_can_retry_after_skill_write_fails(self):
+        self.assert_failed_replacement_can_be_retried(True, "SKILL.md")
 
     def test_missing_hash_tools_fail_before_changing_the_cli(self):
         self.environment["PATH"] = str(self.bin)
