@@ -83,9 +83,6 @@ to external consumers, but their checked snapshots must change intentionally.
 - Use one private compiled language identifier and one static dispatch per file.
 - Do not add runtime plugins, dynamic analyzer loading, or a public callback
   framework.
-- Keep `rust-code-analysis` pinned behind one private per-file adapter. Do not use
-  its filesystem walker, worker threads, channels, terminal output, or file
-  output.
 - Never leak upstream parser or metric values across the language crate seam.
 - List a language as supported only after fixtures prove meaningful cognitive,
   cyclomatic, and line behavior.
