@@ -1,0 +1,20 @@
+{
+  "name": "smackdebt",
+  "interface": {
+    "displayName": "Smackdebt"
+  },
+  "plugins": [
+    {
+      "name": "smackdebt",
+      "source": {
+        "source": "local",
+        "path": "./plugins/smackdebt"
+      },
+      "policy": {
+        "installation": "AVAILABLE",
+        "authentication": "ON_INSTALL"
+      },
+      "category": "Productivity"
+    }
+  ]
+}

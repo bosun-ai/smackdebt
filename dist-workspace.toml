@@ -2,6 +2,8 @@
 members = ["cargo:."]
 
 [dist]
+# Release notes lead with the combined installer; this section is the CLI alternative.
+display-name = "Smackdebt CLI only"
 cargo-dist-version = "0.32.0"
 ci = "github"
 installers = ["shell"]
@@ -9,7 +11,15 @@ targets = ["x86_64-unknown-linux-gnu", "x86_64-apple-darwin", "aarch64-apple-dar
 install-path = "CARGO_HOME"
 install-updater = false
 pr-run-mode = "plan"
-global-artifacts-jobs = ["./check", "./release-verify"]
+global-artifacts-jobs = ["./check"]
+# Verify the finished installers before making the GitHub Release public.
+github-release = "announce"
+publish-jobs = ["./release-verify"]
+publish-prereleases = true
+
+[[dist.extra-artifacts]]
+artifacts = ["target/agent-installer/install.sh"]
+build = ["python3", "scripts/build-agent-installer.py"]
 
 [dist.github-custom-job-permissions.check]
 contents = "read"

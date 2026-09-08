@@ -33,13 +33,15 @@ jobs:
       - run: python3 -m pip install -r scripts/requirements.txt
       - uses: actions/download-artifact@v8
         with:
-          pattern: artifacts-build-local-*
+          pattern: artifacts-build-*
           path: artifacts
           merge-multiple: true
       - name: Test the archive that will be published
         env:
           TARGET: ${{ matrix.target }}
-        run: python3 scripts/smoke-release.py "artifacts/smackdebt-$TARGET.tar.xz"
+        run: |
+          python3 scripts/smoke-release.py "artifacts/smackdebt-$TARGET.tar.xz"
+          python3 scripts/smoke-agent-install.py artifacts
 
   evidence:
     runs-on: ubuntu-22.04

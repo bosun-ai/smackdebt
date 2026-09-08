@@ -1,0 +1,13 @@
+{
+  "name": "smackdebt",
+  "owner": { "name": "Bosun" },
+  "metadata": { "description": "Use Smackdebt during development and review." },
+  "plugins": [
+    {
+      "name": "smackdebt",
+      "source": "./plugins/smackdebt",
+      "skills": ["./skills/smackdebt"],
+      "description": "Check code debt as you work."
+    }
+  ]
+}

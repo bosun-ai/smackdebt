@@ -83,6 +83,7 @@ class ReleaseConfigurationTests(unittest.TestCase):
             run(repository, RELEASE_PLZ, "update")
             changelog = repository / "CHANGELOG.md"
             self.assertIn("0.1.0", changelog.read_text())
+            self.assertIn("/releases/download/v0.1.0/install.sh | sh", changelog.read_text())
             self.assertEqual(list(repository.glob("crates/*/CHANGELOG.md")), [])
             commit(repository, "chore: release v0.1.0")
             run(repository, "git", "tag", "v0.1.0")
@@ -93,6 +94,7 @@ class ReleaseConfigurationTests(unittest.TestCase):
             workspace = tomllib.loads((repository / "Cargo.toml").read_text())
             self.assertEqual(workspace["workspace"]["package"]["version"], "0.1.1")
             self.assertIn("recognize changed analysis", changelog.read_text())
+            self.assertIn("/releases/download/v0.1.1/install.sh | sh", changelog.read_text())
             self.assertEqual(list(repository.glob("crates/*/CHANGELOG.md")), [])
 
 

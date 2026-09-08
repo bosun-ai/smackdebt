@@ -9,8 +9,10 @@ Smackdebt checks source, dependencies, and Git history to show where debt lives 
 For Linux x86_64 and macOS (Intel or Apple Silicon):
 
 ```sh
-curl --proto '=https' --tlsv1.2 -LsSf https://github.com/bosun-ai/smackdebt/releases/latest/download/smackdebt-installer.sh | sh
+curl -fsSL https://github.com/bosun-ai/smackdebt/releases/latest/download/install.sh | sh
 ```
+
+Installs the CLI and a skill for Codex, Claude Code, Cursor, Copilot, and Gemini CLI. Add `-s -- --no-skill` after `sh` for just the CLI, or `-s -- --no-cli` for just the skill. Rerun to update the same components and locations; add `-s -- --uninstall` to remove them. [Agent and plugin installation](docs/agents.md).
 
 Or grab an archive from [Releases](https://github.com/bosun-ai/smackdebt/releases). Building from source? With Rust 1.97+, run `cargo install --locked --path crates/cli` from this repository.
 
