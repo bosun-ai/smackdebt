@@ -1483,6 +1483,18 @@ undecorated, and an explicit `--color` cannot be combined with `--json`.
 Read [ARCHITECTURE.md](ARCHITECTURE.md) for the domain model, data flow,
 aggregation rules, Git behavior, and language extension path.
 
+## Development checks
+
+Install the Python check dependencies in a virtual environment before running
+the workspace checks:
+
+```console
+python3 -m venv .venv
+. .venv/bin/activate
+python3 -m pip install -r scripts/requirements.txt
+just check
+```
+
 ## Credits
 
 Smackdebt uses tree-sitter and its language grammars for syntax trees. Smackdebt
