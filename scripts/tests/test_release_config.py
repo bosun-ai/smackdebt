@@ -59,7 +59,8 @@ def write_test_package(repository, member):
     lines = ["[package]", *(package_field(key, value) for key, value in package.items()), "\n[dependencies]"]
     for name, dependency in original.get("dependencies", {}).items():
         if "path" in dependency:
-            lines.append(f'{name} = {{ path = "{dependency["path"]}", version = "0.1.0" }}')
+            path = dependency["path"]
+            lines.append(f'{name} = {{ path = "{path}", version = "0.1.0" }}')
     (directory / "Cargo.toml").write_text("\n".join(lines) + "\n")
     binary = package["name"] == "smackdebt"
     source = "fn main() {}\n" if binary else "pub fn value() -> usize { 1 }\n"
