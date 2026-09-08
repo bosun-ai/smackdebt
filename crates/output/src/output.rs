@@ -481,14 +481,14 @@ impl Presentation {
         // A diff that moved no debt states one witness for the count it printed
         // and the comparison confidence behind it, and leaves the rest out.
         let trust_only = no_debt && !all && trust.exists;
-        let diff_rows = (!codebase).then(|| {
-            let mut rows = select_diff_rows(
-                report,
-                selection,
-                all,
-                top,
-                verdict.diff_tier() == Some(DiffTier::Mixed),
-            );
+        let diff_candidates = (!codebase).then(|| {
+            let mut rows = diff_row_candidates(report, selection);
+            rows.sort_unstable();
+            rows
+        });
+        let diff_rows = diff_candidates.as_deref().map(|candidates| {
+            let mut rows =
+                select_diff_rows(candidates, all, top, verdict.diff_tier() == Some(DiffTier::Mixed));
             // `--top` names its own number and keeps it.
             if trust_only && top.is_none() {
                 rows.keep_top();
@@ -539,7 +539,7 @@ impl Presentation {
             ReportMode::Diff => diff_next(
                 report,
                 selected,
-                diff_rows.as_ref().expect("diff rows were selected"),
+                diff_candidates.as_deref().expect("diff rows were selected"),
             ),
         };
 
@@ -1626,15 +1626,11 @@ fn diff_row_candidates(report: &Report, selection: &DebtDiffSelection) -> Vec<Di
 }
 
 fn select_diff_rows(
-    report: &Report,
-    selection: &DebtDiffSelection,
+    rows: &[DiffRowCandidate],
     all: bool,
     top: Option<NonZeroUsize>,
     mixed: bool,
 ) -> DiffRowSelection {
-    let mut rows = diff_row_candidates(report, selection);
-    rows.sort_unstable();
-
     let limit = if all { rows.len() } else { finding_limit(top) };
     let mut chosen = BTreeMap::new();
     if mixed && top.is_none() {
@@ -1652,7 +1648,7 @@ fn select_diff_rows(
         if chosen.len() == limit {
             break;
         }
-        chosen.insert(row.token, row.key);
+        chosen.insert(row.token, row.key.clone());
     }
     DiffRowSelection(chosen)
 }
@@ -3201,22 +3197,26 @@ pub(super) fn direction_name(direction: ComparisonDirection) -> &'static str {
 ///
 /// The pointer is a command a reader runs, so it may only name a path that is
 /// still there: a cleanup diff's best movement is a removal, and pointing at
-/// the deleted file would print a command that fails. Movements are walked in
-/// rank order and each one's paths in the order its row states them, so the
-/// pointer is the first surviving path below this scope. A diff that moved
-/// nothing, one whose movements all name gone or shallower paths, and a file
-/// view — already as deep as a path goes — print no pointer rather than a
-/// command that fails or repeats the one just run.
-fn diff_next(report: &Report, selected: &Scope, diff_rows: &DiffRowSelection) -> Option<String> {
+/// the deleted file would print a command that fails. The whole ranking is
+/// walked in order — shown rows and withheld ones alike — and each movement's
+/// paths in the order its row states them, so the pointer is the first
+/// surviving path below this scope even when every shown row names a deleted
+/// one. A diff that moved nothing, one whose movements all name gone or
+/// shallower paths, and a file view — already as deep as a path goes — print
+/// no pointer rather than a command that fails or repeats the one just run.
+fn diff_next(
+    report: &Report,
+    selected: &Scope,
+    candidates: &[DiffRowCandidate],
+) -> Option<String> {
     if selected.kind() == ScopeKind::File {
         return None;
     }
     let reference = report.comparison_ref()?;
     let gone = deleted_paths(report);
-    let path = diff_rows
-        .ranked()
-        .into_iter()
-        .flat_map(|(_, key)| movement_paths(key))
+    let path = candidates
+        .iter()
+        .flat_map(|row| movement_paths(&row.key))
         .find(|path| path_below(selected.name(), path) && !gone.contains(path))?;
     Some(format!("smackdebt diff {reference} {path}"))
 }

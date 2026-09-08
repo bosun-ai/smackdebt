@@ -144,11 +144,16 @@ fn a_cleanup_diff_points_past_a_deleted_path_to_a_surviving_one() {
         terminal.ends_with("\n  next: smackdebt diff main pkg/kept.js\n"),
         "{terminal}"
     );
-    // `--top 1` states the removal alone, and that movement names nothing a
-    // reader can open.
+    // `--top 1` states the removal alone, but the pointer reads the whole
+    // ranking: the withheld movement in the surviving file is still where a
+    // reader is sent.
     let one = render(&report, top(1));
     assert!(one.contains("  better gone · function"), "{one}");
-    assert!(!one.contains("next:"), "{one}");
+    assert!(!one.contains("kept · function"), "{one}");
+    assert!(
+        one.ends_with("\n  next: smackdebt diff main pkg/kept.js\n"),
+        "{one}"
+    );
 }
 
 /// A unit removed inside a renamed file answers with the base-side name its

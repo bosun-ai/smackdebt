@@ -246,8 +246,9 @@ concentration tables are read.
 
 `next:` closes a diff the way it closes a codebase report: it names the command
 that reaches the highest-ranked movement's own path, restating the ref the run
-compared against. The pointer is a command you run, so it names only a path the
-change left behind: a cleanup diff whose movements are all removals prints no
+compared against. The pointer reads the whole ranking, shown rows and withheld
+ones alike, and it is a command you run, so it names only a path the change
+left behind: a cleanup diff whose movements *all* name deleted paths prints no
 pointer rather than a command that fails. A diff that moved nothing, and a view
 already at a file, print none either.
 
