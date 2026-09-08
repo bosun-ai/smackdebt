@@ -41,6 +41,7 @@ pub struct Comparison {
     after_rating: Option<Rating>,
     file: Option<FileId>,
     span: Option<SourceSpan>,
+    origin: Option<(FileId, SourceSpan)>,
     anonymous_ambiguity: bool,
     unpaired_anonymous: bool,
     role_participation: ComparisonParticipation,
@@ -66,6 +67,7 @@ impl Comparison {
             after_rating,
             file: None,
             span: None,
+            origin: None,
             anonymous_ambiguity: false,
             unpaired_anonymous: false,
             role_participation: ComparisonParticipation::Verdict,
@@ -107,6 +109,19 @@ impl Comparison {
     pub const fn span(&self) -> Option<SourceSpan> {
         self.span
     }
+    /// Where the unit answered from before the change followed it here.
+    ///
+    /// A unit the change moved between files is one comparison, located on
+    /// the side it landed. The origin states the side it left, so a reader
+    /// who knew it by its old home can still find it.
+    pub const fn origin(&self) -> Option<(FileId, SourceSpan)> {
+        self.origin
+    }
+    #[must_use]
+    pub const fn with_origin(mut self, file: FileId, span: SourceSpan) -> Self {
+        self.origin = Some((file, span));
+        self
+    }
     pub const fn with_span(mut self, span: SourceSpan) -> Self {
         self.span = Some(span);
         self
@@ -135,6 +150,13 @@ impl Comparison {
     ///
     /// A fixture or generated side makes the whole comparison context, even
     /// when the file's role changes on the other side of the diff.
+    /// Records a participation another pass settled, when the roles it read
+    /// are not the ones this comparison's file carries.
+    #[must_use]
+    pub const fn with_participation(mut self, participation: ComparisonParticipation) -> Self {
+        self.role_participation = participation;
+        self
+    }
     pub const fn with_source_roles(
         mut self,
         before: Option<SourceRole>,

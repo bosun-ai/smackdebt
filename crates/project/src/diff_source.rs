@@ -7,8 +7,8 @@ use std::sync::atomic::Ordering;
 use std::sync::{Arc, Mutex, mpsc};
 
 use smackdebt_analysis::{
-    Comparison, DependencySyntax, FileAnalysis, FileId, HealthCounts, HealthPolicy, Language,
-    ParseStatus, SourceRole, compare_units,
+    Comparison, ComparisonKind, DependencySyntax, FileAnalysis, FileId, HealthCounts, HealthPolicy,
+    Language, ParseStatus, SourceRole, UnitDiffSides, compare_unit_sets, compare_units,
 };
 use smackdebt_discovery::{DiscoveredFile, Inventory};
 use smackdebt_git::ObjectReader;
@@ -279,19 +279,95 @@ pub(crate) fn analyze_diff_input(
     let before_path = input.change.base_path();
     let before = analyze_diff_side(worker, file_id, before_path, input.before, policy);
     worker.work.record_algorithm_pass();
-    let mut comparisons = match (diff_units(&before), diff_units(&current)) {
-        (Some(before), Some(current)) => compare_units(before, current, policy.health),
-        _ => Vec::new(),
-    };
-    comparisons
-        .retain(|comparison| comparison.kind() != smackdebt_analysis::ComparisonKind::Unchanged);
     DiffResult {
         index: input.index,
         change: input.change,
         current,
         before,
-        comparisons,
+        // Units are compared once the whole change is in hand, so a unit that
+        // moved between two files can be followed to where it landed.
+        comparisons: Vec::new(),
     }
+}
+
+/// Compares every changed file's units, following the ones the change moved
+/// between files.
+///
+/// The cross-file pool holds the selected files alone. A scoped view drops
+/// the rows of files outside it, so pairing across that edge would delete a
+/// removal the reader must still see: the unit left this scope, whatever
+/// received it.
+pub(crate) fn compare_changed_units(
+    results: &mut [DiffResult],
+    selected: &BTreeSet<PathBuf>,
+    policy: HealthPolicy,
+    work: &AnalysisWork,
+) {
+    work.record_algorithm_pass();
+    let followed: Vec<bool> = results
+        .iter()
+        .map(|result| selected.contains(result.change.current_path()))
+        .collect();
+    let comparisons = {
+        let sides: Vec<UnitDiffSides<'_>> = results
+            .iter()
+            .zip(&followed)
+            .map(|(result, followed)| pooled_sides(result, *followed))
+            .collect();
+        compare_unit_sets(&sides, policy)
+    };
+    let roles: Vec<Option<SourceRole>> =
+        results.iter().map(|result| result.before.role()).collect();
+    for ((result, comparisons), followed) in results.iter_mut().zip(comparisons).zip(&followed) {
+        result.comparisons = if *followed {
+            comparisons
+        } else {
+            unpooled_comparisons(result, policy)
+        };
+        result.comparisons.retain(retained_movement);
+        settle_moved_participation(result, &roles);
+    }
+}
+
+/// Settles what a moved unit may move.
+///
+/// A comparison reads the roles of the file it sits in, but a unit that
+/// arrived from somewhere else was that file's source: a fixture emptied into
+/// primary code moved no debt, whichever side a reader looks from.
+fn settle_moved_participation(result: &mut DiffResult, before_roles: &[Option<SourceRole>]) {
+    let after = result.current.role();
+    for comparison in &mut result.comparisons {
+        let Some((origin, _)) = comparison.origin() else {
+            continue;
+        };
+        let before = before_roles.get(origin.index()).copied().flatten();
+        *comparison = comparison.clone().with_source_roles(before, after);
+    }
+}
+
+/// The units one file offers the change, which are none unless the file was
+/// selected and both of its sides parsed.
+fn pooled_sides(result: &DiffResult, followed: bool) -> UnitDiffSides<'_> {
+    match (diff_units(&result.before), diff_units(&result.current)) {
+        (Some(before), Some(current)) if followed => UnitDiffSides::new(before, current),
+        _ => UnitDiffSides::new(&[], &[]),
+    }
+}
+
+/// One unselected file's own comparison, which never leaves it.
+fn unpooled_comparisons(result: &DiffResult, policy: HealthPolicy) -> Vec<Comparison> {
+    match (diff_units(&result.before), diff_units(&result.current)) {
+        (Some(before), Some(current)) => compare_units(before, current, policy),
+        _ => Vec::new(),
+    }
+}
+
+/// Whether a comparison states something the change did.
+///
+/// A unit neither side changed is not a movement, unless the change moved it:
+/// that a unit now lives somewhere else is the whole fact.
+fn retained_movement(comparison: &Comparison) -> bool {
+    comparison.kind() != ComparisonKind::Unchanged || comparison.origin().is_some()
 }
 pub(crate) fn diff_units(side: &DiffSide) -> Option<&[smackdebt_analysis::UnitFact]> {
     match side {
@@ -437,6 +513,117 @@ impl InputSide {
 
 #[cfg(test)]
 mod tests {
+
+    /// A function moved between two files is one unit that went somewhere,
+    /// not one removed here and another added there. Nothing about the debt
+    /// changed, and the verdict says so.
+    #[test]
+    fn a_function_moved_between_files_changes_no_debt() {
+        let root = tempfile::tempdir().unwrap();
+        let repository_path = root.path();
+        git(repository_path, ["init", "-q"]);
+        git(
+            repository_path,
+            ["config", "user.email", "test@example.invalid"],
+        );
+        git(repository_path, ["config", "user.name", "Smackdebt Test"]);
+        let complex = "pub fn tangled(a: i32) -> i32 {\n    if a > 0 {\n        if a > 1 {\n            return 1;\n        }\n    }\n    0\n}\n";
+        fs::write(repository_path.join("left.rs"), complex).unwrap();
+        fs::write(
+            repository_path.join("right.rs"),
+            "pub fn other() -> i32 { 1 }\n",
+        )
+        .unwrap();
+        git(repository_path, ["add", "."]);
+        git(repository_path, ["commit", "-qm", "base"]);
+        // The whole function leaves one file for the other, unchanged.
+        fs::write(repository_path.join("left.rs"), "").unwrap();
+        fs::write(
+            repository_path.join("right.rs"),
+            format!("pub fn other() -> i32 {{ 1 }}\n{complex}"),
+        )
+        .unwrap();
+
+        let result =
+            analyze_diff(&DiffRequest::new(repository_path).with_reference("HEAD")).unwrap();
+        let report = result.report();
+        let moved: Vec<_> = report
+            .comparisons()
+            .iter()
+            .filter(|comparison| comparison.identity().name() == "tangled")
+            .collect();
+        assert_eq!(moved.len(), 1, "one unit, one movement: {moved:?}");
+        assert_eq!(
+            moved[0].kind(),
+            smackdebt_analysis::ComparisonKind::Unchanged
+        );
+        let origin = moved[0]
+            .origin()
+            .expect("the move states where it came from");
+        assert_eq!(report.files()[origin.0.index()].path(), "left.rs");
+        assert_eq!(
+            report.verdict().unwrap().diff_tier(),
+            Some(smackdebt_analysis::DiffTier::NoDebtChange),
+            "moving code moves no debt"
+        );
+    }
+
+    /// A function that moved and grew states the growth once, where it landed.
+    #[test]
+    fn a_function_that_moved_and_worsened_states_one_regression() {
+        let root = tempfile::tempdir().unwrap();
+        let repository_path = root.path();
+        git(repository_path, ["init", "-q"]);
+        git(
+            repository_path,
+            ["config", "user.email", "test@example.invalid"],
+        );
+        git(repository_path, ["config", "user.name", "Smackdebt Test"]);
+        fs::write(
+            repository_path.join("left.rs"),
+            "pub fn tangled(a: i32) -> i32 { a }\n",
+        )
+        .unwrap();
+        fs::write(
+            repository_path.join("right.rs"),
+            "pub fn other() -> i32 { 1 }\n",
+        )
+        .unwrap();
+        git(repository_path, ["add", "."]);
+        git(repository_path, ["commit", "-qm", "base"]);
+        fs::write(repository_path.join("left.rs"), "").unwrap();
+        fs::write(
+            repository_path.join("right.rs"),
+            "pub fn other() -> i32 { 1 }\npub fn tangled(a: i32) -> i32 {\n    if a > 0 {\n        if a > 1 {\n            return 1;\n        }\n    }\n    0\n}\n",
+        )
+        .unwrap();
+
+        let request = DiffRequest::new(repository_path)
+            .with_reference("HEAD")
+            .with_thresholds(HealthPolicy::new(
+                smackdebt_analysis::Thresholds::new(1, 2),
+                smackdebt_analysis::Thresholds::new(1, 2),
+                smackdebt_analysis::Thresholds::new(50, 100),
+                smackdebt_analysis::Thresholds::new(4, 7),
+                smackdebt_analysis::Thresholds::new(6, 9),
+            ));
+        let result = analyze_diff(&request).unwrap();
+        let report = result.report();
+        let moved: Vec<_> = report
+            .comparisons()
+            .iter()
+            .filter(|comparison| comparison.identity().name() == "tangled")
+            .collect();
+        assert_eq!(moved.len(), 1, "{moved:?}");
+        assert_eq!(
+            moved[0].kind(),
+            smackdebt_analysis::ComparisonKind::Regressed
+        );
+        assert!(
+            moved[0].origin().is_some(),
+            "the growth names where it came from"
+        );
+    }
     use super::*;
     use crate::diff::analyze_diff;
     use crate::requests::DiffRequest;

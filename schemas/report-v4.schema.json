@@ -868,6 +868,8 @@
       "required": [
         "id",
         "file",
+        "moved_from_file",
+        "moved_from_line",
         "start_line",
         "end_line",
         "name",
@@ -886,6 +888,16 @@
         },
         "file": {
           "$ref": "#/$defs/nullable_index"
+        },
+        "moved_from_file": {
+          "$ref": "#/$defs/nullable_index"
+        },
+        "moved_from_line": {
+          "type": [
+            "integer",
+            "null"
+          ],
+          "minimum": 1
         },
         "name": {
           "type": "string"

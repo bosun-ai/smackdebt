@@ -3,10 +3,10 @@ use std::collections::BTreeMap;
 
 use crate::comparison::{Comparison, ComparisonKind};
 use crate::health::{HealthPolicy, Rating};
-use crate::report::ComparisonId;
+use crate::report::{ComparisonId, FileId};
 use crate::source::{SourceSpan, UnitFact, UnitFingerprint, UnitIdentity, UnitKind, UnitMatchKey};
 
-struct PendingComparison<'a> {
+pub(crate) struct PendingComparison<'a> {
     identity: UnitIdentity,
     kind: ComparisonKind,
     before: Option<&'a UnitFact>,
@@ -14,6 +14,9 @@ struct PendingComparison<'a> {
     span: SourceSpan,
     anonymous_ambiguity: bool,
     unpaired_anonymous: bool,
+    /// The file position and span this unit answered from before a change
+    /// moved it here, when one did.
+    origin: Option<(usize, SourceSpan)>,
 }
 
 /// One key several units on at least one side answer to.
@@ -37,7 +40,7 @@ struct Bucket {
     rating: Rating,
 }
 
-struct MatchState<'a> {
+pub(crate) struct MatchState<'a> {
     before: &'a [UnitFact],
     after: &'a [UnitFact],
     used_before: Vec<bool>,
@@ -51,7 +54,7 @@ struct MatchState<'a> {
 }
 
 impl<'a> MatchState<'a> {
-    fn new(before: &'a [UnitFact], after: &'a [UnitFact], policy: HealthPolicy) -> Self {
+    pub(crate) fn new(before: &'a [UnitFact], after: &'a [UnitFact], policy: HealthPolicy) -> Self {
         Self {
             before,
             after,
@@ -62,6 +65,50 @@ impl<'a> MatchState<'a> {
             unclear_after: Vec::new(),
             policy,
         }
+    }
+
+    /// The units no pass paired yet, with their positions, per side.
+    pub(crate) fn unused_before(&self) -> Vec<(usize, &'a UnitFact)> {
+        unused_indexed(self.before, &self.used_before)
+    }
+
+    pub(crate) fn unused_after(&self) -> Vec<(usize, &'a UnitFact)> {
+        unused_indexed(self.after, &self.used_after)
+    }
+
+    /// Takes one unused unit for a pairing the caller proved.
+    pub(crate) fn claim_before(&mut self, index: usize) -> &'a UnitFact {
+        self.used_before[index] = true;
+        &self.before[index]
+    }
+
+    pub(crate) fn claim_after(&mut self, index: usize) -> &'a UnitFact {
+        self.used_after[index] = true;
+        &self.after[index]
+    }
+
+    /// Records a unit this file received from another, which reads as the one
+    /// movement it is.
+    pub(crate) fn push_moved(
+        &mut self,
+        before: &'a UnitFact,
+        after: &'a UnitFact,
+        origin: (usize, SourceSpan),
+    ) {
+        self.pending.push(PendingComparison {
+            identity: after.identity().clone(),
+            kind: paired_kind(before, after, self.policy),
+            before: Some(before),
+            after: Some(after),
+            span: after.span(),
+            anonymous_ambiguity: false,
+            unpaired_anonymous: false,
+            origin: Some(origin),
+        });
+    }
+
+    pub(crate) fn take_pending(&mut self) -> Vec<PendingComparison<'a>> {
+        std::mem::take(&mut self.pending)
     }
 
     fn bucket(&self, unit: &UnitFact) -> Bucket {
@@ -94,6 +141,7 @@ impl<'a> MatchState<'a> {
                     span: right.span(),
                     anonymous_ambiguity: false,
                     unpaired_anonymous: false,
+                    origin: None,
                 });
                 continue;
             }
@@ -128,6 +176,7 @@ impl<'a> MatchState<'a> {
             span: representative.span(),
             anonymous_ambiguity: anonymous,
             unpaired_anonymous: false,
+            origin: None,
         });
     }
 
@@ -160,7 +209,7 @@ impl<'a> MatchState<'a> {
     /// The buckets count the units a stated ambiguity swallowed too. Those were
     /// never paired either, and a count that cannot see them would call a
     /// leftover addition net-new while its removal sat inside an ambiguity.
-    fn append_one_sided(&mut self) {
+    pub(crate) fn append_one_sided(&mut self) {
         let (before, after) = (self.before, self.after);
         let removed = unused(before, &self.used_before);
         let added = unused(after, &self.used_after);
@@ -186,6 +235,7 @@ impl<'a> MatchState<'a> {
                 span: unit.span(),
                 anonymous_ambiguity: flagged && anonymous,
                 unpaired_anonymous: withheld,
+                origin: None,
             });
         }
     }
@@ -284,6 +334,14 @@ fn group_unused<K: Ord>(
     groups
 }
 
+fn unused_indexed<'a>(units: &'a [UnitFact], used: &[bool]) -> Vec<(usize, &'a UnitFact)> {
+    units
+        .iter()
+        .enumerate()
+        .filter(|(index, _)| !used[*index])
+        .collect()
+}
+
 fn unused<'a>(units: &'a [UnitFact], used: &[bool]) -> Vec<&'a UnitFact> {
     units
         .iter()
@@ -299,7 +357,7 @@ fn mark_used(used: &mut [bool], indexes: &[usize]) {
     }
 }
 
-fn finish_comparisons(
+pub(crate) fn finish_comparisons(
     mut pending: Vec<PendingComparison<'_>>,
     policy: HealthPolicy,
 ) -> Vec<Comparison> {
@@ -325,6 +383,9 @@ fn finish_comparisons(
                 after.map(|value| policy.assess(value).rating()),
             )
             .with_span(value.span);
+            if let Some((file, span)) = value.origin {
+                comparison = comparison.with_origin(FileId::from_index(file), span);
+            }
             if value.anonymous_ambiguity {
                 comparison = comparison.with_anonymous_ambiguity();
             }
@@ -353,6 +414,13 @@ pub fn compare_units(
     policy: HealthPolicy,
 ) -> Vec<Comparison> {
     let mut state = MatchState::new(before, after, policy);
+    pair_within_file(&mut state);
+    state.append_one_sided();
+    finish_comparisons(state.pending, policy)
+}
+
+/// Runs one file's three passes, strongest evidence first.
+pub(crate) fn pair_within_file(state: &mut MatchState<'_>) {
     for contest in state.pair_unique(declared_key) {
         state.state_ambiguity(&contest, false);
     }
@@ -364,6 +432,4 @@ pub fn compare_units(
     for contest in state.pair_unique(fingerprint_key) {
         state.state_ambiguity(&contest, true);
     }
-    state.append_one_sided();
-    finish_comparisons(state.pending, policy)
 }

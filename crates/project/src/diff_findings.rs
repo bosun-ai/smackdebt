@@ -38,6 +38,13 @@ pub(crate) fn retained_comparison(
     if comparison.is_unpaired_anonymous() {
         retained = retained.with_unpaired_anonymous();
     }
+    if let Some((origin, span)) = comparison.origin() {
+        // The move already read the roles of both files it spans, which are
+        // not the pair this file carries.
+        retained = retained
+            .with_origin(origin, span)
+            .with_participation(comparison.participation());
+    }
     retained
 }
 /// Where one changed file sits in the report and whether the change

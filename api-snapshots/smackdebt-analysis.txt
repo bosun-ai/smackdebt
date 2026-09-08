@@ -362,11 +362,14 @@ pub const fn smackdebt_analysis::Comparison::is_anonymous_ambiguity(&self) -> bo
 pub const fn smackdebt_analysis::Comparison::is_unpaired_anonymous(&self) -> bool
 pub const fn smackdebt_analysis::Comparison::kind(&self) -> smackdebt_analysis::ComparisonKind
 pub fn smackdebt_analysis::Comparison::new(smackdebt_analysis::ComparisonId, smackdebt_analysis::UnitIdentity, smackdebt_analysis::ComparisonKind, core::option::Option<smackdebt_analysis::Measurements>, core::option::Option<smackdebt_analysis::Measurements>, core::option::Option<smackdebt_analysis::Rating>, core::option::Option<smackdebt_analysis::Rating>) -> Self
+pub const fn smackdebt_analysis::Comparison::origin(&self) -> core::option::Option<(smackdebt_analysis::FileId, smackdebt_analysis::SourceSpan)>
 pub const fn smackdebt_analysis::Comparison::participation(&self) -> smackdebt_analysis::ComparisonParticipation
 pub const fn smackdebt_analysis::Comparison::source_moves_debt(&self) -> bool
 pub const fn smackdebt_analysis::Comparison::span(&self) -> core::option::Option<smackdebt_analysis::SourceSpan>
 pub const fn smackdebt_analysis::Comparison::with_anonymous_ambiguity(self) -> Self
 pub fn smackdebt_analysis::Comparison::with_file(self, smackdebt_analysis::FileId) -> Self
+pub const fn smackdebt_analysis::Comparison::with_origin(self, smackdebt_analysis::FileId, smackdebt_analysis::SourceSpan) -> Self
+pub const fn smackdebt_analysis::Comparison::with_participation(self, smackdebt_analysis::ComparisonParticipation) -> Self
 pub const fn smackdebt_analysis::Comparison::with_source_roles(self, core::option::Option<smackdebt_analysis::SourceRole>, core::option::Option<smackdebt_analysis::SourceRole>) -> Self
 pub const fn smackdebt_analysis::Comparison::with_span(self, smackdebt_analysis::SourceSpan) -> Self
 pub const fn smackdebt_analysis::Comparison::with_unpaired_anonymous(self) -> Self
@@ -1277,6 +1280,9 @@ impl smackdebt_analysis::Thresholds
 pub const fn smackdebt_analysis::Thresholds::high(self) -> u32
 pub const fn smackdebt_analysis::Thresholds::new(u32, u32) -> Self
 pub const fn smackdebt_analysis::Thresholds::watch(self) -> u32
+pub struct smackdebt_analysis::UnitDiffSides<'a>
+impl<'a> smackdebt_analysis::UnitDiffSides<'a>
+pub const fn smackdebt_analysis::UnitDiffSides<'a>::new(&'a [smackdebt_analysis::UnitFact], &'a [smackdebt_analysis::UnitFact]) -> Self
 pub struct smackdebt_analysis::UnitFact
 impl smackdebt_analysis::UnitFact
 pub fn smackdebt_analysis::UnitFact::identity(&self) -> &smackdebt_analysis::UnitIdentity
@@ -1395,6 +1401,7 @@ pub fn smackdebt_analysis::close_over_packages(usize, &[core::option::Option<sma
 pub fn smackdebt_analysis::cluster_problems(smackdebt_analysis::ProblemInput<'_>) -> alloc::vec::Vec<smackdebt_analysis::ProblemCard>
 pub fn smackdebt_analysis::compare_architecture(&[(smackdebt_analysis::PackageId, smackdebt_analysis::PackageId)], &[(smackdebt_analysis::PackageId, smackdebt_analysis::PackageId)], &[smackdebt_analysis::PackageCycle], &[smackdebt_analysis::PackageCycle]) -> alloc::vec::Vec<smackdebt_analysis::ArchitectureComparison>
 pub fn smackdebt_analysis::compare_evolution(&[smackdebt_analysis::ChangeCoupling], &alloc::collections::btree::set::BTreeSet<(smackdebt_analysis::PackageId, smackdebt_analysis::PackageId)>, &alloc::collections::btree::set::BTreeSet<(smackdebt_analysis::PackageId, smackdebt_analysis::PackageId)>) -> alloc::vec::Vec<smackdebt_analysis::EvolutionaryComparison>
+pub fn smackdebt_analysis::compare_unit_sets(&[smackdebt_analysis::UnitDiffSides<'_>], smackdebt_analysis::HealthPolicy) -> alloc::vec::Vec<alloc::vec::Vec<smackdebt_analysis::Comparison>>
 pub fn smackdebt_analysis::compare_units(&[smackdebt_analysis::UnitFact], &[smackdebt_analysis::UnitFact], smackdebt_analysis::HealthPolicy) -> alloc::vec::Vec<smackdebt_analysis::Comparison>
 pub fn smackdebt_analysis::contributor_concentration(&[smackdebt_analysis::HistoryCommitFact]) -> alloc::vec::Vec<smackdebt_analysis::ContributorConcentration>
 pub fn smackdebt_analysis::cycle_witness(&[usize], &[(usize, usize)]) -> core::option::Option<alloc::vec::Vec<(usize, usize)>>

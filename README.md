@@ -252,6 +252,14 @@ left behind: a cleanup diff whose movements *all* name deleted paths prints no
 pointer rather than a command that fails. A diff that moved nothing, and a view
 already at a file, print none either.
 
+A unit the change moved between files is one movement, not a removal beside
+an addition. Its row sits where the unit landed, states `moved from
+<path>:<line>` for the place it left, and compares the two sides as any other
+pair: code that only moved changes no debt and moves no verdict, while code
+that moved and grew states the growth once. Two units of one name cannot say
+which became which, so a contested move stays the removal and addition it can
+prove.
+
 The diff tiers are fixed in the same way:
 
 | Tier | Sentence |

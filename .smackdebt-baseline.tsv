@@ -25,6 +25,7 @@ crates/analysis/src/source.rs	file_size	0	1
 crates/analysis/src/strongly_connected_components.rs	cognitive	1	0
 crates/analysis/src/strongly_connected_components.rs	cyclomatic	0	1
 crates/analysis/src/strongly_connected_components.rs	nesting	0	1
+crates/analysis/src/unit_matching.rs	file_size	0	1
 crates/analysis/src/verdict.rs	file_size	1	0
 crates/cli/src/app.rs	file_size	0	1
 crates/cli/tests/acceptance.rs	cognitive	1	0

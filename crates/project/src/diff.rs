@@ -20,7 +20,7 @@ use crate::diff_report::{
     link_propagation_scopes, new_diff_builder, record_changed_files, record_unchanged_files,
     set_diff_architecture_facts, set_diff_history_facts, stream_diff_evolution,
 };
-use crate::diff_source::{DiffObjects, analyze_diff_files};
+use crate::diff_source::{DiffObjects, analyze_diff_files, compare_changed_units};
 use crate::requests::{
     DEFAULT_HISTORY_DAYS, DiffRequest, ExecutionWidth, ProjectError, ProjectReport, SourceRoleRule,
     WorkStats,
@@ -127,6 +127,9 @@ pub(crate) fn analyze_diff(request: &DiffRequest) -> Result<ProjectReport, Proje
         side_aliases,
         &request.role_rules,
     );
+    // Roles are settled, so a unit the change moved is followed with the
+    // participation both of its sides finally carry.
+    compare_changed_units(&mut results, &selected_paths, request.policy, &work);
     let root = ScopeId::from_index(0);
     let mut builder = new_diff_builder(hierarchy_scopes, selected_count);
     let placement = DiffPlacement {

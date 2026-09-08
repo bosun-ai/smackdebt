@@ -20,12 +20,11 @@ FINDINGS
         nesting 1 → 3
   worse renamed · function
         e/new.js:1
-        added
-        cognitive 3
-        cyclomatic 3
-        statements 2
-        nesting 2
-        parameters 1
+        moved from e/old.js:1
+        cognitive 0 → 3
+        cyclomatic 1 → 3
+        statements 1 → 2
+        nesting 0 → 2
   better a · function
         a/main.js:2
         cognitive 3 → 0

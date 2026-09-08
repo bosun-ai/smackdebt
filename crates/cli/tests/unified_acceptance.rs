@@ -1862,10 +1862,13 @@ fn worktree_diff_reports_the_declared_mixed_change_outcomes_once() {
     parallel_terminal.success();
     assert_eq!(terminal, parallel_terminal);
     assert_golden("unified-worktree-diff.terminal.txt", &terminal.stdout);
-    // The added unit has an after side only, so its card states that side.
+    // The fixture renames a file Git's similarity check does not follow, so
+    // the unit inside it is one the change moved: its card names where it came
+    // from and states both sides, rather than claiming a unit appeared from
+    // nowhere while another vanished.
     assert!(
         String::from_utf8(terminal.stdout.clone()).unwrap().contains(
-            "        added · cognitive 3 · cyclomatic 3 · statements 2 · nesting 2 · parameters 1\n"
+            "        moved from e/old.js:1 · cognitive 0 → 3 · cyclomatic 1 → 3 · statements 1 → 2 · nesting 0 → 2\n"
         ),
         "{}",
         String::from_utf8_lossy(&terminal.stdout)
@@ -3117,12 +3120,12 @@ fn composition_work_counts_are_visible_without_changing_report_bytes() {
         (
             "worktree diff terminal",
             vec!["diff", "main", "--all", "--history", "36500d"],
-            [1, 29, 8, 26, 7, 15, 28],
+            [1, 29, 8, 26, 7, 15, 29],
         ),
         (
             "worktree diff JSON",
             vec!["diff", "main", "--json", "--history", "36500d"],
-            [1, 29, 8, 26, 7, 15, 28],
+            [1, 29, 8, 26, 7, 15, 29],
         ),
         // A selection inside a repository answers one scope of the repository
         // report, so it costs the repository run exactly — the same walk, the
@@ -3158,7 +3161,7 @@ fn composition_work_counts_are_visible_without_changing_report_bytes() {
             vec!["diff", "main~1", "--json", "--history", "36500d"],
         ),
     ] {
-        assert_evidence_flow(name, arguments, reference.path(), [1, 29, 8, 26, 7, 15, 28]);
+        assert_evidence_flow(name, arguments, reference.path(), [1, 29, 8, 26, 7, 15, 29]);
     }
 
     let languages = GeneratedRepository::new("main");

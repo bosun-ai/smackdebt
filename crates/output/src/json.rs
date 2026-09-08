@@ -1279,9 +1279,15 @@ impl Serialize for ComparisonView<'_> {
     {
         let comparison = self.0;
         let span = comparison.span();
-        let mut map = serializer.serialize_map(Some(13))?;
+        let origin = comparison.origin();
+        let mut map = serializer.serialize_map(Some(15))?;
         map.serialize_entry("id", &comparison.id().get())?;
         map.serialize_entry("file", &comparison.file().map(|id| id.get()))?;
+        map.serialize_entry("moved_from_file", &origin.map(|(file, _)| file.get()))?;
+        map.serialize_entry(
+            "moved_from_line",
+            &origin.map(|(_, span)| span.start_line()),
+        )?;
         map.serialize_entry("start_line", &span.map(|span| span.start_line()))?;
         map.serialize_entry("end_line", &span.map(|span| span.end_line()))?;
         map.serialize_entry("name", comparison.identity().name())?;

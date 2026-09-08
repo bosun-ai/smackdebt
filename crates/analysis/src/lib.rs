@@ -35,6 +35,7 @@ mod stable_dependencies;
 mod strongly_connected_components;
 mod test_scope;
 mod unit_matching;
+mod unit_set_matching;
 mod verdict;
 
 pub use architecture::{
@@ -109,6 +110,7 @@ pub use stable_dependencies::{MINIMUM_STABLE_DEPENDENCY_REFERENCES, stable_depen
 pub use strongly_connected_components::strongly_connected_components;
 pub use test_scope::{ModuleDeclaration, test_declared_files};
 pub use unit_matching::compare_units;
+pub use unit_set_matching::{UnitDiffSides, compare_unit_sets};
 
 pub use comparison::{Comparison, ComparisonDirection, ComparisonKind, ComparisonParticipation};
 pub use health::{

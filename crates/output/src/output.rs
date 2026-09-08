@@ -1734,7 +1734,7 @@ impl DiffFindingRows<'_> {
             }
             section
                 .rows
-                .push(row.with_facts(changed_measurements(comparison)));
+                .push(row.with_facts(comparison_facts(report, comparison)));
         }
         section
     }
@@ -1762,6 +1762,27 @@ fn comparison_location_path<'a>(record: &'a FileRecord, comparison: &Comparison)
     } else {
         record.path()
     }
+}
+
+/// The facts one comparison states, the movement it made first.
+fn comparison_facts(report: &Report, comparison: &Comparison) -> Vec<String> {
+    let Some((origin, span)) = comparison.origin() else {
+        return changed_measurements(comparison);
+    };
+    let path = report
+        .files()
+        .get(origin.index())
+        .map(|record| record.base_path().unwrap_or_else(|| record.path()))
+        .unwrap_or_default();
+    let moved = format!("moved from {path}:{}", span.start_line());
+    // A unit that only moved has nothing else to say, and the measurement
+    // summary would say "unchanged" over a change that plainly happened.
+    if comparison.kind() == ComparisonKind::Unchanged {
+        return vec![moved];
+    }
+    let mut facts = vec![moved];
+    facts.extend(changed_measurements(comparison));
+    facts
 }
 
 fn changed_measurements(comparison: &Comparison) -> Vec<String> {
