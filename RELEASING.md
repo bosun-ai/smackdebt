@@ -1,6 +1,6 @@
 # Releasing Smackdebt
 
-We ship one CLI through GitHub Releases: Linux x86_64, Intel macOS, and Apple Silicon macOS. Version numbers start at `0.1.0` and move together across the workspace. Agent skills and plugins are a separate follow-up.
+We ship one CLI through GitHub Releases: Linux x86_64, Intel macOS, and Apple Silicon macOS. Version numbers start at `0.1.0` and move together across the workspace. `install.sh` installs the CLI and the portable agent skill; Codex and Claude Code plugins bundle the same skill.
 
 ## One-time setup
 
@@ -16,6 +16,7 @@ The token is needed because PRs and tags created with the built-in `GITHUB_TOKEN
 Release-plz runs after pushes to `master` and opens or updates a release PR with the shared version and root changelog. Only merging that PR starts publication. The first release is `v0.1.0`.
 
 1. Review the release PR's version, changelog, and passing CI. Changes in internal libraries must appear in the application changelog too.
+   When changing the skill, increment the version in both plugin manifests so plugin managers refresh their caches. Plugin versions track skill changes independently of the CLI. The combined installer embeds the CLI release version and that tag's skill during the build.
 2. Check out its final candidate commit with a clean tree. Review public report examples before accepting any changed report digests.
 3. Record evidence locally, supplying paths to Smackdebt, the private Fluyt workload, and the private Rust workload:
 
@@ -41,10 +42,18 @@ just licenses
 just acceptance-install
 dist generate --check
 dist plan
+dist build --artifacts=global
+sh target/distrib/install.sh --help
 dist build --artifacts=local --target aarch64-apple-darwin
 python3 scripts/smoke-release.py target/distrib/smackdebt-aarch64-apple-darwin.tar.xz
 ```
 
 Use the target matching your machine. The Linux archive requires glibc; the generated installer checks platform compatibility.
+
+Installer tests run through stdin with isolated user directories on all three
+check runners. They cover opt-outs, updates, existing skills, and failed installs.
+`dist build --artifacts=global` must include `install.sh` and the existing
+`smackdebt-installer.sh`. After publication, verify the combined installer with
+a fresh user profile before announcing the one-line install.
 
 If an upload or runner fails, rerun the failed release jobs for the same tag. Never move a published tag. If code or evidence needs changing, prepare a new version through a release PR. After publication, verify the release's installer and download links before announcing it.

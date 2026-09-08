@@ -1,0 +1,20 @@
+{
+  "name": "smackdebt",
+  "version": "0.1.0",
+  "description": "Find costly code and check whether your changes improve it.",
+  "author": {
+    "name": "Bosun"
+  },
+  "skills": "./skills/",
+  "interface": {
+    "displayName": "Smackdebt",
+    "shortDescription": "Check code debt as you work.",
+    "longDescription": "Use the local Smackdebt CLI to inspect debt and review changes before finishing a task.",
+    "developerName": "Bosun",
+    "category": "Productivity",
+    "capabilities": [],
+    "defaultPrompt": ["Use Smackdebt to review my changes."]
+  },
+  "repository": "https://github.com/bosun-ai/smackdebt",
+  "license": "MIT"
+}

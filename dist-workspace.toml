@@ -11,6 +11,10 @@ install-updater = false
 pr-run-mode = "plan"
 global-artifacts-jobs = ["./check", "./release-verify"]
 
+[[dist.extra-artifacts]]
+artifacts = ["target/agent-installer/install.sh"]
+build = ["python3", "scripts/build-agent-installer.py"]
+
 [dist.github-custom-job-permissions.check]
 contents = "read"
 

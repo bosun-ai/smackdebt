@@ -78,6 +78,9 @@ jobs:
         run: |
           dist build --artifacts=local --target "$TARGET"
           python3 scripts/smoke-release.py "target/distrib/smackdebt-$TARGET.tar.xz"
+          dist build --artifacts=global
+          SMACKDEBT_TEST_INSTALLER=target/distrib/install.sh python3 -m unittest scripts/tests/test_agent_installer.py
+          python3 scripts/smoke-agent-install.py target/distrib
       - uses: actions/upload-artifact@v7
         if: ${{ inputs.plan == '' }}
         with:

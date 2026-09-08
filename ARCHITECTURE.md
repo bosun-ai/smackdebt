@@ -799,6 +799,14 @@ or persistent cache is part of the first release.
 
 ## Release automation
 
+Agent integrations live under `plugins/smackdebt`, outside the Rust crates.
+Codex and Claude Code manifests bundle one portable skill. The release packager
+embeds that same skill and the workspace version in `install.sh`; cargo-dist
+publishes it as an extra artifact. It delegates binary installation to the
+existing versioned CLI installer and writes user-level skills with checksum
+receipts to preserve local edits. It does not edit repository instructions or
+baselines. Agent activation remains advisory. See [agent installation](docs/agents.md).
+
 Release-plz manages the shared workspace version and one application changelog.
 Merging its release PR creates one version tag; cargo-dist owns the generated
 GitHub workflow, platform archives, shell installer, and GitHub Release.

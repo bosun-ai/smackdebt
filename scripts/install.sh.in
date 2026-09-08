@@ -1,0 +1,123 @@
+#!/bin/sh
+# Release template: scripts/build-agent-installer.py supplies the version and skill.
+set -eu
+
+version='@VERSION@'
+completed=''
+temporary=''
+staged=''
+
+fail() {
+    printf 'smackdebt: %s\n' "$1" >&2
+    exit 1
+}
+
+cleanup() {
+    status=$?
+    trap - 0
+    if [ -n "$staged" ]; then rm -f "$staged"; fi
+    if [ -n "$temporary" ]; then rm -rf "$temporary"; fi
+    if [ "$status" -ne 0 ]; then
+        printf 'smackdebt: installation stopped; completed: %s\n' "${completed:-nothing}" >&2
+    fi
+    exit "$status"
+}
+
+hash_file() {
+    if command -v sha256sum >/dev/null 2>&1; then
+        digest=$(sha256sum < "$1")
+    else
+        digest=$(shasum -a 256 < "$1")
+    fi
+    printf '%s\n' "${digest%% *}"
+}
+
+check_destination() {
+    [ ! -L "$1" ] || fail "skill directory is a link: $1"
+    if [ -e "$1" ]; then
+        [ -d "$1" ] || fail "not a directory: $1"
+    fi
+    for file in "$1/SKILL.md" "$1/.smackdebt.sha256"; do
+        [ ! -L "$file" ] || fail "will not replace a link: $file"
+        if [ -e "$file" ]; then
+            [ -f "$file" ] || fail "not a regular file: $file"
+        fi
+    done
+    if [ -f "$1/SKILL.md" ]; then
+        [ -f "$1/.smackdebt.sha256" ] || fail "existing skill is not managed by this installer: $1"
+        observed=$(hash_file "$1/SKILL.md")
+        recorded=$(cat "$1/.smackdebt.sha256")
+        [ "$observed" = "$recorded" ] ||
+            fail "skill has local edits; move it aside before reinstalling: $1"
+    fi
+    mkdir -p "$1"
+    [ -w "$1" ] || fail "directory is not writable: $1"
+}
+
+install_skill() {
+    staged=$(mktemp "$1/.smackdebt.XXXXXX")
+    cp "$temporary/SKILL.md" "$staged"
+    chmod 644 "$staged"
+    mv -f "$staged" "$1/SKILL.md"
+    staged=$(mktemp "$1/.smackdebt.XXXXXX")
+    cp "$temporary/skill.sha256" "$staged"
+    chmod 644 "$staged"
+    mv -f "$staged" "$1/.smackdebt.sha256"
+    staged=''
+    completed="${completed:+$completed; }skill at $1"
+}
+
+main() {
+    cli=yes
+    skill=yes
+    for option in "$@"; do
+        case "$option" in
+            --no-cli) cli=no ;;
+            --no-skill) skill=no ;;
+            --help) printf 'Usage: install.sh [--no-cli | --no-skill]\n'; return ;;
+            *) printf 'smackdebt: unknown option: %s\n' "$option" >&2; exit 2 ;;
+        esac
+    done
+    if [ "$cli:$skill" = no:no ]; then
+        printf 'smackdebt: select the CLI, the skill, or both\n' >&2
+        exit 2
+    fi
+    [ -n "${HOME:-}" ] || fail 'HOME is not set'
+    if [ "$cli" = yes ]; then
+        command -v curl >/dev/null 2>&1 || fail 'curl is required to install the CLI'
+    fi
+    if [ "$skill" = yes ]; then
+        command -v sha256sum >/dev/null 2>&1 || command -v shasum >/dev/null 2>&1 ||
+            fail 'sha256sum or shasum is required to install the skill'
+    fi
+    temporary=$(mktemp -d "${TMPDIR:-/tmp}/smackdebt-install.XXXXXX")
+    trap cleanup 0
+    trap 'exit 130' INT
+    trap 'exit 143' TERM
+    if [ "$skill" = yes ]; then
+        cat > "$temporary/SKILL.md" <<'SMACKDEBT_SKILL'
+@SKILL@
+SMACKDEBT_SKILL
+        hash_file "$temporary/SKILL.md" > "$temporary/skill.sha256"
+        check_destination "$HOME/.agents/skills/smackdebt"
+        check_destination "${CLAUDE_CONFIG_DIR:-$HOME/.claude}/skills/smackdebt"
+    fi
+    if [ "$cli" = yes ]; then
+        url="https://github.com/bosun-ai/smackdebt/releases/download/v$version/smackdebt-installer.sh"
+        curl --proto '=https' --tlsv1.2 -fsSL "$url" -o "$temporary/cli.sh" ||
+            fail "could not download the CLI installer for v$version"
+        sh "$temporary/cli.sh" </dev/null || fail 'the CLI installer failed'
+        completed='CLI'
+    fi
+    if [ "$skill" = yes ]; then
+        install_skill "$HOME/.agents/skills/smackdebt"
+        install_skill "${CLAUDE_CONFIG_DIR:-$HOME/.claude}/skills/smackdebt"
+    fi
+    printf 'smackdebt %s: installed %s\n' "$version" "$completed"
+    if [ "$cli" = yes ]; then
+        printf 'Open a new terminal or restart your agent if smackdebt is not on PATH.\n'
+    fi
+}
+
+# Keep this call last: a shell reading from a pipe must read the whole script first.
+main "$@"

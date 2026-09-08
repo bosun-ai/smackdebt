@@ -1,0 +1,8 @@
+{
+  "name": "smackdebt",
+  "version": "0.1.0",
+  "description": "Find costly code and check whether your changes improve it.",
+  "author": { "name": "Bosun" },
+  "repository": "https://github.com/bosun-ai/smackdebt",
+  "license": "MIT"
+}
