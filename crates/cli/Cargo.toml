@@ -4,7 +4,10 @@ version.workspace = true
 edition.workspace = true
 rust-version.workspace = true
 license.workspace = true
+repository.workspace = true
 publish.workspace = true
+description = "Find costly code debt and see whether your changes make it better"
+readme = "../../README.md"
 
 [features]
 allocation-stats = ["dep:stats_alloc", "smackdebt-project/evidence-stats"]
@@ -19,8 +22,8 @@ path = "src/main.rs"
 clap.workspace = true
 serde.workspace = true
 stats_alloc = { workspace = true, optional = true }
-smackdebt-output = { path = "../output" }
-smackdebt-project = { path = "../project" }
+smackdebt-output = { path = "../output", version = "0.1.0" }
+smackdebt-project = { path = "../project", version = "0.1.0" }
 terminal_size.workspace = true
 toml.workspace = true
 

@@ -39,3 +39,7 @@ and peak values.
 records every profile, and verifies that all records use that HEAD with
 `workspace_dirty` set to false. A report-byte change requires the explicit
 `--accept-report-change` baseline option and review of the new digest.
+
+Release validation compares the candidate and release trees, allowing only the
+approved evidence files to differ. GitHub merge, squash, and rebase commits
+are accepted; other file changes require fresh measurements.

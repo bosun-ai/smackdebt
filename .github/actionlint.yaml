@@ -1,0 +1,7 @@
+# Preserve dist's generated workflow; check its structure while allowing the
+# generator's deliberate shell word splitting and repeated output redirects.
+paths:
+  .github/workflows/release.yml:
+    ignore:
+      - 'shellcheck reported issue in this script: SC2086:'
+      - 'shellcheck reported issue in this script: SC2129:'

@@ -4,7 +4,9 @@ version.workspace = true
 edition.workspace = true
 rust-version.workspace = true
 license.workspace = true
+repository.workspace = true
 publish.workspace = true
+description = "Terminal and JSON report writers for Smackdebt"
 
 [features]
 width-test-checks = []
@@ -13,7 +15,7 @@ width-test-checks = []
 anstyle.workspace = true
 serde.workspace = true
 serde_json.workspace = true
-smackdebt-analysis = { path = "../analysis" }
+smackdebt-analysis = { path = "../analysis", version = "0.1.0" }
 unicode-width.workspace = true
 
 [lints]

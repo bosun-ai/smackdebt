@@ -2,34 +2,86 @@ name: check
 
 on:
   push:
+    branches: [master]
   pull_request:
+  workflow_call:
+    inputs:
+      plan:
+        type: string
+        default: ''
+
+permissions:
+  contents: read
+
+concurrency:
+  group: check-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
 
 jobs:
   check:
     strategy:
       fail-fast: false
       matrix:
-        os: [ubuntu-latest, macos-latest]
+        include:
+          - os: ubuntu-22.04
+            target: x86_64-unknown-linux-gnu
+          - os: macos-15-intel
+            target: x86_64-apple-darwin
+          - os: macos-14
+            target: aarch64-apple-darwin
     runs-on: ${{ matrix.os }}
+    env:
+      SMACKDEBT_RELEASE_PLZ: release-plz
     steps:
       # Full history: self-analysis and the ratchet gate read the repository's
       # own commits.
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v6
         with:
           fetch-depth: 0
+          persist-credentials: false
       # Nightly is not a build toolchain: cargo-public-api invokes nightly
       # rustdoc for its JSON output. Installed first so the pinned workspace
       # toolchain below stays the default.
       - uses: dtolnay/rust-toolchain@nightly
       - uses: dtolnay/rust-toolchain@stable
         with:
-          toolchain: "1.97"
+          toolchain: "1.97.0"
           components: rustfmt, clippy
       - uses: Swatinem/rust-cache@v2
       - uses: taiki-e/install-action@v2
         with:
-          tool: just, cargo-public-api@0.52.0
-      - uses: actions/setup-python@v5
+          tool: just, cargo-public-api@0.52.0, cargo-deny, release-plz@0.3.162
+      - name: Install actionlint
+        if: runner.os == 'Linux'
+        working-directory: ${{ runner.temp }}
+        run: |
+          curl --proto '=https' --tlsv1.2 -LsSf -O https://github.com/rhysd/actionlint/releases/download/v1.7.12/actionlint_1.7.12_linux_amd64.tar.gz
+          echo '8aca8db96f1b94770f1b0d72b6dddcb1ebb8123cb3712530b08cc387b349a3d8  actionlint_1.7.12_linux_amd64.tar.gz' | sha256sum --check
+          tar -xzf actionlint_1.7.12_linux_amd64.tar.gz -C "$HOME/.cargo/bin" actionlint
+      - uses: actions/setup-python@v6
         with:
           python-version: "3.12"
+      - run: python3 -m pip install -r scripts/requirements.txt
       - run: just check
+      - run: just licenses
+        if: runner.os == 'Linux'
+      - run: actionlint
+        if: runner.os == 'Linux'
+      - name: Install dist
+        shell: bash
+        run: curl --proto '=https' --tlsv1.2 -LsSf https://github.com/axodotdev/cargo-dist/releases/download/v0.32.0/cargo-dist-installer.sh | sh
+      - run: dist generate --check
+      - name: Build and test the archive
+        if: ${{ inputs.plan == '' }}
+        env:
+          TARGET: ${{ matrix.target }}
+        run: |
+          dist build --artifacts=local --target "$TARGET"
+          python3 scripts/smoke-release.py "target/distrib/smackdebt-$TARGET.tar.xz"
+      - uses: actions/upload-artifact@v7
+        if: ${{ inputs.plan == '' }}
+        with:
+          name: checked-${{ matrix.target }}
+          path: |
+            target/distrib/*.tar.xz
+            target/distrib/*.sha256

@@ -201,7 +201,7 @@ class ReleaseHeadTests(unittest.TestCase):
                         expected,
                     )
 
-    def test_release_revision_rejects_unrelated_or_multiple_children(self):
+    def test_release_revision_rejects_source_changes_and_accepts_evidence_commits(self):
         with tempfile.TemporaryDirectory() as directory:
             repository = Path(directory)
             recorded = initialize_release_repository(repository)
@@ -229,11 +229,11 @@ class ReleaseHeadTests(unittest.TestCase):
                 "{}\n",
                 "record runs",
             )
-            self.assertIsNotNone(
+            self.assertIsNone(
                 release_head.release_revision_problem(recorded, repository, second)
             )
 
-    def test_release_revision_rejects_path_boundaries_and_merges(self):
+    def test_release_revision_rejects_wrong_paths_and_accepts_evidence_merges(self):
         for path in [
             "benchmarks/baselines/nested/one-file.json",
             "benchmarks/baselines/private-profile.json",
@@ -267,9 +267,44 @@ class ReleaseHeadTests(unittest.TestCase):
                 "main evidence",
             )
             git(repository, "merge", "--no-ff", "-qm", "merge evidence", "evidence")
-            self.assertIsNotNone(
+            self.assertIsNone(
                 release_head.release_revision_problem(recorded, repository)
             )
+
+    def test_release_accepts_squashed_and_rebased_candidates_with_the_same_source(self):
+        for strategy in ["squash", "rebase"]:
+            with self.subTest(strategy=strategy), tempfile.TemporaryDirectory() as directory:
+                repository = Path(directory)
+                initialize_release_repository(repository)
+                git(repository, "switch", "-qc", "release")
+                recorded = commit_release_path(repository, "README.md", "release\n", "prepare")
+                commit_release_path(
+                    repository, "benchmarks/baselines/one-file.json", "{}\n", "evidence"
+                )
+                if strategy == "squash":
+                    git(repository, "switch", "-q", "main")
+                    git(repository, "merge", "--squash", "release")
+                    git(repository, "commit", "-qm", "squashed release")
+                else:
+                    git(repository, "-c", "user.name=Rebased Test", "rebase", "--force-rebase", "main")
+                self.assertIsNone(release_head.release_revision_problem(recorded, repository))
+
+    def test_release_rejects_changes_to_any_non_evidence_file(self):
+        for path in ["src/main.rs", "Cargo.toml", "Cargo.lock", ".github/workflows/release.yml"]:
+            with self.subTest(path=path), tempfile.TemporaryDirectory() as directory:
+                repository = Path(directory)
+                recorded = initialize_release_repository(repository)
+                commit_release_path(repository, "benchmarks/baselines/one-file.json", "{}\n", "evidence")
+                commit_release_path(repository, path, "changed\n", "change release")
+                self.assertIsNotNone(release_head.release_revision_problem(recorded, repository))
+
+    def test_release_rejects_missing_or_invalid_recorded_commits(self):
+        with tempfile.TemporaryDirectory() as directory:
+            repository = Path(directory)
+            initialize_release_repository(repository)
+            for revision in [None, "HEAD", "--help", "a" * 40]:
+                with self.subTest(revision=revision):
+                    self.assertIsNotNone(release_head.release_revision_problem(revision, repository))
 
     def test_release_revision_rejects_dirty_code_in_both_modes(self):
         with tempfile.TemporaryDirectory() as directory:
