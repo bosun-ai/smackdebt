@@ -1,3 +1,5 @@
+//! Strongly connected components of an indexed directed dependency graph.
+
 pub fn strongly_connected_components(
     node_count: usize,
     edges: &[(usize, usize)],

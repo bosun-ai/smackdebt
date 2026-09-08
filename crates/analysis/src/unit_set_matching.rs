@@ -1,3 +1,5 @@
+//! Cross-file unit matching after within-file identities have been paired.
+
 //! Following units across the files of one change.
 //!
 //! A unit that moved between two files is one unit, and a report that calls
@@ -18,12 +20,11 @@
 //! declares it — which says nothing once the unit lives somewhere else, while
 //! identical syntax at a new address is exactly what a move looks like.
 
-use std::collections::BTreeMap;
-
 use crate::comparison::Comparison;
 use crate::health::HealthPolicy;
 use crate::source::{UnitFact, UnitFingerprint, UnitIdentity, UnitMatchKey};
 use crate::unit_matching::{MatchState, finish_comparisons, pair_within_file};
+use std::collections::BTreeMap;
 
 /// One changed file's units, on the sides that hold them.
 ///
@@ -134,7 +135,8 @@ fn fingerprint_key(unit: &UnitFact) -> Option<UnitFingerprint> {
 mod tests {
     use super::*;
     use crate::comparison::ComparisonKind;
-    use crate::health::{HealthPolicy, Measurements, Thresholds};
+    use crate::health::{HealthPolicy, Thresholds};
+    use crate::measurements::Measurements;
     use crate::source::{LocalUnitId, SourceSpan, UnitFact, UnitIdentity, UnitKind};
 
     fn policy() -> HealthPolicy {

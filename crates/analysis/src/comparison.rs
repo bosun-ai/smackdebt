@@ -1,4 +1,7 @@
-use crate::health::{Measurements, Rating, is_rated};
+//! Source-unit comparison values and their participation in a debt verdict.
+
+use crate::health::{Rating, is_rated};
+use crate::measurements::Measurements;
 use crate::report::{ComparisonId, FileId};
 use crate::source::{SourceRole, SourceSpan, UnitIdentity};
 

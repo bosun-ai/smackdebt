@@ -1,3 +1,5 @@
+//! Inventory directory identities, ancestry, and distance for history metrics.
+
 use crate::report::FileId;
 use std::collections::BTreeMap;
 

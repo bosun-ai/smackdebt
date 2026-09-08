@@ -1,3 +1,5 @@
+//! Stable directed witnesses for strongly connected dependency components.
+
 use std::collections::VecDeque;
 
 pub fn cycle_witness(component: &[usize], edges: &[(usize, usize)]) -> Option<Vec<(usize, usize)>> {

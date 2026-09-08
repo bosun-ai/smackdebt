@@ -1,12 +1,20 @@
-use crate::{
-    ArchitectureComparison, ArchitectureComparisonId, ArchitectureComparisonKind, PackageId,
-};
+//! Before/after dependency edge and cycle comparisons.
+//!
+//! Cycle matching retains a component when either witness still connects its
+//! overlapping members. Edge membership changes remain separate from rated cycle
+//! movement; comparison values retain the source evidence needed to explain both.
+
+#![deny(missing_docs)]
+
+use crate::PackageId;
+use crate::{ComparisonDirection, FileId, SourceRole, SourceTrust, StaticRelationKind};
 use std::collections::BTreeSet;
 
 /// A cyclic component and one stable directed witness whose last package is
 /// the first package again.
 pub type PackageCycle = (Vec<PackageId>, Vec<PackageId>);
 
+/// Compares edge membership and cyclic components while preserving valid overlapping witnesses.
 pub fn compare_architecture(
     before_edges: &[(PackageId, PackageId)],
     after_edges: &[(PackageId, PackageId)],
@@ -78,6 +86,142 @@ fn witness_exists(witness: &[PackageId], edges: &BTreeSet<(PackageId, PackageId)
             .windows(2)
             .all(|step| edges.contains(&(step[0], step[1])))
 }
+
+/// The dependency edge or cycle change described by a comparison.
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub enum ArchitectureComparisonKind {
+    /// A dependency edge is present only after the change.
+    EdgeAdded,
+    /// A dependency edge is present only before the change.
+    EdgeRemoved,
+    /// A cyclic component has no retained witness before the change.
+    CycleIntroduced,
+    /// A cyclic component has no retained witness after the change.
+    CycleRemoved,
+}
+
+/// Dependency movement with optional file, relation, and reference evidence.
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct ArchitectureComparison {
+    id: ArchitectureComparisonId,
+    kind: ArchitectureComparisonKind,
+    direction: ComparisonDirection,
+    packages: Vec<PackageId>,
+    witness: Vec<PackageId>,
+    files: Vec<FileId>,
+    relation: Option<StaticRelationKind>,
+    role: Option<SourceRole>,
+    trust: Option<SourceTrust>,
+    before_references: Option<u32>,
+    after_references: Option<u32>,
+}
+
+impl ArchitectureComparison {
+    /// Retains an edge or cycle change; cycle changes set debt direction while edge changes remain neutral.
+    pub fn new(
+        id: ArchitectureComparisonId,
+        kind: ArchitectureComparisonKind,
+        packages: Vec<PackageId>,
+    ) -> Self {
+        let direction = match kind {
+            ArchitectureComparisonKind::CycleIntroduced => ComparisonDirection::Worse,
+            ArchitectureComparisonKind::CycleRemoved => ComparisonDirection::Better,
+            ArchitectureComparisonKind::EdgeAdded | ArchitectureComparisonKind::EdgeRemoved => {
+                ComparisonDirection::Changed
+            }
+        };
+        Self {
+            id,
+            kind,
+            direction,
+            packages,
+            witness: Vec::new(),
+            files: Vec::new(),
+            relation: None,
+            role: None,
+            trust: None,
+            before_references: None,
+            after_references: None,
+        }
+    }
+    /// Attaches the closed directed package path that witnesses the cycle.
+    pub fn with_witness(mut self, witness: Vec<PackageId>) -> Self {
+        self.witness = witness;
+        self
+    }
+    /// Attaches the file identities affected by the dependency movement.
+    pub fn with_files(mut self, files: Vec<FileId>) -> Self {
+        self.files = files;
+        self
+    }
+    /// Attaches the dependency relation, source role, and trust for the changed edge.
+    pub fn with_relation_evidence(
+        mut self,
+        relation: StaticRelationKind,
+        role: SourceRole,
+        trust: SourceTrust,
+    ) -> Self {
+        self.relation = Some(relation);
+        self.role = Some(role);
+        self.trust = Some(trust);
+        self
+    }
+    /// Retains the exact before and after reference counts for the relation.
+    pub fn with_reference_counts(mut self, before: u32, after: u32) -> Self {
+        self.before_references = Some(before);
+        self.after_references = Some(after);
+        self
+    }
+    /// The row's typed position in its owning report table.
+    pub const fn id(&self) -> ArchitectureComparisonId {
+        self.id
+    }
+    /// The finding or movement category represented by this row.
+    pub const fn kind(&self) -> ArchitectureComparisonKind {
+        self.kind
+    }
+    /// Whether the comparison represents worse, better, or neutral debt movement.
+    pub const fn direction(&self) -> ComparisonDirection {
+        self.direction
+    }
+    /// The package identities participating in this observation.
+    pub fn packages(&self) -> &[PackageId] {
+        &self.packages
+    }
+    /// The closed directed package path retained as cycle evidence.
+    pub fn witness(&self) -> &[PackageId] {
+        &self.witness
+    }
+    /// The file identities participating in this observation.
+    pub fn files(&self) -> &[FileId] {
+        &self.files
+    }
+    /// The dependency relation kind when this row describes an edge.
+    pub const fn relation(&self) -> Option<StaticRelationKind> {
+        self.relation
+    }
+    /// The source role of the evidence behind this observation.
+    pub const fn role(&self) -> Option<SourceRole> {
+        self.role
+    }
+    /// Whether the source facts behind this observation are trusted or advisory.
+    pub const fn trust(&self) -> Option<SourceTrust> {
+        self.trust
+    }
+    /// The reference count before the change, when supplied.
+    pub const fn before_references(&self) -> Option<u32> {
+        self.before_references
+    }
+    /// The reference count after the change, when supplied.
+    pub const fn after_references(&self) -> Option<u32> {
+        self.after_references
+    }
+}
+
+crate::table_index::table_index!(
+    /// The position of one architecture comparison in its report table.
+    ArchitectureComparisonId
+);
 
 #[cfg(test)]
 mod tests {

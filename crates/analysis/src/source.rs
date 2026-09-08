@@ -1,4 +1,6 @@
-use crate::health::Measurements;
+//! Language-independent source facts, identities, spans, and trust evidence.
+
+use crate::measurements::Measurements;
 
 /// A compact index into a file's unit table.
 #[derive(Clone, Copy, Debug, Eq, Hash, Ord, PartialEq, PartialOrd)]

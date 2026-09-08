@@ -1,9 +1,11 @@
-use std::collections::BTreeMap;
+//! Debt baseline rows and comparisons used by the CLI ratchet gate.
 
-use crate::architecture::{ArchitectureFinding, ArchitectureFindingKind, StableDependencyFinding};
+use crate::dependency_cycles::{ArchitectureFinding, ArchitectureFindingKind};
 use crate::health::{Rating, Signal};
 use crate::report::Report;
 use crate::size::SizeSubject;
+use crate::stable_dependencies::StableDependencyFinding;
+use std::collections::BTreeMap;
 
 /// One ratcheted debt signal with a frozen identifier.
 ///
@@ -421,16 +423,17 @@ impl GateComparison {
 mod tests {
     use super::*;
     use crate::architecture::{
-        ArchitectureFindingKind, ArchitectureGraph, ArchitectureReportFacts, DependencyCoverage,
-        DependencyEdge, DependencyEdgeId, PackageGraphMeasurement, StableDependencyEvidence,
-        StableDependencyFindingId,
+        ArchitectureGraph, ArchitectureReportFacts, DependencyCoverage, DependencyEdge,
+        DependencyEdgeId, PackageGraphMeasurement,
     };
+    use crate::dependency_cycles::ArchitectureFindingKind;
     use crate::report::{
         Coverage, FileId, FileRecord, Finding, FindingId, PackageId, PackageRecord, ReportBuilder,
         ReportMode, Scope, ScopeId, ScopeKind,
     };
     use crate::size::SizePolicy;
     use crate::source::{ParseStatus, SourceRole, SourceSpan, SourceTrust, UnitIdentity, UnitKind};
+    use crate::stable_dependencies::{StableDependencyEvidence, StableDependencyFindingId};
     use crate::{ArchitectureFindingId, HealthCounts, HealthPolicy, Measurements};
 
     /// A counter that vanished from one path and appeared, identical, at

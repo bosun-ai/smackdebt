@@ -1,3 +1,5 @@
+//! Validated history-window durations and timestamp inclusion rules.
+
 /// The selected history window that every history signal describes.
 ///
 /// The window is a pure policy value: it owns the cutoff timestamp and answers

@@ -70,6 +70,54 @@ types. The `unreachable_pub` lint rejects public declarations that no consumer
 can reach. The entry-module check and compiler-visible API snapshots run in the
 architecture gate.
 
+## Analysis module ownership
+
+Metric names follow established terminology where it describes the actual
+measurement. Each metric module owns its values, calculation, thresholds,
+findings, and metric-specific comparisons and tests. Existing crate-root names
+remain the cross-crate interface; the private file layout is not an API.
+
+| Module in `crates/analysis/src` | Responsibility |
+| --- | --- |
+| `measurements.rs` | The five source measurements, retained as one value |
+| `health.rs` | Their shared threshold policy and health counts |
+| `code_churn.rs` | Added/deleted lines and distinct file/package commit touches |
+| `package_change_coupling.rs` | Package co-change, explanations, findings, and comparisons |
+| `file_change_coupling.rs` | File co-change across directories and pair retention |
+| `code_ownership.rs` | Top contributor's commit share and knowledge concentration |
+| `change_amplification.rs` | Median files touched per commit and scope summaries |
+| `dependency_degree.rs` | Direct fan-in and fan-out |
+| `instability.rs` | Outgoing coupling divided by total coupling |
+| `stable_dependencies.rs` | Stable Dependencies Principle violations |
+| `dependency_cycles.rs` | Cycle findings and largest-cycle size |
+| `change_impact.rs` | Transitive dependency reach across files and packages |
+| `hotspot.rs` | Rated code with frequent changes |
+| `size.rs` | File lines and container statements |
+| `orphan_files.rs` | Supported primary files without incoming references |
+| `change_leakage.rs` | Smackdebt's join of change coupling and dependency evidence |
+
+Change coupling is also called temporal or logical coupling. Code ownership
+here means observed commit share. Change amplification uses Smackdebt's
+nearest-rank median measurement of the design symptom. Change impact counts
+potential dependants: repository-wide file reach excludes the changed file,
+while package closures include their starting node. Module Rustdoc records
+these populations, formulas, omissions, limits, and worked examples. Public
+metric items require documentation through module-local `missing_docs` checks.
+
+Shared source facts stay in `source.rs`, dependency tables and coverage in
+`architecture.rs`, and history inputs and composition in `evolution.rs`.
+`architecture_comparison.rs` owns comparisons spanning dependency edges and
+cycles. Graph traversal, directory indexing, and median helpers retain their
+algorithm names. Report assembly, verdict policy, and problem clustering stay
+in their existing modules; they consume metric values instead of owning them.
+Language-specific measurement extraction remains in the languages crate.
+
+Build the source-level reference, including private metric modules, with:
+
+```console
+RUSTDOCFLAGS="-D rustdoc::broken_intra_doc_links" rtk cargo doc -p smackdebt-analysis --no-deps --document-private-items
+```
+
 ## Analysis model
 
 Inventory owns repository-relative paths. Analysis owns shared package and
@@ -79,9 +127,10 @@ Language analysis produces a flat list of units per file. Each unit records:
 - its name, container, kind, and source span;
 - cognitive and cyclomatic complexity;
 - exclusive logical lines;
+- maximum nesting depth and parameter count;
 - its parent unit index when nesting matters.
 
-The health policy stores the three signals in fixed-size values. The highest
+The health policy stores the five signals in fixed-size values. The highest
 signal sets the result: `healthy`, `watch`, or `high`. Rating a unit does not
 allocate.
 

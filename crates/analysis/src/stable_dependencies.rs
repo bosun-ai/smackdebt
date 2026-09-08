@@ -1,7 +1,16 @@
-use crate::architecture::{
-    PackageEdge, PackageGraphMeasurement, StableDependencyEvidence, StableDependencyFinding,
-    StableDependencyFindingId,
-};
+//! Stable Dependencies Principle violations between packages.
+//!
+//! A package should depend toward lower instability. An edge with at least two
+//! references produces a Watch finding when its target has strictly greater
+//! instability than its source. Equal ratios and isolated packages produce none.
+//! The comparison uses exact cross-products of fan-in and fan-out. Findings keep
+//! both packages' measurements and witness edges for explanation. The supplied
+//! package graph owns source eligibility; this module performs no graph rebuild.
+
+#![deny(missing_docs)]
+
+use crate::architecture::{PackageEdge, PackageGraphMeasurement};
+use crate::{DependencyEdgeId, PackageId, Rating};
 
 /// The references one package needs into another before the direction matters.
 pub const MINIMUM_STABLE_DEPENDENCY_REFERENCES: u32 = 2;
@@ -49,6 +58,104 @@ pub fn stable_dependency_findings(
     }
     findings
 }
+
+/// One package that depends on a less stable package.
+///
+/// Stable-dependency violations own their table and their own index type, so a
+/// row can never be mistaken for a position in the cycle finding table.
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct StableDependencyFinding {
+    id: StableDependencyFindingId,
+    rating: Rating,
+    source: PackageId,
+    target: PackageId,
+    evidence: StableDependencyEvidence,
+    witness_edges: Vec<DependencyEdgeId>,
+}
+
+impl StableDependencyFinding {
+    /// Records a selected stable-dependency violation as Watch with its witnesses.
+    pub fn new(
+        id: StableDependencyFindingId,
+        source: PackageId,
+        target: PackageId,
+        evidence: StableDependencyEvidence,
+        witness_edges: Vec<DependencyEdgeId>,
+    ) -> Self {
+        Self {
+            id,
+            rating: Rating::Watch,
+            source,
+            target,
+            evidence,
+            witness_edges,
+        }
+    }
+    /// The row's typed position in its owning report table.
+    pub const fn id(&self) -> StableDependencyFindingId {
+        self.id
+    }
+    /// The health rating carried by this observation.
+    pub const fn rating(&self) -> Rating {
+        self.rating
+    }
+    /// The depending package.
+    pub const fn source(&self) -> PackageId {
+        self.source
+    }
+    /// The depended-on package.
+    pub const fn target(&self) -> PackageId {
+        self.target
+    }
+    /// Both packages' degree operands and the references supporting the violation.
+    pub const fn evidence(&self) -> StableDependencyEvidence {
+        self.evidence
+    }
+    /// The file-edge identities that explain this finding.
+    pub fn witness_edges(&self) -> &[DependencyEdgeId] {
+        &self.witness_edges
+    }
+}
+
+/// The exact degree operands behind one stable-dependency violation.
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub struct StableDependencyEvidence {
+    source: PackageGraphMeasurement,
+    target: PackageGraphMeasurement,
+    references: u32,
+}
+
+impl StableDependencyEvidence {
+    /// Retains both packages' degree measurements and the reference count between them.
+    pub const fn new(
+        source: PackageGraphMeasurement,
+        target: PackageGraphMeasurement,
+        references: u32,
+    ) -> Self {
+        Self {
+            source,
+            target,
+            references,
+        }
+    }
+    /// The depending package's degree facts.
+    pub const fn source(self) -> PackageGraphMeasurement {
+        self.source
+    }
+    /// The depended-on package's degree facts.
+    pub const fn target(self) -> PackageGraphMeasurement {
+        self.target
+    }
+    /// References the depending package has into the depended-on package.
+    pub const fn references(self) -> u32 {
+        self.references
+    }
+}
+
+crate::table_index::table_index!(
+    /// The position of one stable dependency finding in its report table.
+    StableDependencyFindingId
+);
 
 #[cfg(test)]
 mod tests {

@@ -1,32 +1,26 @@
-use crate::{ComparisonDirection, FileId, PackageId, SourceRole, SourceTrust};
+//! Shared history facts, coverage, and composition of history-derived metrics.
+//!
+//! One accumulator feeds each metric from the same streamed commits. This module
+//! owns coverage-based suppression and completed history tables, while metric
+//! values and rules live in their named modules.
+
+use crate::package_change_coupling::pair_is_explained;
+use crate::{
+    ChangeCoupling, ConcentrationComparison, ContributorConcentration, EvolutionaryComparison,
+    EvolutionaryFinding, FileChangeCoupling, FileHistory, KnowledgeConcentrationFinding,
+    PackageHistory,
+};
+use crate::{FileId, PackageId, SourceRole, SourceTrust};
 use std::collections::BTreeSet;
 
-macro_rules! evolution_index {
-    ($name:ident) => {
-        #[derive(Clone, Copy, Debug, Eq, Hash, Ord, PartialEq, PartialOrd)]
-        pub struct $name(u32);
-
-        impl $name {
-            pub const fn from_index(index: usize) -> Self {
-                Self(index as u32)
-            }
-            pub const fn index(self) -> usize {
-                self.0 as usize
-            }
-            pub const fn get(self) -> u32 {
-                self.0
-            }
-        }
-    };
-}
-
-evolution_index!(ContributorId);
-evolution_index!(EvolutionaryFindingId);
-evolution_index!(FileChangeCouplingId);
-evolution_index!(EvolutionaryComparisonId);
-evolution_index!(HistoryComparisonSuppressionId);
-evolution_index!(KnowledgeConcentrationFindingId);
-evolution_index!(ConcentrationComparisonId);
+crate::table_index::table_index!(
+    /// A contributor identity within the selected history.
+    ContributorId
+);
+crate::table_index::table_index!(
+    /// The position of one history comparison suppression in its report table.
+    HistoryComparisonSuppressionId
+);
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub enum HistoryAvailability {
@@ -346,12 +340,12 @@ impl HistoryCommitFact {
 
 #[derive(Default)]
 pub struct EvolutionAccumulator {
-    churn: crate::churn::ChurnAccumulator,
-    coupling: crate::change_coupling::ChangeCouplingAccumulator,
-    concentration: crate::contributor_concentration::ContributorConcentrationAccumulator,
+    churn: crate::code_churn::ChurnAccumulator,
+    coupling: crate::package_change_coupling::ChangeCouplingAccumulator,
+    concentration: crate::code_ownership::ContributorConcentrationAccumulator,
     /// The same tally without the commits the change under review made, which
     /// is what the packages looked like before it.
-    base_concentration: crate::contributor_concentration::ContributorConcentrationAccumulator,
+    base_concentration: crate::code_ownership::ContributorConcentrationAccumulator,
     file_coupling: crate::file_change_coupling::FileChangeCouplingAccumulator,
     amplification: crate::change_amplification::ChangeAmplificationAccumulator,
 }
@@ -431,7 +425,7 @@ impl EvolutionAccumulator {
             before_explanation_pairs.map_or_else(Vec::new, |before| {
                 eligible_coupling
                     .iter()
-                    .filter(|pair| crate::change_coupling::qualifies_for_finding(**pair))
+                    .filter(|pair| crate::package_change_coupling::qualifies_for_finding(**pair))
                     .filter(|pair| {
                         pair_is_explained(before, pair.left(), pair.right())
                             != pair_is_explained(explanation_pairs, pair.left(), pair.right())
@@ -509,10 +503,108 @@ impl HistoryComparisonSuppression {
     }
 }
 
+/// What an evolutionary finding observed.
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub enum EvolutionaryFindingKind {
+    UnexplainedCoupling,
+    KnowledgeConcentration,
+}
+
+#[derive(Clone, Debug, Default, Eq, PartialEq)]
+pub struct EvolutionaryReportFacts {
+    pub(crate) coverage: HistoryCoverage,
+    pub(crate) file_history: Vec<FileHistory>,
+    pub(crate) package_history: Vec<PackageHistory>,
+    pub(crate) coupling: Vec<ChangeCoupling>,
+    pub(crate) concentration: Vec<ContributorConcentration>,
+    pub(crate) findings: Vec<EvolutionaryFinding>,
+    pub(crate) comparisons: Vec<EvolutionaryComparison>,
+    pub(crate) comparison_suppressions: Vec<HistoryComparisonSuppression>,
+    pub(crate) concentration_findings: Vec<KnowledgeConcentrationFinding>,
+    pub(crate) concentration_comparisons: Vec<ConcentrationComparison>,
+    pub(crate) file_coupling: Vec<FileChangeCoupling>,
+}
+
+impl EvolutionaryReportFacts {
+    #[allow(clippy::too_many_arguments)]
+    pub fn new(
+        coverage: HistoryCoverage,
+        file_history: Vec<FileHistory>,
+        package_history: Vec<PackageHistory>,
+        coupling: Vec<ChangeCoupling>,
+        concentration: Vec<ContributorConcentration>,
+        findings: Vec<EvolutionaryFinding>,
+        comparisons: Vec<EvolutionaryComparison>,
+    ) -> Self {
+        Self {
+            coverage,
+            file_history,
+            package_history,
+            coupling,
+            concentration,
+            findings,
+            comparisons,
+            comparison_suppressions: Vec::new(),
+            concentration_findings: Vec::new(),
+            concentration_comparisons: Vec::new(),
+            file_coupling: Vec::new(),
+        }
+    }
+    /// Adds the knowledge-concentration findings, kept in their own table.
+    pub fn with_concentration_findings(
+        mut self,
+        findings: Vec<KnowledgeConcentrationFinding>,
+    ) -> Self {
+        self.concentration_findings = findings;
+        self
+    }
+    /// Adds the concentration movements this change made, if any.
+    pub fn with_concentration_comparisons(
+        mut self,
+        comparisons: Vec<ConcentrationComparison>,
+    ) -> Self {
+        self.concentration_comparisons = comparisons;
+        self
+    }
+    pub fn with_comparison_suppressions(
+        mut self,
+        suppressions: Vec<HistoryComparisonSuppression>,
+    ) -> Self {
+        self.comparison_suppressions = suppressions;
+        self
+    }
+    /// Adds the retained file change coupling pairs, kept in their own table.
+    ///
+    /// A retained pair is the population a change-leakage detector reads. It is
+    /// not a finding and reaches no human view.
+    pub fn with_file_coupling(mut self, pairs: Vec<FileChangeCoupling>) -> Self {
+        self.file_coupling = pairs;
+        self
+    }
+    pub fn file_coupling(&self) -> &[FileChangeCoupling] {
+        &self.file_coupling
+    }
+    pub fn concentration_findings(&self) -> &[KnowledgeConcentrationFinding] {
+        &self.concentration_findings
+    }
+    pub fn findings(&self) -> &[EvolutionaryFinding] {
+        &self.findings
+    }
+    pub fn concentration_comparisons(&self) -> &[ConcentrationComparison] {
+        &self.concentration_comparisons
+    }
+    pub fn comparisons(&self) -> &[EvolutionaryComparison] {
+        &self.comparisons
+    }
+    pub fn comparison_suppressions(&self) -> &[HistoryComparisonSuppression] {
+        &self.comparison_suppressions
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::{DirectoryTree, HistoryChangeFact, change_coupling, contributor_concentration};
+    use crate::{DirectoryTree, change_coupling, contributor_concentration};
 
     /// A tree giving each of the first `count` files its own directory, so a
     /// pair of them is always cross-directory.
@@ -845,7 +937,7 @@ mod tests {
         );
     }
 
-    /// Change amplification rides the same stream as the pairs and is bounded
+    /// Change amplification rides the same stream as the pairs and is limited
     /// by neither the pair guard nor the pair floors: the sweeping commit the
     /// guard holds back is the tenth observation that makes the fact material
     /// at all. An incomplete stream states nothing anywhere.
@@ -914,133 +1006,6 @@ mod tests {
             crate::DirectoryAmplification::default(),
             "a stream that saw part of the history has no typical change to state"
         );
-    }
-
-    #[test]
-    fn churn_deduplicates_package_touches_and_sums_lines() {
-        let commits = vec![
-            commit(0, &[(0, 0, Some(3), Some(1)), (1, 0, Some(2), Some(4))]),
-            commit(1, &[(0, 0, None, None)]),
-        ];
-        let (files, packages) = crate::churn(2, 1, &commits);
-        assert_eq!(
-            (
-                files[0].touches(),
-                files[0].added_lines(),
-                files[0].deleted_lines(),
-                files[0].uncounted_changes()
-            ),
-            (2, 3, 1, 1)
-        );
-        assert_eq!(
-            (
-                packages[0].touches(),
-                packages[0].added_lines(),
-                packages[0].deleted_lines(),
-                packages[0].uncounted_changes()
-            ),
-            (2, 5, 5, 1)
-        );
-    }
-
-    #[test]
-    fn churn_counts_duplicate_file_facts_as_one_commit_touch() {
-        let commits = vec![commit(
-            0,
-            &[(0, 0, Some(3), Some(1)), (0, 0, Some(2), Some(4))],
-        )];
-        let (files, packages) = crate::churn(1, 1, &commits);
-        assert_eq!(files[0].touches(), 1);
-        assert_eq!(files[0].added_lines(), 5);
-        assert_eq!(files[0].deleted_lines(), 5);
-        assert_eq!(packages[0].touches(), 1);
-        assert_eq!(packages[0].added_lines(), 5);
-        assert_eq!(packages[0].deleted_lines(), 5);
-    }
-
-    #[test]
-    fn coupling_counts_a_package_pair_once_per_commit() {
-        let commits = vec![
-            commit(
-                0,
-                &[
-                    (0, 0, Some(1), Some(0)),
-                    (1, 0, Some(1), Some(0)),
-                    (2, 1, Some(1), Some(0)),
-                ],
-            ),
-            commit(1, &[(0, 0, Some(1), Some(0)), (2, 1, Some(1), Some(0))]),
-            commit(1, &[(0, 0, Some(1), Some(0))]),
-            commit(2, &[(2, 1, Some(1), Some(0))]),
-        ];
-        let values = change_coupling(&commits, &crate::PackageContainment::default());
-        assert_eq!(
-            values,
-            vec![
-                ChangeCoupling::new(PackageId::from_index(0), PackageId::from_index(1), 2, 4)
-                    .with_evidence(
-                        SourceRole::Primary,
-                        SourceTrust::Trusted,
-                        SourceRole::Primary,
-                        SourceTrust::Trusted,
-                    )
-            ]
-        );
-        assert_eq!(values[0].similarity(), 0.5);
-    }
-
-    #[test]
-    fn concentration_preserves_only_operands() {
-        let mut commits = Vec::new();
-        for contributor in [0, 0, 0, 1, 1, 2] {
-            commits.push(commit(contributor, &[(0, 0, Some(1), Some(0))]));
-        }
-        let values = contributor_concentration(&commits);
-        assert_eq!(
-            values,
-            vec![ContributorConcentration::new(
-                PackageId::from_index(0),
-                3,
-                3,
-                6
-            )]
-        );
-        assert_eq!(values[0].ratio(), 0.5);
-    }
-
-    #[test]
-    fn an_explaining_pair_suppresses_finding_and_changes_diff_context() {
-        let pair = ChangeCoupling::new(PackageId::from_index(0), PackageId::from_index(1), 3, 3);
-        let explained: BTreeSet<_> = [(PackageId::from_index(0), PackageId::from_index(1))].into();
-        assert_eq!(
-            crate::unexplained_coupling(&[pair], &BTreeSet::new()).len(),
-            1
-        );
-        assert!(crate::unexplained_coupling(&[pair], &explained).is_empty());
-        let reversed: BTreeSet<_> = [(PackageId::from_index(1), PackageId::from_index(0))].into();
-        assert!(crate::unexplained_coupling(&[pair], &reversed).is_empty());
-        let comparisons = crate::compare_evolution(&[pair], &BTreeSet::new(), &explained);
-        assert_eq!(
-            comparisons[0].kind(),
-            EvolutionaryComparisonKind::FindingRemoved
-        );
-        assert_eq!(comparisons[0].direction(), ComparisonDirection::Better);
-    }
-
-    #[test]
-    fn coupling_finding_requires_both_thresholds() {
-        let package_a = PackageId::from_index(0);
-        let package_b = PackageId::from_index(1);
-        let at_boundary = ChangeCoupling::new(package_a, package_b, 3, 15);
-        let too_few_shared = ChangeCoupling::new(package_a, package_b, 2, 10);
-        let below_similarity = ChangeCoupling::new(package_a, package_b, 3, 16);
-
-        assert_eq!(
-            crate::unexplained_coupling(&[at_boundary], &BTreeSet::new()).len(),
-            1
-        );
-        assert!(crate::unexplained_coupling(&[too_few_shared], &BTreeSet::new()).is_empty());
-        assert!(crate::unexplained_coupling(&[below_similarity], &BTreeSet::new()).is_empty());
     }
 
     #[test]
@@ -1237,682 +1202,4 @@ mod tests {
         assert_eq!(report.findings()[0].coupling().shared_commits(), 3);
         assert_eq!(report.findings()[0].coupling().union_commits(), 3);
     }
-
-    #[test]
-    fn one_package_pair_keeps_one_row_across_role_and_trust_variants() {
-        let primary = |file, package| {
-            HistoryChangeFact::new(
-                FileId::from_index(file),
-                PackageId::from_index(package),
-                None,
-                None,
-            )
-        };
-        let test_role = |file, package| {
-            primary(file, package).with_source_evidence(SourceRole::Test, SourceTrust::Trusted)
-        };
-        let commits = vec![
-            HistoryCommitFact::new(
-                ContributorId::from_index(0),
-                vec![primary(0, 0), test_role(1, 0), primary(2, 1)],
-            ),
-            HistoryCommitFact::new(
-                ContributorId::from_index(0),
-                vec![test_role(1, 0), test_role(3, 1)],
-            ),
-        ];
-        let values = change_coupling(&commits, &crate::PackageContainment::default());
-        assert_eq!(values.len(), 1);
-        assert_eq!(
-            (values[0].shared_commits(), values[0].union_commits()),
-            (2, 2)
-        );
-        let evidence = values[0].evidence().unwrap();
-        assert_eq!(
-            (evidence.left_role(), evidence.right_role()),
-            (SourceRole::Primary, SourceRole::Primary)
-        );
-    }
-
-    #[test]
-    fn a_scope_and_its_own_descendant_are_not_a_coupling_pair() {
-        let containment = crate::PackageContainment::from_paths(&[
-            ".".to_owned(),
-            "crates/project".to_owned(),
-            "other".to_owned(),
-        ]);
-        assert!(containment.is_nested(PackageId::from_index(0), PackageId::from_index(1)));
-        assert!(!containment.is_nested(PackageId::from_index(1), PackageId::from_index(2)));
-        let commits = vec![
-            commit(
-                0,
-                &[(0, 0, None, None), (1, 1, None, None), (2, 2, None, None)],
-            ),
-            commit(
-                1,
-                &[(0, 0, None, None), (1, 1, None, None), (2, 2, None, None)],
-            ),
-        ];
-        let values = change_coupling(&commits, &containment);
-        let pairs: Vec<_> = values
-            .iter()
-            .map(|pair| (pair.left().index(), pair.right().index()))
-            .collect();
-        assert_eq!(pairs, [(1, 2)]);
-    }
-
-    #[test]
-    fn dense_commits_store_each_observed_pair_once() {
-        let changes = (0..50)
-            .flat_map(|package| {
-                [
-                    (package * 2, package, Some(1), Some(0)),
-                    (package * 2 + 1, package, Some(1), Some(0)),
-                ]
-            })
-            .collect::<Vec<_>>();
-        let commits = vec![commit(0, &changes), commit(1, &changes)];
-        let values = change_coupling(&commits, &crate::PackageContainment::default());
-        assert_eq!(values.len(), 50 * 49 / 2);
-        assert!(
-            values
-                .iter()
-                .all(|pair| pair.shared_commits() == 2 && pair.union_commits() == 2)
-        );
-    }
-}
-
-#[derive(Clone, Copy, Debug, Eq, PartialEq)]
-pub struct FileHistory {
-    file: FileId,
-    role: SourceRole,
-    trust: SourceTrust,
-    touches: u32,
-    added_lines: u64,
-    deleted_lines: u64,
-    uncounted_changes: u32,
-}
-
-impl FileHistory {
-    pub const fn new(
-        file: FileId,
-        touches: u32,
-        added_lines: u64,
-        deleted_lines: u64,
-        uncounted_changes: u32,
-    ) -> Self {
-        Self {
-            file,
-            role: SourceRole::Primary,
-            trust: SourceTrust::Trusted,
-            touches,
-            added_lines,
-            deleted_lines,
-            uncounted_changes,
-        }
-    }
-    pub const fn with_evidence(mut self, role: SourceRole, trust: SourceTrust) -> Self {
-        self.role = role;
-        self.trust = trust;
-        self
-    }
-    pub const fn file(self) -> FileId {
-        self.file
-    }
-    pub const fn role(self) -> SourceRole {
-        self.role
-    }
-    pub const fn trust(self) -> SourceTrust {
-        self.trust
-    }
-    pub const fn affects_findings(self) -> bool {
-        self.role.affects_verdict() && matches!(self.trust, SourceTrust::Trusted)
-    }
-    pub const fn touches(self) -> u32 {
-        self.touches
-    }
-    pub const fn added_lines(self) -> u64 {
-        self.added_lines
-    }
-    pub const fn deleted_lines(self) -> u64 {
-        self.deleted_lines
-    }
-    pub const fn uncounted_changes(self) -> u32 {
-        self.uncounted_changes
-    }
-}
-
-#[derive(Clone, Copy, Debug, Eq, PartialEq)]
-pub struct PackageHistory {
-    package: PackageId,
-    role: SourceRole,
-    trust: SourceTrust,
-    touches: u32,
-    added_lines: u64,
-    deleted_lines: u64,
-    uncounted_changes: u32,
-}
-
-impl PackageHistory {
-    pub const fn new(
-        package: PackageId,
-        touches: u32,
-        added_lines: u64,
-        deleted_lines: u64,
-        uncounted_changes: u32,
-    ) -> Self {
-        Self {
-            package,
-            role: SourceRole::Primary,
-            trust: SourceTrust::Trusted,
-            touches,
-            added_lines,
-            deleted_lines,
-            uncounted_changes,
-        }
-    }
-    pub const fn with_evidence(mut self, role: SourceRole, trust: SourceTrust) -> Self {
-        self.role = role;
-        self.trust = trust;
-        self
-    }
-    pub const fn package(self) -> PackageId {
-        self.package
-    }
-    pub const fn role(self) -> SourceRole {
-        self.role
-    }
-    pub const fn trust(self) -> SourceTrust {
-        self.trust
-    }
-    pub const fn affects_findings(self) -> bool {
-        self.role.affects_verdict() && matches!(self.trust, SourceTrust::Trusted)
-    }
-    pub const fn touches(self) -> u32 {
-        self.touches
-    }
-    pub const fn added_lines(self) -> u64 {
-        self.added_lines
-    }
-    pub const fn deleted_lines(self) -> u64 {
-        self.deleted_lines
-    }
-    pub const fn uncounted_changes(self) -> u32 {
-        self.uncounted_changes
-    }
-}
-
-#[derive(Clone, Copy, Debug, Eq, PartialEq)]
-pub struct ChangeCoupling {
-    left: PackageId,
-    right: PackageId,
-    shared_commits: u32,
-    union_commits: u32,
-    evidence: Option<CouplingEvidence>,
-}
-
-#[derive(Clone, Copy, Debug, Eq, PartialEq)]
-pub struct CouplingEvidence {
-    left_role: SourceRole,
-    left_trust: SourceTrust,
-    right_role: SourceRole,
-    right_trust: SourceTrust,
-}
-
-impl ChangeCoupling {
-    pub const fn new(
-        left: PackageId,
-        right: PackageId,
-        shared_commits: u32,
-        union_commits: u32,
-    ) -> Self {
-        Self {
-            left,
-            right,
-            shared_commits,
-            union_commits,
-            evidence: None,
-        }
-    }
-    pub const fn with_evidence(
-        mut self,
-        left_role: SourceRole,
-        left_trust: SourceTrust,
-        right_role: SourceRole,
-        right_trust: SourceTrust,
-    ) -> Self {
-        self.evidence = Some(CouplingEvidence {
-            left_role,
-            left_trust,
-            right_role,
-            right_trust,
-        });
-        self
-    }
-    pub const fn left(self) -> PackageId {
-        self.left
-    }
-    pub const fn right(self) -> PackageId {
-        self.right
-    }
-    pub const fn shared_commits(self) -> u32 {
-        self.shared_commits
-    }
-    pub const fn union_commits(self) -> u32 {
-        self.union_commits
-    }
-    pub fn similarity(self) -> f64 {
-        f64::from(self.shared_commits) / f64::from(self.union_commits)
-    }
-    pub const fn evidence(self) -> Option<CouplingEvidence> {
-        self.evidence
-    }
-}
-
-impl CouplingEvidence {
-    pub const fn left_role(self) -> SourceRole {
-        self.left_role
-    }
-    pub const fn left_trust(self) -> SourceTrust {
-        self.left_trust
-    }
-    pub const fn right_role(self) -> SourceRole {
-        self.right_role
-    }
-    pub const fn right_trust(self) -> SourceTrust {
-        self.right_trust
-    }
-}
-
-/// Two files that change in the same commits, named lower identity first.
-///
-/// Every operand is an integer. The distance is the directory distance of the
-/// pair, which is at least 1 because a pair inside one directory is never
-/// stored. Similarity is derived by a reader, exactly as it is for package
-/// change coupling, so no ratio is stored or serialized.
-#[derive(Clone, Copy, Debug, Eq, PartialEq)]
-pub struct FileChangeCoupling {
-    left: FileId,
-    right: FileId,
-    shared_commits: u32,
-    union_commits: u32,
-    distance: u32,
-}
-
-impl FileChangeCoupling {
-    /// Creates one retained pair, which names the lower file identity first.
-    pub fn new(
-        left: FileId,
-        right: FileId,
-        shared_commits: u32,
-        union_commits: u32,
-        distance: u32,
-    ) -> Self {
-        assert!(
-            left < right,
-            "a file pair names the lower file identity first"
-        );
-        assert!(
-            shared_commits <= union_commits,
-            "shared commits are part of the union"
-        );
-        assert!(distance >= 1, "a stored pair crosses a directory boundary");
-        Self {
-            left,
-            right,
-            shared_commits,
-            union_commits,
-            distance,
-        }
-    }
-    pub const fn left(self) -> FileId {
-        self.left
-    }
-    pub const fn right(self) -> FileId {
-        self.right
-    }
-    pub const fn shared_commits(self) -> u32 {
-        self.shared_commits
-    }
-    pub const fn union_commits(self) -> u32 {
-        self.union_commits
-    }
-    /// The integer directory distance between the two files.
-    pub const fn distance(self) -> u32 {
-        self.distance
-    }
-}
-
-#[derive(Clone, Copy, Debug, Eq, PartialEq)]
-pub struct ContributorConcentration {
-    package: PackageId,
-    role: SourceRole,
-    trust: SourceTrust,
-    contributor_count: u32,
-    numerator: u32,
-    denominator: u32,
-}
-
-impl ContributorConcentration {
-    pub const fn new(
-        package: PackageId,
-        contributor_count: u32,
-        numerator: u32,
-        denominator: u32,
-    ) -> Self {
-        Self {
-            package,
-            role: SourceRole::Primary,
-            trust: SourceTrust::Trusted,
-            contributor_count,
-            numerator,
-            denominator,
-        }
-    }
-    pub const fn with_evidence(mut self, role: SourceRole, trust: SourceTrust) -> Self {
-        self.role = role;
-        self.trust = trust;
-        self
-    }
-    pub const fn package(self) -> PackageId {
-        self.package
-    }
-    pub const fn role(self) -> SourceRole {
-        self.role
-    }
-    pub const fn trust(self) -> SourceTrust {
-        self.trust
-    }
-    pub const fn affects_findings(self) -> bool {
-        self.role.affects_verdict() && matches!(self.trust, SourceTrust::Trusted)
-    }
-    pub const fn contributor_count(self) -> u32 {
-        self.contributor_count
-    }
-    pub const fn numerator(self) -> u32 {
-        self.numerator
-    }
-    pub const fn denominator(self) -> u32 {
-        self.denominator
-    }
-    pub fn ratio(self) -> f64 {
-        f64::from(self.numerator) / f64::from(self.denominator)
-    }
-}
-
-/// What an evolutionary finding observed.
-#[derive(Clone, Copy, Debug, Eq, PartialEq)]
-pub enum EvolutionaryFindingKind {
-    UnexplainedCoupling,
-    KnowledgeConcentration,
-}
-
-/// One Watch observation of packages that change together without a code
-/// dependency.
-#[derive(Clone, Copy, Debug, Eq, PartialEq)]
-pub struct EvolutionaryFinding {
-    id: EvolutionaryFindingId,
-    coupling: ChangeCoupling,
-}
-
-impl EvolutionaryFinding {
-    pub const fn new(id: EvolutionaryFindingId, coupling: ChangeCoupling) -> Self {
-        Self { id, coupling }
-    }
-    pub const fn id(self) -> EvolutionaryFindingId {
-        self.id
-    }
-    pub const fn kind(self) -> EvolutionaryFindingKind {
-        EvolutionaryFindingKind::UnexplainedCoupling
-    }
-    pub const fn rating(self) -> crate::Rating {
-        crate::Rating::Watch
-    }
-    pub const fn coupling(self) -> ChangeCoupling {
-        self.coupling
-    }
-}
-
-/// One Watch observation of a package whose knowledge sits with one
-/// contributor.
-///
-/// The finding carries counts alone: no name, address, raw author field, or
-/// internal contributor identifier. It owns its table and its own index type,
-/// so a row can never be mistaken for a coupling finding position.
-#[derive(Clone, Copy, Debug, Eq, PartialEq)]
-pub struct KnowledgeConcentrationFinding {
-    id: KnowledgeConcentrationFindingId,
-    concentration: ContributorConcentration,
-}
-
-impl KnowledgeConcentrationFinding {
-    pub const fn new(
-        id: KnowledgeConcentrationFindingId,
-        concentration: ContributorConcentration,
-    ) -> Self {
-        Self { id, concentration }
-    }
-    pub const fn id(self) -> KnowledgeConcentrationFindingId {
-        self.id
-    }
-    pub const fn kind(self) -> EvolutionaryFindingKind {
-        EvolutionaryFindingKind::KnowledgeConcentration
-    }
-    pub const fn rating(self) -> crate::Rating {
-        crate::Rating::Watch
-    }
-    pub const fn concentration(self) -> ContributorConcentration {
-        self.concentration
-    }
-}
-
-#[derive(Clone, Copy, Debug, Eq, PartialEq)]
-pub enum EvolutionaryComparisonKind {
-    FindingIntroduced,
-    FindingRemoved,
-}
-
-#[derive(Clone, Copy, Debug, Eq, PartialEq)]
-pub struct EvolutionaryComparison {
-    id: EvolutionaryComparisonId,
-    kind: EvolutionaryComparisonKind,
-    direction: ComparisonDirection,
-    coupling: ChangeCoupling,
-}
-
-impl EvolutionaryComparison {
-    pub const fn new(
-        id: EvolutionaryComparisonId,
-        kind: EvolutionaryComparisonKind,
-        direction: ComparisonDirection,
-        coupling: ChangeCoupling,
-    ) -> Self {
-        Self {
-            id,
-            kind,
-            direction,
-            coupling,
-        }
-    }
-    pub const fn id(self) -> EvolutionaryComparisonId {
-        self.id
-    }
-    pub const fn kind(self) -> EvolutionaryComparisonKind {
-        self.kind
-    }
-    pub const fn direction(self) -> ComparisonDirection {
-        self.direction
-    }
-    pub const fn coupling(self) -> ChangeCoupling {
-        self.coupling
-    }
-}
-
-/// What a change did to one package's knowledge concentration.
-#[derive(Clone, Copy, Debug, Eq, PartialEq)]
-pub enum ConcentrationComparisonKind {
-    /// The package now rests on one contributor and did not before.
-    Introduced,
-    /// The package no longer rests on one contributor.
-    Dissolved,
-}
-
-/// One package whose knowledge concentration the change under review moved.
-#[derive(Clone, Copy, Debug, Eq, PartialEq)]
-pub struct ConcentrationComparison {
-    id: ConcentrationComparisonId,
-    kind: ConcentrationComparisonKind,
-    concentration: ContributorConcentration,
-}
-
-impl ConcentrationComparison {
-    pub const fn new(
-        id: ConcentrationComparisonId,
-        kind: ConcentrationComparisonKind,
-        concentration: ContributorConcentration,
-    ) -> Self {
-        Self {
-            id,
-            kind,
-            concentration,
-        }
-    }
-    pub const fn id(self) -> ConcentrationComparisonId {
-        self.id
-    }
-    pub const fn kind(self) -> ConcentrationComparisonKind {
-        self.kind
-    }
-    /// The side that states the fact: the change's own tally when knowledge
-    /// concentrated, and the tally it dissolved when it did not.
-    pub const fn concentration(self) -> ContributorConcentration {
-        self.concentration
-    }
-    pub const fn direction(self) -> ComparisonDirection {
-        match self.kind {
-            ConcentrationComparisonKind::Introduced => ComparisonDirection::Worse,
-            ConcentrationComparisonKind::Dissolved => ComparisonDirection::Better,
-        }
-    }
-}
-
-#[derive(Clone, Debug, Default, Eq, PartialEq)]
-pub struct EvolutionaryReportFacts {
-    pub(crate) coverage: HistoryCoverage,
-    pub(crate) file_history: Vec<FileHistory>,
-    pub(crate) package_history: Vec<PackageHistory>,
-    pub(crate) coupling: Vec<ChangeCoupling>,
-    pub(crate) concentration: Vec<ContributorConcentration>,
-    pub(crate) findings: Vec<EvolutionaryFinding>,
-    pub(crate) comparisons: Vec<EvolutionaryComparison>,
-    pub(crate) comparison_suppressions: Vec<HistoryComparisonSuppression>,
-    pub(crate) concentration_findings: Vec<KnowledgeConcentrationFinding>,
-    pub(crate) concentration_comparisons: Vec<ConcentrationComparison>,
-    pub(crate) file_coupling: Vec<FileChangeCoupling>,
-}
-
-impl EvolutionaryReportFacts {
-    #[allow(clippy::too_many_arguments)]
-    pub fn new(
-        coverage: HistoryCoverage,
-        file_history: Vec<FileHistory>,
-        package_history: Vec<PackageHistory>,
-        coupling: Vec<ChangeCoupling>,
-        concentration: Vec<ContributorConcentration>,
-        findings: Vec<EvolutionaryFinding>,
-        comparisons: Vec<EvolutionaryComparison>,
-    ) -> Self {
-        Self {
-            coverage,
-            file_history,
-            package_history,
-            coupling,
-            concentration,
-            findings,
-            comparisons,
-            comparison_suppressions: Vec::new(),
-            concentration_findings: Vec::new(),
-            concentration_comparisons: Vec::new(),
-            file_coupling: Vec::new(),
-        }
-    }
-    /// Adds the knowledge-concentration findings, kept in their own table.
-    pub fn with_concentration_findings(
-        mut self,
-        findings: Vec<KnowledgeConcentrationFinding>,
-    ) -> Self {
-        self.concentration_findings = findings;
-        self
-    }
-    /// Adds the concentration movements this change made, if any.
-    pub fn with_concentration_comparisons(
-        mut self,
-        comparisons: Vec<ConcentrationComparison>,
-    ) -> Self {
-        self.concentration_comparisons = comparisons;
-        self
-    }
-    pub fn with_comparison_suppressions(
-        mut self,
-        suppressions: Vec<HistoryComparisonSuppression>,
-    ) -> Self {
-        self.comparison_suppressions = suppressions;
-        self
-    }
-    /// Adds the retained file change coupling pairs, kept in their own table.
-    ///
-    /// A retained pair is the population a change-leakage detector reads. It is
-    /// not a finding and reaches no human view.
-    pub fn with_file_coupling(mut self, pairs: Vec<FileChangeCoupling>) -> Self {
-        self.file_coupling = pairs;
-        self
-    }
-    pub fn file_coupling(&self) -> &[FileChangeCoupling] {
-        &self.file_coupling
-    }
-    pub fn concentration_findings(&self) -> &[KnowledgeConcentrationFinding] {
-        &self.concentration_findings
-    }
-    pub fn findings(&self) -> &[EvolutionaryFinding] {
-        &self.findings
-    }
-    pub fn concentration_comparisons(&self) -> &[ConcentrationComparison] {
-        &self.concentration_comparisons
-    }
-    pub fn comparisons(&self) -> &[EvolutionaryComparison] {
-        &self.comparisons
-    }
-    pub fn comparison_suppressions(&self) -> &[HistoryComparisonSuppression] {
-        &self.comparison_suppressions
-    }
-}
-
-/// How the package dependency graph links a coupled package pair.
-///
-/// The classification informs presentation only: finding creation never reads
-/// it, so an indirect link does not suppress or explain an
-/// unexplained-coupling Watch finding.
-#[derive(Clone, Copy, Debug, Eq, PartialEq)]
-pub enum CouplingLink {
-    /// A trusted eligible `uses` relation links the pair in either direction.
-    Direct,
-    /// No direct relation exists, but a dependency path connects the pair in
-    /// one direction; the payload names the first intermediate package on a
-    /// shortest such path.
-    Indirect(PackageId),
-    /// No dependency path connects the pair in either direction.
-    None,
-}
-
-/// Whether a code dependency explains why two packages change together.
-///
-/// The pairs are direction-carrying, so a pair is explained when either
-/// direction is present. They are wider than the verdict graph on purpose: a
-/// dev-dependency test import is still a code dependency.
-pub(crate) fn pair_is_explained(
-    pairs: &BTreeSet<(PackageId, PackageId)>,
-    left: PackageId,
-    right: PackageId,
-) -> bool {
-    pairs.contains(&(left, right)) || pairs.contains(&(right, left))
 }

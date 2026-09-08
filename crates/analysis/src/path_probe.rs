@@ -1,6 +1,8 @@
+//! Reusable dependency traversal with explicit unknown results at search limits.
+
 use std::collections::VecDeque;
 
-/// What a bounded path probe settled about one ordered pair of nodes.
+/// What a limited path probe settled about one ordered pair of nodes.
 ///
 /// `Undecided` is a first-class answer rather than a failure: a probe that
 /// spent its whole budget without settling the question proves nothing, and a
@@ -212,7 +214,7 @@ mod tests {
         assert_eq!(probe.dependents(1), 1);
         assert_eq!(probe.dependents(3), 0, "a leaf is depended on by nothing");
         assert_eq!(probe.dependents(4), 0);
-        // The scratch is shared with the bounded probe, so an interleaved run
+        // The scratch is shared with the limited probe, so an interleaved run
         // must not read a visit mark the other walk left behind.
         assert_eq!(probe.reaches(3, 0, 4_096), ReachAnswer::Reaches);
         assert_eq!(probe.dependents(0), 3);

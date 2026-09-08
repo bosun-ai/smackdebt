@@ -1,10 +1,11 @@
-use std::cmp::Ordering;
-use std::collections::BTreeMap;
+//! Identity-based before/after matching of units within a file.
 
 use crate::comparison::{Comparison, ComparisonKind};
 use crate::health::{HealthPolicy, Rating};
 use crate::report::{ComparisonId, FileId};
 use crate::source::{SourceSpan, UnitFact, UnitFingerprint, UnitIdentity, UnitKind, UnitMatchKey};
+use std::cmp::Ordering;
+use std::collections::BTreeMap;
 
 pub(crate) struct PendingComparison<'a> {
     identity: UnitIdentity,
