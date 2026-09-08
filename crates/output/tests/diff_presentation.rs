@@ -183,6 +183,19 @@ fn render(report: &Report, scope: ScopeId) -> String {
     String::from_utf8(bytes).unwrap()
 }
 
+/// The same view with every useful row, which is where standing context lives.
+fn render_detail(report: &Report, scope: ScopeId) -> String {
+    let mut bytes = Vec::new();
+    write_terminal(
+        &mut bytes,
+        report,
+        Some(scope),
+        TerminalOptions::new(100, true, false),
+    )
+    .unwrap();
+    String::from_utf8(bytes).unwrap()
+}
+
 /// A pair row survives only where the change touched both of its packages.
 #[test]
 fn a_history_pair_needs_both_of_its_packages_in_the_change() {
@@ -216,15 +229,24 @@ fn a_stated_pair_carries_its_counts_its_share_and_its_link() {
     );
 }
 
-/// A concentration row needs the change to have touched its package.
+/// A standing concentration row needs the change to have touched its package,
+/// and detail to have been asked for.
 #[test]
 fn a_concentration_row_needs_its_package_in_the_change() {
-    let terminal = render(&diff(false), ROOT);
+    let terminal = render_detail(&diff(false), ROOT);
     assert!(
         terminal.contains("one contributor made 16 of 16 commits to bow"),
         "{terminal}"
     );
     assert!(!terminal.contains("commits to quiet"), "{terminal}");
+}
+
+/// A concise diff answers what the change did, so concentration the change
+/// never moved is not one of its rows.
+#[test]
+fn a_concise_diff_states_no_standing_concentration() {
+    let terminal = render(&diff(false), ROOT);
+    assert!(!terminal.contains("one contributor"), "{terminal}");
 }
 
 /// A file view states no package-level history at all: the package contains the

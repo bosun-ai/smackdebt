@@ -1,6 +1,7 @@
 use std::collections::{BTreeMap, BTreeSet};
 
 use crate::{
+    ConcentrationComparison, ConcentrationComparisonId, ConcentrationComparisonKind,
     ContributorConcentration, ContributorId, HistoryCommitFact, KnowledgeConcentrationFinding,
     KnowledgeConcentrationFindingId, PackageId, SourceRole, SourceTrust,
 };
@@ -30,6 +31,48 @@ pub fn knowledge_concentration(
             )
         })
         .collect()
+}
+
+/// Names every package whose knowledge concentration the change moved.
+///
+/// A package qualifies or it does not, on each side, by exactly the rule that
+/// states a standing finding — so a change that pushed a package over the bar
+/// introduced the concentration, and one that pulled it back dissolved it. A
+/// package that qualified on both sides states nothing: its concentration is
+/// standing history, which a change did not make.
+pub fn compare_concentration(
+    before: &[ContributorConcentration],
+    after: &[ContributorConcentration],
+) -> Vec<ConcentrationComparison> {
+    let qualified = |rows: &[ContributorConcentration], package: PackageId, role: SourceRole| {
+        rows.iter()
+            .find(|row| row.package() == package && row.role() == role)
+            .copied()
+            .filter(|row| row.affects_findings() && qualifies_for_finding(*row))
+    };
+    let mut comparisons = Vec::new();
+    for row in after {
+        let now = row.affects_findings() && qualifies_for_finding(*row);
+        let then = qualified(before, row.package(), row.role());
+        if now && then.is_none() {
+            comparisons.push(ConcentrationComparison::new(
+                ConcentrationComparisonId::from_index(comparisons.len()),
+                ConcentrationComparisonKind::Introduced,
+                *row,
+            ));
+        }
+    }
+    for row in before {
+        let then = row.affects_findings() && qualifies_for_finding(*row);
+        if then && qualified(after, row.package(), row.role()).is_none() {
+            comparisons.push(ConcentrationComparison::new(
+                ConcentrationComparisonId::from_index(comparisons.len()),
+                ConcentrationComparisonKind::Dissolved,
+                *row,
+            ));
+        }
+    }
+    comparisons
 }
 
 fn qualifies_for_finding(row: ContributorConcentration) -> bool {
@@ -89,6 +132,48 @@ impl ContributorConcentrationAccumulator {
 
 #[cfg(test)]
 mod tests {
+    use crate::{ConcentrationComparisonKind, compare_concentration};
+
+    fn concentrated(package: usize, numerator: u32, denominator: u32) -> ContributorConcentration {
+        ContributorConcentration::new(PackageId::from_index(package), 1, numerator, denominator)
+    }
+
+    /// A change that pushed a package onto one contributor made that
+    /// concentration, so the diff may say so.
+    #[test]
+    fn concentration_the_change_created_is_introduced() {
+        let before = [concentrated(0, 1, 10)];
+        let after = [concentrated(0, 10, 10)];
+        let comparisons = compare_concentration(&before, &after);
+        assert_eq!(comparisons.len(), 1);
+        assert_eq!(
+            comparisons[0].kind(),
+            ConcentrationComparisonKind::Introduced
+        );
+        assert_eq!(comparisons[0].concentration().numerator(), 10);
+    }
+
+    /// A change that spread the work back out dissolved the concentration.
+    #[test]
+    fn concentration_the_change_ended_is_dissolved() {
+        let before = [concentrated(0, 10, 10)];
+        let after = [concentrated(0, 1, 10)];
+        let comparisons = compare_concentration(&before, &after);
+        assert_eq!(comparisons.len(), 1);
+        assert_eq!(
+            comparisons[0].kind(),
+            ConcentrationComparisonKind::Dissolved
+        );
+    }
+
+    /// Concentration both sides hold is standing history, which no change
+    /// made and no diff claims.
+    #[test]
+    fn standing_concentration_states_no_movement() {
+        let rows = [concentrated(0, 10, 10)];
+        assert!(compare_concentration(&rows, &rows).is_empty());
+    }
+
     use super::*;
     use crate::{EvolutionaryFindingKind, Rating};
 

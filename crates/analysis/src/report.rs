@@ -21,10 +21,11 @@ use crate::{
     StableDependencyFinding,
 };
 use crate::{
-    ChangeCoupling, ContributorConcentration, CouplingLink, EvolutionaryComparison,
-    EvolutionaryComparisonId, EvolutionaryFinding, EvolutionaryFindingId, EvolutionaryReportFacts,
-    FileChangeCoupling, FileHistory, HistoryComparisonSuppression, HistoryComparisonSuppressionId,
-    HistoryCoverage, KnowledgeConcentrationFinding, PackageHistory,
+    ChangeCoupling, ConcentrationComparison, ConcentrationComparisonId, ContributorConcentration,
+    CouplingLink, EvolutionaryComparison, EvolutionaryComparisonId, EvolutionaryFinding,
+    EvolutionaryFindingId, EvolutionaryReportFacts, FileChangeCoupling, FileHistory,
+    HistoryComparisonSuppression, HistoryComparisonSuppressionId, HistoryCoverage,
+    KnowledgeConcentrationFinding, PackageHistory,
 };
 #[cfg(test)]
 use crate::{HealthPolicy, LocalUnitId, Signal, Thresholds, compare_units};
@@ -488,6 +489,7 @@ pub struct Scope {
     change_leakage_comparisons: Vec<ChangeLeakageComparisonId>,
     evolutionary_findings: Vec<EvolutionaryFindingId>,
     evolutionary_comparisons: Vec<EvolutionaryComparisonId>,
+    concentration_comparisons: Vec<ConcentrationComparisonId>,
     history_comparison_suppressions: Vec<HistoryComparisonSuppressionId>,
     coverage: Coverage,
     health: HealthCounts,
@@ -518,6 +520,7 @@ impl Scope {
             change_leakage_comparisons: Vec::new(),
             evolutionary_findings: Vec::new(),
             evolutionary_comparisons: Vec::new(),
+            concentration_comparisons: Vec::new(),
             history_comparison_suppressions: Vec::new(),
             coverage: Coverage::default(),
             health: HealthCounts::default(),
@@ -570,6 +573,9 @@ impl Scope {
     }
     pub fn evolutionary_comparisons(&self) -> &[EvolutionaryComparisonId] {
         &self.evolutionary_comparisons
+    }
+    pub fn concentration_comparisons(&self) -> &[ConcentrationComparisonId] {
+        &self.concentration_comparisons
     }
     pub fn history_comparison_suppressions(&self) -> &[HistoryComparisonSuppressionId] {
         &self.history_comparison_suppressions
@@ -640,6 +646,11 @@ impl Scope {
     pub fn add_evolutionary_comparison(&mut self, comparison: EvolutionaryComparisonId) {
         if !self.evolutionary_comparisons.contains(&comparison) {
             self.evolutionary_comparisons.push(comparison);
+        }
+    }
+    pub fn add_concentration_comparison(&mut self, comparison: ConcentrationComparisonId) {
+        if !self.concentration_comparisons.contains(&comparison) {
+            self.concentration_comparisons.push(comparison);
         }
     }
     pub fn add_history_comparison_suppression(
@@ -937,6 +948,7 @@ pub struct Report {
     contributor_concentration: Vec<ContributorConcentration>,
     evolutionary_findings: Vec<EvolutionaryFinding>,
     evolutionary_comparisons: Vec<EvolutionaryComparison>,
+    concentration_comparisons: Vec<ConcentrationComparison>,
     history_comparison_suppressions: Vec<HistoryComparisonSuppression>,
     hotspots: Vec<Hotspot>,
     size_findings: Vec<SizeFinding>,
@@ -1139,6 +1151,7 @@ impl ReportBuilder {
         self.report.contributor_concentration = facts.concentration;
         self.report.evolutionary_findings = facts.findings;
         self.report.evolutionary_comparisons = facts.comparisons;
+        self.report.concentration_comparisons = facts.concentration_comparisons;
         self.report.history_comparison_suppressions = facts.comparison_suppressions;
         self.report.knowledge_concentration_findings = facts.concentration_findings;
     }
@@ -1185,6 +1198,14 @@ impl ReportBuilder {
         comparison: EvolutionaryComparisonId,
     ) {
         self.report.scopes[scope.index()].add_evolutionary_comparison(comparison);
+    }
+
+    pub fn link_concentration_comparison(
+        &mut self,
+        scope: ScopeId,
+        comparison: ConcentrationComparisonId,
+    ) {
+        self.report.scopes[scope.index()].add_concentration_comparison(comparison);
     }
 
     pub fn link_history_comparison_suppression(
@@ -1350,6 +1371,7 @@ impl Report {
             orphan_files: Vec::new(),
             stable_dependency_findings: Vec::new(),
             knowledge_concentration_findings: Vec::new(),
+            concentration_comparisons: Vec::new(),
             problems: Vec::new(),
             package_closures: Vec::new(),
             file_reach: Vec::new(),
@@ -1477,6 +1499,9 @@ impl Report {
     }
     pub fn evolutionary_findings(&self) -> &[EvolutionaryFinding] {
         &self.evolutionary_findings
+    }
+    pub fn concentration_comparisons(&self) -> &[ConcentrationComparison] {
+        &self.concentration_comparisons
     }
     pub fn evolutionary_comparisons(&self) -> &[EvolutionaryComparison] {
         &self.evolutionary_comparisons
@@ -1727,6 +1752,9 @@ impl Report {
         }
         for &id in scope.evolutionary_comparisons() {
             selection.select_evolutionary(self.evolutionary_comparisons[id.index()]);
+        }
+        for &id in scope.concentration_comparisons() {
+            selection.select_concentration(self.concentration_comparisons[id.index()]);
         }
         selection
     }

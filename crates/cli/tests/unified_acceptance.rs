@@ -3120,12 +3120,12 @@ fn composition_work_counts_are_visible_without_changing_report_bytes() {
         (
             "worktree diff terminal",
             vec!["diff", "main", "--all", "--history", "36500d"],
-            [1, 29, 8, 26, 7, 15, 29],
+            [1, 29, 8, 26, 8, 15, 29],
         ),
         (
             "worktree diff JSON",
             vec!["diff", "main", "--json", "--history", "36500d"],
-            [1, 29, 8, 26, 7, 15, 29],
+            [1, 29, 8, 26, 8, 15, 29],
         ),
         // A selection inside a repository answers one scope of the repository
         // report, so it costs the repository run exactly — the same walk, the
@@ -3161,7 +3161,7 @@ fn composition_work_counts_are_visible_without_changing_report_bytes() {
             vec!["diff", "main~1", "--json", "--history", "36500d"],
         ),
     ] {
-        assert_evidence_flow(name, arguments, reference.path(), [1, 29, 8, 26, 7, 15, 29]);
+        assert_evidence_flow(name, arguments, reference.path(), [1, 29, 8, 26, 8, 15, 29]);
     }
 
     let languages = GeneratedRepository::new("main");

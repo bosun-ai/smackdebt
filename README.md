@@ -244,6 +244,15 @@ pair, a diff states pair rows at the root and nowhere below it. The rows a diff
 leaves out stay whole in JSON, where the repository's own coupling and
 concentration tables are read.
 
+Concentration follows the same rule as coupling: a diff states the packages
+whose knowledge concentration the change itself moved — `now concentrates
+knowledge in one contributor` where its commits carried a package over the bar,
+`no longer concentrates knowledge in one contributor` where they carried it
+back. The before side is the history without the commits this change made, so a
+worktree that committed nothing moves no concentration. Standing concentration
+is a fact about the packages rather than about the change: `--all` and a path
+view state it, a concise diff does not, and JSON keeps the whole table.
+
 `next:` closes a diff the way it closes a codebase report: it names the command
 that reaches the highest-ranked movement's own path, restating the ref the run
 compared against. The pointer reads the whole ranking, shown rows and withheld

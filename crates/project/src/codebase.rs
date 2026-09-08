@@ -11,7 +11,7 @@ use smackdebt_discovery::{DiscoveredFile, Inventory};
 use std::path::Path;
 
 use crate::codebase_report::{CodebaseInputs, CodebaseReportBuilder, SignalPolicies};
-use crate::history_stream::load_evolution;
+use crate::history_stream::{ChangeCommits, load_evolution};
 use crate::rating::FileResult;
 use crate::rating::SourcePolicy;
 use crate::requests::{
@@ -194,6 +194,7 @@ pub(crate) fn analyze_codebase(request: &CodebaseRequest) -> Result<ProjectRepor
         request.history_days,
         &history_files,
         &directories,
+        ChangeCommits::default(),
     );
     let mut builder = CodebaseReportBuilder::new(
         selection.label,

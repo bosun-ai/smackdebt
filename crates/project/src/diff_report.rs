@@ -18,7 +18,7 @@ use crate::diff_findings::{DiffIndexes, DiffSpot, add_diff_result};
 use crate::diff_graphs::{ArchitectureLinks, DiffArchitectures};
 use crate::diff_impact::{DiffImpact, ImpactComparisons};
 use crate::diff_source::{DiffResult, DiffSide, DiffUnchanged};
-use crate::history_stream::{history_directory_paths, load_evolution};
+use crate::history_stream::{ChangeCommits, history_directory_paths, load_evolution};
 use crate::paths::{package_of, report_package_path};
 use crate::rating::{FileResult, file_result_role};
 use crate::requests::DiffRequest;
@@ -169,17 +169,27 @@ pub(crate) struct DiffEvolution {
 pub(crate) struct EvolutionLinks {
     pub(crate) findings: Vec<smackdebt_analysis::EvolutionaryFinding>,
     pub(crate) comparisons: Vec<smackdebt_analysis::EvolutionaryComparison>,
+    pub(crate) concentration: Vec<smackdebt_analysis::ConcentrationComparison>,
     pub(crate) suppressions: Vec<smackdebt_analysis::HistoryComparisonSuppression>,
 }
 /// Streams the history window and settles the evolutionary facts a diff
 /// states.
+/// The history one diff reads: the repository holding it and the base the
+/// change is measured from.
+#[derive(Clone, Copy)]
+pub(crate) struct DiffHistorySource<'a> {
+    pub(crate) repository: &'a GitRepository,
+    pub(crate) base: &'a str,
+}
+
 pub(crate) fn stream_diff_evolution(
     request: &DiffRequest,
-    repository: &GitRepository,
+    source: DiffHistorySource<'_>,
     builder: &AnalysisReportBuilder,
     packages: &DiffPackages,
     architectures: &DiffArchitectures,
 ) -> (DiffEvolution, EvolutionLinks) {
+    let repository = source.repository;
     let history_files = builder
         .files()
         .iter()
@@ -200,11 +210,16 @@ pub(crate) fn stream_diff_evolution(
     // A diff states no amplification, so nothing outside pair distances reads
     // it and it stays local to this call.
     let directories = DirectoryTree::from_file_paths(history_directory_paths(&history_files));
+    // The change under review is the commits this worktree holds and the base
+    // does not, so the same stream states both what the packages look like now
+    // and what they looked like before the change.
+    let made_by_change = repository.commits_ahead(source.base).unwrap_or_default();
     let history = load_evolution(
         repository.root(),
         request.history_days,
         &history_files,
         &directories,
+        ChangeCommits::of(&made_by_change),
     );
     let diagnostic = history.diagnostic.clone();
     let current_explanation_pairs = architectures.current.explanation_pairs.clone();
@@ -230,6 +245,7 @@ pub(crate) fn stream_diff_evolution(
     let links = EvolutionLinks {
         findings: facts.findings().to_vec(),
         comparisons: facts.comparisons().to_vec(),
+        concentration: facts.concentration_comparisons().to_vec(),
         suppressions: facts.comparison_suppressions().to_vec(),
     };
     (
@@ -332,6 +348,11 @@ pub(crate) fn link_evolution_scopes(
             .link_evolutionary_comparison(packages[pair.left().index()].scope(), comparison.id());
         builder
             .link_evolutionary_comparison(packages[pair.right().index()].scope(), comparison.id());
+    }
+    for comparison in &links.concentration {
+        let package = comparison.concentration().package();
+        builder.link_concentration_comparison(root, comparison.id());
+        builder.link_concentration_comparison(packages[package.index()].scope(), comparison.id());
     }
     for suppression in &links.suppressions {
         builder.link_history_comparison_suppression(root, suppression.id());

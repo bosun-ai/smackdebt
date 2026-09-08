@@ -5,7 +5,10 @@ use crate::architecture::{
 };
 use crate::change_amplification::{AMPLIFICATION_MIN_COMMITS, AMPLIFICATION_MIN_MEDIAN};
 use crate::comparison::{Comparison, ComparisonKind};
-use crate::evolution::{EvolutionaryComparison, EvolutionaryComparisonId};
+use crate::evolution::{
+    ConcentrationComparison, ConcentrationComparisonId, EvolutionaryComparison,
+    EvolutionaryComparisonId,
+};
 use crate::health::{HealthCounts, is_rated};
 use crate::propagation::{
     CORE_SIZE_FILES, CORE_SIZE_PERCENT, PACKAGE_REACH_FILES, ROOT_REACH_PACKAGES,
@@ -641,6 +644,7 @@ pub struct DebtDiffSelection {
     core: Vec<CoreComparisonId>,
     leakage: Vec<ChangeLeakageComparisonId>,
     evolutionary: Vec<EvolutionaryComparisonId>,
+    concentration: Vec<ConcentrationComparisonId>,
     facts: DebtDiffFacts,
 }
 
@@ -703,6 +707,14 @@ impl DebtDiffSelection {
             .add_direction(comparison.direction());
     }
 
+    /// Selects one package whose knowledge concentration the change moved.
+    pub fn select_concentration(&mut self, comparison: ConcentrationComparison) {
+        self.concentration.push(comparison.id());
+        self.facts
+            .evolutionary
+            .add_direction(comparison.direction());
+    }
+
     pub fn source(&self) -> &[ComparisonId] {
         &self.source
     }
@@ -717,6 +729,9 @@ impl DebtDiffSelection {
     }
     pub fn leakage(&self) -> &[ChangeLeakageComparisonId] {
         &self.leakage
+    }
+    pub fn concentration(&self) -> &[ConcentrationComparisonId] {
+        &self.concentration
     }
     pub fn evolutionary(&self) -> &[EvolutionaryComparisonId] {
         &self.evolutionary

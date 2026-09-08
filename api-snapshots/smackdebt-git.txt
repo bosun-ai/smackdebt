@@ -29,6 +29,7 @@ pub struct smackdebt_git::ContributorIdentity(_)
 pub struct smackdebt_git::GitRepository
 impl smackdebt_git::GitRepository
 pub fn smackdebt_git::GitRepository::changes_from(&self, &str) -> core::result::Result<alloc::vec::Vec<smackdebt_git::Change>, smackdebt_git::GitError>
+pub fn smackdebt_git::GitRepository::commits_ahead(&self, &str) -> core::result::Result<alloc::collections::btree::set::BTreeSet<alloc::string::String>, smackdebt_git::GitError>
 pub fn smackdebt_git::GitRepository::default_ref(&self) -> core::result::Result<core::option::Option<alloc::string::String>, smackdebt_git::GitError>
 pub fn smackdebt_git::GitRepository::discover(impl core::convert::AsRef<std::path::Path>) -> core::result::Result<Self, smackdebt_git::GitError>
 pub fn smackdebt_git::GitRepository::git_processes(&self) -> usize
@@ -46,6 +47,7 @@ pub struct smackdebt_git::HistoryCommit
 impl smackdebt_git::HistoryCommit
 pub fn smackdebt_git::HistoryCommit::changes(&self) -> &[smackdebt_git::HistoryChange]
 pub fn smackdebt_git::HistoryCommit::contributor(&self) -> &smackdebt_git::ContributorIdentity
+pub fn smackdebt_git::HistoryCommit::revision(&self) -> &str
 pub const fn smackdebt_git::HistoryCommit::timestamp(&self) -> i64
 pub struct smackdebt_git::HistoryStreamSummary
 impl smackdebt_git::HistoryStreamSummary

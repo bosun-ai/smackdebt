@@ -2,6 +2,7 @@
 //! evolutionary accumulation they feed.
 
 use std::borrow::Cow;
+use std::collections::BTreeSet;
 use std::collections::HashMap;
 use std::path::{Path, PathBuf};
 
@@ -59,6 +60,7 @@ pub(crate) fn history_directory_paths(
 /// Everything one streamed history window accumulates: the identity tables
 /// the paths resolve through and the counters the coverage will state.
 struct HistoryAccumulation<'a> {
+    change: ChangeCommits<'a>,
     relative_root: &'a Path,
     directories: &'a DirectoryTree,
     window: HistoryWindow,
@@ -101,10 +103,11 @@ impl HistoryAccumulation<'_> {
             changes.push(fact);
         }
         if !changes.is_empty() {
-            self.accumulator.accept(
-                HistoryCommitFact::new(contributor, changes),
-                self.directories,
-            );
+            let mut fact = HistoryCommitFact::new(contributor, changes);
+            if self.change.contains(commit.revision()) {
+                fact = fact.made_by_the_change();
+            }
+            self.accumulator.accept(fact, self.directories);
         }
         self.eligible_commits += u32::from(contains_eligible_source);
     }
@@ -177,11 +180,34 @@ impl HistoryAccumulation<'_> {
     }
 }
 
+/// Which streamed commits the change under review made.
+///
+/// A codebase report reviews no change, so it names none of them and every
+/// commit is standing history.
+#[derive(Clone, Copy, Default)]
+pub(crate) struct ChangeCommits<'a> {
+    revisions: Option<&'a BTreeSet<String>>,
+}
+
+impl<'a> ChangeCommits<'a> {
+    pub(crate) const fn of(revisions: &'a BTreeSet<String>) -> Self {
+        Self {
+            revisions: Some(revisions),
+        }
+    }
+
+    fn contains(self, revision: &str) -> bool {
+        self.revisions
+            .is_some_and(|revisions| revisions.contains(revision))
+    }
+}
+
 pub(crate) fn load_evolution(
     inventory_root: &Path,
     history_days: u32,
     files: &[(PathBuf, FileId, PackageId, SourceRole, SourceTrust)],
     directories: &DirectoryTree,
+    change: ChangeCommits<'_>,
 ) -> LoadedEvolution {
     let Ok(repository) = GitRepository::discover(inventory_root) else {
         return LoadedEvolution {
@@ -206,6 +232,7 @@ pub(crate) fn load_evolution(
         .map_or(i64::MIN, |duration| duration.as_secs() as i64);
     let window = HistoryWindow::of_days(history_days, now);
     let mut state = HistoryAccumulation {
+        change,
         relative_root,
         directories,
         window,
@@ -326,6 +353,62 @@ pub(crate) enum HistoryAlias {
 
 #[cfg(test)]
 mod tests {
+    use crate::diff::analyze_diff;
+    use crate::requests::DiffRequest;
+
+    /// A change whose own commits push a package onto one contributor made
+    /// that concentration, so the diff states the movement rather than the
+    /// standing fact.
+    #[test]
+    fn a_change_that_concentrates_knowledge_states_the_movement() {
+        let root = tempfile::tempdir().unwrap();
+        let repository_path = root.path();
+        git(repository_path, ["init", "-q", "-b", "main"]);
+        let commit = |author: &str, revision: usize| {
+            fs::write(
+                repository_path.join("work.rs"),
+                format!("pub fn work() -> i32 {{ {revision} }}\n"),
+            )
+            .unwrap();
+            git(repository_path, ["add", "."]);
+            git(
+                repository_path,
+                [
+                    "-c",
+                    &format!("user.name={author}"),
+                    "-c",
+                    &format!("user.email={author}@example.invalid"),
+                    "commit",
+                    "-qm",
+                    "change",
+                ],
+            );
+        };
+        // The base is shared work: no contributor holds enough of it.
+        for revision in 0..10 {
+            commit(if revision % 2 == 0 { "Ada" } else { "Bo" }, revision);
+        }
+        git(repository_path, ["branch", "base"]);
+        // The change is one contributor's alone, and enough of it to carry the
+        // package over the bar.
+        for revision in 10..100 {
+            commit("Ada", revision);
+        }
+
+        let result = analyze_diff(
+            &DiffRequest::new(repository_path)
+                .with_reference("base")
+                .with_history_days(36500),
+        )
+        .unwrap();
+        let report = result.report();
+        let moved = report.concentration_comparisons();
+        assert_eq!(moved.len(), 1, "{moved:?}");
+        assert_eq!(
+            moved[0].kind(),
+            smackdebt_analysis::ConcentrationComparisonKind::Introduced
+        );
+    }
     use super::*;
     use crate::codebase::analyze_codebase;
     use crate::requests::CodebaseRequest;

@@ -386,6 +386,9 @@ mod tests {
         assert!(result.report().architecture_comparisons().iter().any(
             |value| value.kind() == smackdebt_analysis::ArchitectureComparisonKind::EdgeRemoved
         ));
-        assert_eq!(result.stats().git_processes, 5);
+        // Discovery, the merge base, the changed paths, the batched object
+        // reader, the streamed history, and the one revision list that says
+        // which of those commits the change under review made.
+        assert_eq!(result.stats().git_processes, 6);
     }
 }

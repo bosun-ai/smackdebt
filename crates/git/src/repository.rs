@@ -5,6 +5,7 @@
 //! All commands are passed as argument vectors to `git`; refs and paths are
 //! never interpolated into a shell command.
 
+use std::collections::BTreeSet;
 use std::ffi::OsString;
 use std::fmt;
 use std::io::{self, BufRead, BufReader, Read, Write};
@@ -207,12 +208,17 @@ impl HistoryChange {
 /// before the next commit is parsed.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct HistoryCommit {
+    revision: String,
     contributor: ContributorIdentity,
     timestamp: i64,
     changes: Vec<HistoryChange>,
 }
 
 impl HistoryCommit {
+    /// The commit this history entry came from, as Git names it.
+    pub fn revision(&self) -> &str {
+        &self.revision
+    }
     pub fn contributor(&self) -> &ContributorIdentity {
         &self.contributor
     }
@@ -335,6 +341,21 @@ impl GitRepository {
         ];
         let output = self.run_raw(args)?;
         Ok(output.status.success())
+    }
+
+    /// The commits this worktree holds that the base does not.
+    ///
+    /// A diff asks what a change did, and the change is exactly this set: the
+    /// history before it is the history without them. The answer is a set of
+    /// revisions rather than a count, so a streamed commit can say which side
+    /// of the change it belongs to.
+    pub fn commits_ahead(&self, base: &str) -> Result<BTreeSet<String>, GitError> {
+        validate_ref(base)?;
+        let value = self.run_text([
+            OsString::from("rev-list"),
+            OsString::from(format!("{base}..HEAD")),
+        ])?;
+        Ok(value.split_whitespace().map(str::to_owned).collect())
     }
 
     pub fn merge_base(&self, left: &str, right: &str) -> Result<String, GitError> {
@@ -659,6 +680,7 @@ struct HistoryParser {
 }
 
 struct PendingCommit {
+    revision: String,
     contributor: ContributorIdentity,
     timestamp: i64,
     changes: Vec<HistoryChange>,
@@ -703,11 +725,12 @@ impl HistoryParser {
                 identity.push(0);
                 identity.extend_from_slice(&self.header[2]);
                 if self.revision.is_none() {
-                    self.revision = Some(revision);
+                    self.revision = Some(revision.clone());
                     self.newest_timestamp = Some(timestamp);
                 }
                 self.oldest_timestamp = Some(timestamp);
                 self.current = Some(PendingCommit {
+                    revision,
                     contributor: ContributorIdentity(String::from_utf8(identity)?),
                     timestamp,
                     changes: Vec::new(),
@@ -774,6 +797,7 @@ impl HistoryParser {
         if let Some(commit) = self.current.take() {
             self.commits += 1;
             accept(HistoryCommit {
+                revision: commit.revision,
                 contributor: commit.contributor,
                 timestamp: commit.timestamp,
                 changes: commit.changes,

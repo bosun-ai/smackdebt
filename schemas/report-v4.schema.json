@@ -40,6 +40,7 @@
     "evolutionary_findings",
     "evolutionary_comparisons",
     "knowledge_concentration_findings",
+    "concentration_comparisons",
     "stable_dependency_findings",
     "hotspots",
     "size_findings",
@@ -239,6 +240,12 @@
       "type": "array",
       "items": {
         "$ref": "#/$defs/evolutionary_comparison"
+      }
+    },
+    "concentration_comparisons": {
+      "type": "array",
+      "items": {
+        "$ref": "#/$defs/concentration_comparison"
       }
     },
     "knowledge_concentration_findings": {
@@ -536,6 +543,7 @@
         "change_leakage_comparisons",
         "evolutionary_findings",
         "evolutionary_comparisons",
+        "concentration_comparisons",
         "coverage",
         "health",
         "diff"
@@ -621,6 +629,12 @@
           },
           "uniqueItems": true
         },
+        "concentration_comparisons": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/index"
+          }
+        },
         "evolutionary_comparisons": {
           "type": "array",
           "items": {
@@ -636,6 +650,60 @@
         },
         "diff": {
           "$ref": "#/$defs/diff"
+        }
+      },
+      "additionalProperties": false
+    },
+    "concentration_comparison": {
+      "type": "object",
+      "required": [
+        "id",
+        "kind",
+        "direction",
+        "package",
+        "role",
+        "numerator",
+        "denominator"
+      ],
+      "properties": {
+        "id": {
+          "$ref": "#/$defs/index"
+        },
+        "kind": {
+          "enum": [
+            "introduced",
+            "dissolved"
+          ]
+        },
+        "direction": {
+          "enum": [
+            "worse",
+            "better",
+            "changed"
+          ]
+        },
+        "package": {
+          "$ref": "#/$defs/index"
+        },
+        "role": {
+          "enum": [
+            "primary",
+            "test",
+            "example",
+            "benchmark",
+            "fixture",
+            "generated",
+            "vendored",
+            "dormant"
+          ]
+        },
+        "numerator": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "denominator": {
+          "type": "integer",
+          "minimum": 0
         }
       },
       "additionalProperties": false

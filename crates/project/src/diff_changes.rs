@@ -572,6 +572,6 @@ mod tests {
         ] {
             assert!(paths.contains(&expected), "missing {expected}: {paths:?}");
         }
-        assert!(result.stats().git_processes <= 6);
+        assert!(result.stats().git_processes <= 7);
     }
 }

@@ -16,9 +16,10 @@ use crate::diff_comparisons::{attribute_comparison_files, compare_diff_architect
 use crate::diff_graphs::{ArchitectureLinks, build_diff_architectures};
 use crate::diff_impact::compare_diff_impact;
 use crate::diff_report::{
-    DiffPlacement, link_architecture_scopes, link_evolution_scopes, link_file_comparison_scopes,
-    link_propagation_scopes, new_diff_builder, record_changed_files, record_unchanged_files,
-    set_diff_architecture_facts, set_diff_history_facts, stream_diff_evolution,
+    DiffHistorySource, DiffPlacement, link_architecture_scopes, link_evolution_scopes,
+    link_file_comparison_scopes, link_propagation_scopes, new_diff_builder, record_changed_files,
+    record_unchanged_files, set_diff_architecture_facts, set_diff_history_facts,
+    stream_diff_evolution,
 };
 use crate::diff_source::{DiffObjects, analyze_diff_files, compare_changed_units};
 use crate::requests::{
@@ -110,6 +111,7 @@ pub(crate) fn analyze_diff(request: &DiffRequest) -> Result<ProjectReport, Proje
         file_scopes,
         packages: package_records,
     } = build_diff_hierarchy(&inventory, &changed, &packages);
+    let base_revision = base.clone();
     let objects = DiffObjects {
         root: repository.root().to_path_buf(),
         base,
@@ -153,8 +155,16 @@ pub(crate) fn analyze_diff(request: &DiffRequest) -> Result<ProjectReport, Proje
     let architecture_links =
         ArchitectureLinks::of(&architecture_comparisons, &architectures.current);
     work.record_algorithm_pass();
-    let (evolution, evolution_links) =
-        stream_diff_evolution(request, &repository, &builder, &packages, &architectures);
+    let (evolution, evolution_links) = stream_diff_evolution(
+        request,
+        DiffHistorySource {
+            repository: &repository,
+            base: &base_revision,
+        },
+        &builder,
+        &packages,
+        &architectures,
+    );
     let impact = compare_diff_impact(&architectures, &tables, &packages, &evolution.facts);
     let impact_comparisons = set_diff_architecture_facts(
         &mut builder,

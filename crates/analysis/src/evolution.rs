@@ -26,6 +26,7 @@ evolution_index!(FileChangeCouplingId);
 evolution_index!(EvolutionaryComparisonId);
 evolution_index!(HistoryComparisonSuppressionId);
 evolution_index!(KnowledgeConcentrationFindingId);
+evolution_index!(ConcentrationComparisonId);
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub enum HistoryAvailability {
@@ -313,6 +314,7 @@ impl HistoryChangeFact {
 pub struct HistoryCommitFact {
     contributor: ContributorId,
     changes: Vec<HistoryChangeFact>,
+    ahead_of_base: bool,
 }
 
 impl HistoryCommitFact {
@@ -320,7 +322,19 @@ impl HistoryCommitFact {
         Self {
             contributor,
             changes,
+            ahead_of_base: false,
         }
+    }
+    /// Records that the change under review contains this commit, so the
+    /// history without it is the history the change started from.
+    #[must_use]
+    pub fn made_by_the_change(mut self) -> Self {
+        self.ahead_of_base = true;
+        self
+    }
+    /// Whether the change under review made this commit.
+    pub const fn made_by_change(&self) -> bool {
+        self.ahead_of_base
     }
     pub const fn contributor(&self) -> ContributorId {
         self.contributor
@@ -335,6 +349,9 @@ pub struct EvolutionAccumulator {
     churn: crate::churn::ChurnAccumulator,
     coupling: crate::change_coupling::ChangeCouplingAccumulator,
     concentration: crate::contributor_concentration::ContributorConcentrationAccumulator,
+    /// The same tally without the commits the change under review made, which
+    /// is what the packages looked like before it.
+    base_concentration: crate::contributor_concentration::ContributorConcentrationAccumulator,
     file_coupling: crate::file_change_coupling::FileChangeCouplingAccumulator,
     amplification: crate::change_amplification::ChangeAmplificationAccumulator,
 }
@@ -360,6 +377,9 @@ impl EvolutionAccumulator {
         self.churn.accept(&commit);
         self.coupling.accept(&commit);
         self.concentration.accept(&commit);
+        if !commit.made_by_change() {
+            self.base_concentration.accept(&commit);
+        }
         self.file_coupling.accept(&commit, directories);
         self.amplification.accept(&commit, directories);
     }
@@ -432,6 +452,14 @@ impl EvolutionAccumulator {
         } else {
             Vec::new()
         };
+        // A codebase report streams no base side, so its two tallies are the
+        // same one and nothing moved.
+        let base_concentration = self.base_concentration.finish();
+        let concentration_comparisons = if history_is_sufficient {
+            crate::compare_concentration(&base_concentration, &concentration)
+        } else {
+            Vec::new()
+        };
         let facts = EvolutionaryReportFacts::new(
             coverage,
             file_history,
@@ -442,6 +470,7 @@ impl EvolutionAccumulator {
             comparisons,
         )
         .with_concentration_findings(concentration_findings)
+        .with_concentration_comparisons(concentration_comparisons)
         .with_comparison_suppressions(comparison_suppressions)
         .with_file_coupling(file_coupling);
         // The amplification travels beside the facts rather than inside them:
@@ -1719,6 +1748,54 @@ impl EvolutionaryComparison {
     }
 }
 
+/// What a change did to one package's knowledge concentration.
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub enum ConcentrationComparisonKind {
+    /// The package now rests on one contributor and did not before.
+    Introduced,
+    /// The package no longer rests on one contributor.
+    Dissolved,
+}
+
+/// One package whose knowledge concentration the change under review moved.
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub struct ConcentrationComparison {
+    id: ConcentrationComparisonId,
+    kind: ConcentrationComparisonKind,
+    concentration: ContributorConcentration,
+}
+
+impl ConcentrationComparison {
+    pub const fn new(
+        id: ConcentrationComparisonId,
+        kind: ConcentrationComparisonKind,
+        concentration: ContributorConcentration,
+    ) -> Self {
+        Self {
+            id,
+            kind,
+            concentration,
+        }
+    }
+    pub const fn id(self) -> ConcentrationComparisonId {
+        self.id
+    }
+    pub const fn kind(self) -> ConcentrationComparisonKind {
+        self.kind
+    }
+    /// The side that states the fact: the change's own tally when knowledge
+    /// concentrated, and the tally it dissolved when it did not.
+    pub const fn concentration(self) -> ContributorConcentration {
+        self.concentration
+    }
+    pub const fn direction(self) -> ComparisonDirection {
+        match self.kind {
+            ConcentrationComparisonKind::Introduced => ComparisonDirection::Worse,
+            ConcentrationComparisonKind::Dissolved => ComparisonDirection::Better,
+        }
+    }
+}
+
 #[derive(Clone, Debug, Default, Eq, PartialEq)]
 pub struct EvolutionaryReportFacts {
     pub(crate) coverage: HistoryCoverage,
@@ -1730,6 +1807,7 @@ pub struct EvolutionaryReportFacts {
     pub(crate) comparisons: Vec<EvolutionaryComparison>,
     pub(crate) comparison_suppressions: Vec<HistoryComparisonSuppression>,
     pub(crate) concentration_findings: Vec<KnowledgeConcentrationFinding>,
+    pub(crate) concentration_comparisons: Vec<ConcentrationComparison>,
     pub(crate) file_coupling: Vec<FileChangeCoupling>,
 }
 
@@ -1754,6 +1832,7 @@ impl EvolutionaryReportFacts {
             comparisons,
             comparison_suppressions: Vec::new(),
             concentration_findings: Vec::new(),
+            concentration_comparisons: Vec::new(),
             file_coupling: Vec::new(),
         }
     }
@@ -1763,6 +1842,14 @@ impl EvolutionaryReportFacts {
         findings: Vec<KnowledgeConcentrationFinding>,
     ) -> Self {
         self.concentration_findings = findings;
+        self
+    }
+    /// Adds the concentration movements this change made, if any.
+    pub fn with_concentration_comparisons(
+        mut self,
+        comparisons: Vec<ConcentrationComparison>,
+    ) -> Self {
+        self.concentration_comparisons = comparisons;
         self
     }
     pub fn with_comparison_suppressions(
@@ -1788,6 +1875,9 @@ impl EvolutionaryReportFacts {
     }
     pub fn findings(&self) -> &[EvolutionaryFinding] {
         &self.findings
+    }
+    pub fn concentration_comparisons(&self) -> &[ConcentrationComparison] {
+        &self.concentration_comparisons
     }
     pub fn comparisons(&self) -> &[EvolutionaryComparison] {
         &self.comparisons

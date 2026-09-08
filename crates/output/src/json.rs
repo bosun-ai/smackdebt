@@ -50,7 +50,7 @@ impl Serialize for ReportView<'_> {
                 .cloned()
                 .expect("a built report always carries a root verdict"),
         };
-        let mut map = serializer.serialize_map(Some(44))?;
+        let mut map = serializer.serialize_map(Some(45))?;
         map.serialize_entry("schema_version", &report.schema_version())?;
         map.serialize_entry("mode", mode_name(report.mode()))?;
         map.serialize_entry("comparison_ref", &report.comparison_ref())?;
@@ -124,6 +124,10 @@ impl Serialize for ReportView<'_> {
         map.serialize_entry(
             "knowledge_concentration_findings",
             &KnowledgeConcentrationFindings(report.knowledge_concentration_findings()),
+        )?;
+        map.serialize_entry(
+            "concentration_comparisons",
+            &ConcentrationComparisons(report.concentration_comparisons()),
         )?;
         map.serialize_entry(
             "stable_dependency_findings",
@@ -263,7 +267,7 @@ impl Serialize for ScopeView<'_> {
         S: Serializer,
     {
         let scope = self.0;
-        let mut map = serializer.serialize_map(Some(17))?;
+        let mut map = serializer.serialize_map(Some(18))?;
         map.serialize_entry("id", &scope.id().get())?;
         map.serialize_entry("kind", scope_kind(scope.kind()))?;
         map.serialize_entry("parent", &scope.parent().map(|id| id.get()))?;
@@ -298,6 +302,10 @@ impl Serialize for ScopeView<'_> {
         map.serialize_entry(
             "evolutionary_comparisons",
             &EvolutionaryComparisonIds(scope.evolutionary_comparisons()),
+        )?;
+        map.serialize_entry(
+            "concentration_comparisons",
+            &ConcentrationComparisonIds(scope.concentration_comparisons()),
         )?;
         map.serialize_entry("coverage", &CoverageView(scope.coverage()))?;
         map.serialize_entry("health", &scope.id().get())?;
@@ -1760,6 +1768,50 @@ impl Serialize for StableDependencyFindingView<'_> {
         map.serialize_entry("references", &evidence.references())?;
         map.serialize_entry("witness_edges", &DependencyEdgeIds(self.0.witness_edges()))?;
         map.end()
+    }
+}
+
+struct ConcentrationComparisons<'a>(&'a [smackdebt_analysis::ConcentrationComparison]);
+impl Serialize for ConcentrationComparisons<'_> {
+    fn serialize<S: Serializer>(&self, serializer: S) -> Result<S::Ok, S::Error> {
+        let mut sequence = serializer.serialize_seq(Some(self.0.len()))?;
+        for comparison in self.0 {
+            sequence.serialize_element(&ConcentrationComparisonView(*comparison))?;
+        }
+        sequence.end()
+    }
+}
+
+struct ConcentrationComparisonView(smackdebt_analysis::ConcentrationComparison);
+impl Serialize for ConcentrationComparisonView {
+    fn serialize<S: Serializer>(&self, serializer: S) -> Result<S::Ok, S::Error> {
+        let concentration = self.0.concentration();
+        let mut map = serializer.serialize_map(Some(7))?;
+        map.serialize_entry("id", &self.0.id().get())?;
+        map.serialize_entry(
+            "kind",
+            match self.0.kind() {
+                smackdebt_analysis::ConcentrationComparisonKind::Introduced => "introduced",
+                smackdebt_analysis::ConcentrationComparisonKind::Dissolved => "dissolved",
+            },
+        )?;
+        map.serialize_entry("direction", direction_name(self.0.direction()))?;
+        map.serialize_entry("package", &concentration.package().get())?;
+        map.serialize_entry("role", source_role_name(concentration.role()))?;
+        map.serialize_entry("numerator", &concentration.numerator())?;
+        map.serialize_entry("denominator", &concentration.denominator())?;
+        map.end()
+    }
+}
+
+struct ConcentrationComparisonIds<'a>(&'a [smackdebt_analysis::ConcentrationComparisonId]);
+impl Serialize for ConcentrationComparisonIds<'_> {
+    fn serialize<S: Serializer>(&self, serializer: S) -> Result<S::Ok, S::Error> {
+        let mut sequence = serializer.serialize_seq(Some(self.0.len()))?;
+        for id in self.0 {
+            sequence.serialize_element(&id.get())?;
+        }
+        sequence.end()
     }
 }
 

@@ -65,15 +65,16 @@ pub use change_leakage::{
 pub use churn::churn;
 pub use connection_graph::{ConnectionGraph, enters_connection_graph};
 pub use contributor_concentration::{
-    MINIMUM_CONCENTRATION_COMMITS, MINIMUM_CONCENTRATION_PERCENT, contributor_concentration,
-    knowledge_concentration,
+    MINIMUM_CONCENTRATION_COMMITS, MINIMUM_CONCENTRATION_PERCENT, compare_concentration,
+    contributor_concentration, knowledge_concentration,
 };
 pub use cycle_witness::cycle_witness;
 pub use dependency_degree::dependency_degree;
 pub use directory_tree::{DirectoryId, DirectoryTree};
 pub use evolution::{
-    ChangeCoupling, ContributorConcentration, ContributorId, CouplingEvidence, CouplingLink,
-    EvolutionAccumulator, EvolutionaryComparison, EvolutionaryComparisonId,
+    ChangeCoupling, ConcentrationComparison, ConcentrationComparisonId,
+    ConcentrationComparisonKind, ContributorConcentration, ContributorId, CouplingEvidence,
+    CouplingLink, EvolutionAccumulator, EvolutionaryComparison, EvolutionaryComparisonId,
     EvolutionaryComparisonKind, EvolutionaryFinding, EvolutionaryFindingId,
     EvolutionaryFindingKind, EvolutionaryReportFacts, FileChangeCoupling, FileChangeCouplingId,
     FileHistory, HistoryAvailability, HistoryChangeCounts, HistoryChangeFact, HistoryCommitFact,

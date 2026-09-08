@@ -2167,7 +2167,13 @@ fn current_history_rows(
 ) -> Section {
     let mut section = Section::new("HISTORY");
     section.rows = coupling_rows(report, selected, detail, relevance);
-    section.rows.extend(concentration_rows(report, relevance));
+    // A diff answers what a change did. Standing concentration is a fact about
+    // the packages, not about the change, so a concise diff states only the
+    // concentration the change itself moved; the standing rows keep their
+    // place under detail and in JSON.
+    if detail || report.mode() != ReportMode::Diff {
+        section.rows.extend(concentration_rows(report, relevance));
+    }
     // The concise view states at most three actionable history rows; a path
     // view and `--all` keep the relevant context they exist to show.
     if !detail {
@@ -2304,9 +2310,11 @@ impl DiffHistoryRows<'_> {
             HistoryRelevance::change_relevant(self.report, self.selected)
         };
         let mut section = current_history_rows(self.report, self.selected, self.detail, &relevance);
-        // A coupling that moved is what this change did, not standing history,
-        // so it is stated wherever the verdict counted it.
+        // A coupling or a concentration that moved is what this change did,
+        // not standing history, so it is stated wherever the verdict counted
+        // it.
         append_evolutionary_comparisons(&mut section, self.report, self.selection, self.diff_rows);
+        append_concentration_comparisons(&mut section, self.report, self.selection);
         section
     }
 }
@@ -2344,6 +2352,38 @@ fn append_evolutionary_comparisons(
             Some(Word::direction(comparison.direction())),
             format!("{left} ↔ {right} {outcome}"),
         ));
+    }
+}
+
+/// The packages whose knowledge concentration this change moved.
+fn append_concentration_comparisons(
+    section: &mut Section,
+    report: &Report,
+    selection: &DebtDiffSelection,
+) {
+    for id in selection.concentration() {
+        let comparison = report.concentration_comparisons()[id.index()];
+        let concentration = comparison.concentration();
+        let package = package_name(report, concentration.package().index()).unwrap_or("?");
+        let outcome = match comparison.kind() {
+            smackdebt_analysis::ConcentrationComparisonKind::Introduced => {
+                "now concentrates knowledge in one contributor"
+            }
+            smackdebt_analysis::ConcentrationComparisonKind::Dissolved => {
+                "no longer concentrates knowledge in one contributor"
+            }
+        };
+        section.rows.push(
+            Row::new(
+                Some(Word::direction(comparison.direction())),
+                format!("{package} {outcome}"),
+            )
+            .with_fact(format!(
+                "one contributor made {} of {} commits",
+                Grouped(concentration.numerator() as usize),
+                Grouped(concentration.denominator() as usize)
+            )),
+        );
     }
 }
 
