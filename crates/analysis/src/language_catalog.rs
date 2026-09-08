@@ -19,6 +19,7 @@ macro_rules! languages {
 
             /// Classifies a filename without reading its contents.
             pub fn from_filename(filename: &str) -> Option<Self> {
+                if filename.ends_with(".blade.php") { return Some(Self::Unknown); }
                 $(if [$($filename),*].contains(&filename) { return Some(Self::$variant); })*
                 let extension = filename.rsplit_once('.')?.1;
                 match extension {
@@ -46,14 +47,15 @@ languages! {
     Astro => ("Astro", "astro", ["astro"], []),
     Kotlin => ("Kotlin", "kotlin", ["kt", "kts"], []),
     Go => ("Go", "go", ["go"], []),
+    Php => ("PHP", "php", ["php", "phtml"], []),
     Unknown => ("Unknown", "unknown", [], []),
 }
 
 fn unsupported_name(extension: &str) -> Option<&'static str> {
     Some(match extension {
         "swift" => "Swift",
-        "php" | "phtml" => "PHP",
-        "cs" | "razor" | "cshtml" => "C#",
+        "cs" => "C#",
+        "razor" | "cshtml" => "Razor",
         "scala" | "sc" => "Scala",
         "ex" | "exs" => "Elixir",
         "dart" => "Dart",
@@ -64,6 +66,9 @@ fn unsupported_name(extension: &str) -> Option<&'static str> {
 impl Language {
     /// The declared source name, including recognized unsupported languages.
     pub fn source_name(filename: &str) -> Option<&'static str> {
+        if filename.ends_with(".blade.php") {
+            return Some("Blade");
+        }
         match Self::from_filename(filename)? {
             Self::Unknown => unsupported_name(filename.rsplit_once('.')?.1),
             language => Some(language.name()),
@@ -82,6 +87,7 @@ mod tests {
             ("Rakefile", Language::Ruby, "Ruby"),
             ("x.rake", Language::Ruby, "Ruby"),
             ("x.go", Language::Go, "Go"),
+            ("x.php", Language::Php, "PHP"),
         ] {
             assert_eq!(Language::from_filename(filename), Some(language));
             assert_eq!(Language::source_name(filename), Some(name));

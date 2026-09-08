@@ -25,6 +25,7 @@ mod manifest_names;
 mod named_dependencies;
 mod package_graph;
 mod paths;
+mod php_project;
 mod project_metadata;
 mod propagation_comparisons;
 mod rating;

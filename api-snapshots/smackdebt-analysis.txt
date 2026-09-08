@@ -130,6 +130,7 @@ pub smackdebt_analysis::Language::Java
 pub smackdebt_analysis::Language::JavaScript
 pub smackdebt_analysis::Language::Jsx
 pub smackdebt_analysis::Language::Kotlin
+pub smackdebt_analysis::Language::Php
 pub smackdebt_analysis::Language::Python
 pub smackdebt_analysis::Language::Ruby
 pub smackdebt_analysis::Language::Rust

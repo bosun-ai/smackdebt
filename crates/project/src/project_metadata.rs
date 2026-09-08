@@ -1,58 +1,64 @@
-//! Static Go project declarations shared by codebase and diff resolution.
+//! Static project declarations shared by codebase and diff resolution.
 use crate::go_project::{GoProject, package_directory};
+use crate::php_project::PhpProject;
 use smackdebt_analysis::Language;
 use std::path::{Path, PathBuf};
 
 #[derive(Clone, Default)]
 pub(crate) struct ProjectMetadata {
-    go: Vec<GoProject>,
+    pub(crate) go: Vec<GoProject>,
+    pub(crate) php: Vec<PhpProject>,
     pub(crate) issues: Vec<ProjectIssue>,
 }
-
 #[derive(Clone)]
 pub(crate) struct ProjectIssue {
     pub(crate) root: PathBuf,
+    pub(crate) language: Language,
     pub(crate) reason: String,
 }
-
 impl ProjectMetadata {
     pub(crate) fn load(
         paths: &[PathBuf],
         mut read: impl FnMut(&Path) -> Result<Vec<u8>, String>,
     ) -> Self {
         let mut result = Self::default();
-        for path in paths.iter().filter(|path| {
-            matches!(
-                path.file_name().and_then(|name| name.to_str()),
-                Some("go.mod" | "go.work")
-            )
-        }) {
+        for path in paths {
+            let Some(name) = path.file_name().and_then(|name| name.to_str()) else {
+                continue;
+            };
+            if !matches!(name, "go.mod" | "go.work" | "composer.json") {
+                continue;
+            }
             let parsed = read(path).and_then(|bytes| {
                 let source = std::str::from_utf8(&bytes)
-                    .map_err(|_| "Go configuration is not UTF-8".to_owned())?;
-                result.go.push(GoProject::parse(path, source)?);
+                    .map_err(|_| "project configuration is not UTF-8".to_owned())?;
+                match name {
+                    "go.mod" | "go.work" => result.go.push(GoProject::parse(path, source)?),
+                    "composer.json" => result.php.push(PhpProject::parse(path, source)?),
+                    _ => unreachable!(),
+                }
                 Ok(())
             });
             if let Err(error) = parsed {
                 result.issues.push(ProjectIssue {
                     root: path.parent().unwrap_or(Path::new("")).to_path_buf(),
+                    language: match name {
+                        "go.mod" | "go.work" => Language::Go,
+                        "composer.json" => Language::Php,
+                        _ => unreachable!(),
+                    },
                     reason: format!("{}: {error}", path.display()),
                 });
             }
         }
         result
     }
-
     pub(crate) fn issue_for(&self, language: Language, source: &Path) -> Option<&str> {
-        if language != Language::Go {
-            return None;
-        }
         self.issues
             .iter()
-            .find(|issue| source.starts_with(&issue.root))
+            .find(|issue| issue.language == language && source.starts_with(&issue.root))
             .map(|issue| issue.reason.as_str())
     }
-
     pub(crate) fn package_directory(
         &self,
         source: &Path,
@@ -112,39 +118,66 @@ impl ProjectMetadata {
         }
         Ok(None)
     }
-
     pub(crate) fn visible(
         &self,
-        _language: Language,
-        _source: &Path,
-        _target: &Path,
-        _name: &str,
+        language: Language,
+        source: &Path,
+        target: &Path,
+        name: &str,
     ) -> bool {
-        true
+        match language {
+            Language::Php => {
+                let Some(owner) = self
+                    .php
+                    .iter()
+                    .filter(|package| source.starts_with(&package.root))
+                    .max_by_key(|package| package.root.components().count())
+                else {
+                    return true;
+                };
+                self.php
+                    .iter()
+                    .filter(|package| {
+                        package.root == owner.root
+                            || package
+                                .name
+                                .as_ref()
+                                .is_some_and(|name| owner.requires.contains(name))
+                    })
+                    .any(|package| package.permits(name, target))
+            }
+            _ => true,
+        }
     }
-
-    pub(crate) fn claims_name(&self, _language: Language, _source: &Path, _name: &str) -> bool {
-        false
+    pub(crate) fn is_external_bootstrap(
+        &self,
+        language: Language,
+        source: &Path,
+        candidate: &str,
+    ) -> bool {
+        language == Language::Php
+            && self
+                .php
+                .iter()
+                .any(|package| package.is_bootstrap(source, candidate))
     }
-
+    pub(crate) fn claims_name(&self, language: Language, source: &Path, name: &str) -> bool {
+        language == Language::Php
+            && self
+                .php
+                .iter()
+                .filter(|package| source.starts_with(&package.root))
+                .any(|package| package.claims(name))
+    }
     pub(crate) fn imports(&self, _source: &Path) -> impl Iterator<Item = &str> {
         std::iter::empty()
     }
-
     pub(crate) fn is_test_source(&self, _source: &Path) -> bool {
         false
     }
-
     pub(crate) fn entries(&self) -> impl Iterator<Item = &Path> {
-        std::iter::empty()
-    }
-
-    pub(crate) fn is_external_bootstrap(
-        &self,
-        _language: Language,
-        _source: &Path,
-        _candidate: &str,
-    ) -> bool {
-        false
+        self.php
+            .iter()
+            .flat_map(|package| package.files.iter().map(PathBuf::as_path))
     }
 }

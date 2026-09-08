@@ -7,6 +7,7 @@ use crate::go_language::Go;
 use crate::java_language::Java;
 use crate::javascript_language::{JavaScript, Jsx, Tsx, TypeScript};
 use crate::language::Language as LanguageContract;
+use crate::php_language::Php;
 use crate::python_language::Python;
 use crate::ruby_language::Ruby;
 use crate::rust_language::Rust;
@@ -63,4 +64,5 @@ analyzers! {
     Tsx => tsx: Tsx,
     Ruby => ruby: Ruby,
     Go => go: Go,
+    Php => php: Php,
 }

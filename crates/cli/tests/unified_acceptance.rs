@@ -3179,7 +3179,7 @@ fn composition_work_counts_are_visible_without_changing_report_bytes() {
         ("directory terminal", vec!["src", "--all"]),
         ("directory JSON", vec!["src", "--json"]),
     ] {
-        assert_evidence_flow(name, arguments, languages.path(), [1, 16, 12, 0, 3, 12, 14]);
+        assert_evidence_flow(name, arguments, languages.path(), [1, 17, 13, 0, 3, 13, 15]);
     }
 
     let roles = source_role_repository();

@@ -79,3 +79,37 @@ pub(super) fn statement(kind: &str, kinds: &[&str]) -> Syntax {
         Syntax::default()
     }
 }
+
+/// Builds an analysis-owned name reference after a language has normalized it.
+pub(super) fn named_reference(
+    node: Node<'_>,
+    name: String,
+    namespace: String,
+    kind: smackdebt_analysis::SymbolKind,
+) -> smackdebt_analysis::DependencySyntax {
+    use smackdebt_analysis::{
+        DependencyKind, DependencySyntax, DependencySyntaxState, NameReference, SourceSpan,
+    };
+    DependencySyntax::new(
+        DependencyKind::Import,
+        &name,
+        SourceSpan::new(
+            node.start_position().row as u32 + 1,
+            node.end_position().row as u32 + 1,
+        ),
+        DependencySyntaxState::Name(NameReference::new(
+            name.clone(),
+            namespace,
+            node.start_byte(),
+            kind,
+        )),
+    )
+}
+
+pub(super) fn qualified_name(namespace: &str, name: &str) -> String {
+    if namespace.is_empty() {
+        name.to_owned()
+    } else {
+        format!("{namespace}.{name}")
+    }
+}
