@@ -27,13 +27,13 @@ class AgentInstallerTests(unittest.TestCase):
         self.bin.mkdir()
         self.environment = dict(os.environ)
         self.environment.update(HOME=str(self.profile), PATH=f"{self.bin}:/usr/bin:/bin", TMPDIR=str(self.root))
-        for name in ("CLAUDE_CONFIG_DIR", "CARGO_HOME", "SMACKDEBT_INSTALL_DIR", "CARGO_DIST_FORCE_INSTALL_DIR"):
+        for name in ("CLAUDE_CONFIG_DIR", "CARGO_HOME", "SMACKDEBT_INSTALL_DIR", "CARGO_DIST_FORCE_INSTALL_DIR", "XDG_CONFIG_HOME"):
             self.environment.pop(name, None)
         self.destinations = [self.profile / folder / "skills/smackdebt" for folder in (".agents", ".claude")]
         artifact = os.environ.get("SMACKDEBT_TEST_INSTALLER")
         self.installer = Path(artifact).read_text() if artifact else builder.render_installer()
         self.executable("curl", '#!/bin/sh\nprintf "%s\\n" "$*" >> "$HOME/downloads"\nwhile [ "$1" != -o ]; do shift; done\ncp "$HOME/cli-installer" "$2"\n')
-        (self.profile / "cli-installer").write_text('#!/bin/sh\ntouch "$HOME/cli-installed"\n')
+        (self.profile / "cli-installer").write_text('#!/bin/sh\nmkdir -p "$SMACKDEBT_INSTALL_DIR/bin"\nprintf "fake binary" > "$SMACKDEBT_INSTALL_DIR/bin/smackdebt"\ntouch "$HOME/cli-installed"\n')
 
     def executable(self, name, text):
         path = self.bin / name
@@ -76,6 +76,114 @@ class AgentInstallerTests(unittest.TestCase):
         self.assert_installed_skill()
         self.assertFalse((self.profile / "cli-installed").exists())
 
+    def test_cli_only_updates_do_not_add_standalone_skills(self):
+        self.assertEqual(self.run_installer("--no-skill").returncode, 0)
+        result = self.run_installer()
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertFalse(any(path.exists() for path in self.destinations))
+
+    def test_skill_only_updates_do_not_add_the_cli(self):
+        self.assertEqual(self.run_installer("--no-cli").returncode, 0)
+        result = self.run_installer()
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assert_installed_skill()
+        self.assertFalse((self.profile / "downloads").exists())
+
+    def test_all_adds_the_missing_component(self):
+        self.assertEqual(self.run_installer("--no-cli").returncode, 0)
+        result = self.run_installer("--all")
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertTrue((self.profile / ".cargo/bin/smackdebt").exists())
+        self.assert_installed_skill()
+
+    def test_invalid_saved_settings_do_not_start_an_update(self):
+        self.assertEqual(self.run_installer("--no-skill").returncode, 0)
+        downloads = (self.profile / "downloads").read_text()
+        (self.profile / ".config/smackdebt/install-state").write_text("broken settings\n")
+        result = self.run_installer()
+        self.assertNotEqual(result.returncode, 0)
+        self.assertIn("cannot read installation settings", result.stderr)
+        self.assertEqual((self.profile / "downloads").read_text(), downloads)
+
+    def test_updates_remember_custom_cli_and_claude_locations(self):
+        prefix = self.profile / "custom cargo"
+        claude = self.profile / "custom claude"
+        self.environment.update(CARGO_HOME=str(prefix), CLAUDE_CONFIG_DIR=str(claude))
+        result = self.run_installer()
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.environment.pop("CARGO_HOME")
+        self.environment.pop("CLAUDE_CONFIG_DIR")
+        result = self.run_installer()
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertTrue((prefix / "bin/smackdebt").exists())
+        self.assertTrue((claude / "skills/smackdebt/SKILL.md").exists())
+        self.assertFalse((self.profile / ".cargo/bin/smackdebt").exists())
+        self.assertFalse(self.destinations[1].exists())
+
+    def test_uninstall_removes_managed_files_and_keeps_shared_files(self):
+        self.assertEqual(self.run_installer().returncode, 0)
+        (self.destinations[0] / "notes.md").write_text("user notes")
+        (self.profile / ".cargo/env").write_text("shared shell configuration")
+        result = self.run_installer("--uninstall")
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertFalse((self.profile / ".cargo/bin/smackdebt").exists())
+        self.assertFalse(any((path / "SKILL.md").exists() for path in self.destinations))
+        self.assertEqual((self.destinations[0] / "notes.md").read_text(), "user notes")
+        self.assertEqual((self.profile / ".cargo/env").read_text(), "shared shell configuration")
+        self.assertFalse((self.profile / ".config/smackdebt/install-state").exists())
+
+    def test_plugin_migration_keeps_cli_updates_without_reinstalling_skills(self):
+        self.assertEqual(self.run_installer().returncode, 0)
+        result = self.run_installer("--uninstall", "--no-cli")
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertTrue((self.profile / ".cargo/bin/smackdebt").exists())
+        result = self.run_installer()
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertFalse(any(path.exists() for path in self.destinations))
+
+    def test_removing_cli_keeps_skill_updates_without_reinstalling_cli(self):
+        self.assertEqual(self.run_installer().returncode, 0)
+        result = self.run_installer("--uninstall", "--no-skill")
+        self.assertEqual(result.returncode, 0, result.stderr)
+        result = self.run_installer()
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertFalse((self.profile / ".cargo/bin/smackdebt").exists())
+        self.assert_installed_skill()
+
+    def test_uninstall_preserves_edited_skills_and_can_resume(self):
+        self.assertEqual(self.run_installer().returncode, 0)
+        edited = self.destinations[0] / "SKILL.md"
+        edited.write_text("user instructions")
+        result = self.run_installer("--uninstall")
+        self.assertNotEqual(result.returncode, 0)
+        self.assertIn("kept changed file", result.stderr)
+        self.assertEqual(edited.read_text(), "user instructions")
+        self.assertFalse((self.profile / ".cargo/bin/smackdebt").exists())
+        edited.unlink()
+        self.assertEqual(self.run_installer("--uninstall").returncode, 0)
+
+    def test_uninstall_preserves_a_binary_replaced_by_another_installer(self):
+        self.assertEqual(self.run_installer().returncode, 0)
+        binary = self.profile / ".cargo/bin/smackdebt"
+        binary.write_text("another installation")
+        result = self.run_installer("--uninstall")
+        self.assertNotEqual(result.returncode, 0)
+        self.assertEqual(binary.read_text(), "another installation")
+
+    def test_update_selection_does_not_forget_ownership_of_other_files(self):
+        self.assertEqual(self.run_installer().returncode, 0)
+        self.assertEqual(self.run_installer("--no-cli").returncode, 0)
+        result = self.run_installer("--uninstall")
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertFalse((self.profile / ".cargo/bin/smackdebt").exists())
+        self.assertFalse(any(path.exists() for path in self.destinations))
+
+    def test_uninstall_without_an_installation_needs_no_download(self):
+        self.environment["PATH"] = str(self.bin)
+        result = self.run_installer("--uninstall")
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertFalse((self.profile / "downloads").exists())
+
     def test_reinstall_updates_managed_skills_and_keeps_other_files(self):
         for destination in self.destinations:
             destination.mkdir(parents=True)
@@ -117,7 +225,7 @@ class AgentInstallerTests(unittest.TestCase):
         self.assertEqual(list(external.iterdir()), [])
 
     def test_invalid_options_do_not_download_or_write_skills(self):
-        for arguments in [("--no-cli", "--no-skill"), ("--typo",)]:
+        for arguments in [("--no-cli", "--no-skill"), ("--typo",), ("--all", "--no-cli"), ("--all", "--uninstall")]:
             with self.subTest(arguments=arguments):
                 result = self.run_installer(*arguments)
                 self.assertEqual(result.returncode, 2)
@@ -148,7 +256,7 @@ class AgentInstallerTests(unittest.TestCase):
         self.assertFalse(self.destinations[1].exists())
 
     def test_a_later_write_failure_reports_the_cli_as_completed(self):
-        self.executable("mv", "#!/bin/sh\necho 'disk full' >&2\nexit 1\n")
+        self.executable("mv", "#!/bin/sh\nfor destination do :; done\ncase \"$destination\" in */SKILL.md) echo 'disk full' >&2; exit 1 ;; esac\nexec /bin/mv \"$@\"\n")
         result = self.run_installer()
         self.assertNotEqual(result.returncode, 0)
         self.assertIn("disk full", result.stderr)

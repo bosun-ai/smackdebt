@@ -16,7 +16,7 @@ The token is needed because PRs and tags created with the built-in `GITHUB_TOKEN
 Release-plz runs after pushes to `master` and opens or updates a release PR with the shared version and root changelog. Only merging that PR starts publication. The first release is `v0.1.0`.
 
 1. Review the release PR's version, changelog, and passing CI. Changes in internal libraries must appear in the application changelog too.
-   When changing the skill, increment the version in both plugin manifests so plugin managers refresh their caches. Plugin versions track skill changes independently of the CLI. The combined installer embeds the CLI release version and that tag's skill during the build.
+   When changing plugin content, increment the version in both plugin manifests so plugin managers refresh their caches. CI enforces this for pull requests and pushes to master. Plugin versions track skill changes independently of the CLI. The combined installer embeds the CLI release version and that tag's skill during the build.
 2. Check out its final candidate commit with a clean tree. Review public report examples before accepting any changed report digests.
 3. Record evidence locally, supplying paths to Smackdebt, the private Fluyt workload, and the private Rust workload:
 
@@ -51,7 +51,9 @@ python3 scripts/smoke-release.py target/distrib/smackdebt-aarch64-apple-darwin.t
 Use the target matching your machine. The Linux archive requires glibc; the generated installer checks platform compatibility.
 
 Installer tests run through stdin with isolated user directories on all three
-check runners. They cover opt-outs, updates, existing skills, and failed installs.
+check runners. They cover remembered component choices and paths, updates,
+removal, preserved user files, and failed installs. The real-artifact smoke also
+checks a CLI-only update and removal of standalone skills while retaining the CLI.
 `dist build --artifacts=global` must include `install.sh` and the existing
 `smackdebt-installer.sh`. The release verification job tests the finished CLI
 archives and combined installer on all three platforms before cargo-dist

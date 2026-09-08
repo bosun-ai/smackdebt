@@ -18,7 +18,7 @@ cleanup() {
     if [ -n "$staged" ]; then rm -f "$staged"; fi
     if [ -n "$temporary" ]; then rm -rf "$temporary"; fi
     if [ "$status" -ne 0 ]; then
-        printf 'smackdebt: installation stopped; completed: %s\n' "${completed:-nothing}" >&2
+        printf 'smackdebt: stopped; completed: %s\n' "${completed:-nothing}" >&2
     fi
     exit "$status"
 }
@@ -68,53 +68,206 @@ install_skill() {
     completed="${completed:+$completed; }skill at $1"
 }
 
+check_regular() {
+    [ ! -L "$1" ] || fail "will not replace a link: $1"
+    if [ -e "$1" ]; then [ -f "$1" ] || fail "not a regular file: $1"; fi
+}
+
+save_selection() {
+    staged=$(mktemp "$state_dir/.install.XXXXXX")
+    printf '%s\n' 1 "$cli" "$skill" "$cli_prefix" "$agents_dir" "$claude_dir" > "$staged"
+    mv -f "$staged" "$state_file"
+    staged=''
+}
+
+load_selection() {
+    {
+        IFS= read -r format
+        IFS= read -r cli
+        IFS= read -r skill
+        IFS= read -r cli_prefix
+        IFS= read -r agents_dir
+        IFS= read -r claude_dir
+    } < "$state_file" || fail "cannot read installation settings: $state_file"
+    [ "$format" = 1 ] || fail "unknown installation settings: $state_file"
+    case "$cli:$skill" in yes:yes|yes:no|no:yes|no:no) ;; *) fail "invalid installation settings: $state_file" ;; esac
+}
+
+check_path() {
+    case "$1" in /*) ;; *) fail "installation paths must be absolute: $1" ;; esac
+    case "$1" in *'
+'*) fail 'installation paths must not contain newlines' ;; esac
+    [ "$1" != / ] || fail 'cannot install directly in the filesystem root'
+}
+
+record_cli() {
+    check_regular "$state_dir/cli.sha256"
+    staged=$(mktemp "$state_dir/.install.XXXXXX")
+    hash_file "$cli_prefix/bin/smackdebt" > "$staged"
+    mv -f "$staged" "$state_dir/cli.sha256"
+    staged=''
+    if [ -f "$state_dir/smackdebt-receipt.json" ]; then
+        check_regular "$state_dir/receipt.sha256"
+        staged=$(mktemp "$state_dir/.install.XXXXXX")
+        hash_file "$state_dir/smackdebt-receipt.json" > "$staged"
+        mv -f "$staged" "$state_dir/receipt.sha256"
+        staged=''
+    fi
+}
+
+remove_managed_file() {
+    if [ ! -e "$1" ] && [ ! -L "$1" ]; then return; fi
+    if [ -L "$1" ] || [ ! -f "$1" ] || [ -L "$2" ] || [ ! -f "$2" ]; then
+        printf 'smackdebt: kept unmanaged file: %s\n' "$1" >&2
+        return 1
+    fi
+    observed=$(hash_file "$1") || return 1
+    if ! grep -Fxq "$observed" "$2"; then
+        printf 'smackdebt: kept changed file: %s\n' "$1" >&2
+        return 1
+    fi
+    rm -f "$1"
+}
+
+remove_skill() {
+    if [ -L "$1" ]; then
+        printf 'smackdebt: kept linked skill directory: %s\n' "$1" >&2
+        return 1
+    fi
+    remove_managed_file "$1/SKILL.md" "$1/.smackdebt.sha256" || return 1
+    if [ ! -L "$1/.smackdebt.sha256" ]; then rm -f "$1/.smackdebt.sha256" || return 1; fi
+    rmdir "$1" 2>/dev/null || :
+}
+
+uninstall() {
+    remaining=0
+    if [ "$remove_cli" = yes ] && { [ "$cli" = yes ] || [ -f "$state_dir/cli.sha256" ]; }; then
+        if remove_managed_file "$cli_prefix/bin/smackdebt" "$state_dir/cli.sha256"; then
+            if remove_managed_file "$state_dir/smackdebt-receipt.json" "$state_dir/receipt.sha256"; then
+                rm -f "$state_dir/cli.sha256" "$state_dir/receipt.sha256"
+                cli=no
+                completed='CLI removed'
+            else remaining=1
+            fi
+        else remaining=1
+        fi
+    fi
+    if [ "$remove_skill" = yes ] && { [ "$skill" = yes ] || [ -f "$agents_dir/.smackdebt.sha256" ] || [ -f "$claude_dir/.smackdebt.sha256" ]; }; then
+        skills_removed=yes
+        remove_skill "$agents_dir" || skills_removed=no
+        remove_skill "$claude_dir" || skills_removed=no
+        if [ "$skills_removed" = yes ]; then
+            skill=no
+            completed="${completed:+$completed; }standalone skills removed"
+        else remaining=1
+        fi
+    fi
+    # Any retained managed component remains selected for the next update.
+    if [ -f "$state_dir/cli.sha256" ]; then cli=yes; fi
+    if [ -f "$agents_dir/.smackdebt.sha256" ] || [ -f "$claude_dir/.smackdebt.sha256" ]; then skill=yes; fi
+    save_selection
+    if [ "$cli:$skill" = no:no ]; then
+        rm -f "$state_file"
+        rmdir "$state_dir" 2>/dev/null || :
+    fi
+    printf 'smackdebt: %s\n' "${completed:-nothing to remove}"
+    if [ "$remaining" -ne 0 ]; then
+        fail 'some files were kept; move them aside and rerun to finish removal'
+    fi
+}
+
 main() {
-    cli=yes
-    skill=yes
+    mode=install
+    selection=remember
+    remove_cli=yes
+    remove_skill=yes
     for option in "$@"; do
         case "$option" in
-            --no-cli) cli=no ;;
-            --no-skill) skill=no ;;
-            --help) printf 'Usage: install.sh [--no-cli | --no-skill]\n'; return ;;
+            --no-cli) remove_cli=no ;;
+            --no-skill) remove_skill=no ;;
+            --all) selection=all ;;
+            --uninstall) mode=uninstall ;;
+            --help)
+                printf '%s\n' 'Usage: install.sh [--all | --no-cli | --no-skill] [--uninstall]' \
+                    'No flags: install both, or update the previous selection.' \
+                    '--all: install both components.' \
+                    '--no-cli / --no-skill: install or remove only the other component.' \
+                    '--uninstall: remove managed files; keep edited files.'
+                return ;;
             *) printf 'smackdebt: unknown option: %s\n' "$option" >&2; exit 2 ;;
         esac
     done
-    if [ "$cli:$skill" = no:no ]; then
-        printf 'smackdebt: select the CLI, the skill, or both\n' >&2
+    if [ "$remove_cli:$remove_skill" = no:no ] ||
+        { [ "$selection" = all ] && { [ "$remove_cli:$remove_skill" != yes:yes ] || [ "$mode" = uninstall ]; }; }; then
+        printf 'smackdebt: choose one component selection\n' >&2
         exit 2
     fi
     [ -n "${HOME:-}" ] || fail 'HOME is not set'
-    if [ "$cli" = yes ]; then
-        command -v curl >/dev/null 2>&1 || fail 'curl is required to install the CLI'
+    state_dir="${XDG_CONFIG_HOME:-$HOME/.config}/smackdebt"
+    state_file="$state_dir/install-state"
+    check_path "$state_dir"
+    [ ! -L "$state_dir" ] || fail "installation settings directory is a link: $state_dir"
+    check_regular "$state_file"
+    cli=yes
+    skill=yes
+    cli_prefix="${SMACKDEBT_INSTALL_DIR:-${CARGO_DIST_FORCE_INSTALL_DIR:-${CARGO_HOME:-$HOME/.cargo}}}"
+    agents_dir="$HOME/.agents/skills/smackdebt"
+    claude_dir="${CLAUDE_CONFIG_DIR:-$HOME/.claude}/skills/smackdebt"
+    if [ -f "$state_file" ]; then
+        load_selection
+    elif [ "$mode" = uninstall ]; then
+        printf 'smackdebt: no managed installation found\n'
+        return
     fi
-    if [ "$skill" = yes ]; then
-        command -v sha256sum >/dev/null 2>&1 || command -v shasum >/dev/null 2>&1 ||
-            fail 'sha256sum or shasum is required to install the skill'
+    if [ "$mode" = install ]; then
+        if [ "$cli:$skill" = no:no ]; then cli=yes; skill=yes; fi
+        if [ "$selection" = all ] || [ "$remove_cli:$remove_skill" != yes:yes ]; then
+            cli=$remove_cli
+            skill=$remove_skill
+        fi
+        if [ "$cli" = yes ]; then
+            command -v curl >/dev/null 2>&1 || fail 'curl is required to install the CLI'
+        fi
     fi
+    command -v sha256sum >/dev/null 2>&1 || command -v shasum >/dev/null 2>&1 ||
+        fail 'sha256sum or shasum is required'
+    check_path "$cli_prefix"
+    check_path "$agents_dir"
+    check_path "$claude_dir"
+    mkdir -p "$state_dir"
     temporary=$(mktemp -d "${TMPDIR:-/tmp}/smackdebt-install.XXXXXX")
     trap cleanup 0
     trap 'exit 130' INT
     trap 'exit 143' TERM
+    if [ "$mode" = uninstall ]; then uninstall; return; fi
     if [ "$skill" = yes ]; then
         cat > "$temporary/SKILL.md" <<'SMACKDEBT_SKILL'
 @SKILL@
 SMACKDEBT_SKILL
         hash_file "$temporary/SKILL.md" > "$temporary/skill.sha256"
-        check_destination "$HOME/.agents/skills/smackdebt"
-        check_destination "${CLAUDE_CONFIG_DIR:-$HOME/.claude}/skills/smackdebt"
+        check_destination "$agents_dir"
+        check_destination "$claude_dir"
     fi
+    # Save intent before changing files so retries finish a partial installation.
+    save_selection
     if [ "$cli" = yes ]; then
+        check_regular "$cli_prefix/bin/smackdebt"
+        check_regular "$state_dir/cli.sha256"
+        check_regular "$state_dir/receipt.sha256"
+        check_regular "$state_dir/smackdebt-receipt.json"
         url="https://github.com/bosun-ai/smackdebt/releases/download/v$version/smackdebt-installer.sh"
         curl --proto '=https' --tlsv1.2 -fsSL "$url" -o "$temporary/cli.sh" ||
             fail "could not download the CLI installer for v$version"
-        sh "$temporary/cli.sh" </dev/null || fail 'the CLI installer failed'
+        SMACKDEBT_INSTALL_DIR="$cli_prefix" sh "$temporary/cli.sh" </dev/null || fail 'the CLI installer failed'
+        record_cli
         completed='CLI'
     fi
     if [ "$skill" = yes ]; then
-        install_skill "$HOME/.agents/skills/smackdebt"
-        install_skill "${CLAUDE_CONFIG_DIR:-$HOME/.claude}/skills/smackdebt"
+        install_skill "$agents_dir"
+        install_skill "$claude_dir"
     fi
     printf 'smackdebt %s: installed %s\n' "$version" "$completed"
+    printf 'Run this installer again to update, or add --uninstall to remove.\n'
     if [ "$cli" = yes ]; then
         printf 'Open a new terminal or restart your agent if smackdebt is not on PATH.\n'
     fi

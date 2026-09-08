@@ -803,8 +803,11 @@ Agent integrations live under `plugins/smackdebt`, outside the Rust crates.
 Codex and Claude Code manifests bundle one portable skill. The release packager
 embeds that same skill and the workspace version in `install.sh`; cargo-dist
 publishes it as an extra artifact. It delegates binary installation to the
-existing versioned CLI installer and writes user-level skills with checksum
-receipts to preserve local edits. It does not edit repository instructions or
+existing versioned CLI installer and writes user-level skills. It saves component
+choices and absolute paths in the user's Smackdebt configuration directory so
+updates and removal use the same locations. Checksum receipts protect managed
+files during removal and preserve local skill edits during updates. Removal keeps
+unrelated files and shared shell environment settings. It does not edit repository instructions or
 baselines. Agent activation remains advisory. See [agent installation](docs/agents.md).
 
 Release-plz manages the shared workspace version and one application changelog.
