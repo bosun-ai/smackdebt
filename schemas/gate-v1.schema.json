@@ -73,6 +73,7 @@
       "additionalProperties": false,
       "required": [
         "path",
+        "moved_from",
         "signal",
         "baseline_high",
         "high",
@@ -82,6 +83,13 @@
       "properties": {
         "path": {
           "type": "string",
+          "minLength": 1
+        },
+        "moved_from": {
+          "type": [
+            "string",
+            "null"
+          ],
           "minLength": 1
         },
         "signal": {

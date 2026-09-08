@@ -261,6 +261,7 @@ pub struct GateDelta {
     high: u32,
     baseline_watch: u32,
     watch: u32,
+    moved_from: Option<String>,
 }
 
 impl GateDelta {
@@ -270,6 +271,18 @@ impl GateDelta {
 
     pub const fn signal(&self) -> GateSignal {
         self.signal
+    }
+
+    /// The path whose identical counters vanished as this one appeared.
+    ///
+    /// The gate keys debt by path, so code that moved reads as a regression
+    /// at its new home beside an improvement at its old one. When exactly one
+    /// vanished row of the same signal carried exactly what this row now
+    /// carries, saying so costs a reader one glance instead of a search. It
+    /// is a hint and nothing more: no counter, no status, and no exit code
+    /// reads it.
+    pub fn moved_from(&self) -> Option<&str> {
+        self.moved_from.as_deref()
     }
 
     pub const fn baseline_high(&self) -> u32 {
@@ -324,7 +337,46 @@ impl GateComparison {
             };
             comparison.record(before, after);
         }
+        comparison.annotate_moves();
         comparison
+    }
+
+    /// Names the vanished row a regression may have come from.
+    ///
+    /// A regression that appeared where the baseline held nothing, carrying
+    /// exactly what one improvement's whole baseline held, is what moved code
+    /// looks like to a path-keyed ledger. Only an unambiguous pair is
+    /// annotated: two candidates of one shape prove nothing about which
+    /// became which, and a guess would read as a fact.
+    fn annotate_moves(&mut self) {
+        let mut sources: BTreeMap<(GateSignal, u32, u32), Vec<&str>> = BTreeMap::new();
+        for delta in &self.improvements {
+            if delta.high == 0 && delta.watch == 0 {
+                sources
+                    .entry((delta.signal, delta.baseline_high, delta.baseline_watch))
+                    .or_default()
+                    .push(delta.path.as_str());
+            }
+        }
+        let moved: Vec<Option<String>> = self
+            .regressions
+            .iter()
+            .map(|delta| {
+                if delta.baseline_high != 0 || delta.baseline_watch != 0 {
+                    return None;
+                }
+                match sources
+                    .get(&(delta.signal, delta.high, delta.watch))
+                    .map(Vec::as_slice)
+                {
+                    Some([only]) => Some((*only).to_owned()),
+                    _ => None,
+                }
+            })
+            .collect();
+        for (delta, moved) in self.regressions.iter_mut().zip(moved) {
+            delta.moved_from = moved;
+        }
     }
 
     fn record(&mut self, before: Option<&GateRow>, after: Option<&GateRow>) {
@@ -342,6 +394,7 @@ impl GateComparison {
             high,
             baseline_watch,
             watch,
+            moved_from: None,
         };
         if high > baseline_high || watch > baseline_watch {
             self.regressions.push(delta);
@@ -379,6 +432,65 @@ mod tests {
     use crate::size::SizePolicy;
     use crate::source::{ParseStatus, SourceRole, SourceSpan, SourceTrust, UnitIdentity, UnitKind};
     use crate::{ArchitectureFindingId, HealthCounts, HealthPolicy, Measurements};
+
+    /// A counter that vanished from one path and appeared, identical, at
+    /// another is what moved code looks like to a path-keyed ledger, so the
+    /// regression names where it may have come from.
+    #[test]
+    fn a_lone_vanished_counter_is_named_as_a_possible_move() {
+        let comparison = GateComparison::between(
+            &snapshot(&[("src/old.rs", GateSignal::Cognitive, 1, 2)]),
+            &snapshot(&[("src/new.rs", GateSignal::Cognitive, 1, 2)]),
+        );
+        assert_eq!(comparison.regressions().len(), 1);
+        assert_eq!(comparison.regressions()[0].moved_from(), Some("src/old.rs"));
+        assert!(comparison.regressed(), "a hint changes no status");
+    }
+
+    /// Two vanished counters of one shape prove nothing about which became
+    /// which, so neither is named.
+    #[test]
+    fn two_candidates_of_one_shape_name_nothing() {
+        let comparison = GateComparison::between(
+            &snapshot(&[
+                ("src/left.rs", GateSignal::Cognitive, 1, 2),
+                ("src/right.rs", GateSignal::Cognitive, 1, 2),
+            ]),
+            &snapshot(&[("src/new.rs", GateSignal::Cognitive, 1, 2)]),
+        );
+        assert_eq!(comparison.regressions().len(), 1);
+        assert_eq!(comparison.regressions()[0].moved_from(), None);
+    }
+
+    /// A counter that grew where the baseline already held one did not
+    /// arrive from anywhere.
+    #[test]
+    fn debt_that_grew_in_place_names_no_origin() {
+        let comparison = GateComparison::between(
+            &snapshot(&[
+                ("src/old.rs", GateSignal::Cognitive, 1, 2),
+                ("src/kept.rs", GateSignal::Cognitive, 1, 0),
+            ]),
+            &snapshot(&[("src/kept.rs", GateSignal::Cognitive, 2, 0)]),
+        );
+        let grew = comparison
+            .regressions()
+            .iter()
+            .find(|delta| delta.path() == "src/kept.rs")
+            .expect("the counter that grew");
+        assert_eq!(grew.moved_from(), None);
+    }
+
+    /// Counters of different shapes are not one move, however suggestive
+    /// their timing.
+    #[test]
+    fn a_different_shape_is_not_a_move() {
+        let comparison = GateComparison::between(
+            &snapshot(&[("src/old.rs", GateSignal::Cognitive, 1, 2)]),
+            &snapshot(&[("src/new.rs", GateSignal::Cognitive, 1, 3)]),
+        );
+        assert_eq!(comparison.regressions()[0].moved_from(), None);
+    }
 
     fn snapshot(rows: &[(&str, GateSignal, u32, u32)]) -> GateSnapshot {
         GateSnapshot::new(

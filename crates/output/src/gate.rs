@@ -113,8 +113,9 @@ impl Serialize for DeltaView<'_> {
     where
         S: Serializer,
     {
-        let mut map = serializer.serialize_map(Some(6))?;
+        let mut map = serializer.serialize_map(Some(7))?;
         map.serialize_entry("path", self.0.path())?;
+        map.serialize_entry("moved_from", &self.0.moved_from())?;
         map.serialize_entry("signal", self.0.signal().id())?;
         map.serialize_entry("baseline_high", &self.0.baseline_high())?;
         map.serialize_entry("high", &self.0.high())?;
@@ -149,6 +150,9 @@ fn delta_facts(delta: &GateDelta) -> String {
             delta.baseline_watch(),
             delta.watch()
         ));
+    }
+    if let Some(origin) = delta.moved_from() {
+        facts.push(format!("possibly moved from {origin}"));
     }
     facts.join(" · ")
 }
@@ -242,7 +246,7 @@ mod tests {
             concat!(
                 "{\"schema_version\":1,\"status\":\"regressed\",",
                 "\"baseline\":\".smackdebt-baseline.tsv\",",
-                "\"regressions\":[{\"path\":\"src/a.rs\",\"signal\":\"nesting\",",
+                "\"regressions\":[{\"path\":\"src/a.rs\",\"moved_from\":null,\"signal\":\"nesting\",",
                 "\"baseline_high\":1,\"high\":2,\"baseline_watch\":2,\"watch\":4}],",
                 "\"improvements\":[],",
                 "\"totals\":{\"regressions\":1,\"improvements\":0}}",

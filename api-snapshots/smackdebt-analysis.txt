@@ -752,6 +752,7 @@ impl smackdebt_analysis::GateDelta
 pub const fn smackdebt_analysis::GateDelta::baseline_high(&self) -> u32
 pub const fn smackdebt_analysis::GateDelta::baseline_watch(&self) -> u32
 pub const fn smackdebt_analysis::GateDelta::high(&self) -> u32
+pub fn smackdebt_analysis::GateDelta::moved_from(&self) -> core::option::Option<&str>
 pub fn smackdebt_analysis::GateDelta::path(&self) -> &str
 pub const fn smackdebt_analysis::GateDelta::signal(&self) -> smackdebt_analysis::GateSignal
 pub const fn smackdebt_analysis::GateDelta::watch(&self) -> u32

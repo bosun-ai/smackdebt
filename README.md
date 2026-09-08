@@ -1401,6 +1401,13 @@ Any counter above its baseline is a regression: the gate names the row as
 Counters below the baseline are improvements, reported as `better` rows and
 never applied to the file. An unchanged tree compares clean and exits 0.
 
+The gate keys debt by path, so code that moved reads as a regression at its new
+home beside an improvement at its old one. Where exactly one vanished row of
+the same signal held exactly what a new row now holds, the `worse` row ends
+with `possibly moved from <path>`. It is a hint for a reader and nothing more:
+two candidates of one shape name nothing, and no counter, status, or exit code
+reads it.
+
 `smackdebt gate --update` writes the observed debt as the new baseline and
 exits 0. It accepts improvements and deliberate new debt alike; the gate never
 tightens or rewrites the baseline on its own, so a clean check run never
