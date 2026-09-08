@@ -13,6 +13,7 @@ mod javascript_language;
 mod language;
 mod language_common;
 mod logical_lines;
+mod php_language;
 mod python_language;
 mod registry;
 mod ruby_language;

@@ -138,7 +138,33 @@ impl<'a> NamedDependencies<'a> {
         if !aliases.is_empty() {
             return self.lookup(source, reference.kind(), &aliases);
         }
+        if source.language == Language::Php {
+            return self.resolve_php(source, reference);
+        }
         self.resolve_scoped_name(source, reference, &imports)
+    }
+    fn resolve_php(
+        &self,
+        source: &SourceDependencies,
+        reference: &NameReference,
+    ) -> NamedResolution {
+        let name = reference.name();
+        let candidate = if reference.namespace().is_empty() {
+            name.to_owned()
+        } else {
+            format!("{}.{name}", reference.namespace())
+        };
+        let outcome = self.lookup(source, reference.kind(), &[candidate]);
+        if !matches!(
+            outcome,
+            NamedResolution::Files(_) | NamedResolution::Ambiguous
+        ) && reference.kind() != SymbolKind::Type
+            && !name.contains('.')
+            && !reference.namespace().is_empty()
+        {
+            return self.lookup(source, reference.kind(), &[name.to_owned()]);
+        }
+        outcome
     }
     fn resolve_scoped_name(
         &self,

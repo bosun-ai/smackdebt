@@ -67,6 +67,7 @@ enum ManifestKind {
     Bundler,
     Gemspec,
     Go,
+    Composer,
 }
 
 impl ManifestKind {
@@ -135,6 +136,7 @@ impl ManifestKind {
         let name = path.file_name()?.to_str()?;
         let exact = [
             ("go.mod", Self::Go),
+            ("composer.json", Self::Composer),
             ("Cargo.toml", Self::Cargo),
             ("package.json", Self::Npm),
             ("pyproject.toml", Self::Python),
@@ -1210,7 +1212,7 @@ pub fn is_resolution_file(path: &Path) -> bool {
         || path
             .file_name()
             .and_then(|name| name.to_str())
-            .is_some_and(|name| matches!(name, "go.mod" | "go.work"))
+            .is_some_and(|name| matches!(name, "go.mod" | "go.work" | "composer.json"))
 }
 
 fn resolution_config_priority(path: &Path) -> Option<u8> {
