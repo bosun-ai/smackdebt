@@ -1,13 +1,16 @@
 //! Static project declarations shared by codebase and diff resolution.
+use crate::csharp_project::CSharpProject;
 use crate::go_project::{GoProject, package_directory};
 use crate::php_project::PhpProject;
 use smackdebt_analysis::Language;
+use std::collections::BTreeSet;
 use std::path::{Path, PathBuf};
 
 #[derive(Clone, Default)]
 pub(crate) struct ProjectMetadata {
     pub(crate) go: Vec<GoProject>,
     pub(crate) php: Vec<PhpProject>,
+    pub(crate) csharp: Vec<CSharpProject>,
     pub(crate) issues: Vec<ProjectIssue>,
 }
 #[derive(Clone)]
@@ -26,7 +29,15 @@ impl ProjectMetadata {
             let Some(name) = path.file_name().and_then(|name| name.to_str()) else {
                 continue;
             };
-            if !matches!(name, "go.mod" | "go.work" | "composer.json") {
+            if !matches!(
+                name,
+                "go.mod"
+                    | "go.work"
+                    | "composer.json"
+                    | "Directory.Build.props"
+                    | "Directory.Build.targets"
+            ) && !name.ends_with(".csproj")
+            {
                 continue;
             }
             let parsed = read(path).and_then(|bytes| {
@@ -35,7 +46,10 @@ impl ProjectMetadata {
                 match name {
                     "go.mod" | "go.work" => result.go.push(GoProject::parse(path, source)?),
                     "composer.json" => result.php.push(PhpProject::parse(path, source)?),
-                    _ => unreachable!(),
+                    _ if name.ends_with(".csproj") => {
+                        result.csharp.push(CSharpProject::parse(path, source)?)
+                    }
+                    _ => return Err("C# project uses shared build configuration".to_owned()),
                 }
                 Ok(())
             });
@@ -45,7 +59,7 @@ impl ProjectMetadata {
                     language: match name {
                         "go.mod" | "go.work" => Language::Go,
                         "composer.json" => Language::Php,
-                        _ => unreachable!(),
+                        _ => Language::CSharp,
                     },
                     reason: format!("{}: {error}", path.display()),
                 });
@@ -146,8 +160,37 @@ impl ProjectMetadata {
                     })
                     .any(|package| package.permits(name, target))
             }
+            Language::CSharp => self.csharp_visible(source, target),
             _ => true,
         }
+    }
+    fn csharp_visible(&self, source: &Path, target: &Path) -> bool {
+        let owners: Vec<_> = self
+            .csharp
+            .iter()
+            .filter(|project| project.contains(source))
+            .collect();
+        if owners.is_empty() {
+            return true;
+        }
+        let mut todo: Vec<_> = owners
+            .into_iter()
+            .map(|project| project.path.as_path())
+            .collect();
+        let mut seen = BTreeSet::new();
+        while let Some(path) = todo.pop() {
+            if !seen.insert(path) {
+                continue;
+            }
+            let Some(project) = self.csharp.iter().find(|project| project.path == path) else {
+                continue;
+            };
+            if project.contains(target) {
+                return true;
+            }
+            todo.extend(project.references.iter().map(PathBuf::as_path));
+        }
+        false
     }
     pub(crate) fn is_external_bootstrap(
         &self,
@@ -169,11 +212,16 @@ impl ProjectMetadata {
                 .filter(|package| source.starts_with(&package.root))
                 .any(|package| package.claims(name))
     }
-    pub(crate) fn imports(&self, _source: &Path) -> impl Iterator<Item = &str> {
-        std::iter::empty()
+    pub(crate) fn imports(&self, source: &Path) -> impl Iterator<Item = &str> {
+        self.csharp
+            .iter()
+            .filter(move |project| project.contains(source))
+            .flat_map(|project| project.imports.iter().map(String::as_str))
     }
-    pub(crate) fn is_test_source(&self, _source: &Path) -> bool {
-        false
+    pub(crate) fn is_test_source(&self, source: &Path) -> bool {
+        self.csharp
+            .iter()
+            .any(|project| project.test && project.contains(source))
     }
     pub(crate) fn entries(&self) -> impl Iterator<Item = &Path> {
         self.php

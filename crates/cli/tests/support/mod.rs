@@ -232,6 +232,7 @@ pub(crate) fn copy_language_truth_files(repository: &GeneratedRepository) {
     for name in [
         "go.go",
         "php.php",
+        "csharp.cs",
         "c.c",
         "cpp.cpp",
         "java.java",
