@@ -1,6 +1,6 @@
 smackdebt · src
   The code is winning.
-29 high · 2 watch · 31 checked
+31 high · 2 watch · 33 checked
 worst: src/c.c — most complex
 
 AREAS
@@ -49,6 +49,10 @@ PROBLEMS
         cognitive 2 · cyclomatic 3 · statements 1
         src/cpp.cpp:4 · method · cognitive 1 ·
         cyclomatic 2 · statements 3
+  high Sample::Outer · method · src/csharp.cs:2
+        cognitive 1 · cyclomatic 2 · statements 3
+        src/csharp.cs:3 · lambda · cognitive 1 ·
+        cyclomatic 2 · statements 2
   high outer · function · src/go.go:2
         cognitive 1 · cyclomatic 2 · statements 3
         src/go.go:3 · closure · cognitive 1 ·

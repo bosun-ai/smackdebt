@@ -12,6 +12,7 @@ description = "Codebase and diff analysis use cases for Smackdebt"
 evidence-stats = ["smackdebt-git/evidence-stats"]
 
 [dependencies]
+quick-xml.workspace = true
 rayon.workspace = true
 serde_json.workspace = true
 json5.workspace = true

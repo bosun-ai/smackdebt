@@ -12,6 +12,7 @@ use crate::source::SourceRole;
 
 /// Conventional entry filenames, which are normally depended on by nothing.
 pub const ENTRY_FILENAMES: &[&str] = &[
+    "Program.cs",
     "__init__.py",
     "__main__.py",
     "build.rs",
@@ -130,7 +131,12 @@ mod tests {
 
     #[test]
     fn an_entry_file_without_incoming_dependencies_is_exempt() {
-        for path in ["src/lib.rs", "cmd/main.go", "public/index.php"] {
+        for path in [
+            "src/lib.rs",
+            "cmd/main.go",
+            "public/index.php",
+            "app/Program.cs",
+        ] {
             assert!(orphan_files(&[candidate(0, path, SourceRole::Primary, 0)]).is_empty());
         }
         assert!(orphan_files(&[candidate(0, "app/index.js", SourceRole::Primary, 0)]).is_empty());

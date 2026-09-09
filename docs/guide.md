@@ -941,14 +941,15 @@ Smackdebt finds the repository root, supported source files, ignored paths, and
 project packages. It recognizes packages from common manifests, including:
 
 - `Cargo.toml`
-- `go.mod`
-- `composer.json`
 - `package.json`
 - `pyproject.toml`
 - `pom.xml`
 - Gradle settings and build files
 - `CMakeLists.txt`
 - `Gemfile` and `*.gemspec`
+- `go.mod`
+- `composer.json`
+- C# `*.csproj` files
 
 Several recognized manifests in one directory describe one package with
 several ecosystem markers. Files belong to their nearest package. Repositories
@@ -1032,6 +1033,7 @@ does not quietly count them as healthy.
 One tree-sitter source engine supports:
 
 - C and C++
+- C#
 - Go
 - Java
 - JavaScript and JSX
@@ -1043,19 +1045,31 @@ One tree-sitter source engine supports:
 - Vue single-file components, including script and template regions
 
 React components, hooks, and callbacks use the existing JSX and TSX analyzers.
-Go receivers and closures, plus PHP methods and closures, use the same five
-measurements as other languages.
+Go receivers and closures, PHP methods and closures, and C# methods, local
+functions, accessors, and lambdas use the same five measurements as other languages.
 
-Go imports name packages. Smackdebt connects an import to the package's source
-files, excluding `_test.go`, using `go.mod`, local replacements, and `go.work`.
+Static dependency resolution reads local declarations and project files:
+
+- Go imports name packages. Smackdebt connects an import to the package's source
+  files, excluding `_test.go`, using `go.mod`, local replacements, and `go.work`.
+- PHP resolves namespaces and aliases against Composer PSR-4, PSR-0, classmap,
+  and files declarations. Composer's generated autoloader is an external bootstrap
+  reference. Literal includes and `__DIR__` paths resolve locally;
+  dynamic includes remain visible as unresolved references.
+- C# resolves explicit type references and aliases, including global using
+  directives and partial classes. Literal `.csproj` project references, compile
+  items, using items, and test-project markers guide visibility. Namespace imports
+  alone do not create edges to every file in that namespace.
+
 The same rules apply independently to each side of a diff, including edits that
-only change project configuration. No compiler or build tool runs.
+only change project configuration. No compiler, autoloader, or build tool runs.
+Conditional C# project configuration and shared build files are disclosed as
+incomplete resolution. Generated code follows the existing source-role rules.
+Build-selected Go files are analyzed as repository source, without choosing an
+operating system or build tags. Reflection, dynamic loading, and runtime dispatch
+are outside the static graph.
 
-PHP resolves namespaces and aliases against Composer PSR-4, PSR-0, classmap,
-and files declarations. Composer's generated autoloader is an external bootstrap
-reference. Literal includes and `__DIR__` paths resolve locally; dynamic includes
-remain visible as unresolved references. The same rules apply independently to
-each side of a diff without running PHP or Composer.
+Blade (`.blade.php`) and Razor (`.razor`, `.cshtml`) remain unsupported documents.
 
 Astro and Kotlin files remain visible as unsupported coverage; they are not
 counted as healthy. Astro documents stay in codebase and diff inventories, but
