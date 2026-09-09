@@ -4,6 +4,7 @@ mod analyzer;
 mod c_language;
 mod cognitive_complexity;
 mod cpp_language;
+mod csharp_language;
 mod cyclomatic_complexity;
 mod dependency;
 mod engine;

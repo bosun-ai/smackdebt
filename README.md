@@ -76,7 +76,7 @@ Other rated findings appear under their own names. Each problem includes measure
 
 ## Languages
 
-**C, C++, Go, Java, JavaScript/JSX, PHP, Python, Ruby, Rust, TypeScript/TSX, and Vue** (scripts and templates). React uses JSX/TSX support. Unsupported files and parse failures remain visible in coverage warnings.
+**C, C++, C#, Go, Java, JavaScript/JSX, PHP, Python, Ruby, Rust, TypeScript/TSX, and Vue** (scripts and templates). React uses JSX/TSX support. Unsupported files and parse failures remain visible in coverage warnings.
 
 ## Keep digging
 

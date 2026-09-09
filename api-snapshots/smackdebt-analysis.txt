@@ -124,6 +124,7 @@ pub smackdebt_analysis::HistoryAvailability::Unavailable
 pub enum smackdebt_analysis::Language
 pub smackdebt_analysis::Language::Astro
 pub smackdebt_analysis::Language::C
+pub smackdebt_analysis::Language::CSharp
 pub smackdebt_analysis::Language::Cpp
 pub smackdebt_analysis::Language::Go
 pub smackdebt_analysis::Language::Java
