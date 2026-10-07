@@ -12,7 +12,9 @@ use crate::health::{HealthAssessment, HealthCounts, Rating};
 use crate::hotspot::Hotspot;
 use crate::measurements::Measurements;
 use crate::orphan_files::OrphanFile;
-use crate::problem::{ProblemCard, ProblemInput, cluster_problems};
+use crate::problem::{
+    ClaimedFinding, ProblemAnchor, ProblemCard, ProblemInput, ProblemVisibility, cluster_problems,
+};
 use crate::size::SizeFinding;
 use crate::source::{Language, ParseStatus, SourceRole, SourceSpan, SourceTrust, UnitIdentity};
 use crate::verdict::{
@@ -1240,6 +1242,7 @@ impl ReportBuilder {
         self.report.aggregate();
         let problems = cluster_problems(self.report.problem_input());
         self.report.problems = problems;
+        self.report.verdict = self.report.root.map(|root| self.report.scope_verdict(root));
         self.report
     }
 }
@@ -1538,6 +1541,76 @@ impl Report {
     pub fn problems(&self) -> &[ProblemCard] {
         &self.problems
     }
+    /// The ranked problems visible in a scope. Detail changes visibility, never order.
+    pub fn scope_problems(
+        &self,
+        selected: ScopeId,
+        all: bool,
+    ) -> impl Iterator<Item = &ProblemCard> {
+        self.problems.iter().filter(move |card| {
+            self.problem_belongs_to_scope(card, selected)
+                && (all
+                    || card.visibility() == ProblemVisibility::Default
+                    || self.problem_owns_scope(card, selected))
+        })
+    }
+
+    fn problem_belongs_to_scope(&self, card: &ProblemCard, selected: ScopeId) -> bool {
+        match card.anchor() {
+            ProblemAnchor::File(file) => self.file_in_scope(*file, selected),
+            ProblemAnchor::Files(files) => {
+                files.iter().any(|file| self.file_in_scope(*file, selected))
+            }
+            ProblemAnchor::Package(package) => self.package_meets_scope(*package, selected),
+            ProblemAnchor::PackagePair(left, right) => {
+                self.package_meets_scope(*left, selected)
+                    || self.package_meets_scope(*right, selected)
+            }
+        }
+    }
+
+    fn problem_owns_scope(&self, card: &ProblemCard, selected: ScopeId) -> bool {
+        match card.anchor() {
+            ProblemAnchor::File(file) => {
+                self.scopes[selected.index()].kind() == ScopeKind::File
+                    && self.file_in_scope(*file, selected)
+            }
+            ProblemAnchor::Package(package) => self.packages[package.index()].scope() == selected,
+            ProblemAnchor::Files(_) | ProblemAnchor::PackagePair(..) => false,
+        }
+    }
+
+    /// The first path named by a ranked problem, used for guidance and navigation.
+    fn problem_path<'a>(&'a self, card: &ProblemCard) -> &'a str {
+        match card.anchor() {
+            ProblemAnchor::File(file) => self.files[file.index()].path(),
+            ProblemAnchor::Files(files) => self.files[files[0].index()].path(),
+            ProblemAnchor::Package(package) | ProblemAnchor::PackagePair(package, _) => {
+                self.packages[package.index()].path()
+            }
+        }
+    }
+
+    fn file_in_scope(&self, file: FileId, selected: ScopeId) -> bool {
+        self.scope_within(self.files[file.index()].scope(), selected)
+    }
+
+    fn package_meets_scope(&self, package: PackageId, selected: ScopeId) -> bool {
+        let scope = self.packages[package.index()].scope();
+        self.scope_within(scope, selected) || self.scope_within(selected, scope)
+    }
+
+    fn scope_within(&self, scope: ScopeId, ancestor: ScopeId) -> bool {
+        let mut current = Some(scope);
+        while let Some(id) = current {
+            if id == ancestor {
+                return true;
+            }
+            current = self.scopes[id.index()].parent();
+        }
+        false
+    }
+
     /// Whether a file crossed rated debt with enough change activity.
     pub fn is_hotspot(&self, file: FileId) -> bool {
         self.hotspots
@@ -1753,13 +1826,19 @@ impl Report {
     /// Names the worst things in a scope with their resolved paths.
     ///
     /// Fixture and generated debt never moves a verdict, so it can never be a
-    /// worst offender either. A scope whose only debt is structural falls back
-    /// to the witnesses of its package dependency cycles.
+    /// worst offender either. Structural and history cards name their anchors.
     ///
     /// At most `WORST_OFFENDER_LIMIT` offenders are kept, and they are kept by
-    /// limited insertion rather than by sorting, so naming them costs one pass
-    /// over the scope's findings however large the scope is.
+    /// the existing problem order for a codebase, and finding rank for a diff.
     fn worst_offenders(&self, scope: &Scope) -> Vec<WorstOffender> {
+        if self.mode == ReportMode::Codebase {
+            return self
+                .scope_problems(scope.id(), false)
+                .filter(|card| self.problem_affects_verdict(card))
+                .take(WORST_OFFENDER_LIMIT)
+                .map(|card| self.problem_offender(card))
+                .collect();
+        }
         let mut best: Vec<(FindingRank<'_>, &Finding)> = Vec::with_capacity(WORST_OFFENDER_LIMIT);
         for finding in scope
             .findings()
@@ -1800,6 +1879,63 @@ impl Report {
             .take(WORST_OFFENDER_LIMIT)
             .map(|path| WorstOffender::new(path, WorstOffenderReason::PackageDependencyCycle))
             .collect()
+    }
+
+    fn problem_affects_verdict(&self, card: &ProblemCard) -> bool {
+        let mut has_source = false;
+        for claim in card.claimed_findings() {
+            if let ClaimedFinding::Source(id) = claim {
+                has_source = true;
+                if self.findings[id.index()].affects_verdict() {
+                    return true;
+                }
+            }
+        }
+        if has_source {
+            return false;
+        }
+        if card.visibility() == ProblemVisibility::Default {
+            return true;
+        }
+        let eligible = |file: FileId| {
+            let file = &self.files[file.index()];
+            file.role().affects_verdict() && file.trust() == SourceTrust::Trusted
+        };
+        match card.anchor() {
+            ProblemAnchor::File(file) => eligible(*file),
+            ProblemAnchor::Files(files) => files.iter().copied().any(eligible),
+            ProblemAnchor::Package(_) | ProblemAnchor::PackagePair(..) => true,
+        }
+    }
+
+    fn problem_offender(&self, card: &ProblemCard) -> WorstOffender {
+        let path = self.problem_path(card);
+        let source = card.claimed_findings().iter().find_map(|claim| {
+            let ClaimedFinding::Source(id) = claim else {
+                return None;
+            };
+            let finding = &self.findings[id.index()];
+            (finding.affects_verdict() && self.files[finding.file().index()].path() == path)
+                .then_some(finding)
+        });
+        if let Some(finding) = source {
+            let reason = if self.is_hotspot(finding.file()) {
+                WorstOffenderReason::HotAndComplex
+            } else {
+                WorstOffenderReason::TopRankedProblem
+            };
+            return WorstOffender::new(path, reason).with_identity(finding.identity().clone());
+        }
+        let package_cycle = card.claimed_findings().iter().any(|claim| {
+            matches!(claim, ClaimedFinding::Architecture(id)
+                if self.architecture_findings[id.index()].kind() == ArchitectureFindingKind::PackageCycle)
+        });
+        let reason = if package_cycle {
+            WorstOffenderReason::PackageDependencyCycle
+        } else {
+            WorstOffenderReason::TopRankedProblem
+        };
+        WorstOffender::new(path, reason)
     }
 
     fn rank(&self, finding: &Finding) -> FindingRank<'_> {
@@ -1939,7 +2075,6 @@ impl Report {
         };
         aggregate_scope(&mut self.scopes, &self.files, root);
         aggregate_comparison_scope(&mut self.scopes, &self.comparisons, root);
-        self.verdict = Some(self.scope_verdict(root));
     }
 }
 
@@ -2260,7 +2395,7 @@ mod tests {
             .worst_offender()
             .expect("rated debt has an offender");
         assert_eq!(offender.path(), "src/work.rs");
-        assert_eq!(offender.reason(), WorstOffenderReason::MostComplex);
+        assert_eq!(offender.reason(), WorstOffenderReason::TopRankedProblem);
         assert_eq!(&report.scope_verdict(report.root().unwrap()), verdict);
     }
 

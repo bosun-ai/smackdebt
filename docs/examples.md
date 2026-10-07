@@ -14,7 +14,7 @@ smackdebt --color never --jobs 1 --history 36500d
 smackdebt diff main --color never --jobs 1 --history 36500d
 ```
 
-<!-- smackdebt-example fixture=worktree-change status=0 stderr=empty stdout=Debt_increased_in_some_places_and_decreased_in_others.|worse_b|better_a|changed_c|next:_smackdebt_diff_main_b/main.js -->
+<!-- smackdebt-example fixture=worktree-change status=0 stderr=empty stdout=Debt_increased_in_some_places_and_decreased_in_others.|worse_b|worse_c|better_a|next:_smackdebt_diff_main_b/main.js -->
 ```console
 smackdebt diff main --color never --jobs 1 --history 36500d
 ```

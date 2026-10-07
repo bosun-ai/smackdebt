@@ -255,9 +255,16 @@ The diff tiers are fixed in the same way:
 | Tier | Sentence |
 | --- | --- |
 | `no_debt_change` | No debt changed. |
+| `changed` | Debt measurements changed. |
 | `better` | Debt decreased. |
 | `worse` | Debt increased. |
 | `mixed` | Debt increased in some places and decreased in others. |
+
+A Watch or High function can improve or worsen without crossing a rating
+threshold. If at least one of its five measurements increases and none decreases,
+it is worse; the reverse is better. Opposing movements remain `changed`, with
+both values shown. Changes that stay healthy do not move the debt verdict.
+A diff with only changes of unclear direction says `Debt measurements changed.`
 
 The default diff uses one three-row limit across `FINDINGS`, `ARCHITECTURE`,
 and `HISTORY`. A mixed result first keeps one row for each direction that is
@@ -1111,7 +1118,12 @@ in trouble:
 terminal prints for it. In a diff the tier and sentence are the diff answer and
 `summary.debt_diff` states each count with its word, including zero counts.
 `summary.worst` names at most three offenders with real repository-relative
-path strings. Every value in the head also exists in a table, and both come from
+path strings. In codebase reports these follow the default problem-card order,
+one offender per card. The headline and `next:` name the first of those problems;
+`--all` reveals detail cards without changing that recommendation. Problems
+without a hotspot or package-cycle reason use `top_ranked_problem`. Context
+source remains visible in detail but never becomes a verdict offender.
+Every value in the head also exists in a table, and both come from
 the same completed report.
 
 Each source comparison has `participation: "verdict"` or

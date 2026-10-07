@@ -1,11 +1,11 @@
 smackdebt diff · repository root
   Debt increased in some places and decreased in
         others.
-worse 4 · better 4 · changed 1
+worse 5 · better 4 · changed 0
 worst: c/main.js — package dependency cycle
 
 AREAS
-  c · worse 2 · changed 1
+  c · worse 3
   b · worse 1 · better 1
   d · worse 1
   e · worse 1
@@ -18,6 +18,9 @@ FINDINGS
         cyclomatic 2 → 4
         statements 1 → 2
         nesting 1 → 3
+  worse c · function
+        c/main.js:2
+        statements 2 → 3
   worse renamed · function
         e/new.js:1
         moved from e/old.js:1
@@ -31,9 +34,6 @@ FINDINGS
         cyclomatic 3 → 1
         statements 2 → 1
         nesting 2 → 0
-  changed c · function
-        c/main.js:2
-        statements 2 → 3
 
 ARCHITECTURE
   worse change reaches more code · c

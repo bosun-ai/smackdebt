@@ -1,6 +1,7 @@
 smackdebt · repository root
   Clean. Ship it.
 0 high · 0 watch · 6 checked
+worst: crates/a — top ranked problem
 
 PROBLEMS
   watch depends on less stable code · crates/a → crates/b

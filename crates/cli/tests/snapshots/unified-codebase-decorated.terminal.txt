@@ -1,7 +1,7 @@
 smackdebt · repository root
 [38;5;208m▌[0m Worn in the usual places.
 1 high · 2 watch · 6 checked
-worst: b/main.js — most complex
+worst: b/main.js — top ranked problem
 
 AREAS
   b · 1 high

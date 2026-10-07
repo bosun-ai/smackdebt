@@ -89,6 +89,7 @@ pub smackdebt_analysis::DiagnosticKind::UnsafeReference
 pub smackdebt_analysis::DiagnosticKind::UnsupportedLanguage
 pub enum smackdebt_analysis::DiffTier
 pub smackdebt_analysis::DiffTier::Better
+pub smackdebt_analysis::DiffTier::Changed
 pub smackdebt_analysis::DiffTier::Mixed
 pub smackdebt_analysis::DiffTier::NoDebtChange
 pub smackdebt_analysis::DiffTier::Worse
@@ -274,6 +275,7 @@ pub enum smackdebt_analysis::WorstOffenderReason
 pub smackdebt_analysis::WorstOffenderReason::HotAndComplex
 pub smackdebt_analysis::WorstOffenderReason::MostComplex
 pub smackdebt_analysis::WorstOffenderReason::PackageDependencyCycle
+pub smackdebt_analysis::WorstOffenderReason::TopRankedProblem
 impl smackdebt_analysis::WorstOffenderReason
 pub const fn smackdebt_analysis::WorstOffenderReason::id(self) -> &'static str
 pub const fn smackdebt_analysis::WorstOffenderReason::text(self) -> &'static str
@@ -1183,6 +1185,7 @@ pub fn smackdebt_analysis::Report::propagation_comparisons(&self) -> &[smackdebt
 pub fn smackdebt_analysis::Report::resolution_diagnostics(&self) -> &[smackdebt_analysis::ResolutionDiagnostic]
 pub const fn smackdebt_analysis::Report::root(&self) -> core::option::Option<smackdebt_analysis::ScopeId>
 pub const fn smackdebt_analysis::Report::schema_version(&self) -> u32
+pub fn smackdebt_analysis::Report::scope_problems(&self, smackdebt_analysis::ScopeId, bool) -> impl core::iter::traits::iterator::Iterator<Item = &smackdebt_analysis::ProblemCard>
 pub fn smackdebt_analysis::Report::scope_verdict(&self, smackdebt_analysis::ScopeId) -> smackdebt_analysis::Verdict
 pub fn smackdebt_analysis::Report::scopes(&self) -> &[smackdebt_analysis::Scope]
 pub fn smackdebt_analysis::Report::size_findings(&self) -> &[smackdebt_analysis::SizeFinding]

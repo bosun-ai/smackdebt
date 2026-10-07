@@ -165,8 +165,12 @@ retained source comparison carries `participation` as `verdict` or `context`,
 derived once from both finalized source roles, so role transitions remain
 machine context without entering debt movement. Every family keeps its own
 counts, including zero counts, so a report can name the
-family that moved. The worst offender is the top of the same finding rank with
-its path resolved once, falling back to the first witness of a package cycle.
+family that moved. Codebase worst offenders follow the default visible problem
+order, one
+per card, with paths resolved once from their anchors. Scope selection and
+anchor paths are analysis-owned queries shared by terminal navigation and
+verdict construction. The root verdict is completed after problem clustering.
+Diff offenders retain source-finding rank and the package-cycle fallback.
 The root verdict completes while the report is built, and any other retained
 scope is answered by a pure function of the completed report, so no renderer
 performs analysis to get one. A retained sub-scope from a completed repository
@@ -309,8 +313,11 @@ fingerprint is created while the source buffer is active, and neither syntax
 bytes nor readable match evidence leave analysis.
 
 One file comparison pairs unique declared identities first, then unique
-language anchors, then unique exact-syntax fingerprints. A candidate present on
-both sides and repeated on either side produces one unclear comparison group. A
+language anchors, then unique exact-syntax fingerprints. Within one Watch or
+High rating, movement of the five measurements in only one
+direction is an improvement or regression. Opposing movements remain a metric
+change, and a diff with only such changes has tier `changed`. Healthy changes
+stay out of the debt verdict. A candidate present on both sides and repeated on either side produces one unclear comparison group. A
 repeated candidate produces one removal or addition per unit only when it is
 absent from the other side. Measurements, ratings, lines, source order, and
 approximate syntax never create a pair. Unclear rows do not move the verdict,

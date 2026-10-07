@@ -1,6 +1,7 @@
 smackdebt · repository root
   Nothing was checked.
 0 high · 0 watch · 0 checked
+worst: a — top ranked problem
 
 PROBLEMS
   watch packages change together · a ↔ b

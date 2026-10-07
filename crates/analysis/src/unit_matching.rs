@@ -315,7 +315,24 @@ fn paired_kind(before: &UnitFact, after: &UnitFact, policy: HealthPolicy) -> Com
         Ordering::Less => ComparisonKind::Regressed,
         Ordering::Greater => ComparisonKind::Improved,
         Ordering::Equal if before.measurements().rated() != after.measurements().rated() => {
-            ComparisonKind::MetricChanged
+            if before_assessment.rating() == Rating::Healthy {
+                return ComparisonKind::MetricChanged;
+            }
+            let mut increased = false;
+            let mut decreased = false;
+            for (before, after) in before_assessment
+                .signals()
+                .into_iter()
+                .zip(after_assessment.signals())
+            {
+                increased |= after.value() > before.value();
+                decreased |= after.value() < before.value();
+            }
+            match (increased, decreased) {
+                (true, false) => ComparisonKind::Regressed,
+                (false, true) => ComparisonKind::Improved,
+                _ => ComparisonKind::MetricChanged,
+            }
         }
         Ordering::Equal => ComparisonKind::Unchanged,
     }
