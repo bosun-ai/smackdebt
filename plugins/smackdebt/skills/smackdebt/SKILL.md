@@ -6,8 +6,23 @@ license: MIT
 
 # Smackdebt
 
-Run in the intended repository or worktree. If `smackdebt --version` fails,
-report that the check could not run. [Installation](https://github.com/bosun-ai/smackdebt#get-it).
+Run in the intended repository or worktree. Check `smackdebt --version` first.
+If the command is missing, offer this binary installation command for Linux x86_64
+or macOS (Intel or Apple Silicon):
+
+```sh
+curl -fsSL https://github.com/bosun-ai/smackdebt/releases/latest/download/install.sh | sh
+```
+
+For users who prefer an existing package manager, offer
+`brew install bosun-ai/tap/smackdebt` or `cargo binstall smackdebt`.
+Let the user choose and approve installation before running it. After installing,
+rerun `smackdebt --version`, then continue the workflow. A plugin already provides
+this skill; running `smackdebt init` as well can create a duplicate.
+If installation is declined, unsupported, or fails, report that the debt check
+could not run and continue the user's task without claiming it passed.
+If the binary exists but fails, report the error rather than reinstalling it.
+[Installation details](https://github.com/bosun-ai/smackdebt#get-it).
 
 ## Workflow
 

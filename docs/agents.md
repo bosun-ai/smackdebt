@@ -66,6 +66,9 @@ claude plugin marketplace add bosun-ai/smackdebt
 claude plugin install smackdebt@smackdebt
 ```
 
+Plugins install the skill; the binary is installed separately. If it is missing,
+the skill offers an installation command and waits for your approval before running
+it. Once installed, the agent checks its version and continues the debt review.
 Plugin managers update and remove their own plugins independently of the binary.
 The portable skill can also be installed through `npx skills add bosun-ai/smackdebt --skill smackdebt`.
 
