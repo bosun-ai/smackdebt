@@ -1,67 +1,84 @@
 # Releasing Smackdebt
 
-We ship one CLI through GitHub Releases: Linux x86_64, Intel macOS, and Apple Silicon macOS. Version numbers start at `0.1.0` and move together across the workspace. `install.sh` installs the CLI and the portable agent skill; Codex and Claude Code plugins bundle the same skill.
+Smackdebt ships through GitHub Releases, `bosun-ai/homebrew-tap`, and crates.io.
+Binary targets are Linux x86_64, Intel macOS, and Apple Silicon macOS. The CLI and
+its six workspace dependencies share a version. Internal Rust APIs remain
+implementation details, even though their crates are published to support installation.
 
 ## One-time setup
 
-- Add `RELEASE_PLZ_TOKEN` as a repository secret. Use a fine-grained token with `bosun-ai` as resource owner, access to `bosun-ai/smackdebt`, and **Contents** and **Pull requests** read/write permissions. Complete any required organization approval.
-- Allow GitHub Actions to create pull requests. Require the three `check` matrix jobs before merging a release PR.
-- Install Rust 1.97.0, `just`, `cargo-public-api@0.52.0`, `cargo-deny`, and Python 3.11+. API snapshots also require nightly Rust. Install Python dependencies with `python3 -m pip install -r scripts/requirements.txt` in a virtual environment.
-- For release configuration changes, install `cargo-dist@0.32.0` and `release-plz@0.3.162`. Run `dist generate` after editing `dist-workspace.toml`; do not edit the generated release workflow.
+Configure repository secrets before merging a release PR:
 
-The token is needed because PRs and tags created with the built-in `GITHUB_TOKEN` do not start further workflows. No Cargo registry token is used. Cargo manifests permit packaging because release-plz reconstructs previous workspace versions through a temporary registry; this does not make the internal Rust APIs supported interfaces. Release-plz has registry publishing disabled; cargo-dist creates the GitHub Release and attaches the artifacts.
+- `RELEASE_PLZ_TOKEN`: access to `bosun-ai/smackdebt`, with Contents and Pull requests
+  read/write. Its owner must have repository write access. Keep the custom token:
+  tags and PRs created with the built-in token do not start subsequent workflows.
+- `CARGO_REGISTRY_TOKEN`: crates.io `publish-new` and `publish-update` access for
+  the seven `smackdebt` packages. Confirm ownership or availability of those names.
+- `HOMEBREW_TAP_TOKEN`: Contents write access to `bosun-ai/homebrew-tap`.
 
-## Prepare a release
+Allow Actions to create PRs and require the three check jobs before merging release PRs.
+Never put tokens in the repository. Trusted publishing can replace the Cargo token
+once the crates have been published and their trusted publisher settings are configured.
 
-Release-plz runs after pushes to `master` and opens or updates a release PR with the shared version and root changelog. Only merging that PR starts publication. The first release is `v0.1.0`.
+## Release flow
 
-1. Review the release PR's version, changelog, and passing CI. Changes in internal libraries must appear in the application changelog too.
-   When changing plugin content, increment the version in both plugin manifests so plugin managers refresh their caches. CI enforces this for pull requests and pushes to master. Plugin versions track skill changes independently of the CLI. The combined installer embeds the CLI release version and that tag's skill during the build.
-2. Check out its final candidate commit with a clean tree. Review public report examples before accepting any changed report digests.
-3. Record evidence locally, supplying paths to Smackdebt, the private Fluyt workload, and the private Rust workload:
+1. Release-plz opens or updates a version PR after pushes to `master`. Review the
+   version, changelog, and passing checks. Only merging a release PR authorizes publication.
+2. Release-plz publishes workspace crates in dependency order and creates the CLI's
+   `vVERSION` tag. Cargo-dist alone owns GitHub Release creation.
+3. Cargo-dist builds binaries, checksums, shell installers, and the Homebrew formula.
+   Full checks and smoke tests against finished artifacts must pass.
+4. Cargo-dist creates the public GitHub Release with notes and assets.
+5. The post-release workflow checks public downloads and cargo-binstall on each
+   supported platform. For stable releases, it installs the generated Homebrew
+   formula, then commits it to the existing tap. An unchanged formula creates no commit.
+   Prereleases do not update the stable Homebrew formula.
 
-   ```sh
-   just release-evidence /path/to/smackdebt /path/to/fluyt /path/to/rust-workspace
-   ```
+Registry publication precedes binary builds; cargo-binstall can report unavailable
+binaries until the GitHub Release completes. It will not silently compile from source.
+Private-workload evidence is an optional maintainer check and does not block publication.
 
-   Use the optional final argument `--accept-report-change` only after reviewing changed output. This runs the complete checks, source install smoke, nine generated performance profiles, and three workload reviews. Only privacy-safe aggregate evidence belongs in this repository.
-4. Commit only the resulting files under `benchmarks/baselines/` and `benchmarks/evidence/` to the release PR. Run `just release-evidence-check` on that clean evidence commit.
-5. Merge the release PR. Release-plz creates its `vVERSION` tag. Cargo-dist builds the archives, runs the complete checks, tests the actual archives, validates the release evidence, and publishes the GitHub Release.
+## Develop and validate
 
-Changes to source, manifests, lockfiles, documentation, or workflows after recording evidence require a new measurement. Merge, squash, and rebase are supported when the final tree matches the recorded candidate except for the approved evidence files. The release check fetches the recorded commit if rewriting history removed it from the checkout. Missing or invalid evidence blocks publication.
-
-## Verify or recover
-
-CI builds each supported target and tests its extracted archive outside the checkout: checksum, version, help, terminal output, JSON schema, serial/automatic equality, a debt-reducing diff, and gate behavior. Release builds repeat the archive smoke on the exact files uploaded by cargo-dist.
-
-Useful local checks:
+Use Rust 1.97.0, Python 3.11+, `just`, nightly plus cargo-public-api 0.52.0,
+cargo-deny, cargo-dist 0.32.0, release-plz 0.3.162, and cargo-binstall.
+Install Python dependencies from `scripts/requirements.txt` in a virtual environment.
 
 ```sh
+python3 scripts/sync-agent-skill.py --check
 just check
 just licenses
 just acceptance-install
+cargo package --workspace --locked
 dist generate --check
 dist plan
-dist build --artifacts=global
-sh target/distrib/install.sh --help
 dist build --artifacts=local --target aarch64-apple-darwin
+dist build --artifacts=global
 python3 scripts/smoke-release.py target/distrib/smackdebt-aarch64-apple-darwin.tar.xz
+python3 scripts/smoke-agent-install.py target/distrib
 ```
 
-Use the target matching your machine. The Linux archive requires glibc; the generated installer checks platform compatibility.
+Use your host target. The Linux binary requires glibc. Edit `dist-workspace.toml`
+and regenerate with `dist generate`; do not hand-edit the generated workflow.
+The missing built-in Homebrew publish-job warning is expected: publication runs
+in our post-release workflow so download URLs already exist.
 
-Installer tests run through stdin with isolated user directories on all three
-check runners. They cover remembered component choices and paths, updates,
-removal, preserved user files, and failed installs. The real-artifact smoke also
-checks a CLI-only update and removal of standalone skills while retaining the CLI.
-`dist build --artifacts=global` must include `install.sh` and the existing
-`smackdebt-installer.sh`. The release verification job tests the finished CLI
-archives and combined installer on all three platforms before cargo-dist
-publishes the GitHub Release in its announce step, including prereleases.
-Release-plz puts the versioned combined install command first in each changelog
-entry. Cargo-dist labels its additional install section "Smackdebt CLI only"
-because that command does not install the skill.
-After publication, verify the combined installer with
-a fresh user profile before announcing the one-line install.
+The plugin skill is the authoring source. After changing it, run
+`python3 scripts/sync-agent-skill.py` to refresh the Cargo-packaged copy and increment
+both plugin manifest versions. CI checks both consistency and plugin versions.
+`smackdebt init` embeds this packaged skill and performs no network access.
 
-If an upload or runner fails, rerun the failed release jobs for the same tag. Never move a published tag. If code or evidence needs changing, prepare a new version through a release PR. After publication, verify the release's installer and download links before announcing it.
+Optional performance evidence remains available through `just release-evidence`
+and `just release-evidence-check`; see `benchmarks/README.md`. Do not copy private source
+into public fixtures or evidence.
+
+## Recovery
+
+Rerun failed jobs for the same tag after infrastructure or credential failures.
+A tap update retry skips an identical formula. If the GitHub Release is already public,
+rerun only failed downstream jobs. Never move a published tag or overwrite released
+artifacts with different code. Code changes require a new version and release PR.
+The existing `v0.1.0` tag is preserved; the first registry release starts at `0.2.0` to avoid reusing that tag.
+
+A PR's green checks prove packaging and local artifact installation. The post-release
+workflow proves the actual public download paths. Check both before announcing a release.

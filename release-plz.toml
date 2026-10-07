@@ -1,6 +1,6 @@
 [workspace]
-git_only = true
-publish = false
+git_only = false
+publish = true
 git_tag_enable = false
 git_tag_name = "v{{ version }}"
 git_release_enable = false
@@ -14,13 +14,15 @@ features_always_increment_minor = true
 body = """
 ## [{{ version }}]{% if release_link %}({{ release_link }}){% endif %} - {{ timestamp | date(format="%Y-%m-%d") }}
 
-Install the CLI and agent skill:
+Install Smackdebt:
 
 ```sh
 curl -fsSL https://github.com/bosun-ai/smackdebt/releases/download/v{{ version }}/install.sh | sh
 ```
 
-For just the CLI, add `-s -- --no-skill` after `sh`.
+Or use `brew install bosun-ai/tap/smackdebt` or `cargo binstall smackdebt`.
+
+Then run `smackdebt init` to install or update skills for your agents.
 {% for group, commits in commits | group_by(attribute="group") %}
 ### {{ group | upper_first }}
 {% for commit in commits %}

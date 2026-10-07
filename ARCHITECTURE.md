@@ -38,7 +38,7 @@ Infrastructure crates do not depend on each other. Languages and discovery use
 analysis-owned values at their seams, but do not depend on another adapter.
 Project orchestration is the only place that composes filesystem, language, and
 Git behavior. Internal Rust APIs remain implementation details. GitHub releases
-distribute the CLI; registry publishing is disabled in release-plz.
+distribute the CLI; crates.io publishes the CLI and its workspace dependencies.
 
 Workspace checks read Cargo metadata and reject dependency edges outside this
 diagram. Compiler-visible API snapshots make cross-crate surface changes
@@ -869,26 +869,26 @@ or persistent cache is part of the first release.
 
 ## Release automation
 
-Agent integrations live under `plugins/smackdebt`, outside the Rust crates.
-Codex and Claude Code manifests bundle one portable skill. The release packager
-embeds that same skill and the workspace version in `install.sh`; cargo-dist
-publishes it as an extra artifact. It delegates binary installation to the
-existing versioned CLI installer and writes user-level skills. It saves component
-choices and absolute paths in the user's Smackdebt configuration directory so
-updates and removal use the same locations. Checksum receipts protect managed
-files during removal and preserve local skill edits during updates. Removal keeps
-unrelated files and shared shell environment settings. It does not edit repository instructions or
-baselines. Agent activation remains advisory. See [agent installation](docs/agents.md).
+Agent integrations live under `plugins/smackdebt`. Codex and Claude Code manifests
+bundle one portable skill. A checked generated copy lives inside the CLI package
+and is embedded in the binary, so `smackdebt init` also works offline from a Cargo
+installation. The CLI owns agent selection and safe user-level skill installation;
+its selection policy is separate from prompts, filesystem writes, and receipts.
+Init is dispatched before project configuration or analysis. Saved choices and
+absolute paths live in the user's Smackdebt configuration directory. Receipts protect
+local edits, and atomic replacements allow interrupted updates to be retried.
+Agent setup does not alter repository instructions or debt baselines.
 
-Release-plz manages the shared workspace version and one application changelog.
-Merging its release PR creates one version tag; cargo-dist owns the generated
-GitHub workflow, platform archives, shell installer, and GitHub Release.
+`install.sh` delegates only binary installation to the versioned cargo-dist shell
+installer. Binary upgrades belong to curl, Homebrew, or Cargo; `init` updates the
+bundled skill at the saved agent locations. See [agent installation](docs/agents.md).
+
+Release-plz manages the shared workspace version and application changelog, publishes
+the workspace crates in dependency order, and creates the application's version tag.
+Cargo-dist owns archives, checksums, installers, the Homebrew formula, and GitHub
+Release creation. Full checks and finished-artifact smoke tests precede publication.
+A post-release job verifies public downloads and cargo-binstall, then installs and
+publishes the stable Homebrew formula to the existing tap. Private-workload evidence
+is available as an optional maintainer check, separate from automated publication.
 The application and gate JSON schemas do not change with packaging.
-
-The release workflow reuses the complete repository checks and tests the exact
-archives before publishing. Release evidence records the clean candidate commit.
-The Git check compares complete trees and permits only the existing approved
-evidence paths to differ, so GitHub merge, squash, and rebase commits do not
-require identical parent lists. Source or release configuration drift still
-requires fresh evidence. Private workloads run locally; CI verifies their
-privacy-safe aggregate records. See [RELEASING.md](RELEASING.md).
+See [RELEASING.md](RELEASING.md).

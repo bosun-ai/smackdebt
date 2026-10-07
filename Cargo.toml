@@ -11,14 +11,12 @@ members = [
 ]
 
 [workspace.package]
-version = "0.1.0"
+version = "0.2.0"
 edition = "2024"
 rust-version = "1.97"
 license = "MIT"
 repository = "https://github.com/bosun-ai/smackdebt"
-# release-plz reconstructs previous versions with `cargo package --workspace`.
-# Cargo needs every local dependency eligible for that temporary registry.
-# Registry publishing is disabled in release-plz.toml; we ship GitHub binaries.
+# The CLI and its workspace dependencies ship together on crates.io.
 publish = true
 
 [workspace.lints.rust]

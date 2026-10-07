@@ -50,7 +50,7 @@ jobs:
       - uses: Swatinem/rust-cache@v2
       - uses: taiki-e/install-action@v2
         with:
-          tool: just, cargo-public-api@0.52.0, cargo-deny, release-plz@0.3.162
+          tool: just, cargo-public-api@0.52.0, cargo-deny, release-plz@0.3.162, cargo-binstall
       - name: Install actionlint
         if: runner.os == 'Linux'
         working-directory: ${{ runner.temp }}
@@ -76,6 +76,9 @@ jobs:
         shell: bash
         run: curl --proto '=https' --tlsv1.2 -LsSf https://github.com/axodotdev/cargo-dist/releases/download/v0.32.0/cargo-dist-installer.sh | sh
       - run: dist generate --check
+      - name: Verify registry packages
+        if: runner.os == 'Linux'
+        run: cargo package --workspace --locked
       - name: Build and test the archive
         if: ${{ inputs.plan == '' }}
         env:
@@ -86,6 +89,12 @@ jobs:
           dist build --artifacts=global
           SMACKDEBT_TEST_INSTALLER=target/distrib/install.sh python3 -m unittest scripts/tests/test_agent_installer.py
           python3 scripts/smoke-agent-install.py target/distrib
+          python3 scripts/smoke-binstall.py target/distrib "$TARGET"
+      - name: Test generated Homebrew installation
+        if: ${{ inputs.plan == '' && runner.os == 'macOS' }}
+        env:
+          TARGET: ${{ matrix.target }}
+        run: python3 scripts/smoke-homebrew.py target/distrib "$TARGET"
       - uses: actions/upload-artifact@v7
         if: ${{ inputs.plan == '' }}
         with:

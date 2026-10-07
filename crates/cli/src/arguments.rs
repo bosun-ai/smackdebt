@@ -19,6 +19,8 @@ pub(crate) struct Cli {
 
 #[derive(Debug, Subcommand)]
 pub(crate) enum Command {
+    /// Install or update the skill for your coding agents.
+    Init(crate::init::InitArgs),
     /// Compare your current work with a Git ref.
     Diff(DiffArgs),
     /// Check debt against a committed baseline.

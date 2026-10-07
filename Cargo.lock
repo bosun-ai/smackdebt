@@ -1130,12 +1130,14 @@ checksum = "0c790de23124f9ab44544d7ac05d60440adc586479ce501c1d6d7da3cd8c9cf5"
 
 [[package]]
 name = "smackdebt"
-version = "0.1.0"
+version = "0.2.0"
 dependencies = [
  "assert_cmd",
+ "blake3",
  "clap",
  "jsonschema",
  "predicates",
+ "same-file",
  "serde",
  "serde_json",
  "smackdebt-output",
@@ -1149,7 +1151,7 @@ dependencies = [
 
 [[package]]
 name = "smackdebt-analysis"
-version = "0.1.0"
+version = "0.2.0"
 dependencies = [
  "blake3",
  "stats_alloc",
@@ -1157,7 +1159,7 @@ dependencies = [
 
 [[package]]
 name = "smackdebt-discovery"
-version = "0.1.0"
+version = "0.2.0"
 dependencies = [
  "ignore",
  "serde_json",
@@ -1168,11 +1170,11 @@ dependencies = [
 
 [[package]]
 name = "smackdebt-git"
-version = "0.1.0"
+version = "0.2.0"
 
 [[package]]
 name = "smackdebt-languages"
-version = "0.1.0"
+version = "0.2.0"
 dependencies = [
  "smackdebt-analysis",
  "tree-sitter",
@@ -1192,7 +1194,7 @@ dependencies = [
 
 [[package]]
 name = "smackdebt-output"
-version = "0.1.0"
+version = "0.2.0"
 dependencies = [
  "anstyle",
  "serde",
@@ -1203,7 +1205,7 @@ dependencies = [
 
 [[package]]
 name = "smackdebt-project"
-version = "0.1.0"
+version = "0.2.0"
 dependencies = [
  "json5",
  "quick-xml",

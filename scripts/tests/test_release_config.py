@@ -25,12 +25,15 @@ def commit(repository, message):
     run(repository, "git", "commit", "-qm", message)
 
 
-def create_release_workspace(repository):
+def create_release_workspace(repository, git_only=True):
     workspace = tomllib.loads((ROOT / "Cargo.toml").read_text())
     manifest = (ROOT / "Cargo.toml").read_text()
     version = workspace["workspace"]["package"]["version"]
     (repository / "Cargo.toml").write_text(manifest.replace(f'version = "{version}"', 'version = "0.1.0"', 1))
-    shutil.copyfile(ROOT / "release-plz.toml", repository / "release-plz.toml")
+    config = (ROOT / "release-plz.toml").read_text()
+    if git_only:
+        config = config.replace("git_only = false", "git_only = true").replace("publish = true", "publish = false")
+    (repository / "release-plz.toml").write_text(config)
     (repository / "README.md").write_text("# Release test\n")
     (repository / ".gitignore").write_text("**/target/\n")
     for member in workspace["workspace"]["members"]:
@@ -68,12 +71,32 @@ def write_test_package(repository, member):
 
 
 class ReleaseConfigurationTests(unittest.TestCase):
-    def test_the_release_flow_never_publishes_crates_to_a_registry(self):
+    def test_registry_publication_is_enabled_for_the_whole_workspace(self):
         config = tomllib.loads((ROOT / "release-plz.toml").read_text())
         workspace = config["workspace"]
         for package in [workspace, *config["package"]]:
-            self.assertFalse(package.get("publish", workspace["publish"]))
-            self.assertTrue(package.get("git_only", workspace["git_only"]))
+            self.assertTrue(package.get("publish", workspace["publish"]))
+            self.assertFalse(package.get("git_only", workspace["git_only"]))
+        self.assertFalse(workspace["git_release_enable"])
+
+    def test_the_packaged_skill_matches_the_plugin_source(self):
+        self.assertEqual((ROOT / "crates/cli/assets/smackdebt/SKILL.md").read_bytes(),
+                         (ROOT / "plugins/smackdebt/skills/smackdebt/SKILL.md").read_bytes())
+
+    @unittest.skipUnless(RELEASE_PLZ, "set SMACKDEBT_RELEASE_PLZ to the pinned release-plz binary")
+    def test_first_registry_release_preserves_the_existing_binary_release_tag(self):
+        with tempfile.TemporaryDirectory(prefix="smackdebt-registry-test-") as temporary:
+            repository = Path(temporary)
+            create_release_workspace(repository, git_only=False)
+            run(repository, "git", "tag", "v0.1.0")
+            for path in [repository / "Cargo.toml", *repository.glob("crates/*/Cargo.toml")]:
+                path.write_text(path.read_text().replace('version = "0.1.0"', 'version = "0.2.0"'))
+            run(repository, "cargo", "generate-lockfile")
+            commit(repository, "feat: publish registry packages")
+            run(repository, RELEASE_PLZ, "update")
+            self.assertIn("0.2.0", (repository / "CHANGELOG.md").read_text())
+            self.assertEqual(run(repository, "git", "tag").strip(), "v0.1.0")
+            self.assertIn('version = "0.2.0"', (repository / "Cargo.toml").read_text())
 
     @unittest.skipUnless(RELEASE_PLZ, "set SMACKDEBT_RELEASE_PLZ to the pinned release-plz binary")
     def test_release_pr_includes_a_library_only_fix_after_the_first_release(self):
