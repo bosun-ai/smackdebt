@@ -3,6 +3,9 @@
 import os
 from pathlib import Path
 import shutil
+from functools import partial
+from http.server import SimpleHTTPRequestHandler, ThreadingHTTPServer
+from threading import Thread
 import subprocess
 import tempfile
 import tomllib
@@ -70,6 +73,11 @@ def write_test_package(repository, member):
     (directory / "src" / ("main.rs" if binary else "lib.rs")).write_text(source)
 
 
+class EmptyRegistryHandler(SimpleHTTPRequestHandler):
+    def log_message(self, format, *args):
+        pass
+
+
 class ReleaseConfigurationTests(unittest.TestCase):
     def test_registry_publication_is_enabled_for_the_whole_workspace(self):
         config = tomllib.loads((ROOT / "release-plz.toml").read_text())
@@ -93,7 +101,24 @@ class ReleaseConfigurationTests(unittest.TestCase):
                 path.write_text(path.read_text().replace('version = "0.1.0"', 'version = "0.2.0"'))
             run(repository, "cargo", "generate-lockfile")
             commit(repository, "feat: publish registry packages")
-            run(repository, RELEASE_PLZ, "update")
+            # Model an empty registry even after real packages have been published.
+            registry = repository / "registry"
+            registry.mkdir()
+            (registry / "config.json").write_text('{"dl":"https://example.invalid/crates"}')
+            server = ThreadingHTTPServer(("127.0.0.1", 0), partial(EmptyRegistryHandler, directory=str(registry)))
+            thread = Thread(target=server.serve_forever, daemon=True)
+            thread.start()
+            try:
+                cargo_config = repository / ".cargo"
+                cargo_config.mkdir()
+                (cargo_config / "config.toml").write_text(
+                    f'[registries.release-test]\nindex = "sparse+http://127.0.0.1:{server.server_port}/"\n')
+                commit(repository, "test: model an empty registry")
+                run(repository, RELEASE_PLZ, "update", "--registry", "release-test")
+            finally:
+                server.shutdown()
+                thread.join()
+                server.server_close()
             self.assertIn("0.2.0", (repository / "CHANGELOG.md").read_text())
             self.assertEqual(run(repository, "git", "tag").strip(), "v0.1.0")
             self.assertIn('version = "0.2.0"', (repository / "Cargo.toml").read_text())

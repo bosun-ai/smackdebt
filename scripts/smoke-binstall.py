@@ -1,4 +1,4 @@
-"""Install a finished archive using the shipped binstall metadata and local HTTP."""
+"""Install a finished archive using the shipped binstall metadata and local HTTPS."""
 
 from functools import partial
 from http.server import SimpleHTTPRequestHandler, ThreadingHTTPServer
@@ -27,7 +27,7 @@ def serve_https(server, directory):
     config = directory / "tls.cnf"
     config.write_text("[req]\nprompt = no\ndistinguished_name = dn\nx509_extensions = ext\n"
                       "[dn]\nCN = localhost\n[ext]\nsubjectAltName = IP:127.0.0.1\n"
-                      "basicConstraints = critical,CA:FALSE\n")
+                      "basicConstraints = critical,CA:FALSE\nkeyUsage = critical,digitalSignature,keyEncipherment\nextendedKeyUsage = serverAuth\n")
     subprocess.run(["openssl", "req", "-x509", "-newkey", "rsa:2048", "-nodes", "-days", "1",
                     "-config", str(config), "-keyout", str(key), "-out", str(certificate)],
                    check=True, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
