@@ -7,7 +7,10 @@ implementation details, even though their crates are published to support instal
 
 ## One-time setup
 
-Configure repository secrets before merging a release PR:
+The `bosun-ai` organization already provides `CARGO_REGISTRY_TOKEN` and
+`HOMEBREW_TAP_TOKEN` to all repositories, including Smackdebt. Smackdebt also has
+a repository-level `RELEASE_PLZ_TOKEN`, which takes precedence over the organization
+secret with the same name. Check their access before the first publication:
 
 - `RELEASE_PLZ_TOKEN`: access to `bosun-ai/smackdebt`, with Contents and Pull requests
   read/write. Its owner must have repository write access. Keep the custom token:
@@ -15,6 +18,9 @@ Configure repository secrets before merging a release PR:
 - `CARGO_REGISTRY_TOKEN`: crates.io `publish-new` and `publish-update` access for
   the seven `smackdebt` packages. Confirm ownership or availability of those names.
 - `HOMEBREW_TAP_TOKEN`: Contents write access to `bosun-ai/homebrew-tap`.
+
+GitHub exposes secret names and visibility, but not token values or their effective
+permissions. The first publication verifies registry and tap access in the workflows.
 
 Allow Actions to create PRs and require the three check jobs before merging release PRs.
 Never put tokens in the repository. Trusted publishing can replace the Cargo token
