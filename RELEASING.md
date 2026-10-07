@@ -47,7 +47,7 @@ Private-workload evidence is an optional maintainer check and does not block pub
 ## Develop and validate
 
 Use Rust 1.97.0, Python 3.11+, `just`, nightly plus cargo-public-api 0.52.0,
-cargo-deny, cargo-dist 0.32.0, release-plz 0.3.162, and cargo-binstall.
+cargo-deny, cargo-dist 0.32.0, and cargo-binstall.
 Install Python dependencies from `scripts/requirements.txt` in a virtual environment.
 
 ```sh
@@ -63,6 +63,10 @@ dist build --artifacts=global
 python3 scripts/smoke-release.py target/distrib/smackdebt-aarch64-apple-darwin.tar.xz
 python3 scripts/smoke-agent-install.py target/distrib
 ```
+
+Publishing uses the official `release-plz/action` workflow. To run the optional
+release configuration integration fixtures locally, install release-plz 0.3.162
+and run `SMACKDEBT_RELEASE_PLZ=release-plz python3 -m unittest scripts/tests/test_release_config.py`.
 
 Use your host target. The Linux binary requires glibc. Edit `dist-workspace.toml`
 and regenerate with `dist generate`; do not hand-edit the generated workflow.

@@ -30,8 +30,6 @@ jobs:
           - os: macos-14
             target: aarch64-apple-darwin
     runs-on: ${{ matrix.os }}
-    env:
-      SMACKDEBT_RELEASE_PLZ: release-plz
     steps:
       # Full history: self-analysis and the ratchet gate read the repository's
       # own commits.
@@ -50,7 +48,7 @@ jobs:
       - uses: Swatinem/rust-cache@v2
       - uses: taiki-e/install-action@v2
         with:
-          tool: just, cargo-public-api@0.52.0, cargo-deny, release-plz@0.3.162, cargo-binstall
+          tool: just, cargo-public-api@0.52.0, cargo-deny, cargo-binstall
       - name: Install actionlint
         if: runner.os == 'Linux'
         working-directory: ${{ runner.temp }}
