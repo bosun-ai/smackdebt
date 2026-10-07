@@ -12,9 +12,26 @@ For Linux x86_64 and macOS (Intel or Apple Silicon):
 curl -fsSL https://github.com/bosun-ai/smackdebt/releases/latest/download/install.sh | sh
 ```
 
-Installs the CLI and a skill for Codex, Claude Code, Cursor, Copilot, and Gemini CLI. Add `-s -- --no-skill` after `sh` for just the CLI, or `-s -- --no-cli` for just the skill. Rerun to update the same components and locations; add `-s -- --uninstall` to remove them. [Agent and plugin installation](docs/agents.md).
+Installs the binary. Or use Homebrew or Cargo:
 
-Or grab an archive from [Releases](https://github.com/bosun-ai/smackdebt/releases). Building from source? With Rust 1.97+, run `cargo install --locked --path crates/cli` from this repository.
+```sh
+brew install bosun-ai/tap/smackdebt
+cargo binstall smackdebt
+```
+
+Then set up your coding agents:
+
+```sh
+smackdebt init
+```
+
+Choose Codex, Claude Code, Cursor, Copilot, or Gemini CLI. Rerun after upgrading
+Smackdebt to update their skills. [Agent setup](docs/agents.md).
+
+Archives are also available from [Releases](https://github.com/bosun-ai/smackdebt/releases).
+With Rust 1.97+, use `cargo install --locked smackdebt`, or build from this checkout
+with `cargo install --locked --path crates/cli`.
+These install paths become available with the next published release.
 
 ## Show me the damage
 

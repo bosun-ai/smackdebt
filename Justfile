@@ -34,6 +34,7 @@ acceptance-install:
     cargo test -p smackdebt --test unified_acceptance installed_command_runs_outside_the_workspace -- --ignored --exact
 
 architecture:
+    python3 scripts/sync-agent-skill.py --check
     python3 scripts/check-dependency-direction.py
     python3 scripts/check-entry-modules.py
     python3 scripts/check-api-snapshots.py

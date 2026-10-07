@@ -2941,6 +2941,7 @@ fn help_and_version_use_the_success_stream_contract() {
                     "Usage: smackdebt [OPTIONS] [PATH] [COMMAND]\n",
                     "\n",
                     "Commands:\n",
+                    "  init  Install or update the skill for your coding agents\n",
                     "  diff  Compare your current work with a Git ref\n",
                     "  gate  Check debt against a committed baseline\n",
                     "  help  Print this message or the help of the given subcommand(s)\n",

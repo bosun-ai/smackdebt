@@ -1,0 +1,64 @@
+name: Verify published release and update Homebrew
+
+on:
+  workflow_call:
+    inputs:
+      plan:
+        required: true
+        type: string
+
+permissions:
+  contents: read
+
+jobs:
+  downloads:
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-22.04, macos-15-intel, macos-14]
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          persist-credentials: false
+      - uses: taiki-e/install-action@v2
+        with:
+          tool: cargo-binstall
+      - name: Verify public downloads and binstall
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          RELEASE_TAG: ${{ fromJson(inputs.plan).announcement_tag }}
+          RELEASE_REPOSITORY: ${{ github.repository }}
+        run: python3 scripts/verify-published-release.py
+
+  homebrew:
+    needs: downloads
+    if: ${{ !fromJson(inputs.plan).announcement_is_prerelease }}
+    runs-on: macos-14
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          persist-credentials: false
+      - name: Download the published formula
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          RELEASE_TAG: ${{ fromJson(inputs.plan).announcement_tag }}
+        run: gh release download "$RELEASE_TAG" --repo "$GITHUB_REPOSITORY" --pattern smackdebt.rb --dir formula
+      - name: Check formula installation
+        env:
+          RELEASE_TAG: ${{ fromJson(inputs.plan).announcement_tag }}
+        run: |
+          brew tap-new bosun-ai/smackdebt-release-check
+          cp formula/smackdebt.rb "$(brew --repo bosun-ai/smackdebt-release-check)/Formula/smackdebt.rb"
+          brew install bosun-ai/smackdebt-release-check/smackdebt
+          test "$(smackdebt --version)" = "smackdebt ${RELEASE_TAG#v}"
+          smackdebt init --all --dry-run
+      - uses: actions/checkout@v6
+        with:
+          repository: bosun-ai/homebrew-tap
+          path: tap
+          token: ${{ secrets.HOMEBREW_TAP_TOKEN }}
+      - name: Update the formula
+        env:
+          RELEASE_TAG: ${{ fromJson(inputs.plan).announcement_tag }}
+        run: python3 scripts/publish-homebrew.py formula/smackdebt.rb tap "$RELEASE_TAG"

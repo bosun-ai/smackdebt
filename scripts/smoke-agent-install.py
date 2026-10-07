@@ -74,53 +74,29 @@ def check_skills(skills):
 
 def check_install(assets, directory):
     profile, environment, version = install_environment(assets, directory)
-    run_installer(assets, directory, environment)
-    command = profile / "custom cargo/bin/smackdebt"
-    skills = [profile / location / "skills/smackdebt/SKILL.md" for location in (".agents", "custom claude")]
-    check_skills(skills)
-    check_cli(command, version, directory)
-
-    user_files = [skills[0].with_name("notes.md"), command.with_name("another-command"), profile / "custom cargo/env"]
-    for path in user_files:
-        path.write_text("keep this user file\n")
-    environment.update(CARGO_HOME=str(profile / ".cargo"), CLAUDE_CONFIG_DIR=str(profile / ".claude"))
-    run_installer(assets, directory, environment)
-    check_skills(skills)
-    assert not (profile / ".cargo/bin/smackdebt").exists()
-    assert not (profile / ".claude/skills/smackdebt").exists()
-    check_cli(command, version, directory)
-
-    run_installer(assets, directory, environment, "--uninstall", "--no-cli")
-    assert not any(path.exists() for path in skills)
-    run_installer(assets, directory, environment)
-    assert not any(path.exists() for path in skills)
-    check_cli(command, version, directory)
-    run_installer(assets, directory, environment, "--all")
-    check_skills(skills)
-    run_installer(assets, directory, environment, "--uninstall")
-    assert not command.exists() and not any(path.exists() for path in skills)
-    assert not (profile / ".config/smackdebt/install-state").exists()
-    assert all(path.read_text() == "keep this user file\n" for path in user_files)
-
-
-def check_cli_only(assets, directory):
-    profile, environment, version = install_environment(assets, directory)
-    run_installer(assets, directory, environment, "--no-skill")
+    environment["CODEX_HOME"] = str(profile / "custom codex")
     run_installer(assets, directory, environment)
     command = profile / "custom cargo/bin/smackdebt"
     check_cli(command, version, directory)
-    assert not (profile / ".agents/skills/smackdebt").exists()
-    assert not (profile / "custom claude/skills/smackdebt").exists()
-    run_installer(assets, directory, environment, "--uninstall")
-    assert not command.exists()
+    assert not (profile / ".agents").exists()
+    assert not (profile / "custom claude").exists()
+    run_installer(assets, directory, environment)
+    subprocess.run([command, "init", "--agent", "codex", "--agent", "claude-code"], env=environment, cwd=directory, check=True)
+    skills = [profile / location / "skills/smackdebt/SKILL.md" for location in ("custom codex", "custom claude")]
+    check_skills(skills)
+    environment.update(CODEX_HOME=str(profile / ".codex"), CLAUDE_CONFIG_DIR=str(profile / ".claude"))
+    subprocess.run([command, "init"], stdin=subprocess.DEVNULL, env=environment, cwd=directory, check=True)
+    check_skills(skills)
+    assert not (profile / ".codex").exists()
+    subprocess.run([command, "init", "--uninstall"], env=environment, cwd=directory, check=True)
+    assert not any(path.exists() for path in skills)
+    check_cli(command, version, directory)
 
 
 def main():
     assets = Path(sys.argv[1]).resolve()
     with tempfile.TemporaryDirectory(prefix="smackdebt-agent-smoke-") as temporary:
         check_install(assets, Path(temporary))
-    with tempfile.TemporaryDirectory(prefix="smackdebt-cli-smoke-") as temporary:
-        check_cli_only(assets, Path(temporary))
     print("agent installer: install, update, and removal passed")
 
 

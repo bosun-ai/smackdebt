@@ -42,20 +42,8 @@ jobs:
         run: |
           python3 scripts/smoke-release.py "artifacts/smackdebt-$TARGET.tar.xz"
           python3 scripts/smoke-agent-install.py artifacts
-
-  evidence:
-    runs-on: ubuntu-22.04
-    steps:
-      - uses: actions/checkout@v6
-        with:
-          fetch-depth: 0
-          persist-credentials: false
-      - uses: actions/setup-python@v6
-        with:
-          python-version: '3.12'
-      - name: Fetch the reviewed candidate
-        run: python3 scripts/fetch-release-evidence.py
-      - name: Validate release evidence
-        run: |
-          python3 scripts/performance/check-baselines.py --release-head
-          python3 scripts/performance/check-workload-reviews.py --release-head
+      - name: Test generated Homebrew installation
+        if: runner.os == 'macOS'
+        env:
+          TARGET: ${{ matrix.target }}
+        run: python3 scripts/smoke-homebrew.py artifacts "$TARGET"

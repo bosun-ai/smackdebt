@@ -1,4 +1,4 @@
-"""Package the CLI release version and the shared skill into one shell installer."""
+"""Build the version-pinned binary installer entry point."""
 
 from pathlib import Path
 import json
@@ -7,7 +7,6 @@ import sys
 
 
 ROOT = Path(__file__).resolve().parents[1]
-SKILL = ROOT / "plugins/smackdebt/skills/smackdebt/SKILL.md"
 
 
 def render_installer():
@@ -15,11 +14,8 @@ def render_installer():
         ["cargo", "metadata", "--format-version=1", "--no-deps", "--locked"], cwd=ROOT,
     ))
     version = next(package["version"] for package in metadata["packages"] if package["name"] == "smackdebt")
-    skill = SKILL.read_text()
-    if "SMACKDEBT_SKILL" in skill.splitlines():
-        raise ValueError("skill contains the installer's heredoc delimiter")
     template = (ROOT / "scripts/install.sh.in").read_text()
-    return template.replace("@VERSION@", version).replace("@SKILL@", skill.rstrip("\n"))
+    return template.replace("@VERSION@", version)
 
 
 def main():

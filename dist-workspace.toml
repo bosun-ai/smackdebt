@@ -2,11 +2,11 @@
 members = ["cargo:."]
 
 [dist]
-# Release notes lead with the combined installer; this section is the CLI alternative.
-display-name = "Smackdebt CLI only"
+display-name = "Smackdebt"
 cargo-dist-version = "0.32.0"
 ci = "github"
-installers = ["shell"]
+installers = ["shell", "homebrew"]
+tap = "bosun-ai/homebrew-tap"
 targets = ["x86_64-unknown-linux-gnu", "x86_64-apple-darwin", "aarch64-apple-darwin"]
 install-path = "CARGO_HOME"
 install-updater = false
@@ -16,6 +16,8 @@ global-artifacts-jobs = ["./check"]
 github-release = "announce"
 publish-jobs = ["./release-verify"]
 publish-prereleases = true
+# Update the tap only after GitHub download URLs exist.
+post-announce-jobs = ["./release-published"]
 
 [[dist.extra-artifacts]]
 artifacts = ["target/agent-installer/install.sh"]
@@ -25,4 +27,7 @@ build = ["python3", "scripts/build-agent-installer.py"]
 contents = "read"
 
 [dist.github-custom-job-permissions.release-verify]
+contents = "read"
+
+[dist.github-custom-job-permissions.release-published]
 contents = "read"

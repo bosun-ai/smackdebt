@@ -48,7 +48,18 @@ pub(crate) fn main() -> ExitCode {
 fn run(arguments: impl IntoIterator<Item = OsString>) -> ExitCode {
     #[cfg(feature = "evidence-stats")]
     reset_evidence_counters();
-    let (cli, selected, config) = match prepare(arguments) {
+    let cli = match parse(arguments) {
+        Ok(cli) => cli,
+        Err(exit) => return exit,
+    };
+    if let Some(Command::Init(args)) = cli.command {
+        return crate::init::run(args);
+    }
+    run_analysis(cli)
+}
+
+fn run_analysis(cli: Cli) -> ExitCode {
+    let (cli, selected, config) = match prepare(cli) {
         Ok(prepared) => prepared,
         Err(exit) => return exit,
     };
@@ -57,6 +68,7 @@ fn run(arguments: impl IntoIterator<Item = OsString>) -> ExitCode {
             let request = codebase_request(cli.path, &cli.common, &config);
             (request.analyze(), cli.common)
         }
+        Some(Command::Init(_)) => unreachable!("init is handled before analysis setup"),
         Some(Command::Gate(args)) => return run_gate(args, selected, &config),
         Some(Command::Diff(args)) => {
             let request = diff_request(args.path, args.reference, &args.common, &config);
@@ -67,6 +79,14 @@ fn run(arguments: impl IntoIterator<Item = OsString>) -> ExitCode {
         Ok(result) => render(&result, &common),
         Err(error) => fail(&error),
     }
+}
+
+fn parse(arguments: impl IntoIterator<Item = OsString>) -> Result<Cli, ExitCode> {
+    Cli::try_parse_from(arguments).map_err(|error| {
+        let exit = error.exit_code();
+        let _ = error.print();
+        ExitCode::from(u8::try_from(exit).unwrap_or(2))
+    })
 }
 
 /// Clears the work counters before a measured run when either stats
@@ -95,17 +115,7 @@ fn codebase_request(
 
 /// Parses the invocation, validates the selected path, and loads project
 /// configuration, or answers with the exit status the failure earned.
-fn prepare(
-    arguments: impl IntoIterator<Item = OsString>,
-) -> Result<(Cli, Option<PathBuf>, ProjectConfig), ExitCode> {
-    let cli = match Cli::try_parse_from(arguments) {
-        Ok(cli) => cli,
-        Err(error) => {
-            let exit = error.exit_code();
-            let _ = error.print();
-            return Err(ExitCode::from(u8::try_from(exit).unwrap_or(2)));
-        }
-    };
+fn prepare(cli: Cli) -> Result<(Cli, Option<PathBuf>, ProjectConfig), ExitCode> {
     if json_all_conflict(&cli) {
         return Err(fail_with("--all cannot be used with --json", 2));
     }
@@ -133,6 +143,7 @@ fn json_all_conflict(cli: &Cli) -> bool {
 /// loaded from.
 fn selected_paths(cli: &Cli) -> (Option<PathBuf>, PathBuf) {
     let selected = match &cli.command {
+        Some(Command::Init(_)) => None,
         None => cli.path.clone(),
         Some(Command::Diff(args)) => args.path.clone().or_else(|| cli.path.clone()),
         Some(Command::Gate(args)) => args.path.clone().or_else(|| cli.path.clone()),
