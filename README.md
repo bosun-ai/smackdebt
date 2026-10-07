@@ -10,6 +10,8 @@ whether their changes helped before handing the code back to you.
 
 Analysis runs locally. No service, account, or API key required.
 
+![Smackdebt finds a complex shipping function, then verifies a refactor: cognitive complexity 27 to 5, nesting 6 to 1, and 50 behavior checks passing.](docs/assets/smackdebt-demo.gif)
+
 ## Get it
 
 For Linux x86_64 and macOS (Intel or Apple Silicon):
@@ -59,16 +61,6 @@ smackdebt --json          # Use the report in your own tools
 ```
 
 ## Less spaghetti, with receipts
-
-Reports name the problem, show the evidence, and point to the code:
-
-```text
-PROBLEMS
-  high hot and complex · src/auth.rs
-    cognitive 28 · hot (11 commits)
-
-next: smackdebt src/auth.rs
-```
 
 Each function gets a **healthy**, **watch**, or **high** rating from its complexity,
 size, nesting, and parameter count. A difficult function cannot hide in a project
