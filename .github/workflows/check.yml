@@ -30,8 +30,6 @@ jobs:
           - os: macos-14
             target: aarch64-apple-darwin
     runs-on: ${{ matrix.os }}
-    env:
-      SMACKDEBT_RELEASE_PLZ: release-plz
     steps:
       # Full history: self-analysis and the ratchet gate read the repository's
       # own commits.
@@ -50,7 +48,15 @@ jobs:
       - uses: Swatinem/rust-cache@v2
       - uses: taiki-e/install-action@v2
         with:
-          tool: just, cargo-public-api@0.52.0, cargo-deny, release-plz@0.3.162, cargo-binstall
+          tool: just, cargo-public-api@0.52.0, cargo-deny, cargo-binstall
+      # Release configuration fixtures are independent of the host platform.
+      # This release-plz version has no Intel macOS binary; installing it there
+      # builds the tool from source before any checks can run.
+      - name: Install release-plz for release configuration checks
+        if: runner.os == 'Linux'
+        uses: taiki-e/install-action@v2
+        with:
+          tool: release-plz@0.3.162
       - name: Install actionlint
         if: runner.os == 'Linux'
         working-directory: ${{ runner.temp }}
@@ -68,6 +74,8 @@ jobs:
           PLUGIN_BASE: ${{ github.event.pull_request.base.sha || github.event.before }}
         run: python3 scripts/check-plugin-version.py "$PLUGIN_BASE"
       - run: just check
+        env:
+          SMACKDEBT_RELEASE_PLZ: ${{ runner.os == 'Linux' && 'release-plz' || '' }}
       - run: just licenses
         if: runner.os == 'Linux'
       - run: actionlint
