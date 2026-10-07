@@ -3,7 +3,7 @@ smackdebt · repository root
   Not all source was checked.
   16 of 18 source files were analyzed.
 4 high · 3 watch · 7 checked
-worst: hot/hot.js — hot AND complex
+worst: god/god.js — top ranked problem
 
 AREAS
   god · 3 high · 1 watch

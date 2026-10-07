@@ -2174,6 +2174,7 @@
             "fights_back",
             "lost",
             "no_debt_change",
+            "changed",
             "better",
             "worse",
             "mixed"
@@ -2358,7 +2359,8 @@
           "enum": [
             "hot_and_complex",
             "most_complex",
-            "package_dependency_cycle"
+            "package_dependency_cycle",
+            "top_ranked_problem"
           ]
         }
       },

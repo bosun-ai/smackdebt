@@ -94,6 +94,123 @@ fn package_path(report: &Value, package: u64) -> String {
         .to_owned()
 }
 
+fn nested_eligibility(name: &str, depth: usize) -> String {
+    let mut source = format!("def {name}(values):\n");
+    for level in 0..depth {
+        source.push_str(&format!(
+            "{}if values[{level}]:\n",
+            "    ".repeat(level + 1)
+        ));
+    }
+    source.push_str(&format!(
+        "{}return True\n    return False\n",
+        "    ".repeat(depth + 1)
+    ));
+    source
+}
+
+#[test]
+fn the_headline_and_next_command_follow_the_first_ranked_problem() {
+    let repository = GeneratedRepository::new("main");
+    let grouped = nested_eligibility("first", 7) + &nested_eligibility("second", 7);
+    repository.write("grouped.py", grouped.as_bytes());
+    repository.write("deep.py", nested_eligibility("deep", 12).as_bytes());
+    for automatic in [false, true] {
+        let run = |invocation: Invocation| {
+            if automatic {
+                invocation.automatic_workers()
+            } else {
+                invocation
+            }
+            .run(repository.path())
+        };
+        let result = run(Invocation::new([] as [&str; 0]));
+        result.success();
+        let terminal = String::from_utf8(result.stdout).unwrap();
+        let first = problem_heads(&terminal)[0];
+        assert!(first.contains("grouped.py"), "{terminal}");
+        assert!(terminal.contains("worst: grouped.py"), "{terminal}");
+        assert!(
+            terminal.ends_with("next: smackdebt grouped.py\n"),
+            "{terminal}"
+        );
+        let result = run(Invocation::new(["--json"]));
+        result.success();
+        let report = checked_json(&result.stdout);
+        assert_eq!(report["summary"]["worst"][0]["path"], "grouped.py");
+    }
+}
+
+#[test]
+fn increasing_already_high_complexity_is_reported_as_worse() {
+    let repository = GeneratedRepository::new("main");
+    repository.write(
+        "eligibility.py",
+        nested_eligibility("eligible", 7).as_bytes(),
+    );
+    repository.commit(support::Commit {
+        message: "initial eligibility",
+        identity: support::Identity {
+            name: "Example",
+            address: "example@example.invalid",
+        },
+        date: "2026-01-01T12:00:00Z",
+    });
+    repository.write(
+        "eligibility.py",
+        nested_eligibility("eligible", 12).as_bytes(),
+    );
+    for automatic in [false, true] {
+        let run = |invocation: Invocation| {
+            if automatic {
+                invocation.automatic_workers()
+            } else {
+                invocation
+            }
+            .run(repository.path())
+        };
+        let result = run(Invocation::new(["diff", "HEAD"]));
+        result.success();
+        let terminal = String::from_utf8(result.stdout).unwrap();
+        assert!(terminal.contains("Debt increased."), "{terminal}");
+        assert!(
+            terminal.contains("worse 1 · better 0 · changed 0"),
+            "{terminal}"
+        );
+        assert!(terminal.contains("cognitive 28 → 78"), "{terminal}");
+        let result = run(Invocation::new(["diff", "HEAD", "--json"]));
+        result.success();
+        let report = checked_json(&result.stdout);
+        assert_eq!(report["verdict"]["tier"], "worse");
+    }
+}
+
+#[test]
+fn selected_context_source_keeps_its_detail_without_becoming_a_verdict_offender() {
+    let repository = GeneratedRepository::new("main");
+    repository.write(
+        "fixtures/eligibility.py",
+        nested_eligibility("eligible", 7).as_bytes(),
+    );
+    repository.write(
+        "vendor.min.js",
+        b"// @generated\nfunction vendor(a,b,c,d,e,f,g,h,i) { return a; }\n",
+    );
+    for path in ["fixtures/eligibility.py", "vendor.min.js"] {
+        let result = Invocation::new([path]).run(repository.path());
+        result.success();
+        let terminal = String::from_utf8(result.stdout).unwrap();
+        assert!(terminal.contains("Nothing was checked."), "{terminal}");
+        assert!(terminal.contains("PROBLEMS"), "{terminal}");
+        assert!(!terminal.contains("worst:"), "{terminal}");
+        assert!(!terminal.contains("next:"), "{terminal}");
+        let result = Invocation::new([path, "--json"]).run(repository.path());
+        result.success();
+        let report = checked_json(&result.stdout);
+        assert!(report["summary"]["worst"].as_array().unwrap().is_empty());
+    }
+}
+
 const PRIVATE_JSON_KEYS: &[&str] = &[
     "source_text",
     "commit_message",
@@ -1027,9 +1144,12 @@ fn a_core_is_stated_only_when_the_largest_cycle_clears_both_floors() {
         "{plain_text}"
     );
     assert_eq!(
-        rated_verdict_lines(&text),
+        rated_verdict_lines(&text)
+            .into_iter()
+            .filter(|line| !line.starts_with("worst:"))
+            .collect::<Vec<_>>(),
         rated_verdict_lines(&plain_text),
-        "neither propagation fact moves a tier, a count, or the worst offender"
+        "neither propagation fact moves a tier or a count; the cycle is now the top problem"
     );
 
     let small = core_repository(200, 3);
@@ -1304,9 +1424,12 @@ fn a_scope_states_how_many_files_a_typical_change_there_touches() {
     let windowed = rendered(vec![]);
     assert!(!windowed.contains("A typical change here"), "{windowed}");
     assert_eq!(
-        rated_verdict_lines(&root),
+        rated_verdict_lines(&root)
+            .into_iter()
+            .filter(|line| !line.starts_with("worst:"))
+            .collect::<Vec<_>>(),
         rated_verdict_lines(&windowed),
-        "amplification moves no tier, no count, and no worst offender"
+        "amplification moves no tier or count; recent history can supply the top problem"
     );
 }
 
@@ -3673,7 +3796,10 @@ fn assert_head_agrees_with_tables(report: &Value) {
         let path = offender["path"].as_str().unwrap();
         assert!(paths.contains(path), "worst path {path} is not a real path");
         if offender["name"].is_null() {
-            assert_eq!(offender["reason"], "package_dependency_cycle");
+            assert!(matches!(
+                offender["reason"].as_str(),
+                Some("package_dependency_cycle" | "top_ranked_problem")
+            ));
         }
     }
     assert_debt_diff_selection(report);

@@ -302,12 +302,15 @@ fn a_scope_with_no_movement_prints_no_footer() {
     assert!(!terminal.contains("inspect directories"), "{terminal}");
 }
 
-/// A no-debt diff that counted a change states the one movement behind the
+/// A diff without a clear direction states the one movement behind the
 /// count, even while comparison confidence is the rest of what it can say.
 #[test]
-fn a_no_debt_diff_states_the_movement_its_count_promised() {
+fn a_changed_diff_states_the_movement_its_count_promised() {
     let terminal = render(&diff(true), ROOT);
-    assert!(terminal.contains("No debt changed."), "{terminal}");
+    assert!(
+        terminal.contains("Debt measurements changed."),
+        "{terminal}"
+    );
     assert!(
         terminal.contains("\nworse 0 · better 0 · changed 1\n"),
         "{terminal}"

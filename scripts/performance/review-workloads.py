@@ -407,6 +407,7 @@ def codebase_head_matches_report(report: dict, terminal: str) -> bool:
             "hot_and_complex": "hot AND complex",
             "most_complex": "most complex",
             "package_dependency_cycle": "package dependency cycle",
+            "top_ranked_problem": "top ranked problem",
         }.get(worst[0].get("reason"))
         expected = f"worst: {worst[0].get('path')} — {reason}"
         if reason is None or count_index + 1 >= len(lines) or lines[count_index + 1] != expected:

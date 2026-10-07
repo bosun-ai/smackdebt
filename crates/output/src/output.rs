@@ -14,10 +14,10 @@ use smackdebt_analysis::{
     DebtDiffSelection, DependencyEdgeId, Diagnostic, DiagnosticKind, DiffTier,
     EvolutionaryFindingId, FileChangeCoupling, FileId, FileRecord, Finding, FindingId, Instability,
     KnowledgeConcentrationFindingId, Language, Measurements, PackageId, PackagePresence,
-    PackageRecord, ProblemAnchor, ProblemCard, ProblemEvidence, ProblemPattern, ProblemVisibility,
-    PropagationReach, Rating, Report, ReportMode, ResolutionIssueKind, Scope, ScopeId, ScopeKind,
-    Signal, SizeFinding, SizeFindingId, SourcePresence, SourceRole, SourceTrust,
-    StableDependencyFindingId, UnitIdentity, UnitKind, Verdict, instability, qualifies_for_finding,
+    PackageRecord, ProblemAnchor, ProblemCard, ProblemEvidence, ProblemPattern, PropagationReach,
+    Rating, Report, ReportMode, ResolutionIssueKind, Scope, ScopeId, ScopeKind, Signal,
+    SizeFinding, SizeFindingId, SourcePresence, SourceRole, SourceTrust, StableDependencyFindingId,
+    UnitIdentity, UnitKind, Verdict, instability, qualifies_for_finding,
 };
 use unicode_width::{UnicodeWidthChar, UnicodeWidthStr};
 
@@ -250,7 +250,7 @@ fn codebase_tier_style(tier: CodebaseTier) -> Option<Style> {
 
 fn diff_tier_style(tier: DiffTier) -> Option<Style> {
     match tier {
-        DiffTier::NoDebtChange => None,
+        DiffTier::NoDebtChange | DiffTier::Changed => None,
         DiffTier::Better => Some(Style::new().fg_color(Some(AnsiColor::Green.into()))),
         DiffTier::Worse => Some(Style::new().fg_color(Some(AnsiColor::Red.into()))),
         DiffTier::Mixed => Some(Style::new().fg_color(Some(Ansi256Color(208).into()))),
@@ -471,16 +471,19 @@ impl Presentation {
         // Codebase debt is one ranked section of named problems; a diff keeps
         // its three sections this round.
         let problems = if codebase {
-            problem_rows(report, displayed, selected, all, top)
+            problem_rows(report, selected, all, top)
         } else {
             Section::new("PROBLEMS")
         };
-        let no_debt = report.mode() == ReportMode::Diff
-            && verdict.diff_tier() == Some(DiffTier::NoDebtChange);
+        let no_direction = report.mode() == ReportMode::Diff
+            && matches!(
+                verdict.diff_tier(),
+                Some(DiffTier::NoDebtChange | DiffTier::Changed)
+            );
         let trust = comparison_trust(report, selected, file_detail, &verdict);
         // A diff that moved no debt states one witness for the count it printed
         // and the comparison confidence behind it, and leaves the rest out.
-        let trust_only = no_debt && !all && trust.exists;
+        let trust_only = no_direction && !all && trust.exists;
         let diff_candidates = (!codebase).then(|| {
             let mut rows = diff_row_candidates(report, selection);
             rows.sort_unstable();
@@ -530,14 +533,16 @@ impl Presentation {
                 .section(),
             )
         };
-        let verdict_only = no_debt && !trust.exists && findings.rows.is_empty();
+        let verdict_only = no_direction && !trust.exists && findings.rows.is_empty();
         let (warnings, warning_detail) = if trust_only {
             comparison_trust_warning_rows(report, selected, file_detail, trust.history)
         } else {
             warning_rows(report, selected, file_detail)
         };
         let next = match report.mode() {
-            ReportMode::Codebase => first_problem_path(report, displayed, selected, all)
+            ReportMode::Codebase => verdict
+                .worst_offender()
+                .map(|offender| PathBuf::from(offender.path()))
                 .or_else(|| drill_path_from_visible(report, selected, areas.first()))
                 .map(|path| format!("smackdebt {}", path.to_string_lossy())),
             ReportMode::Diff => diff_next(
@@ -764,18 +769,12 @@ impl ProblemDetail {
 /// never sorts.
 fn problem_rows(
     report: &Report,
-    displayed: &Scope,
     selected: &Scope,
     all: bool,
     top: Option<NonZeroUsize>,
 ) -> Section {
     let mut section = Section::new("PROBLEMS");
-    let cards: Vec<&ProblemCard> = report
-        .problems()
-        .iter()
-        .filter(|card| card_belongs_to_scope(report, card, displayed))
-        .filter(|card| shows_card(report, card, selected, all))
-        .collect();
+    let cards: Vec<&ProblemCard> = report.scope_problems(selected.id(), all).collect();
     let detail = ProblemDetail::resolve(all, selected.kind() == ScopeKind::File, top, cards.len());
     section.rows = cards
         .into_iter()
@@ -783,72 +782,6 @@ fn problem_rows(
         .map(|card| problem_row(report, card, detail.evidence))
         .collect();
     section
-}
-
-fn first_problem_path(
-    report: &Report,
-    displayed: &Scope,
-    selected: &Scope,
-    all: bool,
-) -> Option<PathBuf> {
-    let card = report.problems().iter().find(|card| {
-        card_belongs_to_scope(report, card, displayed) && shows_card(report, card, selected, all)
-    })?;
-    let path = match card.anchor() {
-        ProblemAnchor::File(file) => report.files().get(file.index())?.path(),
-        ProblemAnchor::Files(files) => report.files().get(files.first()?.index())?.path(),
-        ProblemAnchor::Package(package) => package_name(report, package.index())?,
-        ProblemAnchor::PackagePair(left, _) => package_name(report, left.index())?,
-    };
-    Some(PathBuf::from(path))
-}
-
-/// Whether the current detail level shows this card.
-///
-/// A `detail` card is removed from a view rather than moved inside it, so the
-/// cards that remain keep the order the problem rank gave them.
-fn shows_card(report: &Report, card: &ProblemCard, selected: &Scope, all: bool) -> bool {
-    all || card.visibility() == ProblemVisibility::Default
-        || anchor_is_scope(report, card.anchor(), selected)
-}
-
-/// Whether a card's anchor is the selected scope itself, which is the one
-/// place a `detail` card reaches a default view.
-fn anchor_is_scope(report: &Report, anchor: &ProblemAnchor, selected: &Scope) -> bool {
-    match anchor {
-        ProblemAnchor::File(file) => {
-            selected.kind() == ScopeKind::File && file_belongs_to_scope(report, *file, selected)
-        }
-        ProblemAnchor::Package(package) => report
-            .packages()
-            .get(package.index())
-            .is_some_and(|record| record.scope() == selected.id()),
-        ProblemAnchor::Files(_) | ProblemAnchor::PackagePair(..) => false,
-    }
-}
-
-/// Whether a card belongs to a scope, which its anchor decides.
-fn card_belongs_to_scope(report: &Report, card: &ProblemCard, scope: &Scope) -> bool {
-    match card.anchor() {
-        ProblemAnchor::File(file) => file_belongs_to_scope(report, *file, scope),
-        ProblemAnchor::Files(files) => files
-            .iter()
-            .any(|file| file_belongs_to_scope(report, *file, scope)),
-        ProblemAnchor::Package(package) => package_meets_scope(report, *package, scope),
-        ProblemAnchor::PackagePair(left, right) => {
-            package_meets_scope(report, *left, scope) || package_meets_scope(report, *right, scope)
-        }
-    }
-}
-
-/// Whether a package lies within the selected scope or contains it, which is
-/// how a package-anchored card reaches the views above and below its package.
-fn package_meets_scope(report: &Report, package: PackageId, scope: &Scope) -> bool {
-    let Some(record) = report.packages().get(package.index()) else {
-        return false;
-    };
-    scope_within(report, record.scope(), scope.id())
-        || scope_within(report, scope.id(), record.scope())
 }
 
 /// One card: its rating word, what it is, what it is about, then a prefix of

@@ -27,3 +27,9 @@ Changing a field, enum, table, or index relationship requires an intentional
 schema change, updated product documentation, focused semantic assertions, and
 reviewed JSON results. Contributor names, addresses, and temporary identity
 indexes are not report fields.
+
+Diff tier `changed` means retained debt changed without a clear direction;
+`no_debt_change` means no retained debt movement. Codebase `summary.worst`
+follows the default problem order. Reason `top_ranked_problem` covers problems
+without a hotspot or package-cycle reason. These are additive values
+in schema version 4.

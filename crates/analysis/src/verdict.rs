@@ -324,6 +324,7 @@ impl VerdictCounts {
 #[derive(Clone, Copy, Debug, Eq, Hash, Ord, PartialEq, PartialOrd)]
 pub enum DiffTier {
     NoDebtChange,
+    Changed,
     Better,
     Worse,
     Mixed,
@@ -334,6 +335,7 @@ impl DiffTier {
     pub const fn id(self) -> &'static str {
         match self {
             Self::NoDebtChange => "no_debt_change",
+            Self::Changed => "changed",
             Self::Better => "better",
             Self::Worse => "worse",
             Self::Mixed => "mixed",
@@ -344,6 +346,7 @@ impl DiffTier {
     pub const fn sentence(self) -> &'static str {
         match self {
             Self::NoDebtChange => "No debt changed.",
+            Self::Changed => "Debt measurements changed.",
             Self::Better => "Debt decreased.",
             Self::Worse => "Debt increased.",
             Self::Mixed => "Debt increased in some places and decreased in others.",
@@ -352,14 +355,15 @@ impl DiffTier {
 
     /// Reconciles all three comparison families in one decision.
     ///
-    /// A member that only changed a measurement moves the code in neither
-    /// direction, so it is retained in the facts without deciding the tier.
+    /// Changes without a clear direction remain visible instead of claiming
+    /// that nothing changed.
     pub const fn reconcile(facts: DebtDiffFacts) -> Self {
         let total = facts.total();
         match (total.worse() > 0, total.better() > 0) {
             (true, true) => Self::Mixed,
             (true, false) => Self::Worse,
             (false, true) => Self::Better,
+            (false, false) if total.changed() > 0 => Self::Changed,
             (false, false) => Self::NoDebtChange,
         }
     }
@@ -587,6 +591,7 @@ pub enum WorstOffenderReason {
     HotAndComplex,
     MostComplex,
     PackageDependencyCycle,
+    TopRankedProblem,
 }
 
 impl WorstOffenderReason {
@@ -599,6 +604,7 @@ impl WorstOffenderReason {
             Self::HotAndComplex => "hot_and_complex",
             Self::MostComplex => "most_complex",
             Self::PackageDependencyCycle => "package_dependency_cycle",
+            Self::TopRankedProblem => "top_ranked_problem",
         }
     }
 
@@ -608,6 +614,7 @@ impl WorstOffenderReason {
             Self::HotAndComplex => "hot AND complex",
             Self::MostComplex => "most complex",
             Self::PackageDependencyCycle => "package dependency cycle",
+            Self::TopRankedProblem => "top ranked problem",
         }
     }
 }
@@ -1241,7 +1248,7 @@ mod tests {
         let none = DiffCounts::default();
         let cases = [
             (none, none, none, DiffTier::NoDebtChange),
-            (changed, none, none, DiffTier::NoDebtChange),
+            (changed, none, none, DiffTier::Changed),
             (worse, none, none, DiffTier::Worse),
             (better, none, none, DiffTier::Better),
             (both, none, none, DiffTier::Mixed),

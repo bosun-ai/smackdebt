@@ -295,7 +295,7 @@ mod tests {
         assert_eq!(verdict.diff_tier(), None);
         let offender = verdict.worst_offender().unwrap();
         assert_eq!(offender.path(), "work.rs");
-        assert_eq!(offender.reason(), WorstOffenderReason::MostComplex);
+        assert_eq!(offender.reason(), WorstOffenderReason::TopRankedProblem);
     }
 }
 

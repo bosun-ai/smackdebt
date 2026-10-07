@@ -3,8 +3,7 @@ smackdebt · repository root
 0 high · 1 watch · 2 checked
 worst: very-long-source-package-name/
         very-long-source-directory-name/
-        very-long-source-file-name.js — most
-        complex
+        choice.js — package dependency cycle
 
 PROBLEMS
   high circular dependency ·
