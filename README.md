@@ -1,8 +1,14 @@
 # Smackdebt
 
-**Find the code that hurts. See whether your changes make it better.**
+**Help your AI agent write code you can follow.**
 
-Smackdebt checks source, dependencies, and Git history to show where debt lives and what to tackle next. No setup required. Your code stays on your machine.
+Your agent finished the feature. Now you have to untangle it.
+
+Smackdebt gives coding agents concrete feedback on complexity, tangled dependencies,
+and code that keeps causing work. They can find the trouble, simplify it, and check
+whether their changes helped before handing the code back to you.
+
+Analysis runs locally. No service, account, or API key required.
 
 ## Get it
 
@@ -12,38 +18,49 @@ For Linux x86_64 and macOS (Intel or Apple Silicon):
 curl -fsSL https://github.com/bosun-ai/smackdebt/releases/latest/download/install.sh | sh
 ```
 
-Installs the binary. Or use Homebrew or Cargo:
+Or choose Homebrew or Cargo:
 
 ```sh
 brew install bosun-ai/tap/smackdebt
+# or
 cargo binstall smackdebt
 ```
 
-Then set up your coding agents:
+Then give your agent the skill:
 
 ```sh
 smackdebt init
 ```
 
-Choose Codex, Claude Code, Cursor, Copilot, or Gemini CLI. Rerun after upgrading
-Smackdebt to update their skills. [Agent setup](docs/agents.md).
+Choose **Codex, Claude Code, Cursor, Copilot, or Gemini CLI**, then restart your agent.
+Rerun `init` after upgrading to update its skill. [Agent setup →](docs/agents.md)
 
-Archives are also available from [Releases](https://github.com/bosun-ai/smackdebt/releases).
-With Rust 1.97+, use `cargo install --locked smackdebt`, or build from this checkout
-with `cargo install --locked --path crates/cli`.
-These install paths become available with the next published release.
+Installers arrive with the next published release. Until then, build from this
+checkout with Rust 1.97+: `cargo install --locked --path crates/cli`.
 
-## Show me the damage
+## Give “make it cleaner” some teeth
+
+Ask your agent:
+
+> Use Smackdebt to review this change. Simplify the code where you've made it
+> harder to follow, then run the tests and check the diff again.
+
+The skill guides your agent to inspect the affected code before editing, compare
+against its starting commit afterward, and fix regressions within the task.
+For a required CI check, [set up a debt gate](docs/guide.md#gate).
+
+You can run the same checks yourself:
 
 ```sh
-smackdebt                 # Check the repository
-smackdebt src/auth        # Look closer at a directory or file
-smackdebt diff main       # Compare your worktree with a Git ref
-smackdebt --json          # Feed a script, editor, or agent
-smackdebt gate            # Check against a saved debt baseline
+smackdebt                 # Find the trouble spots
+smackdebt src/auth        # Zoom in
+smackdebt diff main       # Did this change help?
+smackdebt --json          # Use the report in your own tools
 ```
 
-Reports name the problem and give you a next step. For example:
+## Less spaghetti, with receipts
+
+Reports name the problem, show the evidence, and point to the code:
 
 ```text
 PROBLEMS
@@ -53,62 +70,23 @@ PROBLEMS
 next: smackdebt src/auth.rs
 ```
 
-Use `--all` for detail or `--help` for options. [Set up the gate](docs/guide.md#gate) when you want CI to catch regressions.
+Each function gets a **healthy**, **watch**, or **high** rating from its complexity,
+size, nesting, and parameter count. A difficult function cannot hide in a project
+average. Dependency checks reveal cycles and wide change impact; Git history
+highlights difficult code you keep touching.
 
-## What gets measured?
-
-A function takes its worst rating: **healthy**, **watch**, or **high**. One troublesome function cannot hide inside a project average.
-
-| Metric | What it tells you | Watch | High |
-| --- | --- | ---: | ---: |
-| Cognitive complexity | How hard the control flow is to follow | 15 | 25 |
-| Cyclomatic complexity | How many independent paths need testing | 11 | 21 |
-| Logical statements | How much work a function contains | 50 | 100 |
-| Nesting depth | How far you have to keep context in your head | 4 | 7 |
-| Parameters | How much a caller needs to supply | 6 | 9 |
-
-Dependencies reveal cycles and change reach. Git history adds hotspots, files that change together, and reliance on one contributor. [Measurement rules](docs/guide.md#read-the-ratings).
-
-## How bad is it?
-
-The repository verdict ranges from **“Clean. Ship it.”** through **“Solid, with rough edges.”**, **“Worn in the usual places.”**, and **“This code fights back.”** to **“The code is winning.”**
-
-No analyzed code means **“Nothing was checked.”**, not a clean bill of health. A diff tells you whether debt increased, decreased, moved both ways, or stayed the same. [Read the verdicts](docs/guide.md#check-a-codebase).
-
-## Familiar problems, now with receipts
-
-| You see | What to look at |
-| --- | --- |
-| Does too much | A large or widely connected file with concentrated debt |
-| Everything depends on this / depends on many files / change spreads far | A dependency hub or a file with wide reach |
-| Circular dependency | Files or packages tied in a knot |
-| Hot and complex | Difficult code you keep changing |
-| Packages change together | Package changes linked by history rather than imports |
-| Importers follow its changes | An interface whose callers keep needing edits |
-| Change together without a dependency | Files with a hidden relationship |
-| One author | Knowledge concentrated in one contributor |
-| Depends on less stable code | A dependency pointing toward more dependent code |
-
-Other rated findings appear under their own names. Each problem includes measured evidence. [Pattern rules](docs/guide.md#read-the-problems).
+Use `--all` for detail. [Measurements](docs/guide.md#read-the-ratings) ·
+[Problem patterns](docs/guide.md#read-the-problems) · [Checked examples](docs/examples.md)
 
 ## Languages
 
-**C, C++, C#, Go, Java, JavaScript/JSX, PHP, Python, Ruby, Rust, TypeScript/TSX, and Vue** (scripts and templates). React uses JSX/TSX support. Unsupported files and parse failures remain visible in coverage warnings.
+**C, C++, C#, Go, Java, JavaScript/JSX, PHP, Python, Ruby, Rust, TypeScript/TSX,
+and Vue** (scripts and templates). React uses JSX/TSX support. Reports flag
+unsupported files and parse failures so you can see what the check missed.
 
-## Keep digging
+---
 
-[User guide](docs/guide.md) · [Checked examples](docs/examples.md) · [JSON schemas](schemas/README.md) · [Architecture](ARCHITECTURE.md) · [Releasing](RELEASING.md)
+[User guide](docs/guide.md) · [JSON schemas](schemas/README.md) ·
+[Architecture](ARCHITECTURE.md) · [Development & releases](RELEASING.md)
 
-## Development checks
-
-Install the Python check dependencies in a virtual environment before running
-the workspace checks:
-
-```console
-python3 -m venv .venv
-. .venv/bin/activate
-python3 -m pip install -r scripts/requirements.txt
-just check
-```
-
-MIT licensed. Built with [tree-sitter](https://tree-sitter.github.io/tree-sitter/) and its language grammars; Smackdebt owns the measurements and reports.
+MIT licensed. Built with [tree-sitter](https://tree-sitter.github.io/tree-sitter/).
