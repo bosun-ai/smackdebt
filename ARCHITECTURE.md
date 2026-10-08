@@ -887,6 +887,8 @@ Experimental end-of-turn hooks are installed only with `init --experimental-hook
 Each agent's hook configuration points to one private CLI command. That command
 checks the current worktree at most once per changed state and ten-minute interval,
 then requests one more focused agent turn only when the diff report worsened.
+The agent-specific JSON definitions and review message live in
+`crates/cli/assets/hooks/` and are bundled into the CLI package.
 Registration preserves other user settings and removal targets only Smackdebt's
 entry. Analysis failures leave the agent free to finish.
 Agent setup does not alter repository instructions or debt baselines. The private

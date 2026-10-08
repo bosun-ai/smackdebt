@@ -48,6 +48,7 @@ hooks if it does not watch its settings file.
 Hook registration uses each agent's user settings. Existing JSON settings and
 other hooks are preserved. Settings files must contain valid JSON. The hook
 requires the `smackdebt` binary on the agent's `PATH` and a writable user cache.
+The installed hook definitions are in `crates/cli/assets/hooks/` for review.
 
 Supported names are `codex`, `claude-code`, `cursor`, `copilot`, and `gemini`.
 The destinations are `~/.codex/skills`, `~/.claude/skills`, `~/.cursor/skills`,

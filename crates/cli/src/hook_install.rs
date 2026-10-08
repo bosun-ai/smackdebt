@@ -27,30 +27,50 @@ pub(crate) fn config_path(agent: Agent, home: &Path) -> PathBuf {
     }
 }
 
-fn event(agent: Agent) -> &'static str {
+fn template(agent: Agent) -> &'static str {
     match agent {
-        Agent::Codex | Agent::ClaudeCode => "Stop",
-        Agent::Cursor => "stop",
-        Agent::Copilot => "agentStop",
-        Agent::Gemini => "AfterAgent",
+        Agent::Codex => include_str!("../assets/hooks/codex.json"),
+        Agent::ClaudeCode => include_str!("../assets/hooks/claude-code.json"),
+        Agent::Cursor => include_str!("../assets/hooks/cursor.json"),
+        Agent::Copilot => include_str!("../assets/hooks/copilot.json"),
+        Agent::Gemini => include_str!("../assets/hooks/gemini.json"),
     }
 }
 
-fn command(agent: Agent) -> String {
-    format!("smackdebt __hook --agent {}", agent.name())
+struct HookDefinition {
+    event: String,
+    entry: Value,
+    version: Option<Value>,
 }
 
-fn entry(agent: Agent) -> Value {
-    let command = command(agent);
+fn definition(agent: Agent) -> HookDefinition {
+    let template: Value = serde_json::from_str(template(agent)).expect("bundled hook must be JSON");
+    let (event, entries) = template["hooks"]
+        .as_object()
+        .and_then(|hooks| hooks.iter().next())
+        .expect("bundled hook must have an event");
+    let entry = entries
+        .as_array()
+        .and_then(|entries| entries.first())
+        .expect("bundled hook must have an entry")
+        .clone();
+    HookDefinition {
+        event: event.clone(),
+        entry,
+        version: template.get("version").cloned(),
+    }
+}
+
+fn entry_command(agent: Agent, entry: &Value) -> Option<&str> {
     match agent {
-        Agent::Codex | Agent::ClaudeCode => {
-            json!({"hooks": [{"type": "command", "command": command, "timeout": 60}]})
-        }
-        Agent::Gemini => {
-            json!({"hooks": [{"name": "smackdebt-review", "type": "command", "command": command, "timeout": 60000}]})
-        }
-        Agent::Cursor => json!({"command": command}),
-        Agent::Copilot => json!({"type": "command", "bash": command, "timeoutSec": 60}),
+        Agent::Codex | Agent::ClaudeCode | Agent::Gemini => entry
+            .get("hooks")?
+            .as_array()?
+            .first()?
+            .get("command")?
+            .as_str(),
+        Agent::Cursor => entry.get("command")?.as_str(),
+        Agent::Copilot => entry.get("bash")?.as_str(),
     }
 }
 
@@ -78,6 +98,7 @@ fn read(path: &Path) -> Result<Value, String> {
 
 pub(crate) fn preflight(agent: Agent, home: &Path) -> Result<(), String> {
     let path = config_path(agent, home);
+    let definition = definition(agent);
     skill_install::check_path(&path)?;
     let value = read(&path)?;
     if let Some(hooks) = value.get("hooks") {
@@ -85,28 +106,19 @@ pub(crate) fn preflight(agent: Agent, home: &Path) -> Result<(), String> {
             return Err(format!("expected a hooks object in {}", path.display()));
         };
         if events
-            .get(event(agent))
+            .get(&definition.event)
             .is_some_and(|entries| !entries.is_array())
         {
             return Err(format!(
                 "expected a {} hook list in {}",
-                event(agent),
+                definition.event,
                 path.display()
             ));
         }
-        if let Some(entries) = events.get(event(agent)).and_then(Value::as_array) {
+        if let Some(entries) = events.get(&definition.event).and_then(Value::as_array) {
             for candidate in entries {
-                let installed_command = match agent {
-                    Agent::Codex | Agent::ClaudeCode | Agent::Gemini => candidate
-                        .get("hooks")
-                        .and_then(Value::as_array)
-                        .and_then(|hooks| hooks.first())
-                        .and_then(|hook| hook.get("command")),
-                    Agent::Cursor => candidate.get("command"),
-                    Agent::Copilot => candidate.get("bash"),
-                };
-                if installed_command.and_then(Value::as_str) == Some(command(agent).as_str())
-                    && candidate != &entry(agent)
+                if entry_command(agent, candidate) == entry_command(agent, &definition.entry)
+                    && candidate != &definition.entry
                 {
                     return Err(format!("hook has local edits: {}", path.display()));
                 }
@@ -118,6 +130,7 @@ pub(crate) fn preflight(agent: Agent, home: &Path) -> Result<(), String> {
 
 fn edit(agent: Agent, home: &Path, installing: bool) -> Result<(), String> {
     preflight(agent, home)?;
+    let definition = definition(agent);
     let path = config_path(agent, home);
     let existed = path.exists();
     let mut value = read(&path)?;
@@ -125,14 +138,14 @@ fn edit(agent: Agent, home: &Path, installing: bool) -> Result<(), String> {
     if !installing && !existed {
         return Ok(());
     }
-    if installing && matches!(agent, Agent::Cursor | Agent::Copilot) {
-        root.entry("version").or_insert(json!(1));
+    if installing && let Some(version) = definition.version {
+        root.entry("version").or_insert(version);
     }
     let hooks = root.entry("hooks").or_insert(json!({}));
     let events = hooks.as_object_mut().expect("preflight checked hooks");
-    let entries = events.entry(event(agent)).or_insert(json!([]));
+    let entries = events.entry(&definition.event).or_insert(json!([]));
     let entries = entries.as_array_mut().expect("preflight checked list");
-    let managed = entry(agent);
+    let managed = definition.entry;
     if installing && entries.contains(&managed) {
         return Ok(());
     }
@@ -141,19 +154,19 @@ fn edit(agent: Agent, home: &Path, installing: bool) -> Result<(), String> {
     if installing {
         entries.push(managed);
     } else if entries.is_empty() {
-        events.remove(event(agent));
+        events.remove(&definition.event);
     }
-    if !installing && old_len == entries_len(&value, agent) {
+    if !installing && old_len == entries_len(&value, &definition.event) {
         return Ok(());
     }
     let serialized = serde_json::to_vec_pretty(&value).map_err(|error| error.to_string())?;
     skill_install::atomic_write(&path, &serialized)
 }
 
-fn entries_len(value: &Value, agent: Agent) -> usize {
+fn entries_len(value: &Value, event: &str) -> usize {
     value
         .get("hooks")
-        .and_then(|hooks| hooks.get(event(agent)))
+        .and_then(|hooks| hooks.get(event))
         .and_then(Value::as_array)
         .map_or(0, Vec::len)
 }
