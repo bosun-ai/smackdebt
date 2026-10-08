@@ -27,6 +27,28 @@ smackdebt init --all --dry-run
 smackdebt init --agent codex --dest /absolute/path/to/skills
 ```
 
+To try automatic debt reviews, add `--experimental-hooks` when installing or
+updating any of the five agents:
+
+```sh
+smackdebt init --agent codex --experimental-hooks
+smackdebt init --all --experimental-hooks
+```
+
+Hooks are off by default. They run when an agent finishes a turn with local
+changes, at most once for the same change and no more than once every ten
+minutes per repository. They compare the worktree with `HEAD` and ask the agent
+for one focused review only if debt worsened. The agent should fix regressions
+that fit its task and leave unrelated debt alone. A failed check does not block
+the agent. `init --dry-run` previews setup; `init --uninstall` removes Smackdebt's
+hook entries along with the selected skills. Plain `init` updates hooks already
+enabled, without enabling them for other agents. Restart an agent to load new
+hooks if it does not watch its settings file.
+
+Hook registration uses each agent's user settings. Existing JSON settings and
+other hooks are preserved. Settings files must contain valid JSON. The hook
+requires the `smackdebt` binary on the agent's `PATH` and a writable user cache.
+
 Supported names are `codex`, `claude-code`, `cursor`, `copilot`, and `gemini`.
 The destinations are `~/.codex/skills`, `~/.claude/skills`, `~/.cursor/skills`,
 `~/.copilot/skills`, and `~/.gemini/skills`, respectively. `CODEX_HOME` and

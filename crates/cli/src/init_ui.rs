@@ -88,6 +88,23 @@ impl SetupUi {
         }
     }
 
+    pub(crate) fn hook_result(&self, action: &str, agent: Agent, path: &Path) -> io::Result<()> {
+        if self.interactive {
+            cliclack::log::success(format!(
+                "{action} {} experimental hook\n{}",
+                agent.label(),
+                path.display()
+            ))
+        } else {
+            writeln!(
+                io::stdout().lock(),
+                "{action} {} experimental hook at {}",
+                agent.label(),
+                path.display()
+            )
+        }
+    }
+
     pub(crate) fn complete(&self, changed: bool) -> io::Result<()> {
         if !self.interactive {
             return Ok(());

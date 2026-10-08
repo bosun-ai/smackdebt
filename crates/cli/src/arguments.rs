@@ -24,6 +24,9 @@ pub(crate) struct Cli {
 pub(crate) enum Command {
     /// Install or update the skill for your coding agents.
     Init(crate::init::InitArgs),
+    /// Internal command used by optional agent hooks.
+    #[command(name = "__hook", hide = true)]
+    Hook(crate::agent_hook::HookArgs),
     /// Compare your current work with a Git ref.
     #[command(
         after_help = "Examples:\n  smackdebt diff main\n  smackdebt diff main src/auth\n  smackdebt diff --json"
