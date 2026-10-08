@@ -657,7 +657,7 @@ undecorated output that remains complete.
 
 The CLI resolves width, color, and decoration before calling output. `COLUMNS`
 takes priority, followed by terminal width or a 100-column redirected default.
-Automatic color requires a terminal and no `NO_COLOR`; automatic decoration
+Automatic color requires a capable terminal and no `NO_COLOR`; automatic decoration
 requires a terminal only, so `NO_COLOR` removes styling while a terminal keeps
 its glyphs. Explicit always and never modes override both choices, and there is
 no separate decoration option. The output crate reads no environment or terminal
@@ -805,6 +805,12 @@ One bad file does not stop a codebase report. Invocation failures go to standard
 error. JSON standard output stays valid when the report contains non-fatal
 diagnostics.
 
+Help, setup, and gate use the same CLI color policy. Gate terminal output reuses
+the report renderer's verdict line, status icons, and wrapping; JSON is unchanged.
+CLI-owned progress waits 250 ms before showing a spinner on standard error and
+clears it before rendering. It is disabled for JSON, CI, redirected streams, and
+`TERM=dumb`; it performs no analysis and does not change project orchestration.
+
 ## Performance evidence
 
 Correctness tests run outside measured intervals for generated one-file,
@@ -877,7 +883,12 @@ its selection policy is separate from prompts, filesystem writes, and receipts.
 Init is dispatched before project configuration or analysis. Saved choices and
 absolute paths live in the user's Smackdebt configuration directory. Receipts protect
 local edits, and atomic replacements allow interrupted updates to be retried.
-Agent setup does not alter repository instructions or debt baselines.
+Agent setup does not alter repository instructions or debt baselines. The private
+setup UI uses cliclack for keyboard selection and cancellation; installation and
+receipt handling remain separate. First-run suggestions inspect configuration
+folders only. Saved choices take priority on later runs. Interactive removal lists
+managed installations; explicit agent flags and noninteractive updates never
+prompt. Cancellation returns 130 before settings or skills are written.
 
 `install.sh` delegates only binary installation to the versioned cargo-dist shell
 installer. Binary upgrades belong to curl, Homebrew, or Cargo; `init` updates the

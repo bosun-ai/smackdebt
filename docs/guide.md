@@ -331,6 +331,14 @@ and styling through a pipe; `NO_COLOR` removes styling while a terminal keeps
 its glyphs. Styling reaches decoration only, so removing ANSI sequences yields
 the plain bytes exactly.
 
+Color controls also apply to help, setup, and gate output. `TERM=dumb` disables
+automatic styling and interaction. Setup uses a keyboard picker in a terminal;
+explicit agent flags keep it suitable for scripts.
+
+For interactive scans, diffs, and gates taking longer than 250 ms, a small
+“Analyzing code…” indicator appears on standard error and clears before the
+result. CI, redirected output, and JSON never show it.
+
 `COLUMNS` overrides the detected width, and redirected output defaults to 100
 columns. Each row chooses its own shape: it stays on one line when its content
 fits and stacks its facts on indented lines when it does not. Nothing is
@@ -1312,6 +1320,7 @@ could produce a report:
 | 1 | Analysis could not produce a report |
 | 2 | Invalid arguments or configuration |
 | 3 | Gate baseline exceeded |
+| 130 | Interactive setup cancelled |
 
 Common mistakes get one exact line on standard error, an empty standard
 output, and no usage tail:
@@ -1322,7 +1331,7 @@ smackdebt: no source files found under: docs
 smackdebt: not a source file: README.txt
 smackdebt: Git ref not found: no-such-ref
 smackdebt: --all cannot be used with --json
-smackdebt: baseline not found: .smackdebt-baseline.tsv
+smackdebt: baseline not found: .smackdebt-baseline.tsv; rerun this gate with --update to create it
 ```
 
 ## Gate
@@ -1339,6 +1348,9 @@ the gate by rule: they move with wall-clock time, and a committed gate must not.
 A report carrying leakage findings produces the same gate comparison as the same
 tree read without history at all.
 
+The terminal report starts with **Passed** or **Failed**, followed by totals and
+the findings. Review regressions before accepting a new baseline.
+
 Any counter above its baseline is a regression: the gate names the row as
 `worse` with the moved counter, states the totals, and exits with status 3.
 Counters below the baseline are improvements, reported as `better` rows and
@@ -1352,7 +1364,7 @@ two candidates of one shape name nothing, and no counter, status, or exit code
 reads it.
 
 `smackdebt gate --update` writes the observed debt as the new baseline and
-exits 0. It accepts improvements and deliberate new debt alike; the gate never
+prints `Baseline saved: <path>`, and exits 0. It accepts improvements and deliberate new debt alike; the gate never
 tightens or rewrites the baseline on its own, so a clean check run never
 touches the working tree. `smackdebt gate --json` writes the comparison as one
 JSON object — schema version 1, described by `schemas/gate-v1.schema.json` —

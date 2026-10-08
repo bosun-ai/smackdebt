@@ -1,0 +1,9 @@
+smackdebt gate · baseline.tsv
+▌ Failed. Debt exceeded the baseline.
+1 regression · 0 improvements
+
+FINDINGS
+ worse src/shipping_with_a_long_descriptive_name.js · cognitive · high 0 → 1
+
+ next: Review these changes. Fix regressions, or rerun this gate with --update
+        to accept them.

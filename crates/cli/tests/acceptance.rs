@@ -524,7 +524,7 @@ fn a_missing_gate_baseline_has_exact_argument_failure_streams() {
         .code(2)
         .stdout("")
         .stderr(format!(
-            "smackdebt: baseline not found: {}\n",
+            "smackdebt: baseline not found: {}; rerun this gate with --update to create it\n",
             baseline.display()
         ));
 }
@@ -544,7 +544,7 @@ fn a_clean_gate_states_zero_totals_and_succeeds() {
         .assert()
         .code(0)
         .stdout(format!(
-            "GATE  {}\n\n0 regressions · 0 improvements\n",
+            "smackdebt gate · {}\n  Passed. Debt stayed within the baseline.\n0 regressions · 0 improvements\n",
             baseline.display()
         ))
         .stderr("");
@@ -565,7 +565,7 @@ fn a_gate_without_a_path_reads_the_working_directory() {
         .args(["gate", "--jobs", "1"])
         .assert()
         .code(0)
-        .stdout("GATE  .smackdebt-baseline.tsv\n\n0 regressions · 0 improvements\n")
+        .stdout("smackdebt gate · .smackdebt-baseline.tsv\n  Passed. Debt stayed within the baseline.\n0 regressions · 0 improvements\n")
         .stderr("");
 }
 
@@ -581,12 +581,13 @@ fn a_regressed_gate_names_the_offending_row_and_exits_three() {
         .code(3)
         .stdout(format!(
             concat!(
-                "GATE  {}\n",
-                "\n",
-                "  worse  work.js · cognitive · high 0 → 1\n",
-                "\n",
+                "smackdebt gate · {}\n",
+                "  Failed. Debt exceeded the baseline.\n",
                 "1 regression · 0 improvements\n",
-                "next: smackdebt gate --update\n",
+                "\nFINDINGS\n",
+                "  worse work.js · cognitive · high 0 → 1\n",
+                "\n",
+                "  next: Review these changes. Fix regressions, or rerun this gate with --update to accept them.\n",
             ),
             baseline.display()
         ))
@@ -607,11 +608,11 @@ fn a_looser_gate_baseline_reports_improvements_and_stays_untouched() {
         .code(0)
         .stdout(format!(
             concat!(
-                "GATE  {}\n",
-                "\n",
-                "  better gone.js · cognitive · high 1 → 0\n",
-                "\n",
+                "smackdebt gate · {}\n",
+                "  Passed. Debt stayed within the baseline.\n",
                 "0 regressions · 1 improvement\n",
+                "\nFINDINGS\n",
+                "  better gone.js · cognitive · high 1 → 0\n",
             ),
             baseline.display()
         ))
@@ -629,7 +630,7 @@ fn a_baseline_update_is_byte_stable_and_idempotent() {
         .arg(project.path())
         .assert()
         .code(0)
-        .stdout("")
+        .stdout(format!("Baseline saved: {}\n", baseline.display()))
         .stderr("");
     let written = fs::read_to_string(&baseline).unwrap();
     assert_eq!(
@@ -642,7 +643,7 @@ fn a_baseline_update_is_byte_stable_and_idempotent() {
         .arg(project.path())
         .assert()
         .code(0)
-        .stdout("")
+        .stdout(format!("Baseline saved: {}\n", baseline.display()))
         .stderr("");
     assert_eq!(fs::read_to_string(&baseline).unwrap(), written);
     // The written baseline immediately gates its own tree clean.
@@ -652,7 +653,7 @@ fn a_baseline_update_is_byte_stable_and_idempotent() {
         .assert()
         .code(0)
         .stdout(format!(
-            "GATE  {}\n\n0 regressions · 0 improvements\n",
+            "smackdebt gate · {}\n  Passed. Debt stayed within the baseline.\n0 regressions · 0 improvements\n",
             baseline.display()
         ))
         .stderr("");
@@ -869,6 +870,49 @@ fn terminal_color_can_be_forced_or_disabled_through_a_pipe() {
 }
 
 #[test]
+fn color_controls_work_for_every_command_without_polluting_json() {
+    let project = gate_fixture();
+    smackdebt()
+        .args(["gate", "--color", "never", "--update"])
+        .arg(project.path())
+        .assert()
+        .success()
+        .stdout(predicates::str::contains("Baseline saved"));
+    smackdebt()
+        .args(["gate", "--color", "always"])
+        .arg(project.path())
+        .assert()
+        .success()
+        .stdout(predicates::str::contains("\x1b["));
+    smackdebt()
+        .args(["gate", "--json", "--color", "always"])
+        .arg(project.path())
+        .assert()
+        .code(2);
+    smackdebt()
+        .args(["--color", "never", "init", "--help"])
+        .assert()
+        .success()
+        .stdout(predicates::boolean::NotPredicate::new(
+            predicates::str::contains("\x1b"),
+        ));
+}
+
+#[test]
+fn global_color_before_a_subcommand_also_conflicts_with_json() {
+    for command in ["diff", "gate"] {
+        smackdebt()
+            .args(["--color", "never", command, "--json"])
+            .assert()
+            .code(2)
+            .stdout("")
+            .stderr(predicates::str::contains(
+                "--color cannot be used with --json",
+            ));
+    }
+}
+
+#[test]
 fn explicit_color_is_rejected_for_json() {
     let project = fixture();
     smackdebt()
@@ -876,7 +920,7 @@ fn explicit_color_is_rejected_for_json() {
         .arg(project.path())
         .assert()
         .code(2)
-        .stderr(predicates::str::contains("cannot be used with '--color"));
+        .stderr(predicates::str::contains("cannot be used with"));
 }
 
 #[test]

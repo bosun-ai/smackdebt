@@ -1,13 +1,18 @@
-use std::io::{self, IsTerminal, Write};
+use std::io;
 use std::path::PathBuf;
 use std::process::ExitCode;
 
 use clap::Args;
 
+use crate::init_ui::SetupUi;
 use crate::skill_install;
 use crate::skill_selection::{Agent, Installation, Selection};
+use crate::terminal::ColorChoice;
 
 #[derive(Debug, Args)]
+#[command(
+    after_help = "Use ↑/↓ to move, Space to select, and Enter to install. Esc cancels.\n\nExamples:\n  smackdebt init\n  smackdebt init --agent codex --agent claude-code\n  smackdebt init --all --dry-run\n  smackdebt init --uninstall"
+)]
 pub(crate) struct InitArgs {
     /// Agent to set up. Repeat for multiple agents.
     #[arg(long, value_enum, conflicts_with = "all")]
@@ -26,11 +31,12 @@ pub(crate) struct InitArgs {
     uninstall: bool,
 }
 
-pub(crate) fn run(args: InitArgs) -> ExitCode {
-    match execute(args) {
+pub(crate) fn run(args: InitArgs, color: ColorChoice) -> ExitCode {
+    let ui = SetupUi::new(color, args.uninstall, args.dry_run);
+    match execute(args, &ui) {
         Ok(()) => ExitCode::SUCCESS,
         Err((code, message)) => {
-            eprintln!("smackdebt: {message}");
+            let _ = ui.error(&message);
             ExitCode::from(code)
         }
     }
@@ -42,52 +48,93 @@ fn environment_path(name: &str) -> Option<PathBuf> {
         .map(PathBuf::from)
 }
 
-fn execute(args: InitArgs) -> Result<(), (u8, String)> {
-    let home = environment_path("HOME").ok_or((2, "HOME is not set".to_owned()))?;
-    let path =
-        skill_install::state_path(&home, environment_path("XDG_CONFIG_HOME")).map_err(failure)?;
-    let mut settings = skill_install::load(&path).map_err(failure)?;
-    let agents = choose_agents(&args, &settings)?;
+struct Setup {
+    home: PathBuf,
+    state_path: PathBuf,
+    selection: Selection,
+}
+
+impl Setup {
+    fn load() -> Result<Self, (u8, String)> {
+        let home = environment_path("HOME").ok_or((2, "HOME is not set".to_owned()))?;
+        let state_path = skill_install::state_path(&home, environment_path("XDG_CONFIG_HOME"))
+            .map_err(failure)?;
+        let selection = skill_install::load(&state_path).map_err(failure)?;
+        Ok(Self {
+            home,
+            state_path,
+            selection,
+        })
+    }
+}
+
+fn execute(args: InitArgs, ui: &SetupUi) -> Result<(), (u8, String)> {
+    let mut setup = Setup::load()?;
+    let agents = choose_agents(&args, &setup.selection, &setup.home, ui)?;
     if args.dest.is_some() && agents.len() != 1 {
         return Err((2, "--dest requires exactly one --agent".to_owned()));
     }
     if agents.is_empty() {
-        println!("No agents selected.");
+        ui.finish("No agents selected. Nothing changed.")
+            .map_err(output_failure)?;
         return Ok(());
     }
     let installations =
-        plan_installations(&args, &agents, &mut settings, &home).map_err(failure)?;
+        plan_installations(&args, &agents, &mut setup.selection, &setup.home).map_err(failure)?;
     if args.dry_run {
         for install in installations {
-            println!(
-                "Would {} {} skill at {}",
+            ui.result(
                 if args.uninstall {
-                    "remove"
+                    "Would remove"
                 } else {
-                    "install/update"
+                    "Would install/update"
                 },
-                install.agent.name(),
-                install.directory.display()
-            );
+                &install,
+                &setup.home,
+            )
+            .map_err(output_failure)?;
         }
         return Ok(());
     }
+    apply_installations(&args, &installations, agents, &mut setup, ui)
+}
+
+fn apply_installations(
+    args: &InitArgs,
+    installations: &[Installation],
+    agents: Vec<Agent>,
+    setup: &mut Setup,
+    ui: &SetupUi,
+) -> Result<(), (u8, String)> {
     if !args.uninstall {
-        settings.selected = agents;
+        setup.selection.selected = agents;
         // Persist intent first; retries finish any partially completed install.
-        skill_install::save(&path, &settings).map_err(failure)?;
+        skill_install::save(&setup.state_path, &setup.selection).map_err(failure)?;
     }
+    let mut changed = false;
     for install in installations {
-        apply(&args, &install).map_err(failure)?;
+        let (action, updated) = apply(args, install).map_err(failure)?;
+        changed |= updated;
+        ui.result(action, install, &setup.home)
+            .map_err(output_failure)?;
         if args.uninstall {
-            settings
+            setup
+                .selection
                 .installations
                 .retain(|saved| saved.agent != install.agent);
-            settings.selected.retain(|agent| *agent != install.agent);
-            skill_install::save(&path, &settings).map_err(failure)?;
+            setup
+                .selection
+                .selected
+                .retain(|agent| *agent != install.agent);
+            skill_install::save(&setup.state_path, &setup.selection).map_err(failure)?;
         }
     }
+    ui.complete(changed).map_err(output_failure)?;
     Ok(())
+}
+
+fn output_failure(error: io::Error) -> (u8, String) {
+    (1, format!("could not write setup output: {error}"))
 }
 
 fn plan_installations(
@@ -139,23 +186,25 @@ fn destination(
     )
 }
 
-fn apply(args: &InitArgs, install: &Installation) -> Result<(), String> {
-    let action = if args.uninstall {
+fn apply(args: &InitArgs, install: &Installation) -> Result<(&'static str, bool), String> {
+    if args.uninstall {
         skill_install::remove(&install.directory)?;
-        "Removed"
-    } else {
-        skill_install::install(&install.directory)?;
-        "Installed/updated"
-    };
-    println!(
-        "{action} {} skill at {}",
-        install.agent.name(),
-        install.directory.display()
-    );
-    Ok(())
+        return Ok(("Removed", true));
+    }
+    use skill_install::InstallOutcome;
+    Ok(match skill_install::install(&install.directory)? {
+        InstallOutcome::Installed => ("Installed", true),
+        InstallOutcome::Updated => ("Updated", true),
+        InstallOutcome::Current => ("Already up to date:", false),
+    })
 }
 
-fn choose_agents(args: &InitArgs, settings: &Selection) -> Result<Vec<Agent>, (u8, String)> {
+fn choose_agents(
+    args: &InitArgs,
+    settings: &Selection,
+    home: &std::path::Path,
+    ui: &SetupUi,
+) -> Result<Vec<Agent>, (u8, String)> {
     if args.all {
         return Ok(Agent::ALL.to_vec());
     }
@@ -168,15 +217,29 @@ fn choose_agents(args: &InitArgs, settings: &Selection) -> Result<Vec<Agent>, (u
         }
         return Ok(agents);
     }
-    if args.uninstall {
-        return Ok(settings
-            .installations
+    let candidates: Vec<_> = if args.uninstall {
+        settings.installations.clone()
+    } else {
+        Agent::ALL
             .iter()
-            .map(|install| install.agent)
-            .collect());
+            .map(|&agent| Installation {
+                agent,
+                directory: destination(agent, args, settings, home),
+            })
+            .collect()
+    };
+    if ui.interactive() && !candidates.is_empty() {
+        let selected = defaults(args, settings, &candidates);
+        return ui.choose(&candidates, selected, home).map_err(|error| {
+            if error.kind() == io::ErrorKind::Interrupted {
+                (130, "Setup cancelled. Nothing changed.".to_owned())
+            } else {
+                (1, format!("could not read agent selection: {error}"))
+            }
+        });
     }
-    if io::stdin().is_terminal() && io::stdout().is_terminal() {
-        return prompt(&settings.selected).map_err(|message| (2, message));
+    if args.uninstall {
+        return Ok(candidates.iter().map(|install| install.agent).collect());
     }
     if settings.selected.is_empty() {
         return Err((
@@ -187,66 +250,22 @@ fn choose_agents(args: &InitArgs, settings: &Selection) -> Result<Vec<Agent>, (u
     Ok(settings.selected.clone())
 }
 
-fn prompt(saved: &[Agent]) -> Result<Vec<Agent>, String> {
-    println!("Choose agents for your account:");
-    for (index, agent) in Agent::ALL.iter().enumerate() {
-        println!(
-            "  {}. [{}] {}",
-            index + 1,
-            if saved.contains(agent) { "x" } else { " " },
-            agent.name()
-        );
+fn defaults(args: &InitArgs, settings: &Selection, candidates: &[Installation]) -> Vec<Agent> {
+    if args.uninstall {
+        return candidates.iter().map(|install| install.agent).collect();
     }
-    print!("Numbers separated by spaces; Enter keeps selection; q cancels: ");
-    io::stdout().flush().map_err(|error| error.to_string())?;
-    let mut answer = String::new();
-    if io::stdin()
-        .read_line(&mut answer)
-        .map_err(|error| error.to_string())?
-        == 0
-    {
-        return Ok(Vec::new());
+    if !settings.selected.is_empty() {
+        return settings.selected.clone();
     }
-    parse_selection(&answer, saved)
-}
-
-fn parse_selection(answer: &str, saved: &[Agent]) -> Result<Vec<Agent>, String> {
-    let answer = answer.trim();
-    if answer == "q" {
-        return Ok(Vec::new());
-    }
-    if answer.is_empty() {
-        return Ok(saved.to_vec());
-    }
-    let mut selected = Vec::new();
-    for number in answer.split_whitespace() {
-        let index = number.parse::<usize>().ok().and_then(|n| n.checked_sub(1));
-        let agent = index
-            .and_then(|index| Agent::ALL.get(index))
-            .ok_or("choose numbers from 1 to 5, or q to cancel")?;
-        if !selected.contains(agent) {
-            selected.push(*agent);
-        }
-    }
-    Ok(selected)
-}
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn picker_keeps_choices_cancels_and_rejects_unknown_agents() {
-        assert_eq!(
-            parse_selection("", &[Agent::Codex]).unwrap(),
-            vec![Agent::Codex]
-        );
-        assert!(parse_selection("q", &[Agent::Codex]).unwrap().is_empty());
-        assert_eq!(
-            parse_selection("1 2 1", &[]).unwrap(),
-            vec![Agent::Codex, Agent::ClaudeCode]
-        );
-        assert!(parse_selection("0", &[]).is_err());
-        assert!(parse_selection("6", &[]).is_err());
-    }
+    candidates
+        .iter()
+        .filter(|install| {
+            install
+                .directory
+                .parent()
+                .and_then(std::path::Path::parent)
+                .is_some_and(std::path::Path::is_dir)
+        })
+        .map(|install| install.agent)
+        .collect()
 }
