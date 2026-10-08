@@ -1,4 +1,77 @@
-use crate::arguments::ColorChoice;
+use clap::ValueEnum;
+use std::io::{self, IsTerminal};
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq, ValueEnum)]
+pub(crate) enum ColorChoice {
+    Auto,
+    Always,
+    Never,
+}
+
+/// Help and argument errors are emitted before a complete Cli can be parsed.
+pub(crate) fn help_color(arguments: &[std::ffi::OsString]) -> clap::ColorChoice {
+    let mut args = arguments.iter().take_while(|arg| *arg != "--");
+    let mut choice = ColorChoice::Auto;
+    while let Some(arg) = args.next() {
+        let value = if arg == "--color" {
+            args.next().and_then(|value| value.to_str())
+        } else {
+            arg.to_str()
+                .and_then(|value| value.strip_prefix("--color="))
+        };
+        if let Some(parsed) = value.and_then(|value| ColorChoice::from_str(value, false).ok()) {
+            choice = parsed;
+        }
+    }
+    match choice {
+        ColorChoice::Always => clap::ColorChoice::Always,
+        ColorChoice::Never => clap::ColorChoice::Never,
+        ColorChoice::Auto
+            if std::env::var_os("NO_COLOR").is_some()
+                || std::env::var("TERM").as_deref() == Ok("dumb") =>
+        {
+            clap::ColorChoice::Never
+        }
+        ColorChoice::Auto => clap::ColorChoice::Auto,
+    }
+}
+
+pub(crate) fn interactive() -> bool {
+    io::stdin().is_terminal()
+        && io::stdout().is_terminal()
+        && io::stderr().is_terminal()
+        && std::env::var_os("CI").is_none()
+        && std::env::var("TERM").as_deref() != Ok("dumb")
+}
+
+pub(crate) fn configure(choice: ColorChoice) {
+    let capable = std::env::var("TERM").as_deref() != Ok("dumb");
+    let no_color = std::env::var_os("NO_COLOR").is_some();
+    console::set_colors_enabled(color(
+        choice,
+        io::stdout().is_terminal() && capable,
+        no_color,
+    ));
+    console::set_colors_enabled_stderr(color(
+        choice,
+        io::stderr().is_terminal() && capable,
+        no_color,
+    ));
+}
+
+pub(crate) fn options(
+    choice: ColorChoice,
+    is_terminal: bool,
+    all: bool,
+) -> smackdebt_output::TerminalOptions {
+    let capable = is_terminal && std::env::var("TERM").as_deref() != Ok("dumb");
+    smackdebt_output::TerminalOptions::new(
+        width(is_terminal, std::env::var("COLUMNS").ok().as_deref()),
+        all,
+        color(choice, capable, std::env::var_os("NO_COLOR").is_some()),
+    )
+    .with_decorations(decorations(choice, capable))
+}
 
 pub(crate) fn width(is_terminal: bool, columns: Option<&str>) -> usize {
     if let Some(width) = columns

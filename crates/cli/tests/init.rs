@@ -17,6 +17,46 @@ fn command(home: &TempDir) -> Command {
 }
 
 #[test]
+fn setup_reports_whether_a_skill_was_installed_updated_or_already_current() {
+    let home = TempDir::new().unwrap();
+    command(&home)
+        .args(["--agent", "codex"])
+        .assert()
+        .success()
+        .stdout(predicate::str::contains("Installed Codex"));
+    command(&home)
+        .assert()
+        .success()
+        .stdout(predicate::str::contains("Already up to date: Codex"));
+    let directory = home.path().join(".codex/skills/smackdebt");
+    fs::write(directory.join("SKILL.md"), "older managed skill").unwrap();
+    fs::write(
+        directory.join(".smackdebt.blake3"),
+        blake3::hash(b"older managed skill").to_hex().as_bytes(),
+    )
+    .unwrap();
+    command(&home)
+        .assert()
+        .success()
+        .stdout(predicate::str::contains("Updated Codex"));
+}
+
+#[test]
+fn setup_accepts_color_control_and_help_explains_the_keyboard_flow() {
+    let home = TempDir::new().unwrap();
+    command(&home)
+        .args(["--color", "never", "--all", "--dry-run"])
+        .assert()
+        .success()
+        .stdout(predicate::str::contains("\x1b").not());
+    command(&home)
+        .arg("--help")
+        .assert()
+        .success()
+        .stdout(predicate::str::contains("Space").and(predicate::str::contains("--agent codex")));
+}
+
+#[test]
 fn installs_only_chosen_agents_without_reading_project_config() {
     let home = TempDir::new().unwrap();
     fs::write(home.path().join(".smackdebt.toml"), "broken = [").unwrap();

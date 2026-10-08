@@ -4,7 +4,7 @@ use std::num::NonZeroUsize;
 use std::path::{Path, PathBuf};
 use std::process::ExitCode;
 
-use clap::Parser;
+use clap::{CommandFactory, FromArgMatches};
 use smackdebt_output::{TerminalOptions, write_gate, write_gate_json, write_json, write_terminal};
 use smackdebt_project::{
     CodebaseRequest, DiffRequest, ExecutionWidth, GateComparison, GateSnapshot, HealthPolicy,
@@ -16,10 +16,10 @@ use stats_alloc::{INSTRUMENTED_SYSTEM, StatsAlloc};
 #[cfg(feature = "allocation-stats")]
 use std::alloc::System;
 
-use crate::arguments::{Cli, ColorChoice, Command, Common, GateArgs, parse_days};
+use crate::arguments::{Cli, Command, Common, GateArgs, parse_days};
 use crate::config::{self, ProjectConfig};
 use crate::gate_baseline;
-use crate::terminal;
+use crate::terminal::{self, ColorChoice};
 
 #[cfg(feature = "allocation-stats")]
 #[global_allocator]
@@ -52,8 +52,12 @@ fn run(arguments: impl IntoIterator<Item = OsString>) -> ExitCode {
         Ok(cli) => cli,
         Err(exit) => return exit,
     };
+    if json_color_conflict(&cli) {
+        return fail_with("--color cannot be used with --json", 2);
+    }
+    terminal::configure(cli.common.color.unwrap_or(ColorChoice::Auto));
     if let Some(Command::Init(args)) = cli.command {
-        return crate::init::run(args);
+        return crate::init::run(args, cli.common.color.unwrap_or(ColorChoice::Auto));
     }
     run_analysis(cli)
 }
@@ -63,16 +67,23 @@ fn run_analysis(cli: Cli) -> ExitCode {
         Ok(prepared) => prepared,
         Err(exit) => return exit,
     };
+    let choice = cli.common.color.unwrap_or(ColorChoice::Auto);
     let (result, common) = match cli.command {
         None => {
             let request = codebase_request(cli.path, &cli.common, &config);
-            (request.analyze(), cli.common)
+            (
+                crate::progress::run(!cli.common.json, || request.analyze()),
+                cli.common,
+            )
         }
         Some(Command::Init(_)) => unreachable!("init is handled before analysis setup"),
-        Some(Command::Gate(args)) => return run_gate(args, selected, &config),
+        Some(Command::Gate(args)) => return run_gate(args, selected, &config, choice),
         Some(Command::Diff(args)) => {
             let request = diff_request(args.path, args.reference, &args.common, &config);
-            (request.analyze(), args.common)
+            (
+                crate::progress::run(!args.common.json, || request.analyze()),
+                args.common,
+            )
         }
     };
     match result {
@@ -82,11 +93,22 @@ fn run_analysis(cli: Cli) -> ExitCode {
 }
 
 fn parse(arguments: impl IntoIterator<Item = OsString>) -> Result<Cli, ExitCode> {
-    Cli::try_parse_from(arguments).map_err(|error| {
-        let exit = error.exit_code();
-        let _ = error.print();
-        ExitCode::from(u8::try_from(exit).unwrap_or(2))
-    })
+    let arguments: Vec<_> = arguments.into_iter().collect();
+    let color = terminal::help_color(&arguments);
+    let width = terminal::width(
+        io::stdout().is_terminal(),
+        std::env::var("COLUMNS").ok().as_deref(),
+    );
+    Cli::command()
+        .color(color)
+        .term_width(width)
+        .try_get_matches_from(arguments)
+        .and_then(|matches| Cli::from_arg_matches(&matches))
+        .map_err(|error| {
+            let exit = error.exit_code();
+            let _ = error.print();
+            ExitCode::from(u8::try_from(exit).unwrap_or(2))
+        })
 }
 
 /// Clears the work counters before a measured run when either stats
@@ -137,6 +159,15 @@ fn prepare(cli: Cli) -> Result<(Cli, Option<PathBuf>, ProjectConfig), ExitCode> 
 fn json_all_conflict(cli: &Cli) -> bool {
     cli.common.json && cli.common.all
         || matches!(&cli.command, Some(Command::Diff(args)) if args.common.json && args.common.all)
+}
+
+fn json_color_conflict(cli: &Cli) -> bool {
+    let json = match &cli.command {
+        Some(Command::Diff(args)) => args.common.json,
+        Some(Command::Gate(args)) => args.json,
+        _ => cli.common.json,
+    };
+    json && cli.common.color.is_some()
 }
 
 /// The path the user selected, if any, and the directory configuration is
@@ -221,16 +252,8 @@ fn render(result: &smackdebt_project::ProjectReport, common: &Common) -> ExitCod
 /// The terminal options one run renders with, from the flags and the
 /// environment.
 fn terminal_options(common: &Common, stdout_is_terminal: bool) -> TerminalOptions {
-    let width = terminal::width(stdout_is_terminal, std::env::var("COLUMNS").ok().as_deref());
     let choice = common.color.unwrap_or(ColorChoice::Auto);
-    let color = terminal::color(
-        choice,
-        stdout_is_terminal,
-        std::env::var_os("NO_COLOR").is_some(),
-    );
-    let decorations = terminal::decorations(choice, stdout_is_terminal);
-    TerminalOptions::new(width, common.all, color)
-        .with_decorations(decorations)
+    terminal::options(choice, stdout_is_terminal, common.all)
         .with_top(common.top.and_then(NonZeroUsize::new))
 }
 
@@ -283,7 +306,12 @@ fn print_evidence_stats(before_render: smackdebt_project::EvidenceSnapshot) {
 /// and exit 3 when any ratcheted counter exceeds it. `--update` writes the
 /// observed snapshot verbatim instead of comparing, so the baseline moves
 /// only on request and a clean check run never dirties the working tree.
-fn run_gate(args: GateArgs, selected: Option<PathBuf>, config: &ProjectConfig) -> ExitCode {
+fn run_gate(
+    args: GateArgs,
+    selected: Option<PathBuf>,
+    config: &ProjectConfig,
+    choice: ColorChoice,
+) -> ExitCode {
     let baseline_path = args.baseline.unwrap_or_else(|| match &selected {
         Some(path) => path.join(gate_baseline::BASELINE_FILE_NAME),
         None => PathBuf::from(gate_baseline::BASELINE_FILE_NAME),
@@ -296,7 +324,10 @@ fn run_gate(args: GateArgs, selected: Option<PathBuf>, config: &ProjectConfig) -
             Err(exit) => return exit,
         }
     };
-    let result = match gate_request(selected, config, args.jobs).analyze() {
+    let analyzed = crate::progress::run(!args.json, || {
+        gate_request(selected, config, args.jobs).analyze()
+    });
+    let result = match analyzed {
         Ok(result) => result,
         Err(error) => return fail(&error),
     };
@@ -305,26 +336,46 @@ fn run_gate(args: GateArgs, selected: Option<PathBuf>, config: &ProjectConfig) -
         return write_baseline(&baseline_path, &observed);
     };
     let comparison = GateComparison::between(&baseline, &observed);
-    render_gate(&baseline_path.display().to_string(), &comparison, args.json)
+    render_gate(
+        &baseline_path.display().to_string(),
+        &comparison,
+        args.json,
+        choice,
+    )
 }
 
 /// Writes the observed snapshot verbatim, so the baseline moves only on
 /// request.
 fn write_baseline(path: &Path, observed: &GateSnapshot) -> ExitCode {
     match std::fs::write(path, gate_baseline::render(observed)) {
-        Ok(()) => ExitCode::SUCCESS,
+        Ok(()) => match writeln!(io::stdout().lock(), "Baseline saved: {}", path.display()) {
+            Err(error) if stdout_failure(&error) == StdoutFailure::Reportable => {
+                fail_with(&format!("could not write confirmation: {error}"), 1)
+            }
+            _ => ExitCode::SUCCESS,
+        },
         Err(error) => fail_with(&format!("could not write {}: {error}", path.display()), 1),
     }
 }
 
 /// Streams the gate comparison and answers with the exit status the contract
 /// promises: 3 on regression, quiet success when the reader left.
-fn render_gate(baseline_name: &str, comparison: &GateComparison, json: bool) -> ExitCode {
+fn render_gate(
+    baseline_name: &str,
+    comparison: &GateComparison,
+    json: bool,
+    choice: ColorChoice,
+) -> ExitCode {
     let mut stdout = io::BufWriter::new(io::stdout().lock());
     let rendered = if json {
         write_gate_json(&mut stdout, baseline_name, comparison).and_then(|()| writeln!(stdout))
     } else {
-        write_gate(&mut stdout, baseline_name, comparison)
+        write_gate(
+            &mut stdout,
+            baseline_name,
+            comparison,
+            terminal::options(choice, io::stdout().is_terminal(), false),
+        )
     }
     .and_then(|()| stdout.flush());
     match rendered {
@@ -348,7 +399,10 @@ fn read_baseline(path: &Path) -> Result<GateSnapshot, ExitCode> {
         Ok(text) => text,
         Err(error) if error.kind() == io::ErrorKind::NotFound => {
             return Err(fail_with(
-                &format!("baseline not found: {}", path.display()),
+                &format!(
+                    "baseline not found: {}; rerun this gate with --update to create it",
+                    path.display()
+                ),
                 2,
             ));
         }

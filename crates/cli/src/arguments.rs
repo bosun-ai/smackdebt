@@ -1,12 +1,15 @@
 use std::path::PathBuf;
 
-use clap::{Args, Parser, Subcommand, ValueEnum};
+use clap::{Args, Parser, Subcommand};
+
+use crate::terminal::ColorChoice;
 
 #[derive(Debug, Parser)]
 #[command(
     name = "smackdebt",
     version,
-    about = "Find costly code and see whether a change made it better"
+    about = "Less spaghetti. Help your agent write code you can follow.",
+    after_help = "Examples:\n  smackdebt                 Find the trouble spots\n  smackdebt src/auth        Look closer\n  smackdebt diff main       Check what changed\n  smackdebt init            Set up your agents\n  smackdebt gate            Check the baseline"
 )]
 pub(crate) struct Cli {
     #[command(subcommand)]
@@ -22,8 +25,14 @@ pub(crate) enum Command {
     /// Install or update the skill for your coding agents.
     Init(crate::init::InitArgs),
     /// Compare your current work with a Git ref.
+    #[command(
+        after_help = "Examples:\n  smackdebt diff main\n  smackdebt diff main src/auth\n  smackdebt diff --json"
+    )]
     Diff(DiffArgs),
     /// Check debt against a committed baseline.
+    #[command(
+        after_help = "Examples:\n  smackdebt gate\n  smackdebt gate --json\n  smackdebt gate --update    Accept the current debt as your baseline"
+    )]
     Gate(GateArgs),
 }
 
@@ -48,7 +57,7 @@ pub(crate) struct GateArgs {
     #[arg(long, conflicts_with = "json")]
     pub(crate) update: bool,
     /// Write the gate result as JSON.
-    #[arg(long)]
+    #[arg(long, conflicts_with = "color")]
     pub(crate) json: bool,
     /// Number of workers to use.
     #[arg(long, value_parser = parse_jobs)]
@@ -58,7 +67,7 @@ pub(crate) struct GateArgs {
 #[derive(Clone, Debug, Args)]
 pub(crate) struct Common {
     /// Write the complete JSON report.
-    #[arg(long)]
+    #[arg(long, conflicts_with = "color", help_heading = "Output")]
     pub(crate) json: bool,
     /// Number of workers to use.
     #[arg(long, value_parser = parse_jobs)]
@@ -67,21 +76,14 @@ pub(crate) struct Common {
     #[arg(long, value_parser = parse_days)]
     pub(crate) history: Option<u32>,
     /// Show all useful terminal detail.
-    #[arg(long)]
+    #[arg(long, help_heading = "Output")]
     pub(crate) all: bool,
     /// Show up to this many problems or comparisons.
-    #[arg(long, value_parser = parse_top, conflicts_with_all = ["json", "all"])]
+    #[arg(long, value_parser = parse_top, conflicts_with_all = ["json", "all"], help_heading = "Output")]
     pub(crate) top: Option<usize>,
-    /// Glyph color: auto, always, or never.
-    #[arg(long, value_enum, conflicts_with = "json")]
+    /// Terminal color and decoration: auto, always, or never.
+    #[arg(long, value_enum, global = true, help_heading = "Output")]
     pub(crate) color: Option<ColorChoice>,
-}
-
-#[derive(Clone, Copy, Debug, Eq, PartialEq, ValueEnum)]
-pub(crate) enum ColorChoice {
-    Auto,
-    Always,
-    Never,
 }
 
 pub(crate) fn parse_days(value: &str) -> Result<u32, String> {

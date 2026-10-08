@@ -32,6 +32,16 @@ impl Agent {
         }
     }
 
+    pub(crate) fn label(self) -> &'static str {
+        match self {
+            Self::Codex => "Codex",
+            Self::ClaudeCode => "Claude Code",
+            Self::Cursor => "Cursor",
+            Self::Copilot => "GitHub Copilot",
+            Self::Gemini => "Gemini CLI",
+        }
+    }
+
     pub(crate) fn directory(
         self,
         home: &Path,

@@ -7,9 +7,17 @@ Then run:
 smackdebt init
 ```
 
-Choose agents by entering their numbers, separated by spaces. Enter keeps the
-saved selection; `q` cancels without changing files. Skills are installed for
-your user account and work across projects. Restart your agent to discover them.
+Use **↑/↓** to move, **Space** to toggle an agent, and **Enter** to install.
+On first use, agents with existing configuration folders are preselected. Later
+runs remember your choices and destinations. **Esc** or **Ctrl+C** cancels without
+changing files (exit 130). An empty selection changes nothing.
+
+Skills are installed for your user account and work across projects. Setup shows
+whether each skill was installed, updated, or already current. Restart your agent
+after installation or an update. Unchecking an agent skips its update; it does
+not remove its skill.
+
+![Keyboard selection, saved choices, and cancellation in Smackdebt init.](assets/smackdebt-init.gif)
 
 For scripts, choose agents explicitly:
 
@@ -26,7 +34,7 @@ The destinations are `~/.codex/skills`, `~/.claude/skills`, `~/.cursor/skills`,
 an absolute skills directory for exactly one agent; Smackdebt adds `smackdebt/`.
 
 The selection and absolute destinations are remembered in
-`${XDG_CONFIG_HOME:-$HOME/.config}/smackdebt/agents.toml`. Without a terminal,
+`${XDG_CONFIG_HOME:-$HOME/.config}/smackdebt/agents.toml`. Without an interactive terminal (including CI and `TERM=dumb`),
 `init` updates the saved selection or requires `--agent`/`--all` on first use.
 Explicit selection changes future updates; it does not remove earlier installations.
 Uninstall an agent before changing its saved destination.
@@ -38,10 +46,15 @@ Then run `smackdebt init` to update selected skills. The skill is bundled with
 the installed binary: setup and skill updates need no network, Node, or Rust.
 
 ```sh
-smackdebt init --uninstall                    # Remove all managed skills
+smackdebt init --uninstall                    # Choose managed skills to remove
 smackdebt init --uninstall --agent codex      # Remove one agent's skill
 smackdebt init --uninstall --dry-run          # Preview removal
 ```
+
+Interactive removal preselects all managed installations; uncheck any you want
+to keep. Explicit `--agent`/`--all` commands never prompt. Without a terminal,
+`--uninstall` removes all managed installations as before. `--dry-run` previews
+the chosen operation without writing files.
 
 Updates and removal preserve edited or unmanaged skills and unrelated files.
 Move a conflicting skill aside before retrying. Interrupted operations can be

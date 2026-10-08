@@ -1,0 +1,31 @@
+Less spaghetti. Help your agent write code you can follow.
+
+Usage: smackdebt [OPTIONS] [PATH] [COMMAND]
+
+Commands:
+  init  Install or update the skill for your coding agents
+  diff  Compare your current work with a Git ref
+  gate  Check debt against a committed baseline
+  help  Print this message or the help of the given subcommand(s)
+
+Arguments:
+  [PATH]  Show one path
+
+Options:
+      --jobs <JOBS>        Number of workers to use
+      --history <HISTORY>  Recent activity window, such as 90d
+  -h, --help               Print help
+  -V, --version            Print version
+
+Output:
+      --json           Write the complete JSON report
+      --all            Show all useful terminal detail
+      --top <TOP>      Show up to this many problems or comparisons
+      --color <COLOR>  Terminal color and decoration: auto, always, or never [possible values: auto, always, never]
+
+Examples:
+  smackdebt                 Find the trouble spots
+  smackdebt src/auth        Look closer
+  smackdebt diff main       Check what changed
+  smackdebt init            Set up your agents
+  smackdebt gate            Check the baseline

@@ -169,7 +169,7 @@ impl<W: Write> Write for WidthWriter<'_, W> {
 /// The word carries the meaning. A glyph, when decoration is enabled, is
 /// written immediately before the word it decorates and never instead of it.
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
-enum Word {
+pub(crate) enum Word {
     High,
     Watch,
     Worse,
@@ -204,7 +204,7 @@ impl Word {
         }
     }
 
-    fn style(self) -> Option<Style> {
+    pub(crate) fn style(self) -> Option<Style> {
         match self {
             Self::High | Self::Worse => Some(Style::new().fg_color(Some(AnsiColor::Red.into()))),
             Self::Watch | Self::Warning => {
@@ -2656,13 +2656,13 @@ fn diagnostic_detail<'a>(path: &str, diagnostic: &'a Diagnostic) -> &'a str {
     }
 }
 
-struct Renderer<'a, W> {
+pub(crate) struct Renderer<'a, W> {
     writer: &'a mut W,
     options: TerminalOptions,
 }
 
 impl<'a, W: Write> Renderer<'a, W> {
-    const fn new(writer: &'a mut W, options: TerminalOptions) -> Self {
+    pub(crate) const fn new(writer: &'a mut W, options: TerminalOptions) -> Self {
         Self { writer, options }
     }
 
@@ -2709,15 +2709,7 @@ impl<'a, W: Write> Renderer<'a, W> {
             Some(tier) => diff_tier_style(tier),
             None => codebase_tier_style(view.verdict.tier()),
         };
-        // The two cells the bar occupies are reserved either way, so a
-        // decorated and an undecorated report break their lines identically.
-        if self.options.decorations {
-            self.write_decoration(TIER_BAR, style)?;
-            write!(self.writer, " ")?;
-        } else {
-            write!(self.writer, "  ")?;
-        }
-        self.write_text(view.verdict.sentence(), 2)?;
+        self.write_outcome(view.verdict.sentence(), style)?;
         for fact in stated_verdict_facts(&view.verdict) {
             write!(self.writer, "  ")?;
             self.write_text(&fact, 2)?;
@@ -2732,6 +2724,16 @@ impl<'a, W: Write> Renderer<'a, W> {
             )?;
         }
         Ok(())
+    }
+
+    pub(crate) fn write_outcome(&mut self, sentence: &str, style: Option<Style>) -> io::Result<()> {
+        if self.options.decorations {
+            self.write_decoration(TIER_BAR, style)?;
+            write!(self.writer, " ")?;
+        } else {
+            write!(self.writer, "  ")?;
+        }
+        self.write_text(sentence, 2)
     }
 
     fn write_section(&mut self, section: &Section) -> io::Result<()> {
@@ -2787,7 +2789,7 @@ impl<'a, W: Write> Renderer<'a, W> {
     }
 
     /// Writes one row head: its optional decorated word, then its text.
-    fn write_head(&mut self, word: Option<Word>, text: &str) -> io::Result<()> {
+    pub(crate) fn write_head(&mut self, word: Option<Word>, text: &str) -> io::Result<()> {
         match word {
             None => write!(self.writer, "  ")?,
             Some(word) => {
@@ -2810,7 +2812,7 @@ impl<'a, W: Write> Renderer<'a, W> {
 
     /// Writes `text` after `lead` cells that are already on the line,
     /// continuing on indented lines instead of clipping.
-    fn write_text(&mut self, text: &str, lead: usize) -> io::Result<()> {
+    pub(crate) fn write_text(&mut self, text: &str, lead: usize) -> io::Result<()> {
         let continuation = INDENT.max(lead);
         let lines = wrap(
             text,

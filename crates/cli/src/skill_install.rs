@@ -99,20 +99,38 @@ pub(crate) fn atomic_write(path: &Path, bytes: &[u8]) -> Result<(), String> {
     Ok(())
 }
 
-pub(crate) fn install(directory: &Path) -> Result<(), String> {
+#[derive(Clone, Copy, PartialEq, Eq)]
+pub(crate) enum InstallOutcome {
+    Installed,
+    Updated,
+    Current,
+}
+
+pub(crate) fn install(directory: &Path) -> Result<InstallOutcome, String> {
     preflight(directory)?;
     let skill = directory.join("SKILL.md");
     let receipt = directory.join(RECEIPT);
     let new_hash = blake3::hash(SKILL.as_bytes()).to_hex();
     let mut hashes = format!("{new_hash}\n");
-    if skill.exists() {
+    let outcome = if skill.exists() {
         let previous = fs::read(&skill).map_err(|error| error.to_string())?;
+        if previous == SKILL.as_bytes() {
+            // A retry may still need to finish the two-hash receipt.
+            if fs::read(&receipt).map_err(|error| error.to_string())? != hashes.as_bytes() {
+                atomic_write(&receipt, hashes.as_bytes())?;
+            }
+            return Ok(InstallOutcome::Current);
+        }
         hashes.push_str(&format!("{}\n", blake3::hash(&previous).to_hex()));
-    }
+        InstallOutcome::Updated
+    } else {
+        InstallOutcome::Installed
+    };
     // Save both hashes before replacement so an interrupted update can retry.
     atomic_write(&receipt, hashes.as_bytes())?;
     atomic_write(&skill, SKILL.as_bytes())?;
-    atomic_write(&receipt, format!("{new_hash}\n").as_bytes())
+    atomic_write(&receipt, format!("{new_hash}\n").as_bytes())?;
+    Ok(outcome)
 }
 
 pub(crate) fn remove(directory: &Path) -> Result<(), String> {

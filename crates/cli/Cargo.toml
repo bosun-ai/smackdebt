@@ -30,6 +30,8 @@ smackdebt-output = { path = "../output", version = "0.2.0" }
 smackdebt-project = { path = "../project", version = "0.2.0" }
 terminal_size.workspace = true
 toml.workspace = true
+cliclack = "0.5.6"
+console = "0.16"
 
 [dev-dependencies]
 assert_cmd.workspace = true

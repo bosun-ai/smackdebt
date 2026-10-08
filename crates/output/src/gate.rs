@@ -4,42 +4,48 @@ use serde::Serialize;
 use serde::ser::{SerializeMap, SerializeSeq, Serializer};
 use smackdebt_analysis::{GateComparison, GateDelta};
 
-use crate::output::Counted;
+use crate::output::{Counted, Renderer, TerminalOptions, Word};
 
-/// Writes one gate report in the house vocabulary.
-///
-/// Regressions come first as `worse` rows, improvements follow as `better`
-/// rows, and each row names the path, the signal, and every counter that
-/// moved as `<before> → <after>`. The proposal line appears only when a
-/// regression exists, because a clean or improving gate needs no update.
+/// Writes a verdict-first gate report using the same layout as scan and diff.
 pub fn write_gate(
     writer: &mut impl Write,
     baseline: &str,
     comparison: &GateComparison,
+    options: TerminalOptions,
 ) -> io::Result<()> {
-    writeln!(writer, "GATE  {baseline}")?;
-    writeln!(writer)?;
+    let mut renderer = Renderer::new(writer, options);
+    renderer.write_text(&format!("smackdebt gate · {baseline}"), 0)?;
+    let (sentence, status) = if comparison.regressed() {
+        ("Failed. Debt exceeded the baseline.", Word::Worse)
+    } else {
+        ("Passed. Debt stayed within the baseline.", Word::Better)
+    };
+    renderer.write_outcome(sentence, status.style())?;
+    renderer.write_text(
+        &format!(
+            "{} · {}",
+            Counted::new(comparison.regressions().len(), "regression", "regressions"),
+            Counted::new(
+                comparison.improvements().len(),
+                "improvement",
+                "improvements"
+            ),
+        ),
+        0,
+    )?;
     if !comparison.regressions().is_empty() || !comparison.improvements().is_empty() {
+        renderer.write_text("", 0)?;
+        renderer.write_text("FINDINGS", 0)?;
         for delta in comparison.regressions() {
-            writeln!(writer, "  {:<6} {}", "worse", delta_facts(delta))?;
+            renderer.write_head(Some(Word::Worse), &delta_facts(delta))?;
         }
         for delta in comparison.improvements() {
-            writeln!(writer, "  {:<6} {}", "better", delta_facts(delta))?;
+            renderer.write_head(Some(Word::Better), &delta_facts(delta))?;
         }
-        writeln!(writer)?;
     }
-    writeln!(
-        writer,
-        "{} · {}",
-        Counted::new(comparison.regressions().len(), "regression", "regressions"),
-        Counted::new(
-            comparison.improvements().len(),
-            "improvement",
-            "improvements"
-        ),
-    )?;
     if comparison.regressed() {
-        writeln!(writer, "next: smackdebt gate --update")?;
+        renderer.write_text("", 0)?;
+        renderer.write_head(Some(Word::Next), "Review these changes. Fix regressions, or rerun this gate with --update to accept them.")?;
     }
     Ok(())
 }
@@ -168,7 +174,13 @@ mod tests {
             &GateSnapshot::new(observed.to_vec()),
         );
         let mut bytes = Vec::new();
-        write_gate(&mut bytes, ".smackdebt-baseline.tsv", &comparison).unwrap();
+        write_gate(
+            &mut bytes,
+            ".smackdebt-baseline.tsv",
+            &comparison,
+            TerminalOptions::default(),
+        )
+        .unwrap();
         String::from_utf8(bytes).unwrap()
     }
 
@@ -176,7 +188,7 @@ mod tests {
     fn a_clean_gate_states_its_zero_totals_without_a_proposal() {
         assert_eq!(
             rendered(&[], &[]),
-            "GATE  .smackdebt-baseline.tsv\n\n0 regressions · 0 improvements\n"
+            "smackdebt gate · .smackdebt-baseline.tsv\n  Passed. Debt stayed within the baseline.\n0 regressions · 0 improvements\n"
         );
     }
 
@@ -203,13 +215,14 @@ mod tests {
         assert_eq!(
             rendered(&baseline, &observed),
             concat!(
-                "GATE  .smackdebt-baseline.tsv\n",
-                "\n",
-                "  worse  crates/output/src/output.rs · cognitive · high 3 → 4\n",
+                "smackdebt gate · .smackdebt-baseline.tsv\n",
+                "  Failed. Debt exceeded the baseline.\n",
+                "1 regression · 1 improvement\n",
+                "\nFINDINGS\n",
+                "  worse crates/output/src/output.rs · cognitive · high 3 → 4\n",
                 "  better crates/analysis/src/verdict.rs · cognitive · high 2 → 1\n",
                 "\n",
-                "1 regression · 1 improvement\n",
-                "next: smackdebt gate --update\n",
+                "  next: Review these changes. Fix regressions, or rerun this gate with --update to accept them.\n",
             )
         );
     }
@@ -260,7 +273,7 @@ mod tests {
         let observed = [GateRow::new("src/a.rs", GateSignal::Nesting, 2, 4)];
         let report = rendered(&baseline, &observed);
         assert!(
-            report.contains("  worse  src/a.rs · nesting · high 1 → 2 · watch 2 → 4\n"),
+            report.contains("  worse src/a.rs · nesting · high 1 → 2 · watch 2 → 4\n"),
             "{report}"
         );
     }

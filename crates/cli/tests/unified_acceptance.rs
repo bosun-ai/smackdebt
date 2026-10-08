@@ -2505,7 +2505,7 @@ fn every_fifty_column_snapshot_respects_unicode_display_width() {
         assert_max_display_width(&fs::read(entry.path()).unwrap(), 50, &name);
         checked += 1;
     }
-    assert_eq!(checked, 7, "expected every reviewed 50-column view");
+    assert_eq!(checked, 10, "expected every reviewed 50-column view");
 }
 
 /// Both suites commit their terminal results here, so one scan proves the
@@ -2525,7 +2525,7 @@ fn no_committed_terminal_result_states_a_dependency_edge_as_a_row() {
         assert_no_dependency_edge_rows(&String::from_utf8_lossy(&bytes), &name);
         checked += 1;
     }
-    assert_eq!(checked, 37, "expected every committed terminal view");
+    assert_eq!(checked, 46, "expected every committed terminal view");
 }
 
 #[test]
@@ -2936,7 +2936,7 @@ fn help_and_version_use_the_success_stream_contract() {
             assert_eq!(
                 String::from_utf8_lossy(&result.stdout),
                 concat!(
-                    "Find costly code and see whether a change made it better\n",
+                    "Less spaghetti. Help your agent write code you can follow.\n",
                     "\n",
                     "Usage: smackdebt [OPTIONS] [PATH] [COMMAND]\n",
                     "\n",
@@ -2950,14 +2950,21 @@ fn help_and_version_use_the_success_stream_contract() {
                     "  [PATH]  Show one path\n",
                     "\n",
                     "Options:\n",
-                    "      --json               Write the complete JSON report\n",
                     "      --jobs <JOBS>        Number of workers to use\n",
                     "      --history <HISTORY>  Recent activity window, such as 90d\n",
-                    "      --all                Show all useful terminal detail\n",
-                    "      --top <TOP>          Show up to this many problems or comparisons\n",
-                    "      --color <COLOR>      Glyph color: auto, always, or never [possible values: auto, always, never]\n",
                     "  -h, --help               Print help\n",
                     "  -V, --version            Print version\n",
+                    "\nOutput:\n",
+                    "      --json           Write the complete JSON report\n",
+                    "      --all            Show all useful terminal detail\n",
+                    "      --top <TOP>      Show up to this many problems or comparisons\n",
+                    "      --color <COLOR>  Terminal color and decoration: auto, always, or never [possible values: auto, always, never]\n",
+                    "\nExamples:\n",
+                    "  smackdebt                 Find the trouble spots\n",
+                    "  smackdebt src/auth        Look closer\n",
+                    "  smackdebt diff main       Check what changed\n",
+                    "  smackdebt init            Set up your agents\n",
+                    "  smackdebt gate            Check the baseline\n",
                 )
             );
         }
