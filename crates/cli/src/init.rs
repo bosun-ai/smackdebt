@@ -4,6 +4,7 @@ use std::process::ExitCode;
 
 use clap::Args;
 
+use crate::hook_install;
 use crate::init_ui::SetupUi;
 use crate::skill_install;
 use crate::skill_selection::{Agent, Installation, Selection};
@@ -29,6 +30,9 @@ pub(crate) struct InitArgs {
     /// Remove managed skills, preserving edited and unrelated files.
     #[arg(long)]
     uninstall: bool,
+    /// Install experimental end-of-turn debt checks for selected agents.
+    #[arg(long, conflicts_with = "uninstall")]
+    experimental_hooks: bool,
 }
 
 pub(crate) fn run(args: InitArgs, color: ColorChoice) -> ExitCode {
@@ -82,21 +86,35 @@ fn execute(args: InitArgs, ui: &SetupUi) -> Result<(), (u8, String)> {
     let installations =
         plan_installations(&args, &agents, &mut setup.selection, &setup.home).map_err(failure)?;
     if args.dry_run {
-        for install in installations {
-            ui.result(
-                if args.uninstall {
-                    "Would remove"
-                } else {
-                    "Would install/update"
-                },
-                &install,
-                &setup.home,
+        return preview_installations(&args, &installations, &setup, ui);
+    }
+    apply_installations(&args, &installations, agents, &mut setup, ui)
+}
+
+fn preview_installations(
+    args: &InitArgs,
+    installations: &[Installation],
+    setup: &Setup,
+    ui: &SetupUi,
+) -> Result<(), (u8, String)> {
+    let action = if args.uninstall {
+        "Would remove"
+    } else {
+        "Would install/update"
+    };
+    for install in installations {
+        ui.result(action, install, &setup.home)
+            .map_err(output_failure)?;
+        if args.experimental_hooks || setup.selection.experimental_hooks.contains(&install.agent) {
+            ui.hook_result(
+                action,
+                install.agent,
+                &hook_install::config_path(install.agent, &setup.home),
             )
             .map_err(output_failure)?;
         }
-        return Ok(());
     }
-    apply_installations(&args, &installations, agents, &mut setup, ui)
+    Ok(())
 }
 
 fn apply_installations(
@@ -113,10 +131,26 @@ fn apply_installations(
     }
     let mut changed = false;
     for install in installations {
-        let (action, updated) = apply(args, install).map_err(failure)?;
+        let (action, updated) =
+            apply(args, install, &setup.home, &mut setup.selection).map_err(failure)?;
+        if !args.uninstall {
+            skill_install::save(&setup.state_path, &setup.selection).map_err(failure)?;
+        }
         changed |= updated;
         ui.result(action, install, &setup.home)
             .map_err(output_failure)?;
+        if args.experimental_hooks || setup.selection.experimental_hooks.contains(&install.agent) {
+            ui.hook_result(
+                if args.uninstall {
+                    "Removed"
+                } else {
+                    "Installed/updated"
+                },
+                install.agent,
+                &hook_install::config_path(install.agent, &setup.home),
+            )
+            .map_err(output_failure)?;
+        }
         if args.uninstall {
             setup
                 .selection
@@ -125,6 +159,10 @@ fn apply_installations(
             setup
                 .selection
                 .selected
+                .retain(|agent| *agent != install.agent);
+            setup
+                .selection
+                .experimental_hooks
                 .retain(|agent| *agent != install.agent);
             skill_install::save(&setup.state_path, &setup.selection).map_err(failure)?;
         }
@@ -147,6 +185,9 @@ fn plan_installations(
     for &agent in agents {
         let directory = destination(agent, args, settings, home);
         skill_install::preflight(&directory)?;
+        if args.experimental_hooks || settings.experimental_hooks.contains(&agent) {
+            hook_install::preflight(agent, home)?;
+        }
         for saved in &settings.installations {
             if saved.agent != agent && skill_install::same_directory(&directory, &saved.directory)?
             {
@@ -186,13 +227,28 @@ fn destination(
     )
 }
 
-fn apply(args: &InitArgs, install: &Installation) -> Result<(&'static str, bool), String> {
+fn apply(
+    args: &InitArgs,
+    install: &Installation,
+    home: &std::path::Path,
+    settings: &mut Selection,
+) -> Result<(&'static str, bool), String> {
     if args.uninstall {
+        if settings.experimental_hooks.contains(&install.agent) {
+            hook_install::remove(install.agent, home)?;
+        }
         skill_install::remove(&install.directory)?;
         return Ok(("Removed", true));
     }
     use skill_install::InstallOutcome;
-    Ok(match skill_install::install(&install.directory)? {
+    let outcome = skill_install::install(&install.directory)?;
+    if args.experimental_hooks || settings.experimental_hooks.contains(&install.agent) {
+        hook_install::install(install.agent, home)?;
+        if !settings.experimental_hooks.contains(&install.agent) {
+            settings.experimental_hooks.push(install.agent);
+        }
+    }
+    Ok(match outcome {
         InstallOutcome::Installed => ("Installed", true),
         InstallOutcome::Updated => ("Updated", true),
         InstallOutcome::Current => ("Already up to date:", false),
