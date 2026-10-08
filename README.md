@@ -62,10 +62,19 @@ smackdebt --json          # Use the report in your own tools
 
 ## Less spaghetti, with receipts
 
-Each function gets a **healthy**, **watch**, or **high** rating from its complexity,
-size, nesting, and parameter count. A difficult function cannot hide in a project
-average. Dependency checks reveal cycles and wide change impact; Git history
-highlights difficult code you keep touching.
+The first five metrics rate each function **healthy**, **watch**, or **high**.
+The rest show trouble between files and over time.
+
+| Metric | What it measures |
+| --- | --- |
+| Cognitive complexity | How hard the flow is to follow. |
+| Cyclomatic complexity | How many decisions the code makes. |
+| Statements in a function | How many statements it contains. |
+| Maximum nesting depth | How deep branches and loops go. |
+| Declared parameters | How many inputs a function takes. |
+| Dependency cycles | Dependencies that lead back to themselves. |
+| Change impact | How much code depends on a file. |
+| Hotspots | Complex code changed often. |
 
 Use `--all` for detail. [Measurements](docs/guide.md#read-the-ratings) ·
 [Problem patterns](docs/guide.md#read-the-problems) · [Checked examples](docs/examples.md)
