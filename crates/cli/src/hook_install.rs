@@ -101,31 +101,36 @@ pub(crate) fn preflight(agent: Agent, home: &Path) -> Result<(), String> {
     let definition = definition(agent);
     skill_install::check_path(&path)?;
     let value = read(&path)?;
-    if let Some(hooks) = value.get("hooks") {
-        let Some(events) = hooks.as_object() else {
-            return Err(format!("expected a hooks object in {}", path.display()));
-        };
-        if events
-            .get(&definition.event)
-            .is_some_and(|entries| !entries.is_array())
-        {
-            return Err(format!(
-                "expected a {} hook list in {}",
-                definition.event,
-                path.display()
-            ));
-        }
-        if let Some(entries) = events.get(&definition.event).and_then(Value::as_array) {
-            for candidate in entries {
-                if entry_command(agent, candidate) == entry_command(agent, &definition.entry)
-                    && candidate != &definition.entry
-                {
-                    return Err(format!("hook has local edits: {}", path.display()));
-                }
-            }
-        }
+    let entries = event_entries(&value, &definition.event, &path)?;
+    if entries.is_some_and(|entries| {
+        entries.iter().any(|candidate| {
+            entry_command(agent, candidate) == entry_command(agent, &definition.entry)
+                && candidate != &definition.entry
+        })
+    }) {
+        return Err(format!("hook has local edits: {}", path.display()));
     }
     Ok(())
+}
+
+fn event_entries<'a>(
+    value: &'a Value,
+    event: &str,
+    path: &Path,
+) -> Result<Option<&'a Vec<Value>>, String> {
+    let Some(hooks) = value.get("hooks") else {
+        return Ok(None);
+    };
+    let events = hooks
+        .as_object()
+        .ok_or_else(|| format!("expected a hooks object in {}", path.display()))?;
+    let Some(entries) = events.get(event) else {
+        return Ok(None);
+    };
+    entries
+        .as_array()
+        .map(Some)
+        .ok_or_else(|| format!("expected a {event} hook list in {}", path.display()))
 }
 
 fn edit(agent: Agent, home: &Path, installing: bool) -> Result<(), String> {

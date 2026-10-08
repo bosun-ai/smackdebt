@@ -85,41 +85,36 @@ fn execute(args: InitArgs, ui: &SetupUi) -> Result<(), (u8, String)> {
     }
     let installations =
         plan_installations(&args, &agents, &mut setup.selection, &setup.home).map_err(failure)?;
-    for install in &installations {
-        if args.experimental_hooks || setup.selection.experimental_hooks.contains(&install.agent) {
-            hook_install::preflight(install.agent, &setup.home).map_err(failure)?;
-        }
-    }
     if args.dry_run {
-        for install in installations {
-            ui.result(
-                if args.uninstall {
-                    "Would remove"
-                } else {
-                    "Would install/update"
-                },
-                &install,
-                &setup.home,
-            )
-            .map_err(output_failure)?;
-            if args.experimental_hooks
-                || setup.selection.experimental_hooks.contains(&install.agent)
-            {
-                ui.hook_result(
-                    if args.uninstall {
-                        "Would remove"
-                    } else {
-                        "Would install/update"
-                    },
-                    install.agent,
-                    &hook_install::config_path(install.agent, &setup.home),
-                )
-                .map_err(output_failure)?;
-            }
-        }
-        return Ok(());
+        return preview_installations(&args, &installations, &setup, ui);
     }
     apply_installations(&args, &installations, agents, &mut setup, ui)
+}
+
+fn preview_installations(
+    args: &InitArgs,
+    installations: &[Installation],
+    setup: &Setup,
+    ui: &SetupUi,
+) -> Result<(), (u8, String)> {
+    let action = if args.uninstall {
+        "Would remove"
+    } else {
+        "Would install/update"
+    };
+    for install in installations {
+        ui.result(action, install, &setup.home)
+            .map_err(output_failure)?;
+        if args.experimental_hooks || setup.selection.experimental_hooks.contains(&install.agent) {
+            ui.hook_result(
+                action,
+                install.agent,
+                &hook_install::config_path(install.agent, &setup.home),
+            )
+            .map_err(output_failure)?;
+        }
+    }
+    Ok(())
 }
 
 fn apply_installations(
@@ -190,6 +185,9 @@ fn plan_installations(
     for &agent in agents {
         let directory = destination(agent, args, settings, home);
         skill_install::preflight(&directory)?;
+        if args.experimental_hooks || settings.experimental_hooks.contains(&agent) {
+            hook_install::preflight(agent, home)?;
+        }
         for saved in &settings.installations {
             if saved.agent != agent && skill_install::same_directory(&directory, &saved.directory)?
             {
