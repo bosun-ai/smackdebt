@@ -9,7 +9,7 @@ publish.workspace = true
 description = "Compiled language analyzers for Smackdebt"
 
 [dependencies]
-smackdebt-analysis = { path = "../analysis", version = "0.2.0" }
+smackdebt-analysis = { path = "../analysis", version = "0.3.0" }
 tree-sitter.workspace = true
 tree-sitter-c.workspace = true
 tree-sitter-cpp.workspace = true
