@@ -6,6 +6,27 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
+## [0.3.0](https://github.com/bosun-ai/smackdebt/compare/v0.2.0...v0.3.0) - 2026-10-08
+
+Install Smackdebt:
+
+```sh
+curl -fsSL https://github.com/bosun-ai/smackdebt/releases/download/v0.3.0/install.sh | sh
+```
+
+Or use `brew install bosun-ai/tap/smackdebt` or `cargo binstall smackdebt`.
+
+Then run `smackdebt init` to install or update skills for your agents.
+
+### Added
+
+- *(cli)* make setup interactive and polish terminal output ([#16](https://github.com/bosun-ai/smackdebt/pull/16))
+
+
+### Other
+
+- show Smackdebt metrics in the README ([#18](https://github.com/bosun-ai/smackdebt/pull/18))
+
 ## [0.2.0](https://github.com/bosun-ai/smackdebt/releases/tag/v0.2.0) - 2026-10-07
 
 Install Smackdebt:

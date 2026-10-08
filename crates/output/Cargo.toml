@@ -15,7 +15,7 @@ width-test-checks = []
 anstyle.workspace = true
 serde.workspace = true
 serde_json.workspace = true
-smackdebt-analysis = { path = "../analysis", version = "0.2.0" }
+smackdebt-analysis = { path = "../analysis", version = "0.3.0" }
 unicode-width.workspace = true
 
 [lints]

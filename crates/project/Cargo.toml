@@ -17,10 +17,10 @@ rayon.workspace = true
 serde_json.workspace = true
 json5.workspace = true
 thiserror.workspace = true
-smackdebt-analysis = { path = "../analysis", version = "0.2.0" }
-smackdebt-discovery = { path = "../discovery", version = "0.2.0" }
-smackdebt-git = { path = "../git", version = "0.2.0" }
-smackdebt-languages = { path = "../languages", version = "0.2.0" }
+smackdebt-analysis = { path = "../analysis", version = "0.3.0" }
+smackdebt-discovery = { path = "../discovery", version = "0.3.0" }
+smackdebt-git = { path = "../git", version = "0.3.0" }
+smackdebt-languages = { path = "../languages", version = "0.3.0" }
 
 [dev-dependencies]
 tempfile.workspace = true

@@ -26,8 +26,8 @@ tempfile.workspace = true
 clap.workspace = true
 serde.workspace = true
 stats_alloc = { workspace = true, optional = true }
-smackdebt-output = { path = "../output", version = "0.2.0" }
-smackdebt-project = { path = "../project", version = "0.2.0" }
+smackdebt-output = { path = "../output", version = "0.3.0" }
+smackdebt-project = { path = "../project", version = "0.3.0" }
 terminal_size.workspace = true
 toml.workspace = true
 cliclack = "0.5.6"
