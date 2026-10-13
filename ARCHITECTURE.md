@@ -141,7 +141,12 @@ file. A finding is owned once even when several parent summaries include its
 rating. Full scans retain every `watch` and `high` finding and reduce healthy
 units to counts.
 
-The scope order is repository, package, directory, file, container, and unit.
+The scope hierarchy follows repository paths through packages and directories,
+then files, containers, and units.
+Nested packages sit below their containing package or directory scope.
+Directories between package roots are retained even when they own no source
+files. Selecting a directory therefore includes every package below it, while
+each file keeps its single nearest-package owner.
 Codebase and diff reports use the same repository-relative hierarchy.
 `ProjectReport` records the initial selected scope separately from report
 facts, so a renderer can show the repository, a package, or a directory from

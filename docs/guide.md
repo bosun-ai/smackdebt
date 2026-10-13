@@ -100,7 +100,9 @@ twenty times. [Read the problems](#read-the-problems) lists the pattern names,
 the evidence each one needs, and the thresholds behind them.
 
 Pass a reported path to progressively inspect the next level. Repository,
-package, directory, and file scopes retain the same repository-relative paths:
+package, directory, and file scopes retain the same repository-relative paths.
+A directory view includes nested packages, including Cargo workspace members,
+even when the selected directory has no source files of its own:
 
 ```console
 $ smackdebt crates/analysis
