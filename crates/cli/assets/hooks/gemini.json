@@ -1,0 +1,16 @@
+{
+  "hooks": {
+    "AfterAgent": [
+      {
+        "hooks": [
+          {
+            "name": "smackdebt-review",
+            "type": "command",
+            "command": "smackdebt __hook --agent gemini",
+            "timeout": 60000
+          }
+        ]
+      }
+    ]
+  }
+}

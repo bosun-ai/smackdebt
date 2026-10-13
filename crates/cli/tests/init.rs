@@ -308,3 +308,82 @@ fn aliases_are_detected_before_the_first_skill_directory_is_created() {
     assert!(!real.join("skills").exists());
     assert!(!home.path().join(".config").exists());
 }
+
+#[test]
+fn hooks_are_opt_in_for_all_agents_and_survive_plain_updates() {
+    let home = TempDir::new().unwrap();
+    command(&home).args(["--all"]).assert().success();
+    for file in [
+        ".codex/hooks.json",
+        ".claude/settings.json",
+        ".cursor/hooks.json",
+        ".copilot/hooks/smackdebt.json",
+        ".gemini/settings.json",
+    ] {
+        assert!(!home.path().join(file).exists(), "{file}");
+    }
+    command(&home)
+        .args(["--all", "--experimental-hooks"])
+        .assert()
+        .success();
+    command(&home).args(["--all"]).assert().success();
+    for (file, event) in [
+        (".codex/hooks.json", "Stop"),
+        (".claude/settings.json", "Stop"),
+        (".cursor/hooks.json", "stop"),
+        (".copilot/hooks/smackdebt.json", "agentStop"),
+        (".gemini/settings.json", "AfterAgent"),
+    ] {
+        let config: serde_json::Value =
+            serde_json::from_slice(&fs::read(home.path().join(file)).unwrap()).unwrap();
+        assert_eq!(
+            config["hooks"][event].as_array().unwrap().len(),
+            1,
+            "{file}"
+        );
+    }
+    command(&home).args(["--uninstall"]).assert().success();
+    for (file, event) in [
+        (".codex/hooks.json", "Stop"),
+        (".claude/settings.json", "Stop"),
+        (".cursor/hooks.json", "stop"),
+        (".copilot/hooks/smackdebt.json", "agentStop"),
+        (".gemini/settings.json", "AfterAgent"),
+    ] {
+        let config: serde_json::Value =
+            serde_json::from_slice(&fs::read(home.path().join(file)).unwrap()).unwrap();
+        assert!(config["hooks"].get(event).is_none(), "{file}");
+    }
+}
+
+#[test]
+fn hook_install_preserves_other_settings_and_fails_before_any_install_on_invalid_json() {
+    let home = TempDir::new().unwrap();
+    let claude = home.path().join(".claude/settings.json");
+    fs::create_dir_all(claude.parent().unwrap()).unwrap();
+    fs::write(&claude, r#"{"theme":"dark","hooks":{"Stop":[{"hooks":[{"type":"command","command":"my-check"}]}]}}"#).unwrap();
+    command(&home)
+        .args(["--agent", "claude-code", "--experimental-hooks"])
+        .assert()
+        .success();
+    let config: serde_json::Value = serde_json::from_slice(&fs::read(&claude).unwrap()).unwrap();
+    assert_eq!(config["theme"], "dark");
+    assert_eq!(config["hooks"]["Stop"].as_array().unwrap().len(), 2);
+    command(&home).args(["--uninstall"]).assert().success();
+    let config: serde_json::Value = serde_json::from_slice(&fs::read(&claude).unwrap()).unwrap();
+    assert_eq!(config["hooks"]["Stop"].as_array().unwrap().len(), 1);
+    assert_eq!(
+        config["hooks"]["Stop"][0]["hooks"][0]["command"],
+        "my-check"
+    );
+
+    let gemini = home.path().join(".gemini/settings.json");
+    fs::create_dir_all(gemini.parent().unwrap()).unwrap();
+    fs::write(&gemini, "not json").unwrap();
+    command(&home)
+        .args(["--all", "--experimental-hooks"])
+        .assert()
+        .failure()
+        .stderr(predicate::str::contains("could not parse"));
+    assert!(!home.path().join(".codex/skills/smackdebt").exists());
+}

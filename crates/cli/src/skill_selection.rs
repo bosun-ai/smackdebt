@@ -64,6 +64,8 @@ impl Agent {
 pub(crate) struct Selection {
     pub(crate) selected: Vec<Agent>,
     pub(crate) installations: Vec<Installation>,
+    #[serde(default)]
+    pub(crate) experimental_hooks: Vec<Agent>,
 }
 
 #[derive(Clone, Serialize, Deserialize)]

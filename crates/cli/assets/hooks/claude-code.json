@@ -1,0 +1,15 @@
+{
+  "hooks": {
+    "Stop": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "smackdebt __hook --agent claude-code",
+            "timeout": 60
+          }
+        ]
+      }
+    ]
+  }
+}

@@ -59,6 +59,9 @@ fn run(arguments: impl IntoIterator<Item = OsString>) -> ExitCode {
     if let Some(Command::Init(args)) = cli.command {
         return crate::init::run(args, cli.common.color.unwrap_or(ColorChoice::Auto));
     }
+    if let Some(Command::Hook(args)) = cli.command {
+        return crate::agent_hook::run(args);
+    }
     run_analysis(cli)
 }
 
@@ -77,6 +80,7 @@ fn run_analysis(cli: Cli) -> ExitCode {
             )
         }
         Some(Command::Init(_)) => unreachable!("init is handled before analysis setup"),
+        Some(Command::Hook(_)) => unreachable!("hook is handled before analysis setup"),
         Some(Command::Gate(args)) => return run_gate(args, selected, &config, choice),
         Some(Command::Diff(args)) => {
             let request = diff_request(args.path, args.reference, &args.common, &config);
@@ -174,7 +178,7 @@ fn json_color_conflict(cli: &Cli) -> bool {
 /// loaded from.
 fn selected_paths(cli: &Cli) -> (Option<PathBuf>, PathBuf) {
     let selected = match &cli.command {
-        Some(Command::Init(_)) => None,
+        Some(Command::Init(_) | Command::Hook(_)) => None,
         None => cli.path.clone(),
         Some(Command::Diff(args)) => args.path.clone().or_else(|| cli.path.clone()),
         Some(Command::Gate(args)) => args.path.clone().or_else(|| cli.path.clone()),

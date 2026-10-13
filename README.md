@@ -36,6 +36,7 @@ smackdebt init
 
 Choose **Codex, Claude Code, Cursor, Copilot, or Gemini CLI**, then restart your agent.
 Rerun `init` after upgrading to update its skill. [Agent setup →](docs/agents.md)
+For optional end-of-turn checks, run `smackdebt init --experimental-hooks`.
 
 Installers arrive with the next published release. Until then, build from this
 checkout with Rust 1.97+: `cargo install --locked --path crates/cli`.

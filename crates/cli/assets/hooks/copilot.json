@@ -1,0 +1,12 @@
+{
+  "version": 1,
+  "hooks": {
+    "agentStop": [
+      {
+        "type": "command",
+        "bash": "smackdebt __hook --agent copilot",
+        "timeoutSec": 60
+      }
+    ]
+  }
+}

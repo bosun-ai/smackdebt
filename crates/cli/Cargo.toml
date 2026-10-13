@@ -25,6 +25,7 @@ same-file = "1.0"
 tempfile.workspace = true
 clap.workspace = true
 serde.workspace = true
+serde_json.workspace = true
 stats_alloc = { workspace = true, optional = true }
 smackdebt-output = { path = "../output", version = "0.2.0" }
 smackdebt-project = { path = "../project", version = "0.2.0" }
