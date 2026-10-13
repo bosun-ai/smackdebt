@@ -100,3 +100,11 @@ smackdebt bundles/vendor.min.js --color never
 ```console
 smackdebt share/jquery.plugin.js --color never
 ```
+
+## Directories containing packages
+
+`smackdebt workspace` includes every nested package, even when its Cargo manifest
+only declares workspace members. The CLI regressions check two member functions
+produce `2 high · 0 watch · 2 checked`, and that directory reports and diffs exclude
+siblings outside the selected directory. They also cover directly owned source,
+a directory without a manifest, and identical output across worker settings.

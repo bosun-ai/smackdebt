@@ -9,66 +9,70 @@ pub(crate) struct HierarchyBuilder {
     pub(crate) scopes: Vec<Scope>,
     pub(crate) package_scopes: Vec<ScopeId>,
     pub(crate) file_scopes: BTreeMap<PathBuf, ScopeId>,
-    pub(crate) directories: BTreeMap<(PathBuf, PathBuf), ScopeId>,
-    pub(crate) package_roots: Vec<PathBuf>,
+    directories: BTreeMap<PathBuf, ScopeId>,
 }
 impl HierarchyBuilder {
     pub(crate) fn new(label: String, package_roots: &[PathBuf]) -> Self {
         let root = ScopeId::from_index(0);
-        let mut scopes = vec![Scope::new(root, ScopeKind::Repository, label, None)];
-        let mut package_scopes = Vec::with_capacity(package_roots.len());
-        for package_root in package_roots {
-            let id = ScopeId::from_index(scopes.len());
-            package_scopes.push(id);
-            scopes[root.index()].add_child(id);
-            scopes.push(Scope::new(
+        let mut hierarchy = Self {
+            scopes: vec![Scope::new(root, ScopeKind::Repository, label, None)],
+            package_scopes: Vec::with_capacity(package_roots.len()),
+            file_scopes: BTreeMap::new(),
+            directories: BTreeMap::new(),
+        };
+        // Register every package before linking parents: diff reports may append
+        // a removed parent package after its current children.
+        for path in package_roots {
+            let id = ScopeId::from_index(hierarchy.scopes.len());
+            hierarchy.package_scopes.push(id);
+            if !path.as_os_str().is_empty() {
+                hierarchy.directories.insert(path.clone(), id);
+            }
+            hierarchy.scopes.push(Scope::new(
                 id,
                 ScopeKind::Package,
-                if package_root.as_os_str().is_empty() {
+                if path.as_os_str().is_empty() {
                     ".".to_owned()
                 } else {
-                    package_root.display().to_string()
+                    path.display().to_string()
                 },
                 Some(root),
             ));
         }
-        Self {
-            scopes,
-            package_scopes,
-            file_scopes: BTreeMap::new(),
-            directories: BTreeMap::new(),
-            package_roots: package_roots.to_vec(),
+        for (index, path) in package_roots.iter().enumerate() {
+            let parent = hierarchy.directory_scope(path.parent().unwrap_or(Path::new("")), root);
+            let id = hierarchy.package_scopes[index];
+            hierarchy.scopes[id.index()].set_parent(parent);
+            hierarchy.scopes[parent.index()].add_child(id);
         }
+        hierarchy
+    }
+
+    /// Reuses a package or directory at this path so nested packages and
+    /// directly owned files share one geographic scope.
+    fn directory_scope(&mut self, path: &Path, root: ScopeId) -> ScopeId {
+        if path.as_os_str().is_empty() {
+            return root;
+        }
+        if let Some(&scope) = self.directories.get(path) {
+            return scope;
+        }
+        let parent = self.directory_scope(path.parent().unwrap_or(Path::new("")), root);
+        let id = ScopeId::from_index(self.scopes.len());
+        self.scopes[parent.index()].add_child(id);
+        self.scopes.push(Scope::new(
+            id,
+            ScopeKind::Directory,
+            path.display().to_string(),
+            Some(parent),
+        ));
+        self.directories.insert(path.to_path_buf(), id);
+        id
     }
 
     pub(crate) fn add_file(&mut self, path: &Path, package_index: usize) {
-        let package_root = self.package_roots[package_index].clone();
         let package_scope = self.package_scopes[package_index];
-        let relative_directory = path
-            .parent()
-            .unwrap_or(Path::new(""))
-            .strip_prefix(&package_root)
-            .unwrap_or(Path::new(""));
-        let mut parent = package_scope;
-        let mut accumulated = package_root.clone();
-        for component in relative_directory.components() {
-            accumulated.push(component);
-            let key = (package_root.clone(), accumulated.clone());
-            parent = if let Some(id) = self.directories.get(&key) {
-                *id
-            } else {
-                let id = ScopeId::from_index(self.scopes.len());
-                self.scopes[parent.index()].add_child(id);
-                self.scopes.push(Scope::new(
-                    id,
-                    ScopeKind::Directory,
-                    accumulated.display().to_string(),
-                    Some(parent),
-                ));
-                self.directories.insert(key, id);
-                id
-            };
-        }
+        let parent = self.directory_scope(path.parent().unwrap_or(Path::new("")), package_scope);
         let file_scope = ScopeId::from_index(self.scopes.len());
         self.scopes[parent.index()].add_child(file_scope);
         self.scopes.push(Scope::new(

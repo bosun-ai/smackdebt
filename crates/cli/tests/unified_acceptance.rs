@@ -2348,6 +2348,146 @@ fn a_selected_scope_answers_from_the_same_repository_report_as_the_root_run() {
     );
 }
 
+/// A directory includes the source in every package below it, even when its
+/// own manifest is only a workspace wrapper or it has no manifest at all.
+#[test]
+fn directory_selection_includes_nested_packages_without_counting_siblings() {
+    for (wrapper_manifest, direct_source) in [(true, false), (true, true), (false, true)] {
+        let repository = GeneratedRepository::new("main");
+        if wrapper_manifest {
+            repository.write(
+                "workspace/Cargo.toml",
+                b"[workspace]\nmembers = [\"crates/member\", \"crates/other\"]\n",
+            );
+        }
+        repository.write(
+            "workspace/crates/member/Cargo.toml",
+            b"[package]\nname = \"member\"\nversion = \"0.1.0\"\n",
+        );
+        let source = b"pub fn work(a: bool, b: bool, c: bool, d: bool, e: bool, f: bool, g: bool, h: bool, i: bool) {}\n";
+        repository.write("workspace/crates/member/src/lib.rs", source);
+        repository.write(
+            "workspace/crates/other/Cargo.toml",
+            b"[package]\nname = \"other\"\nversion = \"0.1.0\"\n",
+        );
+        repository.write("workspace/crates/other/src/lib.rs", source);
+        repository.write("sibling/src/lib.rs", source);
+        repository.write(
+            "sibling/Cargo.toml",
+            b"[package]\nname = \"sibling\"\nversion = \"0.1.0\"\n",
+        );
+        if direct_source {
+            repository.write("workspace/direct.rs", source);
+        }
+        let expected = if direct_source { 3 } else { 2 };
+        let root = Invocation::new(["--json"]).run(repository.path());
+        root.success();
+        let root_report = checked_json(&root.stdout);
+        assert_eq!(root_report["summary"]["checked"], expected + 1);
+        for (path, count) in [
+            ("workspace", expected),
+            ("workspace/crates", 2),
+            ("workspace/crates/member", 1),
+        ] {
+            assert_nested_directory_report(&repository, &root_report, path, count);
+        }
+        let inside = Invocation::new([".", "--json"]).run(&repository.path().join("workspace"));
+        inside.success();
+        assert_eq!(checked_json(&inside.stdout)["summary"]["checked"], expected);
+    }
+}
+
+fn run_with_both_worker_settings(
+    invocation: Invocation,
+    directory: &Path,
+) -> support::ProcessResult {
+    let serial = invocation.run(directory);
+    serial.success();
+    let parallel = invocation.automatic_workers().run(directory);
+    parallel.success();
+    assert_eq!(serial, parallel);
+    serial
+}
+
+fn assert_nested_directory_report(
+    repository: &GeneratedRepository,
+    root_report: &Value,
+    path: &str,
+    count: u64,
+) {
+    let invocation = Invocation::new([path, "--json"]);
+    let result = run_with_both_worker_settings(invocation, repository.path());
+    let report = checked_json(&result.stdout);
+    assert_eq!(report["summary"]["checked"], count, "{path}");
+    assert_eq!(report["summary"]["high"], count, "{path}");
+    let member = report["files"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .find(|file| {
+            report["paths"][file["path"].as_u64().unwrap() as usize]
+                == "workspace/crates/member/src/lib.rs"
+        })
+        .unwrap();
+    assert_eq!(
+        package_path(&report, member["package"].as_u64().unwrap()),
+        "workspace/crates/member"
+    );
+    for (table, value) in root_report.as_object().unwrap() {
+        if !matches!(table.as_str(), "verdict" | "summary" | "selected_scope") {
+            assert_eq!(&report[table], value, "{path}: {table}");
+        }
+    }
+    let invocation = Invocation::new([path, "--all"]);
+    let terminal = run_with_both_worker_settings(invocation, repository.path());
+    let text = String::from_utf8_lossy(&terminal.stdout);
+    assert!(
+        text.contains(&format!("{count} high · 0 watch · {count} checked")),
+        "{text}"
+    );
+    assert!(
+        text.contains("workspace/crates/member/src/lib.rs"),
+        "{text}"
+    );
+    assert!(!text.contains("sibling/src/lib.rs"), "{text}");
+}
+
+#[test]
+fn directory_diff_includes_nested_package_changes_without_counting_siblings() {
+    let repository = GeneratedRepository::new("main");
+    repository.write(
+        "workspace/Cargo.toml",
+        b"[workspace]\nmembers = [\"member\"]\n",
+    );
+    for directory in ["workspace/member", "sibling"] {
+        repository.write(
+            &format!("{directory}/Cargo.toml"),
+            b"[package]\nname = \"member\"\nversion = \"0.1.0\"\n",
+        );
+        repository.write(&format!("{directory}/src/lib.rs"), b"pub fn work() {}\n");
+    }
+    repository.commit(support::Commit {
+        message: "healthy functions",
+        identity: support::Identity {
+            name: "Author",
+            address: "author@example.invalid",
+        },
+        date: "2026-08-01T12:00:00Z",
+    });
+    for directory in ["workspace/member", "sibling"] {
+        repository.write(&format!("{directory}/src/lib.rs"), b"pub fn work(a: bool, b: bool, c: bool, d: bool, e: bool, f: bool, g: bool, h: bool, i: bool) {}\n");
+    }
+    let invocation = Invocation::new(["diff", "main", "workspace", "--json"]);
+    let result = run_with_both_worker_settings(invocation, repository.path());
+    let report = checked_json(&result.stdout);
+    assert_eq!(report["summary"]["debt_diff"]["worse"], 1);
+    let invocation = Invocation::new(["diff", "main", "workspace", "--all"]);
+    let terminal = run_with_both_worker_settings(invocation, repository.path());
+    let text = String::from_utf8_lossy(&terminal.stdout);
+    assert!(text.contains("workspace/member/src/lib.rs"), "{text}");
+    assert!(!text.contains("sibling/src/lib.rs"), "{text}");
+}
+
 /// A file scope resolves against the repository, so it names only the imports
 /// that genuinely match nothing and can still state its graph neighbours.
 #[test]

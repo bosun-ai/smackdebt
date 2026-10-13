@@ -1285,6 +1285,7 @@ pub const fn smackdebt_analysis::Scope::parent(&self) -> core::option::Option<sm
 pub const fn smackdebt_analysis::Scope::path(&self) -> core::option::Option<smackdebt_analysis::PathId>
 pub fn smackdebt_analysis::Scope::propagation_comparisons(&self) -> &[smackdebt_analysis::PropagationComparisonId]
 pub fn smackdebt_analysis::Scope::reserve_findings(&mut self, usize)
+pub fn smackdebt_analysis::Scope::set_parent(&mut self, smackdebt_analysis::ScopeId)
 pub fn smackdebt_analysis::Scope::set_path(&mut self, smackdebt_analysis::PathId)
 pub struct smackdebt_analysis::ScopeId(_)
 impl smackdebt_analysis::ScopeId

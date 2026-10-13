@@ -536,6 +536,10 @@ impl Scope {
     pub const fn parent(&self) -> Option<ScopeId> {
         self.parent
     }
+    /// Sets this scope's parent while retaining its contents and child links.
+    pub fn set_parent(&mut self, parent: ScopeId) {
+        self.parent = Some(parent);
+    }
     pub fn children(&self) -> &[ScopeId] {
         &self.children
     }
