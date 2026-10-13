@@ -80,7 +80,7 @@ impl Language for Python {
         }
     }
 
-    fn dependency(node: Node<'_>, source: &[u8]) -> Option<DependencySyntax> {
-        crate::dependency::python(node, source)
+    fn collect_dependencies(node: Node<'_>, source: &[u8], output: &mut Vec<DependencySyntax>) {
+        crate::python_dependencies::collect(node, source, output);
     }
 }

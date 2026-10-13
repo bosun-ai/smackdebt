@@ -90,8 +90,12 @@ impl Language for Java {
         }
     }
 
+    fn collect_names(node: Node<'_>, source: &[u8], names: &mut smackdebt_analysis::SourceNames) {
+        crate::java_dependencies::collect(node, source, names);
+    }
+
     fn dependency(node: Node<'_>, source: &[u8]) -> Option<DependencySyntax> {
-        crate::dependency::java(node, source)
+        crate::java_dependencies::reference(node, source)
     }
 }
 

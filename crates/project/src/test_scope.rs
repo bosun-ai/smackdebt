@@ -67,7 +67,9 @@ fn record_declarer(
             continue;
         };
         let test_scoped = reference.scope() == smackdebt_analysis::DependencyScope::Test;
-        for target in resolve_candidates(path, candidates, index, aliases) {
+        for target in crate::rust_layout::resolve_explicit_module(path, reference, index)
+            .unwrap_or_else(|| resolve_candidates(path, candidates, index, aliases))
+        {
             if target.index() != declarer {
                 declarations.insert((declarer, target.index(), test_scoped));
             }

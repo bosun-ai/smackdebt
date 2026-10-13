@@ -162,7 +162,7 @@ mod tests {
         assert_eq!(report.package_edges().len(), 2);
         assert_eq!(
             report.dependency_coverage(),
-            DependencyCoverage::new(2, 0, 0, 1, 2, 0, 0)
+            DependencyCoverage::new(2, 2, 0, 1, 0, 0, 0)
         );
         assert_eq!(report.dependency_coverage().total(), 5);
         assert_eq!(report.architecture_findings().len(), 1);

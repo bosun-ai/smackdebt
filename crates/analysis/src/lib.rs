@@ -132,9 +132,10 @@ pub use report::{
 pub use size::{SizeFinding, SizeFindingId, SizePolicy, SizeSubject};
 pub use source::{
     CRATE_ROOT_CANDIDATE, DECLARING_FILE_CANDIDATE, DependencyIntent, DependencyKind,
-    DependencyScope, DependencySyntax, DependencySyntaxState, FileAnalysis, Language, LocalUnitId,
-    PARENT_MODULE_CANDIDATE, ParseStatus, RecoveredFacts, SourceRole, SourceSpan, SourceTrust,
-    StaticRelationKind, UnitFact, UnitIdentity, UnitKind, UnitMatchEvidence, is_symbolic_candidate,
+    DependencyScope, DependencySyntax, DependencySyntaxState, FileAnalysis, IncludeStyle, Language,
+    LocalUnitId, PARENT_MODULE_CANDIDATE, ParseStatus, RecoveredFacts, SourceRole, SourceSpan,
+    SourceTrust, StaticRelationKind, UnitFact, UnitIdentity, UnitKind, UnitMatchEvidence,
+    is_symbolic_candidate,
 };
 pub use source_names::{NameDeclaration, NameImport, NameReference, SourceNames, SymbolKind};
 pub use stable_dependencies::{

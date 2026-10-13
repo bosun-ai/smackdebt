@@ -84,6 +84,9 @@ Use `--all` for detail. [Measurements](docs/guide.md#read-the-ratings) ·
 **C, C++, C#, Go, Java, JavaScript/JSX, PHP, Python, Ruby, Rust, TypeScript/TSX,
 and Vue** (scripts and templates). React uses JSX/TSX support. Reports flag
 unsupported files and parse failures so you can see what the check missed.
+Dependency analysis follows supported static references and local project
+configuration. Runtime loading and framework auto-imports are outside its scope;
+[dependency coverage](docs/guide.md#languages) explains the language-specific limits.
 
 ---
 

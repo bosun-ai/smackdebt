@@ -108,7 +108,7 @@ impl Language for Ruby {
     }
 
     fn dependency(node: Node<'_>, source: &[u8]) -> Option<DependencySyntax> {
-        crate::dependency::ruby(node, source)
+        crate::ruby_dependencies::ruby(node, source)
     }
 }
 

@@ -5,6 +5,8 @@ use std::path::{Path, PathBuf};
 
 use smackdebt_analysis::FileId;
 
+mod declarations;
+
 /// Resolves candidates that name a file by role instead of by path.
 ///
 /// Symbolic candidates are the last resort of one reference: they are consulted
@@ -89,272 +91,122 @@ pub(crate) fn rust_source_root(source: &Path) -> Option<PathBuf> {
     None
 }
 
+pub(crate) fn resolve_explicit_module(
+    source: &Path,
+    reference: &smackdebt_analysis::DependencySyntax,
+    index: &BTreeMap<PathBuf, FileId>,
+) -> Option<Vec<FileId>> {
+    if reference.relation() != smackdebt_analysis::StaticRelationKind::ModuleOwnership {
+        return None;
+    }
+    let module = reference.module_path()?;
+    let smackdebt_analysis::DependencySyntaxState::Candidates(candidates) = reference.state()
+    else {
+        return None;
+    };
+    let inline = module
+        .rsplit_once("::")
+        .map(|(prefix, _)| prefix.replace("::", "/"))
+        .unwrap_or_default();
+    let parent = if inline.is_empty() {
+        source.parent().unwrap_or(Path::new("")).to_path_buf()
+    } else {
+        rust_module_directory(source)?
+    };
+    Some(
+        candidates
+            .iter()
+            .filter_map(|candidate| {
+                crate::paths::clean_relative(&parent.join(&inline).join(candidate))
+            })
+            .filter_map(|path| index.get(&path).copied())
+            .collect(),
+    )
+}
+
+/// Explicit module files and their declared children, indexed by logical module path.
+#[derive(Default)]
+pub(crate) struct RustModules {
+    paths: BTreeMap<PathBuf, FileId>,
+    logical_sources: BTreeMap<FileId, PathBuf>,
+}
+impl RustModules {
+    pub(crate) fn new(
+        sources: &[crate::dependencies::SourceDependencies],
+        index: &BTreeMap<PathBuf, FileId>,
+    ) -> Self {
+        declarations::ModuleDeclarations::collect(sources, index).finish()
+    }
+
+    pub(crate) fn resolve(
+        &self,
+        source: &crate::dependencies::SourceDependencies,
+        reference: &smackdebt_analysis::DependencySyntax,
+    ) -> Option<Vec<FileId>> {
+        if source.language != smackdebt_analysis::Language::Rust {
+            return None;
+        }
+        let inline = reference.module_path().unwrap_or("");
+        let base = self
+            .logical_sources
+            .get(&source.file)
+            .cloned()
+            .or_else(|| rust_module_directory(&source.path))?;
+        if reference.relation() == smackdebt_analysis::StaticRelationKind::ModuleOwnership {
+            return self.resolve_declaration(&base, reference);
+        }
+        let mut path = reference_path(&source.path, &base, inline, reference.target())?;
+        loop {
+            if let Some(file) = self.paths.get(&path) {
+                return Some(vec![*file]);
+            }
+            if !path.pop() {
+                return None;
+            }
+        }
+    }
+    fn resolve_declaration(
+        &self,
+        base: &Path,
+        reference: &smackdebt_analysis::DependencySyntax,
+    ) -> Option<Vec<FileId>> {
+        let module = reference
+            .module_path()
+            .unwrap_or_else(|| reference.target());
+        let target = self
+            .paths
+            .get(&base.join(module.replace("::", "/")))
+            .copied();
+        if reference.module_path().is_some() {
+            Some(target.into_iter().collect())
+        } else {
+            target.map(|file| vec![file])
+        }
+    }
+}
+
 #[cfg(test)]
-mod tests {
+mod tests;
 
-    use crate::codebase::analyze_codebase;
-    use crate::requests::CodebaseRequest;
-    use smackdebt_analysis::ResolutionDiagnostic;
-    use smackdebt_analysis::ResolutionIssueKind;
-    use std::fs;
-
-    #[test]
-    fn a_super_rooted_item_resolves_to_the_file_declaring_the_parent_module() {
-        let root = tempfile::tempdir().unwrap();
-        for (path, source) in [
-            ("Cargo.toml", "[package]\nname='rooted'\nversion='0.1.0'\n"),
-            (
-                "src/lib.rs",
-                "mod builder;\nmod edge;\nmod widget;\npub struct Root;\n",
-            ),
-            // The parent module lives inside its own directory.
-            (
-                "src/builder/mod.rs",
-                "mod manifests;\npub struct DockerMode;\n",
-            ),
-            // A chain of several `super` segments would name this file's own
-            // parent, two levels below the module it counts from.
-            (
-                "src/builder/manifests.rs",
-                "use super::DockerMode;\nuse super::super::*;\n",
-            ),
-            // The parent module lives beside its directory, 2018 style.
-            (
-                "src/widget.rs",
-                "mod deep;\nmod parts;\npub struct Frame;\n",
-            ),
-            (
-                "src/widget/parts.rs",
-                "use super::Frame;\nuse self::helper;\npub fn helper() -> u32 { 1 }\n",
-            ),
-            // The declaring file is the module of its own directory, so its
-            // parent is the directory above rather than beside it.
-            ("src/widget/deep/mod.rs", "use super::Frame;\n"),
-            // The parent of a source-root module is the crate root.
-            ("src/edge.rs", "use super::Root;\n"),
-            // Nothing declares this file, so nothing can be named.
-            ("standalone/loose.rs", "use super::Nothing;\n"),
-        ] {
-            let file = root.path().join(path);
-            fs::create_dir_all(file.parent().unwrap()).unwrap();
-            fs::write(file, source).unwrap();
+fn reference_path(source: &Path, base: &Path, inline: &str, target: &str) -> Option<PathBuf> {
+    let mut segments = target.split("::");
+    let mut path = match segments.next()? {
+        "crate" => rust_source_root(source)
+            .unwrap_or_else(|| source.parent().unwrap_or(Path::new("")).to_path_buf()),
+        "self" => base.join(inline.replace("::", "/")),
+        "super" => {
+            let mut path = base.join(inline.replace("::", "/"));
+            path.pop();
+            path
         }
-
-        let result = analyze_codebase(&CodebaseRequest::new(root.path())).unwrap();
-        let report = result.report();
-        let mut edges: Vec<_> = report
-            .dependency_edges()
-            .iter()
-            .filter(|edge| edge.relation() == smackdebt_analysis::StaticRelationKind::Uses)
-            .map(|edge| {
-                (
-                    report.files()[edge.source().index()].path(),
-                    report.files()[edge.target().index()].path(),
-                )
-            })
-            .collect();
-        edges.sort_unstable();
-        // Every edge, so a fallback that names a module the reference did not
-        // ask for fails here instead of hiding among the ones it did.
-        assert_eq!(
-            edges,
-            [
-                // A directory module declares its children.
-                ("src/builder/manifests.rs", "src/builder/mod.rs"),
-                // The crate root declares the modules of the source root.
-                ("src/edge.rs", "src/lib.rs"),
-                // A module file beside its directory declares the children of
-                // that directory, whether they are files or directories.
-                ("src/widget/deep/mod.rs", "src/widget.rs"),
-                ("src/widget/parts.rs", "src/widget.rs"),
-            ],
-            "a reference resolves to the module that declares its root"
-        );
-        let unresolved: Vec<_> = report
-            .resolution_diagnostics()
-            .iter()
-            .filter(|value| value.kind() == ResolutionIssueKind::Unresolved)
-            .map(ResolutionDiagnostic::target)
-            .collect();
-        assert_eq!(
-            unresolved,
-            ["super::super::*", "super::Nothing"],
-            "a module the walk cannot name exactly keeps its absence: {edges:?}"
-        );
-    }
-    #[test]
-    fn rust_root_use_prefers_the_nearest_matching_module() {
-        for (name, leaf, parent, expected_internal, expected_ambiguous) in [
-            ("leaf", true, false, 1, 0),
-            ("parent", false, true, 1, 0),
-            ("both", true, true, 1, 0),
-        ] {
-            let root = tempfile::tempdir().unwrap();
-            fs::write(
-                root.path().join("main.rs"),
-                "use crate::core::work;\nfn main() { work(); }\n",
-            )
-            .unwrap();
-            if leaf {
-                fs::create_dir_all(root.path().join("core")).unwrap();
-                fs::write(root.path().join("core/work.rs"), "pub fn work() {}\n").unwrap();
-            }
-            if parent {
-                fs::write(root.path().join("core.rs"), "pub fn work() {}\n").unwrap();
-            }
-
-            let result = analyze_codebase(&CodebaseRequest::new(root.path())).unwrap();
-            assert_eq!(
-                result.report().dependency_coverage().internal(),
-                expected_internal,
-                "{name}"
-            );
-            assert_eq!(
-                result.report().dependency_coverage().ambiguous(),
-                expected_ambiguous,
-                "{name}"
-            );
-            assert_eq!(
-                result.report().dependency_edges().len(),
-                expected_internal as usize,
-                "{name}"
-            );
-            assert_eq!(
-                result.report().resolution_diagnostics().len(),
-                expected_ambiguous as usize,
-                "{name}"
-            );
+        _ => return None,
+    };
+    for segment in segments {
+        if segment == "super" {
+            path.pop();
+        } else {
+            path.push(segment);
         }
     }
-    #[test]
-    fn rust_crate_qualified_use_resolves_from_the_crate_source_root() {
-        let root = tempfile::tempdir().unwrap();
-        fs::create_dir_all(root.path().join("crates/app/src/core")).unwrap();
-        fs::write(
-            root.path().join("crates/app/Cargo.toml"),
-            "[package]\nname='app'\nversion='0.1.0'\n",
-        )
-        .unwrap();
-        fs::write(
-            root.path().join("crates/app/src/lib.rs"),
-            "use crate::core::work;\npub fn run() { work(); }\n",
-        )
-        .unwrap();
-        fs::write(
-            root.path().join("crates/app/src/core.rs"),
-            "pub fn work() {}\n",
-        )
-        .unwrap();
-
-        let result = analyze_codebase(&CodebaseRequest::new(root.path())).unwrap();
-        assert_eq!(result.report().dependency_edges().len(), 1);
-        assert_eq!(
-            result
-                .report()
-                .dependency_coverage()
-                .resolved_internal_uses(),
-            1
-        );
-        assert_eq!(result.report().dependency_coverage().total(), 1);
-    }
-    #[test]
-    fn a_rust_module_file_owns_a_directory_named_after_it() {
-        let root = tempfile::tempdir().unwrap();
-        fs::create_dir_all(root.path().join("src/outer")).unwrap();
-        fs::write(
-            root.path().join("Cargo.toml"),
-            "[package]\nname='modules'\nversion='0.1.0'\n",
-        )
-        .unwrap();
-        fs::write(root.path().join("src/lib.rs"), "mod outer;\nmod sibling;\n").unwrap();
-        fs::write(root.path().join("src/outer.rs"), "mod inner;\n").unwrap();
-        fs::write(
-            root.path().join("src/outer/inner.rs"),
-            "use super::super::sibling::shared;\npub fn work() -> u32 { shared() }\n",
-        )
-        .unwrap();
-        fs::write(
-            root.path().join("src/sibling.rs"),
-            "pub fn shared() -> u32 { 1 }\n",
-        )
-        .unwrap();
-
-        let result = analyze_codebase(&CodebaseRequest::new(root.path())).unwrap();
-        let report = result.report();
-        let mut edges: Vec<_> = report
-            .dependency_edges()
-            .iter()
-            .map(|edge| {
-                (
-                    report.files()[edge.source().index()].path().to_owned(),
-                    report.files()[edge.target().index()].path().to_owned(),
-                    edge.relation(),
-                )
-            })
-            .collect();
-        edges.sort();
-        let ownership = smackdebt_analysis::StaticRelationKind::ModuleOwnership;
-        let uses = smackdebt_analysis::StaticRelationKind::Uses;
-        assert_eq!(
-            edges,
-            [
-                (
-                    "src/lib.rs".to_owned(),
-                    "src/outer.rs".to_owned(),
-                    ownership
-                ),
-                (
-                    "src/lib.rs".to_owned(),
-                    "src/sibling.rs".to_owned(),
-                    ownership
-                ),
-                // `mod inner;` in `outer.rs` names `outer/inner.rs`.
-                (
-                    "src/outer.rs".to_owned(),
-                    "src/outer/inner.rs".to_owned(),
-                    ownership
-                ),
-                // `super::super` from `outer/inner.rs` is the crate root's module.
-                (
-                    "src/outer/inner.rs".to_owned(),
-                    "src/sibling.rs".to_owned(),
-                    uses
-                ),
-            ]
-        );
-        assert_eq!(report.resolution_diagnostics().len(), 0);
-    }
-    #[test]
-    fn a_module_declaration_reads_the_module_directory_before_a_sibling_file() {
-        let root = tempfile::tempdir().unwrap();
-        fs::write(
-            root.path().join("Cargo.toml"),
-            "[package]\nname='precedence'\nversion='0.1.0'\n",
-        )
-        .unwrap();
-        fs::create_dir_all(root.path().join("a")).unwrap();
-        fs::write(root.path().join("a.rs"), "mod child;\npub fn a() {}\n").unwrap();
-        fs::write(root.path().join("a/child.rs"), "pub fn owned() {}\n").unwrap();
-        fs::write(root.path().join("child.rs"), "pub fn sibling() {}\n").unwrap();
-        let result = analyze_codebase(&CodebaseRequest::new(root.path())).unwrap();
-        let report = result.report();
-        let declarations: Vec<_> = report
-            .dependency_edges()
-            .iter()
-            .filter(|edge| {
-                edge.relation() == smackdebt_analysis::StaticRelationKind::ModuleOwnership
-            })
-            .map(|edge| {
-                (
-                    report.files()[edge.source().index()].path().to_owned(),
-                    report.files()[edge.target().index()].path().to_owned(),
-                )
-            })
-            .collect();
-        assert_eq!(
-            declarations,
-            [("a.rs".to_owned(), "a/child.rs".to_owned())],
-            "the module directory a file owns wins over a sibling of the same name"
-        );
-    }
+    Some(path)
 }

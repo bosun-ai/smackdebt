@@ -74,8 +74,11 @@ pub smackdebt_analysis::DependencyScope::Test
 pub enum smackdebt_analysis::DependencySyntaxState
 pub smackdebt_analysis::DependencySyntaxState::Candidates(alloc::vec::Vec<alloc::string::String>)
 pub smackdebt_analysis::DependencySyntaxState::External
+pub smackdebt_analysis::DependencySyntaxState::Include(smackdebt_analysis::IncludeStyle)
 pub smackdebt_analysis::DependencySyntaxState::Name(smackdebt_analysis::NameReference)
 pub smackdebt_analysis::DependencySyntaxState::PackageMembers
+pub smackdebt_analysis::DependencySyntaxState::PythonImport
+pub smackdebt_analysis::DependencySyntaxState::PythonImport::names: alloc::vec::Vec<alloc::string::String>
 pub smackdebt_analysis::DependencySyntaxState::Unresolved(alloc::string::String)
 pub enum smackdebt_analysis::DiagnosticKind
 pub smackdebt_analysis::DiagnosticKind::AmbiguousIdentity
@@ -122,6 +125,9 @@ pub enum smackdebt_analysis::HistoryAvailability
 pub smackdebt_analysis::HistoryAvailability::Complete
 pub smackdebt_analysis::HistoryAvailability::Incomplete
 pub smackdebt_analysis::HistoryAvailability::Unavailable
+pub enum smackdebt_analysis::IncludeStyle
+pub smackdebt_analysis::IncludeStyle::Angle
+pub smackdebt_analysis::IncludeStyle::Quoted
 pub enum smackdebt_analysis::Language
 pub smackdebt_analysis::Language::Astro
 pub smackdebt_analysis::Language::C
@@ -562,13 +568,16 @@ pub struct smackdebt_analysis::DependencySyntax
 impl smackdebt_analysis::DependencySyntax
 pub const fn smackdebt_analysis::DependencySyntax::intent(&self) -> smackdebt_analysis::DependencyIntent
 pub const fn smackdebt_analysis::DependencySyntax::kind(&self) -> smackdebt_analysis::DependencyKind
+pub fn smackdebt_analysis::DependencySyntax::module_path(&self) -> core::option::Option<&str>
 pub fn smackdebt_analysis::DependencySyntax::new(smackdebt_analysis::DependencyKind, impl core::convert::Into<alloc::string::String>, smackdebt_analysis::SourceSpan, smackdebt_analysis::DependencySyntaxState) -> Self
 pub const fn smackdebt_analysis::DependencySyntax::relation(&self) -> smackdebt_analysis::StaticRelationKind
+pub fn smackdebt_analysis::DependencySyntax::relocate(&mut self, smackdebt_analysis::SourceSpan)
 pub const fn smackdebt_analysis::DependencySyntax::scope(&self) -> smackdebt_analysis::DependencyScope
 pub const fn smackdebt_analysis::DependencySyntax::span(&self) -> smackdebt_analysis::SourceSpan
 pub const fn smackdebt_analysis::DependencySyntax::state(&self) -> &smackdebt_analysis::DependencySyntaxState
 pub fn smackdebt_analysis::DependencySyntax::target(&self) -> &str
 pub fn smackdebt_analysis::DependencySyntax::with_internal_intent(self) -> Self
+pub fn smackdebt_analysis::DependencySyntax::with_module_path(self, impl core::convert::Into<alloc::string::String>) -> Self
 pub fn smackdebt_analysis::DependencySyntax::with_relation(self, smackdebt_analysis::StaticRelationKind) -> Self
 pub fn smackdebt_analysis::DependencySyntax::with_span(self, smackdebt_analysis::SourceSpan) -> Self
 pub fn smackdebt_analysis::DependencySyntax::with_test_scope(self) -> Self

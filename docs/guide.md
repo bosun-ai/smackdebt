@@ -1067,13 +1067,37 @@ functions, accessors, and lambdas use the same five measurements as other langua
 
 Static dependency resolution reads local declarations and project files:
 
+- JavaScript, JSX, TypeScript, and TSX follow literal imports, re-exports,
+  `require`, and dynamic-import calls with literal targets. Computed or escaped
+  targets are reported as unresolved. Vue also follows literal external script
+  attributes; encoded or bound script attributes remain unresolved.
+- Python follows grouped imports, aliases, relative imports, package members,
+  and package initializers. Imports inside functions still count as static
+  dependencies; a cycle does not by itself prove an import-time failure.
+- Java resolves declared packages and types independently of directory layout,
+  including same-package references and static imports. Wildcards connect only
+  referenced types, and competing declarations remain ambiguous. Java build-tool
+  source-set selection and compiler-level member binding are not evaluated.
+- Rust follows literal `#[path]` module locations as well as ordinary module
+  layouts. Existing test-scope and module-wiring rules still apply.
+- C and C++ use quoted versus angle-bracket include rules and search paths in
+  discovered `compile_commands.json` files. The database is read as data, never
+  executed. Conflicting configurations, macro includes, and unsupported compiler
+  options remain visible as incomplete resolution. Ignored build directories are
+  not searched separately. C++ module syntax rejected by the parser remains a
+  parse diagnostic.
+- Ruby follows `require_relative` and gem-local `require` through literal
+  gemspec `require_paths` arrays (default `lib`). Assignments must be directly
+  inside a top-level `Gem::Specification.new` block. Conditional assignments,
+  load-path mutations, and computed targets remain unresolved; Rails autoloading
+  is not inferred.
 - Go imports name packages. Smackdebt connects an import to the package's source
   files, excluding `_test.go`, using `go.mod`, local replacements, and `go.work`.
 - PHP resolves namespaces and aliases against Composer PSR-4, PSR-0, classmap,
   and files declarations. Composer's generated autoloader is an external bootstrap
   reference. Literal includes and `__DIR__` paths resolve locally;
   dynamic includes remain visible as unresolved references.
-- C# resolves explicit type references and aliases, including global using
+- C# resolves explicit type references, static receivers, and aliases, including global using
   directives and partial classes. Literal `.csproj` project references, compile
   items, using items, and test-project markers guide visibility. Namespace imports
   alone do not create edges to every file in that namespace.
@@ -1085,6 +1109,11 @@ incomplete resolution. Generated code follows the existing source-role rules.
 Build-selected Go files are analyzed as repository source, without choosing an
 operating system or build tags. Reflection, dynamic loading, and runtime dispatch
 are outside the static graph.
+
+Graph evidence marked `complete` means no known gaps in the supported static
+forms. It does not prove that framework auto-imports or runtime dependencies are
+absent. An unresolved reference can hide a cycle, so read coverage diagnostics
+alongside the reported findings.
 
 Blade (`.blade.php`) and Razor (`.razor`, `.cshtml`) remain unsupported documents.
 

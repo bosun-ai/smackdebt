@@ -1694,8 +1694,8 @@ fn unresolved_and_ambiguous_relations_reach_a_file_scope_and_all_only() {
     assert!(!detailed.contains("settings.yaml"), "{detailed}");
 
     // The machine report keeps the asset reference under its own reason, and
-    // the evidence the graph is judged on counts one hole, not two: only the
-    // import that named a source file nothing answers.
+    // graph evidence counts the missing source and the computed require target.
+    // The asset does not add uncertainty to the source graph.
     let json = run_in(project.path(), ["--json", "--jobs", "1"]);
     let report: serde_json::Value = serde_json::from_slice(&json).unwrap();
     validate_schema(&report);
@@ -1708,8 +1708,8 @@ fn unresolved_and_ambiguous_relations_reach_a_file_scope_and_all_only() {
     assert_eq!(assets.len(), 1, "{}", report["resolution_diagnostics"]);
     assert_eq!(assets[0]["target"], "../settings.yaml?raw");
     assert_eq!(assets[0]["reason"], "target is an asset");
-    assert_eq!(report["graph_evidence"]["unresolved_internal"], 1);
-    assert_eq!(report["dependency_coverage"]["unresolved_internal_uses"], 1);
+    assert_eq!(report["graph_evidence"]["unresolved_internal"], 2);
+    assert_eq!(report["dependency_coverage"]["unresolved_internal_uses"], 2);
 
     for (case, arguments) in [
         vec!["app/main.js", "--color", "never"],

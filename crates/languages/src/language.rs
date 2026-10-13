@@ -9,7 +9,6 @@ use crate::semantic::Syntax;
 pub(super) struct Classification {
     pub(super) unit: Option<UnitKind>,
     pub(super) syntax: Syntax,
-    pub(super) dependency: Option<DependencySyntax>,
 }
 
 pub(super) trait Language {
@@ -37,6 +36,14 @@ pub(super) trait Language {
         None
     }
 
+    fn collect_dependencies(
+        node: Node<'_>,
+        source: &[u8],
+        dependencies: &mut Vec<DependencySyntax>,
+    ) {
+        dependencies.extend(Self::dependency(node, source));
+    }
+
     /// The number of parameters the rated unit at `node` declares.
     ///
     /// The shared default reads the declared parameter list, so a language
@@ -46,16 +53,13 @@ pub(super) trait Language {
         crate::language_common::declared_parameter_count(node)
     }
 
-    fn classify(node: Node<'_>, source: &[u8], include_dependency: bool) -> Classification {
+    fn classify(node: Node<'_>, source: &[u8]) -> Classification {
         if !node.is_named() {
             return Classification::default();
         }
         Classification {
             unit: Self::unit_kind(node),
             syntax: Self::syntax(node, source),
-            dependency: include_dependency
-                .then(|| Self::dependency(node, source))
-                .flatten(),
         }
     }
 

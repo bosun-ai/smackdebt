@@ -102,7 +102,7 @@ impl Language for Rust {
     }
 
     fn dependency(node: Node<'_>, source: &[u8]) -> Option<DependencySyntax> {
-        crate::dependency::rust(node, source)
+        crate::rust_dependencies::rust(node, source)
     }
 }
 

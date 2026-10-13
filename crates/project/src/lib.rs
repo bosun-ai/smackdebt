@@ -1,6 +1,7 @@
 #![forbid(unsafe_code)]
 
 mod architecture;
+mod c_includes;
 mod candidates;
 mod codebase;
 mod codebase_report;
@@ -29,12 +30,14 @@ mod paths;
 mod php_project;
 mod project_metadata;
 mod propagation_comparisons;
+mod python_resolution;
 mod rating;
 mod reference_tables;
 mod requests;
 mod resolution_config;
 mod resolution_rules;
 mod roles;
+mod ruby_resolution;
 mod rust_layout;
 mod selection;
 mod source_units;

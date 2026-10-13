@@ -1220,9 +1220,11 @@ pub fn is_resolution_file(path: &Path) -> bool {
                     "go.mod"
                         | "go.work"
                         | "composer.json"
+                        | "compile_commands.json"
                         | "Directory.Build.props"
                         | "Directory.Build.targets"
                 ) || name.ends_with(".csproj")
+                    || name.ends_with(".gemspec")
             })
 }
 
@@ -1787,7 +1789,10 @@ mod tests {
         );
         assert_eq!(
             snapshot.resolution_configs(),
-            [PathBuf::from("pkg/tsconfig.json")]
+            [
+                PathBuf::from("pkg/tsconfig.json"),
+                PathBuf::from("pkg/widget.gemspec")
+            ]
         );
     }
 
