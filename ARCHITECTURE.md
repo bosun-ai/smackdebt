@@ -341,17 +341,20 @@ change only when the measurement rule itself changes.
 
 ## Static dependency analysis
 
-Each language implementation translates its import forms during the existing
-tree traversal. A dependency syntax value contains its kind, raw target, source
-span, ordered path candidates, and a scope, or an explicit external or
-unresolved state. Scope is `Default` or `Test`: the Rust grammar sets `Test`
+Each language implementation collects its import forms into reusable worker
+storage during the existing tree traversal. A statement may emit several
+references. Dependency values retain kind, target, source span, and scope, with
+path candidates, a declared-name reference, Python module members, C/C++ include
+style, or an explicit external or unresolved state. Scope is `Default` or `Test`: the Rust grammar sets `Test`
 when a `cfg` attribute on the declaring item or on an enclosing `mod` names
 `test` outside a `not(...)` predicate. This is a syntactic match, not a `cfg`
 evaluator; it never learns which features a build enables. Offsetting a syntax
 record preserves the scope. This grammar-owned step performs no filesystem or
 Git access. Vue combines
-dependencies from its JavaScript or TypeScript script regions while preserving
-document line numbers.
+dependencies from its JavaScript or TypeScript script regions and literal
+external script attributes while preserving document line numbers. Computed
+JavaScript targets and unsupported encoded Vue script attributes are diagnostics,
+never guessed file edges.
 
 Project orchestration builds one read-only file index from discovery paths and
 package identities. It joins relative candidates to the source directory and
@@ -481,6 +484,22 @@ This graph is intentionally static. It does not execute build files, expand
 macros, trace runtime loading, or provide compiler-grade call or type graphs.
 Unclear identity stays visible in dependency coverage instead of producing a
 guessed edge.
+
+Language-owned extraction modules preserve syntax meaning before lookup. Python
+collects every imported name and resolves module files separately from packages,
+including package initializers. Java indexes declared packages and types rather
+than assuming a source directory layout; wildcard imports only connect referenced
+types. Java and C# static receivers respect local bindings. Rust records literal
+module path overrides, including their logical module identities.
+
+Project metadata reads compilation databases and literal gemspec load paths as
+data on each diff side. C/C++ includes retain quoted/angle syntax and follow
+declared search order; unsupported or conflicting compiler options are visible.
+Ruby ordinary requires use gem load roots, while relative requires use the source
+directory. Dynamic load-path changes withhold ordinary require edges in that
+file. These adapters use the existing inventory and never run a compiler,
+interpreter, autoloader, or build script. Graph completeness describes supported
+static forms rather than runtime or compiler-level completeness.
 
 ## Execution and memory ownership
 

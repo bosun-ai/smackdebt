@@ -68,7 +68,7 @@ impl Language for Cpp {
     }
 
     fn dependency(node: Node<'_>, source: &[u8]) -> Option<DependencySyntax> {
-        crate::dependency::include(node, source)
+        crate::c_dependencies::include(node, source)
     }
 }
 

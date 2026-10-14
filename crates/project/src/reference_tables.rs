@@ -422,10 +422,19 @@ pub(crate) struct ReferenceResolver<'a> {
     pub(crate) package_roots: &'a [PathBuf],
     pub(crate) aliases: &'a ResolutionRules,
 }
+/// Language context shared by every reference in one source file.
+struct SourceResolution<'a> {
+    dependencies: &'a SourceDependencies,
+    package: PackageId,
+    rust_modules: &'a crate::rust_layout::RustModules,
+    load_path_changed: bool,
+}
+
 impl ReferenceResolver<'_> {
     /// Resolves every reference the dependency table states, in table order.
     pub(crate) fn resolve(&self, dependencies: &[SourceDependencies]) -> ReferenceTables {
         let mut tables = ReferenceTables::default();
+        let rust_modules = crate::rust_layout::RustModules::new(dependencies, self.index);
         let names = NamedDependencies::new(
             dependencies,
             self.side_package_roots,
@@ -437,6 +446,13 @@ impl ReferenceResolver<'_> {
                 self.side_package_roots,
                 self.package_roots,
             );
+            let load_path_changed = dependencies.language == smackdebt_analysis::Language::Ruby && dependencies.references.iter().any(|reference| matches!(reference.state(), DependencySyntaxState::Unresolved(reason) if reason == "Ruby load-path changes cannot be resolved statically"));
+            let source = SourceResolution {
+                dependencies,
+                package: source_package,
+                rust_modules: &rust_modules,
+                load_path_changed,
+            };
             for reference in &dependencies.references {
                 if matches!(
                     reference.state(),
@@ -453,7 +469,7 @@ impl ReferenceResolver<'_> {
                     tables.record_external(reference, dependencies);
                     continue;
                 }
-                self.record(&mut tables, source_package, dependencies, reference);
+                self.record(&mut tables, &source, reference);
             }
         }
         tables
@@ -481,13 +497,40 @@ impl ReferenceResolver<'_> {
     fn record(
         &self,
         tables: &mut ReferenceTables,
-        source_package: PackageId,
-        dependencies: &SourceDependencies,
+        source: &SourceResolution<'_>,
         reference: &DependencySyntax,
     ) {
+        let dependencies = source.dependencies;
+        let source_package = source.package;
         match reference.state() {
             DependencySyntaxState::PackageMembers | DependencySyntaxState::Name(_) => {
                 unreachable!("named references are resolved before path references");
+            }
+            DependencySyntaxState::PythonImport { names } => {
+                let resolution = crate::python_resolution::resolve(
+                    &dependencies.path,
+                    reference.target(),
+                    names,
+                    self.index,
+                    self.side_package_roots,
+                );
+                if matches!(resolution, NamedResolution::External) {
+                    tables.record_unmatched(
+                        source_package,
+                        reference,
+                        dependencies,
+                        self.manifest_resolution(reference, dependencies),
+                    );
+                } else {
+                    tables.record_named(resolution, reference, dependencies);
+                }
+            }
+            DependencySyntaxState::Include(style) => {
+                tables.record_named(
+                    self.resolve_include(dependencies, reference, *style),
+                    reference,
+                    dependencies,
+                );
             }
             DependencySyntaxState::External => {
                 let resolution = self.manifest_resolution(reference, dependencies);
@@ -511,36 +554,99 @@ impl ReferenceResolver<'_> {
                 );
             }
             DependencySyntaxState::Candidates(candidates) => {
-                let matches =
-                    resolve_candidates(&dependencies.path, candidates, self.index, self.aliases);
-                match matches.as_slice() {
-                    [] if reference.intent() == smackdebt_analysis::DependencyIntent::Internal => {
-                        tables.record_unmatched_internal(reference, dependencies, candidates);
-                    }
-                    [] => {
-                        let resolution = self.manifest_resolution(reference, dependencies);
-                        tables.record_unmatched(
-                            source_package,
-                            reference,
-                            dependencies,
-                            resolution,
-                        );
-                    }
-                    [target] => {
-                        tables.record_internal(*target, reference, dependencies);
-                    }
-                    _ => {
-                        tables.record_diagnostic(
-                            reference,
-                            dependencies,
-                            ResolutionVerdict {
-                                resolution: RelationResolution::AmbiguousInternal,
-                                kind: ResolutionIssueKind::Ambiguous,
-                                reason: "several repository files match",
-                            },
-                        );
-                    }
-                }
+                self.record_candidates(tables, source, reference, candidates);
+            }
+        }
+    }
+
+    fn resolve_include(
+        &self,
+        dependencies: &SourceDependencies,
+        reference: &DependencySyntax,
+        style: smackdebt_analysis::IncludeStyle,
+    ) -> NamedResolution {
+        match self.aliases.metadata.resolve_include(
+            &dependencies.path,
+            reference.target(),
+            style,
+            |path| self.index.contains_key(path),
+        ) {
+            Ok(Some(path)) => {
+                NamedResolution::Files(self.index.get(&path).copied().into_iter().collect())
+            }
+            Ok(None) => NamedResolution::External,
+            Err(reason) => NamedResolution::Unresolved(reason),
+        }
+    }
+
+    fn candidate_files(
+        &self,
+        source: &SourceResolution<'_>,
+        reference: &DependencySyntax,
+        candidates: &[String],
+    ) -> Result<Vec<FileId>, &'static str> {
+        let dependencies = source.dependencies;
+        if dependencies.language == smackdebt_analysis::Language::Ruby
+            && reference.intent() == smackdebt_analysis::DependencyIntent::Package
+        {
+            if source.load_path_changed {
+                return Err("Ruby load-path changes cannot be resolved statically");
+            }
+            return self.aliases.metadata.ruby.resolve(
+                &dependencies.path,
+                reference.target(),
+                self.index,
+            );
+        }
+        Ok(source
+            .rust_modules
+            .resolve(dependencies, reference)
+            .unwrap_or_else(|| {
+                resolve_candidates(&dependencies.path, candidates, self.index, self.aliases)
+            }))
+    }
+
+    fn record_candidates(
+        &self,
+        tables: &mut ReferenceTables,
+        source: &SourceResolution<'_>,
+        reference: &DependencySyntax,
+        candidates: &[String],
+    ) {
+        let dependencies = source.dependencies;
+        let source_package = source.package;
+        let matches = match self.candidate_files(source, reference, candidates) {
+            Ok(files) => files,
+            Err(reason) => {
+                tables.record_named(
+                    NamedResolution::Unresolved(reason.to_owned()),
+                    reference,
+                    dependencies,
+                );
+                return;
+            }
+        };
+        match matches.as_slice() {
+            [] if reference.intent() == smackdebt_analysis::DependencyIntent::Internal => {
+                tables.record_unmatched_internal(reference, dependencies, candidates);
+            }
+            [] => {
+                let resolution = self.manifest_resolution(reference, dependencies);
+                tables.record_unmatched(source_package, reference, dependencies, resolution);
+            }
+            [target] => {
+                tables.record_internal(*target, reference, dependencies);
+            }
+            _ => {
+                tables.record_diagnostic(
+                    reference,
+                    dependencies,
+                    ResolutionVerdict {
+                        resolution: RelationResolution::AmbiguousInternal,
+                        kind: ResolutionIssueKind::Ambiguous,
+                        reason: "several repository files match",
+                    },
+                );
             }
         }
     }

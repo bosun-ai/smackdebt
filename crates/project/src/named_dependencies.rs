@@ -131,6 +131,9 @@ impl<'a> NamedDependencies<'a> {
             .chain(globals.iter().copied())
             .filter(|import| import.kind() == reference.kind())
             .collect();
+        if source.language == Language::Java {
+            return self.resolve_java(source, reference, &imports);
+        }
         let aliases: Vec<_> = imports
             .iter()
             .filter_map(|import| alias_target(import, name))
@@ -142,6 +145,62 @@ impl<'a> NamedDependencies<'a> {
             return self.resolve_php(source, reference);
         }
         self.resolve_csharp(source, reference, &imports)
+    }
+    fn resolve_java(
+        &self,
+        source: &SourceDependencies,
+        reference: &NameReference,
+        imports: &[&NameImport],
+    ) -> NamedResolution {
+        let name = reference.name();
+        let mut namespace = reference.namespace();
+        while source.names.declarations().iter().any(|declaration| {
+            declaration.kind() == SymbolKind::Type && declaration.name() == namespace
+        }) {
+            let outcome = self.lookup(source, reference.kind(), &[format!("{namespace}.{name}")]);
+            if matches!(
+                outcome,
+                NamedResolution::Files(_) | NamedResolution::Ambiguous
+            ) {
+                return outcome;
+            }
+            namespace = namespace.rsplit_once('.').map_or("", |(parent, _)| parent);
+        }
+        let aliases: Vec<_> = imports
+            .iter()
+            .filter_map(|import| alias_target(import, name))
+            .collect();
+        if !aliases.is_empty() {
+            return self.lookup(source, reference.kind(), &aliases);
+        }
+        // Java packages do not inherit names from their parent package.
+        let local = if namespace.is_empty() {
+            name.to_owned()
+        } else {
+            format!("{namespace}.{name}")
+        };
+        for candidate in std::iter::once(local).chain(name.contains('.').then(|| name.to_owned())) {
+            let outcome = self.lookup(source, reference.kind(), &[candidate]);
+            if matches!(
+                outcome,
+                NamedResolution::Files(_) | NamedResolution::Ambiguous
+            ) {
+                return outcome;
+            }
+        }
+        let candidates: Vec<_> = imports
+            .iter()
+            .filter(|import| import.alias().is_none())
+            .map(|import| format!("{}.{name}", import.target()))
+            .collect();
+        if !candidates.is_empty() {
+            return self.lookup(source, reference.kind(), &candidates);
+        }
+        self.lookup(
+            source,
+            reference.kind(),
+            &[qualified_java_name(namespace, name)],
+        )
     }
     fn resolve_php(
         &self,
@@ -297,4 +356,12 @@ fn alias_target(import: &NameImport, name: &str) -> Option<String> {
     }
     let tail = name.strip_prefix(alias)?.strip_prefix('.')?;
     Some(format!("{}.{tail}", import.target()))
+}
+
+fn qualified_java_name(namespace: &str, name: &str) -> String {
+    if namespace.is_empty() || name.contains('.') {
+        name.to_owned()
+    } else {
+        format!("{namespace}.{name}")
+    }
 }

@@ -1,3 +1,6 @@
+mod external_script;
+use external_script::external_script;
+
 use smackdebt_analysis::{
     FileAnalysis, Language, LocalUnitId, ParseStatus, RecoveredFacts, SourceSpan, UnitFact,
     UnitIdentity, UnitKind,
@@ -102,6 +105,7 @@ pub(super) fn analyze_vue(
         match node.kind() {
             "script_element" => {
                 document_facts.push(engine::ByteRange::of(node));
+                dependencies.extend(external_script(node, source));
                 if let Some(raw) = named_child(node, "raw_text") {
                     let start = raw.start_byte();
                     let end = raw.end_byte();

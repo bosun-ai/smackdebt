@@ -94,3 +94,69 @@ fn invalid_csharp_project_configuration_withholds_guessed_edges() {
     assert!(!output.report().graph_evidence().is_complete());
     assert!(!output.report().resolution_diagnostics().is_empty());
 }
+
+#[test]
+fn csharp_static_receivers_resolve_types_and_aliases() {
+    let root = tempfile::tempdir().unwrap();
+    for (path, source) in [
+        (
+            "A.cs",
+            "namespace App; class A { static void Run() { B.Run(); } }",
+        ),
+        (
+            "B.cs",
+            "namespace App; class B { static void Run() { A.Run(); } }",
+        ),
+        (
+            "C.cs",
+            "using Worker = App.B; class C { void Run() { Worker.Run(); } }",
+        ),
+    ] {
+        write(root.path(), path, source);
+    }
+    let output = CodebaseRequest::new(root.path()).analyze().unwrap();
+    assert_eq!(
+        pairs(output.report()),
+        [("A.cs", "B.cs"), ("B.cs", "A.cs"), ("C.cs", "B.cs")]
+    );
+}
+
+#[test]
+fn csharp_value_receivers_do_not_guess_type_dependencies() {
+    let root = tempfile::tempdir().unwrap();
+    for (path, source) in [
+        (
+            "A.cs",
+            "class A { void Run(dynamic B) { B.Run(); } void More() { dynamic B = null; B.Run(); } }",
+        ),
+        ("B.cs", "class B { static void Run() {} }"),
+    ] {
+        write(root.path(), path, source);
+    }
+    let output = CodebaseRequest::new(root.path()).analyze().unwrap();
+    assert!(pairs(output.report()).is_empty());
+}
+
+#[test]
+fn csharp_shadowing_stays_inside_its_lexical_scope() {
+    let root = tempfile::tempdir().unwrap();
+    write(
+        root.path(),
+        "A.cs",
+        "class A { void Run() { { dynamic B = null; B.Run(); } B.Run(); } void Other(dynamic B) { B.Run(); } }",
+    );
+    write(
+        root.path(),
+        "B.cs",
+        "class B { public static void Run() {} }",
+    );
+    let output = CodebaseRequest::new(root.path()).analyze().unwrap();
+    assert_eq!(pairs(output.report()), [("A.cs", "B.cs")]);
+    assert_eq!(
+        output
+            .report()
+            .dependency_coverage()
+            .resolved_internal_uses(),
+        1
+    );
+}

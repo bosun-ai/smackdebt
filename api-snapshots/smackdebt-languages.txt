@@ -10,3 +10,4 @@ impl smackdebt_languages::Analyzer
 pub fn smackdebt_languages::Analyzer::analyze(&mut self, &std::path::Path, alloc::vec::Vec<u8>) -> core::result::Result<smackdebt_analysis::source::FileAnalysis, smackdebt_languages::AnalysisError>
 pub fn smackdebt_languages::Analyzer::has_generated_marker(&std::path::Path, &[u8]) -> bool
 pub fn smackdebt_languages::Analyzer::language(&std::path::Path) -> smackdebt_analysis::language_catalog::Language
+pub fn smackdebt_languages::ruby_gem_require_paths(&str) -> core::result::Result<alloc::vec::Vec<alloc::string::String>, alloc::string::String>

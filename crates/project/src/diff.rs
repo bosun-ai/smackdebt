@@ -101,6 +101,7 @@ pub(crate) fn analyze_diff(request: &DiffRequest) -> Result<ProjectReport, Proje
     let selected_count = selected_paths.len();
     let packages = DiffPackages::of(&inventory, &base_inventory, &all_changed);
     let before_aliases = load_base_resolution_aliases(
+        repository.root(),
         &mut batch,
         &base,
         &packages.before_roots,

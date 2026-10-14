@@ -8,6 +8,8 @@ use std::path::{Path, PathBuf};
 
 #[derive(Clone, Default)]
 pub(crate) struct ProjectMetadata {
+    pub(crate) c_includes: Vec<crate::c_includes::CIncludeConfig>,
+    pub(crate) ruby: crate::ruby_resolution::RubyLoadPaths,
     pub(crate) go: Vec<GoProject>,
     pub(crate) php: Vec<PhpProject>,
     pub(crate) csharp: Vec<CSharpProject>,
@@ -21,6 +23,7 @@ pub(crate) struct ProjectIssue {
 }
 impl ProjectMetadata {
     pub(crate) fn load(
+        repository_root: &Path,
         paths: &[PathBuf],
         mut read: impl FnMut(&Path) -> Result<Vec<u8>, String>,
     ) -> Self {
@@ -29,21 +32,22 @@ impl ProjectMetadata {
             let Some(name) = path.file_name().and_then(|name| name.to_str()) else {
                 continue;
             };
-            if !matches!(
-                name,
-                "go.mod"
-                    | "go.work"
-                    | "composer.json"
-                    | "Directory.Build.props"
-                    | "Directory.Build.targets"
-            ) && !name.ends_with(".csproj")
-            {
+            if !is_project_configuration(name) {
                 continue;
             }
             let parsed = read(path).and_then(|bytes| {
                 let source = std::str::from_utf8(&bytes)
                     .map_err(|_| "project configuration is not UTF-8".to_owned())?;
                 match name {
+                    "compile_commands.json" => {
+                        result
+                            .c_includes
+                            .push(crate::c_includes::CIncludeConfig::parse(
+                                repository_root,
+                                source,
+                            )?)
+                    }
+                    _ if name.ends_with(".gemspec") => result.ruby.insert_gemspec(path, source),
                     "go.mod" | "go.work" => result.go.push(GoProject::parse(path, source)?),
                     "composer.json" => result.php.push(PhpProject::parse(path, source)?),
                     _ if name.ends_with(".csproj") => {
@@ -59,6 +63,8 @@ impl ProjectMetadata {
                     language: match name {
                         "go.mod" | "go.work" => Language::Go,
                         "composer.json" => Language::Php,
+                        "compile_commands.json" => Language::C,
+                        _ if name.ends_with(".gemspec") => Language::Ruby,
                         _ => Language::CSharp,
                     },
                     reason: format!("{}: {error}", path.display()),
@@ -67,10 +73,30 @@ impl ProjectMetadata {
         }
         result
     }
+    pub(crate) fn resolve_include(
+        &self,
+        source: &Path,
+        target: &str,
+        style: smackdebt_analysis::IncludeStyle,
+        exists: impl FnMut(&Path) -> bool,
+    ) -> Result<Option<PathBuf>, String> {
+        if let Some(issue) = self
+            .issues
+            .iter()
+            .find(|issue| issue.language == Language::C)
+        {
+            return Err(issue.reason.clone());
+        }
+        crate::c_includes::resolve(&self.c_includes, source, target, style, exists)
+    }
     pub(crate) fn issue_for(&self, language: Language, source: &Path) -> Option<&str> {
         self.issues
             .iter()
-            .find(|issue| issue.language == language && source.starts_with(&issue.root))
+            .find(|issue| {
+                (issue.language == language
+                    || (issue.language == Language::C && language == Language::Cpp))
+                    && source.starts_with(&issue.root)
+            })
             .map(|issue| issue.reason.as_str())
     }
     pub(crate) fn package_directory(
@@ -228,4 +254,17 @@ impl ProjectMetadata {
             .iter()
             .flat_map(|package| package.files.iter().map(PathBuf::as_path))
     }
+}
+
+fn is_project_configuration(name: &str) -> bool {
+    matches!(
+        name,
+        "compile_commands.json"
+            | "go.mod"
+            | "go.work"
+            | "composer.json"
+            | "Directory.Build.props"
+            | "Directory.Build.targets"
+    ) || name.ends_with(".csproj")
+        || name.ends_with(".gemspec")
 }

@@ -115,7 +115,7 @@ pub(super) fn append_expression<L: Language>(
             .last()
             .copied()
             .unwrap_or(base_nesting);
-        let mut syntax = L::classify(node, source, false).syntax;
+        let mut syntax = L::classify(node, source).syntax;
         syntax.logical_statement = false;
         scratch.observations.push(Observation { syntax, nesting });
         scratch
@@ -275,17 +275,21 @@ fn collect_units<L: Language>(
         let parent = scratch.unit_by_depth.last().copied().flatten();
         let names_before = scratch.names.declarations().len() + scratch.names.imports().len();
         L::collect_names(node, source, &mut scratch.names);
-        let classification = L::classify(node, source, true);
+        let references_before = scratch.dependencies.len();
+        L::collect_dependencies(node, source, &mut scratch.dependencies);
+        let classification = L::classify(node, source);
         let carries_fact = classification.unit.is_some()
-            || classification.dependency.is_some()
+            || scratch.dependencies.len() != references_before
             || scratch.names.declarations().len() + scratch.names.imports().len() != names_before;
         if recovered {
             record_recovery_spans(node, carries_fact, scratch);
         }
-        if let Some(dependency) = classification.dependency {
-            scratch
-                .dependencies
-                .push(offset_dependency(dependency, line_offset));
+        for dependency in &mut scratch.dependencies[references_before..] {
+            let span = dependency.span();
+            dependency.relocate(SourceSpan::new(
+                span.start_line() + line_offset,
+                span.end_line() + line_offset,
+            ));
         }
         let child_parent = match classification.unit {
             Some(kind) => {
@@ -429,6 +433,7 @@ fn nearest_declared_unit(mut parent: Option<usize>, drafts: &[UnitDraft]) -> Opt
     None
 }
 
+#[cfg(test)]
 fn offset_dependency(dependency: DependencySyntax, line_offset: u32) -> DependencySyntax {
     if line_offset == 0 {
         return dependency;
@@ -446,7 +451,7 @@ fn measure<L: Language>(root: Node<'_>, source: &[u8], scratch: &mut Scratch) ->
     walk(root, |node, depth| {
         scratch.nesting_by_depth.truncate(depth);
         let nesting = scratch.nesting_by_depth.last().copied().unwrap_or(0);
-        let classification = L::classify(node, source, false);
+        let classification = L::classify(node, source);
         if node.id() != root.id() && classification.unit.is_some() {
             return false;
         }

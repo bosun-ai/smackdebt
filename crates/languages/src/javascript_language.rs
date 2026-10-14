@@ -75,40 +75,50 @@ macro_rules! javascript_language {
 }
 
 fn javascript_dependency(node: Node<'_>, source: &[u8]) -> Option<DependencySyntax> {
-    match node.kind() {
-        "import_statement" => crate::dependency::quoted(
-            node,
-            source,
-            DependencyKind::Import,
-            &[".js", ".jsx", ".ts", ".tsx"],
-            false,
-        ),
-        "export_statement" if node.child_by_field_name("source").is_some() => {
-            crate::dependency::quoted(
-                node.child_by_field_name("source")?,
-                source,
-                DependencyKind::Import,
-                &[".js", ".jsx", ".ts", ".tsx"],
-                false,
-            )
-        }
+    let kind = match node.kind() {
+        "import_statement" | "export_statement" => DependencyKind::Import,
         "call_expression" => {
             let function = node.child_by_field_name("function")?;
-            let name = function.utf8_text(source).ok()?;
-            if matches!(name, "require" | "import") {
-                crate::dependency::quoted(
-                    node,
-                    source,
-                    DependencyKind::Require,
-                    &[".js", ".jsx", ".ts", ".tsx"],
-                    false,
-                )
-            } else {
-                None
+            if !matches!(function.utf8_text(source).ok()?, "require" | "import") {
+                return None;
             }
+            DependencyKind::Require
         }
-        _ => None,
+        _ => return None,
+    };
+    let argument = if node.kind() == "call_expression" {
+        node.child_by_field_name("arguments")?.named_child(0)?
+    } else if let Some(value) = node.child_by_field_name("source") {
+        value
+    } else {
+        let mut cursor = node.walk();
+        let clause = node
+            .named_children(&mut cursor)
+            .find(|child| child.kind() == "import_require_clause")?;
+        clause.child_by_field_name("source")?
+    };
+    let text = argument.utf8_text(source).ok()?;
+    if !matches!(argument.kind(), "string" | "template_string")
+        || text.contains("${")
+        || text.contains(['\\', '\n', '\r'])
+    {
+        return Some(
+            crate::dependency::unresolved(
+                node,
+                kind,
+                node.utf8_text(source).unwrap_or(text),
+                "dependency target is dynamic",
+            )
+            .with_internal_intent(),
+        );
     }
+    crate::dependency::quoted(
+        argument,
+        source,
+        kind,
+        &[".js", ".jsx", ".ts", ".tsx"],
+        false,
+    )
 }
 
 javascript_language!(

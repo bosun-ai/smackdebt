@@ -38,13 +38,15 @@ pub(crate) fn load_resolution_aliases(root: &Path, inventory: &Inventory) -> Res
             }
         })
         .collect();
-    let metadata =
-        crate::project_metadata::ProjectMetadata::load(inventory.resolution_files(), |path| {
-            fs::read(root.join(path)).map_err(|error| error.to_string())
-        });
+    let metadata = crate::project_metadata::ProjectMetadata::load(
+        root,
+        inventory.resolution_files(),
+        |path| fs::read(root.join(path)).map_err(|error| error.to_string()),
+    );
     ResolutionRules::new(metadata, packages)
 }
 pub(crate) fn load_base_resolution_aliases(
+    repository_root: &Path,
     reader: &mut smackdebt_git::ObjectReader,
     base: &str,
     package_roots: &[PathBuf],
@@ -108,12 +110,13 @@ pub(crate) fn load_base_resolution_aliases(
         .filter(|path| sources.get(*path).is_some_and(Result::is_ok))
         .cloned()
         .collect();
-    let metadata = crate::project_metadata::ProjectMetadata::load(&existing, |path| {
-        sources
-            .get(path)
-            .cloned()
-            .unwrap_or_else(|| Err("configuration object is absent".to_owned()))
-    });
+    let metadata =
+        crate::project_metadata::ProjectMetadata::load(repository_root, &existing, |path| {
+            sources
+                .get(path)
+                .cloned()
+                .unwrap_or_else(|| Err("configuration object is absent".to_owned()))
+        });
     ResolutionRules::new(metadata, packages)
 }
 fn is_script_config(path: &Path) -> bool {

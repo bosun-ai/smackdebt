@@ -75,8 +75,19 @@ pub fn is_symbolic_candidate(candidate: &str) -> bool {
 }
 
 /// Why a dependency cannot safely produce path candidates.
+#[derive(Clone, Copy, Debug, Eq, Hash, Ord, PartialEq, PartialOrd)]
+pub enum IncludeStyle {
+    Quoted,
+    Angle,
+}
+
+/// The source form that repository resolution must interpret.
 #[derive(Clone, Debug, Eq, Hash, Ord, PartialEq, PartialOrd)]
 pub enum DependencySyntaxState {
+    Include(IncludeStyle),
+    PythonImport {
+        names: Vec<String>,
+    },
     /// An import names a package's complete source membership.
     PackageMembers,
     /// A name resolves through source declarations and lexical imports.
@@ -108,6 +119,7 @@ pub struct DependencySyntax {
     intent: DependencyIntent,
     relation: StaticRelationKind,
     scope: DependencyScope,
+    module_path: Option<String>,
 }
 
 impl DependencySyntax {
@@ -125,6 +137,7 @@ impl DependencySyntax {
             intent: DependencyIntent::Package,
             relation: StaticRelationKind::Uses,
             scope: DependencyScope::Default,
+            module_path: None,
         }
     }
 
@@ -154,6 +167,15 @@ impl DependencySyntax {
         self.scope
     }
 
+    pub fn module_path(&self) -> Option<&str> {
+        self.module_path.as_deref()
+    }
+
+    pub fn with_module_path(mut self, path: impl Into<String>) -> Self {
+        self.module_path = Some(path.into());
+        self
+    }
+
     pub fn with_internal_intent(mut self) -> Self {
         self.intent = DependencyIntent::Internal;
         self
@@ -165,6 +187,11 @@ impl DependencySyntax {
     pub fn with_test_scope(mut self) -> Self {
         self.scope = DependencyScope::Test;
         self
+    }
+
+    /// Changes only the source location without copying the target.
+    pub fn relocate(&mut self, span: SourceSpan) {
+        self.span = span;
     }
 
     /// Returns the same reference relocated to `span`.

@@ -108,3 +108,19 @@ only declares workspace members. The CLI regressions check two member functions
 produce `2 high · 0 watch · 2 checked`, and that directory reports and diffs exclude
 siblings outside the selected directory. They also cover directly owned source,
 a directory without a manifest, and identical output across worker settings.
+
+## Dependency cycles across languages
+
+The `dependency_languages` CLI acceptance suite checks all 14 supported language
+variants using a two-file cycle and an acyclic control. It also checks a mixed
+JavaScript/TypeScript/Vue cycle and a cycle across packages. Terminal cards and
+JSON witnesses must agree, including source locations; one-worker and automatic
+runs must produce identical bytes.
+
+```console
+rtk cargo test -p smackdebt --test dependency_languages
+```
+
+A cycle witness shows a path back to its starting file. Missing or computed
+references remain diagnostics; a report without cycles is not proof that runtime
+or framework dependencies are acyclic.
